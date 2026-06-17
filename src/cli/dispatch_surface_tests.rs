@@ -23,31 +23,31 @@ fn source_ips_timeline_and_patterns_args_map_to_requests() {
     let timeline = crate::cli::TimelineArgs {
         bucket: Some("hour".to_string()),
         group_by: Some("app_name".to_string()),
-        from: Some("2026-06-13T00:00:00Z".to_string()),
-        to: Some("2026-06-13T01:00:00Z".to_string()),
-        hostname: Some("host-a".to_string()),
-        app_name: Some("nginx".to_string()),
+        since: Some("2026-06-13T00:00:00Z".to_string()),
+        until: Some("2026-06-13T01:00:00Z".to_string()),
+        host: Some("host-a".to_string()),
+        app: Some("nginx".to_string()),
         severity_min: Some("warning".to_string()),
         json: true,
     }
     .into_request();
     assert_eq!(timeline.bucket.as_deref(), Some("hour"));
     assert_eq!(timeline.group_by.as_deref(), Some("app_name"));
-    assert_eq!(timeline.hostname.as_deref(), Some("host-a"));
+    assert_eq!(timeline.host.as_deref(), Some("host-a"));
     assert_eq!(timeline.severity_min.as_deref(), Some("warning"));
 
     let patterns = crate::cli::PatternsArgs {
-        from: Some("from".to_string()),
-        to: Some("to".to_string()),
-        hostname: Some("host-a".to_string()),
-        app_name: Some("cortex".to_string()),
+        since: Some("from".to_string()),
+        until: Some("to".to_string()),
+        host: Some("host-a".to_string()),
+        app: Some("cortex".to_string()),
         severity_min: Some("err".to_string()),
         scan_limit: Some(1000),
         top_n: Some(10),
         json: false,
     }
     .into_request();
-    assert_eq!(patterns.app_name.as_deref(), Some("cortex"));
+    assert_eq!(patterns.app.as_deref(), Some("cortex"));
     assert_eq!(patterns.scan_limit, Some(1000));
     assert_eq!(patterns.top_n, Some(10));
 }

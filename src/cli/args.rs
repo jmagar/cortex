@@ -53,6 +53,10 @@ pub(crate) enum CliCommand {
     Entity(EntityArgs),
     Graph(GraphCommand),
     FileTail(FileTailCommand),
+    /// Hidden: emit shell-completion candidates (`cortex __complete <ctx> ...`).
+    Complete(Vec<String>),
+    /// Emit a shell completion script (`cortex completions <shell>`).
+    Completions(Vec<String>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -81,7 +85,7 @@ pub(crate) struct FileTailAddArgs {
     pub id: String,
     pub path: String,
     pub tag: String,
-    pub hostname: Option<String>,
+    pub host: Option<String>,
     pub facility: Option<String>,
     pub severity: Option<String>,
     pub start_at_end: bool,
@@ -316,8 +320,8 @@ pub(crate) struct ComposeLogsArgs {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ServiceLogsArgs {
     pub service: String,
-    pub from: Option<String>,
-    pub to: Option<String>,
+    pub since: Option<String>,
+    pub until: Option<String>,
     pub tail: Option<u32>,
     pub json: bool,
 }
@@ -326,8 +330,8 @@ impl Default for ServiceLogsArgs {
     fn default() -> Self {
         Self {
             service: String::new(),
-            from: None,
-            to: None,
+            since: None,
+            until: None,
             tail: Some(200),
             json: false,
         }
@@ -339,7 +343,7 @@ pub(crate) struct IncidentArgs {
     pub around: String,
     pub minutes: Option<u32>,
     pub service: Option<String>,
-    pub hostname: Option<String>,
+    pub host: Option<String>,
     pub limit: Option<u32>,
     pub json: bool,
 }
@@ -348,9 +352,9 @@ pub(crate) struct IncidentArgs {
 pub(crate) struct SessionsArgs {
     pub project: Option<String>,
     pub tool: Option<String>,
-    pub hostname: Option<String>,
-    pub from: Option<String>,
-    pub to: Option<String>,
+    pub host: Option<String>,
+    pub since: Option<String>,
+    pub until: Option<String>,
     pub limit: Option<u32>,
     pub json: bool,
 }
@@ -360,33 +364,33 @@ pub(crate) struct SearchArgs {
     pub query: Option<String>,
     /// Literal substring text (FTS5-safe); mutually exclusive with `query`.
     pub grep: Option<String>,
-    pub hostname: Option<String>,
-    pub source_ip: Option<String>,
+    pub host: Option<String>,
+    pub source: Option<String>,
     pub severity: Option<String>,
-    pub app_name: Option<String>,
+    pub app: Option<String>,
     pub facility: Option<String>,
     pub exclude_facility: Option<String>,
-    pub from: Option<String>,
-    pub to: Option<String>,
-    pub received_from: Option<String>,
-    pub received_to: Option<String>,
+    pub since: Option<String>,
+    pub until: Option<String>,
+    pub received_since: Option<String>,
+    pub received_until: Option<String>,
     pub limit: Option<u32>,
     pub json: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct FilterArgs {
-    pub hostname: Option<String>,
-    pub source_ip: Option<String>,
+    pub host: Option<String>,
+    pub source: Option<String>,
     pub severity: Option<String>,
-    pub app_name: Option<String>,
+    pub app: Option<String>,
     pub facility: Option<String>,
     pub exclude_facility: Option<String>,
     pub process_id: Option<String>,
-    pub from: Option<String>,
-    pub to: Option<String>,
-    pub received_from: Option<String>,
-    pub received_to: Option<String>,
+    pub since: Option<String>,
+    pub until: Option<String>,
+    pub received_since: Option<String>,
+    pub received_until: Option<String>,
     pub limit: Option<u32>,
     pub source_kind: Option<String>,
     pub tool: Option<String>,
@@ -401,17 +405,17 @@ pub(crate) struct FilterArgs {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct TailArgs {
-    pub hostname: Option<String>,
-    pub source_ip: Option<String>,
-    pub app_name: Option<String>,
+    pub host: Option<String>,
+    pub source: Option<String>,
+    pub app: Option<String>,
     pub n: Option<u32>,
     pub json: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct TimeRangeArgs {
-    pub from: Option<String>,
-    pub to: Option<String>,
+    pub since: Option<String>,
+    pub until: Option<String>,
     pub limit: Option<u32>,
     pub json: bool,
 }
@@ -421,8 +425,8 @@ pub(crate) struct CorrelateArgs {
     pub reference_time: String,
     pub window_minutes: Option<u32>,
     pub severity_min: Option<String>,
-    pub hostname: Option<String>,
-    pub source_ip: Option<String>,
+    pub host: Option<String>,
+    pub source: Option<String>,
     pub query: Option<String>,
     pub limit: Option<u32>,
     pub json: bool,
@@ -439,20 +443,20 @@ pub(crate) struct SourceIpsArgs {
 pub(crate) struct TimelineArgs {
     pub bucket: Option<String>,
     pub group_by: Option<String>,
-    pub from: Option<String>,
-    pub to: Option<String>,
-    pub hostname: Option<String>,
-    pub app_name: Option<String>,
+    pub since: Option<String>,
+    pub until: Option<String>,
+    pub host: Option<String>,
+    pub app: Option<String>,
     pub severity_min: Option<String>,
     pub json: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct PatternsArgs {
-    pub from: Option<String>,
-    pub to: Option<String>,
-    pub hostname: Option<String>,
-    pub app_name: Option<String>,
+    pub since: Option<String>,
+    pub until: Option<String>,
+    pub host: Option<String>,
+    pub app: Option<String>,
     pub severity_min: Option<String>,
     pub scan_limit: Option<u32>,
     pub top_n: Option<u32>,

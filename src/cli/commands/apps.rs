@@ -14,12 +14,12 @@ pub(crate) fn parse_apps(args: &[String]) -> Result<CliCommand> {
     while let Some(arg) = flags.next() {
         if arg == "--json" {
             parsed.json = true;
-        } else if let Some(v) = flags.match_value(&arg, "--hostname")? {
-            parsed.hostname = Some(v);
-        } else if let Some(v) = flags.match_value(&arg, "--from")? {
-            parsed.from = Some(v);
-        } else if let Some(v) = flags.match_value(&arg, "--to")? {
-            parsed.to = Some(v);
+        } else if let Some(v) = flags.match_value(&arg, "--host")? {
+            parsed.host = Some(v);
+        } else if let Some(v) = flags.match_value(&arg, "--since")? {
+            parsed.since = Some(v);
+        } else if let Some(v) = flags.match_value(&arg, "--until")? {
+            parsed.until = Some(v);
         } else if let Some(v) = flags.match_value(&arg, "--limit")? {
             parsed.limit = Some(parse_u32_flag("--limit", v)?);
         } else if let Some(v) = flags.match_value(&arg, "--offset")? {

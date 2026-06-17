@@ -47,7 +47,7 @@ comments via `/gh-pr`, get it green, **merge it**, and clean up.
    `src/cli/help.rs` (CommandDoc/NestedCommandDoc CATALOG, SECTIONS) with cyan
    headers and white command names; wired per-command/nested `--help`.
 3. Systematically tested and timed every CLI command; identified the slow tier.
-4. Fixed perf bugs (e.g. search `--hostname` 200s → index-led intersect plan;
+4. Fixed perf bugs (e.g. search `--host` 200s → index-led intersect plan;
    established that ANALYZE/`sqlite_stat1` stats are load-bearing for plan
    choice); added `PRAGMA analysis_limit=400` and a 6h `PRAGMA optimize` task.
 5. Added `timeline_hourly` incremental rollup (watermark `source_max_id`,

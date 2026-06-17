@@ -121,8 +121,8 @@ impl CortexService {
         &self,
         req: SimilarIncidentsRequest,
     ) -> ServiceResult<SimilarIncidentsResponse> {
-        let from = parse_optional_timestamp(req.from.as_deref(), "from")?;
-        let to = parse_optional_timestamp(req.to.as_deref(), "to")?;
+        let from = parse_optional_timestamp(req.since.as_deref(), "since")?;
+        let to = parse_optional_timestamp(req.until.as_deref(), "until")?;
         let severity_min = validate_optional_severity(req.severity_min)?;
         let result = self
             .run_db("similar_incidents", move |pool| {
@@ -130,11 +130,11 @@ impl CortexService {
                     pool,
                     &db::SimilarIncidentsParams {
                         query: req.query,
-                        hostname: req.hostname,
-                        app_name: req.app_name,
+                        host: req.host,
+                        app: req.app,
                         severity_min,
-                        from,
-                        to,
+                        since: from,
+                        until: to,
                         window_minutes: req.window_minutes,
                         limit: req.limit,
                     },
@@ -145,18 +145,18 @@ impl CortexService {
     }
 
     pub async fn ask_history(&self, req: AskHistoryRequest) -> ServiceResult<AskHistoryResponse> {
-        let from = parse_optional_timestamp(req.from.as_deref(), "from")?;
-        let to = parse_optional_timestamp(req.to.as_deref(), "to")?;
+        let from = parse_optional_timestamp(req.since.as_deref(), "since")?;
+        let to = parse_optional_timestamp(req.until.as_deref(), "until")?;
         let result = self
             .run_db("ask_history", move |pool| {
                 db::ask_history_sessions(
                     pool,
                     &db::AskHistoryParams {
                         query: req.query,
-                        hostname: req.hostname,
-                        app_name: req.app_name,
-                        from,
-                        to,
+                        host: req.host,
+                        app: req.app,
+                        since: from,
+                        until: to,
                         limit: req.limit,
                     },
                 )
@@ -170,17 +170,17 @@ impl CortexService {
         req: IncidentContextRequest,
     ) -> ServiceResult<IncidentContextResponse> {
         // Both from and to are required — validate and normalize to rfc3339_z format.
-        let from = rfc3339_z(parse_required_timestamp(&req.from, "from")?);
-        let to = rfc3339_z(parse_required_timestamp(&req.to, "to")?);
+        let from = rfc3339_z(parse_required_timestamp(&req.since, "since")?);
+        let to = rfc3339_z(parse_required_timestamp(&req.until, "until")?);
         let result = self
             .run_db("incident_context", move |pool| {
                 db::incident_context_summary(
                     pool,
                     &db::IncidentContextParams {
-                        from,
-                        to,
-                        hostname: req.hostname,
-                        app_name: req.app_name,
+                        since: from,
+                        until: to,
+                        host: req.host,
+                        app: req.app,
                         // req.query accepted but deferred to v2 FTS integration
                         severity_min: req.severity_min,
                         limit: req.limit,

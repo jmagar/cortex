@@ -103,6 +103,14 @@ async fn run_cli(invocation: CliInvocation) -> Result<()> {
         return cli::run_config(command);
     }
 
+    if let cli::CliCommand::Completions(args) = command {
+        return cli::run_completions(&args);
+    }
+
+    if let cli::CliCommand::Complete(args) = command {
+        return cli::run_complete(&args);
+    }
+
     if let cli::CliCommand::Inventory(command) = command {
         if let Some(trigger) = flags.http_flag_trigger() {
             anyhow::bail!(
@@ -646,6 +654,8 @@ impl Mode {
                         | "fleet-state"
                         | "correlate-state"
                         | "file-tail"
+                        | "__complete"
+                        | "completions"
                 ) =>
             {
                 let mut cli_args = Vec::with_capacity(rest.len() + 1);

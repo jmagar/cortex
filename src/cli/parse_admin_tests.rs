@@ -22,8 +22,8 @@ fn parse_service_and_db_commands_dispatch_expected_subcommands() {
     let service = parse_service(&strings(&[
         "logs",
         "cortex",
-        "--from=t0",
-        "--to=t1",
+        "--since=t0",
+        "--until=t1",
         "--tail=20",
         "--json",
     ]))
@@ -31,7 +31,8 @@ fn parse_service_and_db_commands_dispatch_expected_subcommands() {
     match service {
         crate::cli::CliCommand::Service(crate::cli::ServiceCommand::Logs(args)) => {
             assert_eq!(args.service, "cortex");
-            assert_eq!(args.from.as_deref(), Some("t0"));
+            assert_eq!(args.since.as_deref(), Some("t0"));
+            assert_eq!(args.until.as_deref(), Some("t1"));
             assert_eq!(args.tail, Some(20));
             assert!(args.json);
         }

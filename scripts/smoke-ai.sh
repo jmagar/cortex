@@ -102,7 +102,7 @@ checkpoints="$(run_cortex ai checkpoints --limit 20 --json)"
 require_json_count "ai checkpoints did not include fixture source" "$checkpoints" "any(item.get('canonical_path', '').endswith('ai-session-smoke.jsonl') for item in data)"
 pass "ai checkpoints"
 
-tail_output="$(run_cortex tail -n 5 --app-name claude-transcript)"
+tail_output="$(run_cortex tail -n 5 --app claude-transcript)"
 grep -q 'ai-smoke-session' <<<"$tail_output" || fail "tail output did not include fixture session"
 if grep -qE '\blocalhost\b' <<<"$tail_output"; then
   fail "tail output still shows synthetic localhost transcript row"

@@ -189,12 +189,12 @@ Full-text search across all syslog messages with optional filters. Uses SQLite F
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `query` | string | no | — | FTS5 search query (see [FTS5 query syntax](#fts5-query-syntax)) |
-| `hostname` | string | no | — | Exact hostname match. Use `cortex` with `action: "hosts"` to enumerate. |
-| `source_ip` | string | no | — | Exact source identifier. Syslog entries use the verified network sender address (`IP:port`); OTLP rows use the verified peer IP; Docker ingest stream rows use `docker://host/container/stream`; Docker lifecycle event rows use `docker-event://host/container/action`. |
+| `host` | string | no | — | Exact hostname match. Use `cortex` with `action: "hosts"` to enumerate. |
+| `source` | string | no | — | Exact source identifier. Syslog entries use the verified network sender address (`IP:port`); OTLP rows use the verified peer IP; Docker ingest stream rows use `docker://host/container/stream`; Docker lifecycle event rows use `docker-event://host/container/action`. |
 | `severity` | string | no | — | One of: `emerg alert crit err warning notice info debug` |
-| `app_name` | string | no | — | Application name, e.g. `sshd`, `dockerd`, `kernel` |
-| `from` | string | no | — | Start of time range (ISO 8601 / RFC 3339, e.g. `2025-01-15T00:00:00Z`) |
-| `to` | string | no | — | End of time range (ISO 8601) |
+| `app` | string | no | — | Application name, e.g. `sshd`, `dockerd`, `kernel` |
+| `since` | string | no | — | Start of time range (relative like `1h`/`yesterday`, or ISO 8601 / RFC 3339, e.g. `2025-01-15T00:00:00Z`) |
+| `until` | string | no | — | End of time range (relative or ISO 8601) |
 | `limit` | integer | no | 100 | Max results (hard cap: 1000) |
 
 **Response**
@@ -235,7 +235,7 @@ query: "restart*"              # matches restart, restarted, restarting
 
 Structured filter-only retrieval for correlation workflows. This action rejects `query`; use `search` for FTS5 message-body search.
 
-Common filters match `search`: `hostname`, `source_ip`, `severity`, `app_name`, `facility`, `exclude_facility`, `process_id`, `from`, `to`, `received_from`, `received_to`, and `limit`.
+Common filters match `search`: `host`, `source`, `severity`, `app`, `facility`, `exclude_facility`, `process_id`, `since`, `until`, `received_since`, `received_until`, and `limit`.
 
 Correlation aliases include `source_kind` (`docker-stream`, `docker-event`, `agent-command`, `shell-history`, `transcript`, `claude`, `codex`, `gemini`), plus `tool`, `project`, `session_id`, `container`, `docker_host`, `stream`, and `event_action`.
 `source_kind=file-tail` filters managed file-tail rows (`source_ip` prefix `file-tail://`).
@@ -250,9 +250,9 @@ Return the N most recent log entries. Equivalent to `tail -f` across all hosts.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `hostname` | string | no | — | Filter to a specific host |
-| `source_ip` | string | no | — | Filter to an exact source identifier. Syslog entries use the verified network sender address (`IP:port`); OTLP rows use the verified peer IP; Docker ingest stream rows use `docker://host/container/stream`; Docker lifecycle event rows use `docker-event://host/container/action`. |
-| `app_name` | string | no | — | Filter to a specific application |
+| `host` | string | no | — | Filter to a specific host |
+| `source` | string | no | — | Filter to an exact source identifier. Syslog entries use the verified network sender address (`IP:port`); OTLP rows use the verified peer IP; Docker ingest stream rows use `docker://host/container/stream`; Docker lifecycle event rows use `docker-event://host/container/action`. |
+| `app` | string | no | — | Filter to a specific application |
 | `n` | integer | no | 50 | Number of recent entries (hard cap: 500) |
 
 **Response**
@@ -269,8 +269,8 @@ Summarize warnings and errors across all hosts in a time window. Groups by hostn
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `from` | string | no | all time | Start of time range (ISO 8601) |
-| `to` | string | no | now | End of time range (ISO 8601) |
+| `since` | string | no | all time | Start of time range (ISO 8601) |
+| `until` | string | no | now | End of time range (ISO 8601) |
 
 Severities included: `emerg`, `alert`, `crit`, `err`, `warning`.
 
@@ -321,9 +321,9 @@ List AI transcript sessions grouped by project, tool, session, and host.
 |-----------|------|----------|---------|-------------|
 | `project` | string | no | — | Exact project path, e.g. `/home/jmagar/workspace/cortex` |
 | `tool` | string | no | — | AI tool filter: `claude`, `codex`, or `gemini` |
-| `hostname` | string | no | — | Restrict to one host |
-| `from` | string | no | — | Start of time range (ISO 8601) |
-| `to` | string | no | — | End of time range (ISO 8601) |
+| `host` | string | no | — | Restrict to one host |
+| `since` | string | no | — | Start of time range (ISO 8601) |
+| `until` | string | no | — | End of time range (ISO 8601) |
 | `limit` | integer | no | 100 | Max sessions (hard cap: 1000) |
 
 **Response**
@@ -358,8 +358,8 @@ Search for related events across multiple hosts within a ±N minute window aroun
 | `reference_time` | string | **yes** | — | Center timestamp (ISO 8601, e.g. `2025-01-15T14:30:00Z`) |
 | `window_minutes` | integer | no | 5 | Minutes before and after `reference_time` (max 60) |
 | `severity_min` | string | no | `warning` | Minimum severity to include. `warning` returns `warning/err/crit/alert/emerg`. `debug` returns everything. |
-| `hostname` | string | no | — | Limit correlation to one host |
-| `source_ip` | string | no | — | Limit correlation to an exact source identifier. Syslog entries use the verified network sender address (`IP:port`); OTLP rows use the verified peer IP; Docker ingest stream rows use `docker://host/container/stream`; Docker lifecycle event rows use `docker-event://host/container/action`. |
+| `host` | string | no | — | Limit correlation to one host |
+| `source` | string | no | — | Limit correlation to an exact source identifier. Syslog entries use the verified network sender address (`IP:port`); OTLP rows use the verified peer IP; Docker ingest stream rows use `docker://host/container/stream`; Docker lifecycle event rows use `docker-event://host/container/action`. |
 | `query` | string | no | — | FTS5 query to narrow results |
 | `limit` | integer | no | 500 | Max total events (hard cap: 999) |
 
@@ -832,19 +832,19 @@ mounted and reviewed broader read-only roots such as `/var/log` or `/logs`.
 ```bash
 cortex file-tail add --id swag-access \
   --path /file-tail-root/swag/log/nginx/access.log \
-  --tag swag-access --hostname squirts --facility local4
+  --tag swag-access --host squirts --facility local4
 cortex file-tail add --id swag-error \
   --path /file-tail-root/swag/log/nginx/error.log \
-  --tag swag-error --hostname squirts --facility local4 --severity warning
+  --tag swag-error --host squirts --facility local4 --severity warning
 cortex file-tail add --id fail2ban \
   --path /file-tail-root/swag/log/fail2ban/fail2ban.log \
-  --tag fail2ban --hostname squirts --facility local5
+  --tag fail2ban --host squirts --facility local5
 cortex file-tail add --id authelia \
   --path /file-tail-root/authelia/logs/authelia.log \
-  --tag authelia --hostname squirts --facility local5
+  --tag authelia --host squirts --facility local5
 cortex file-tail add --id adguard-query \
   --path /file-tail-root/adguard/var/data/querylog.json \
-  --tag adguard-query --hostname squirts --facility local6
+  --tag adguard-query --host squirts --facility local6
 ```
 
 The default starts at EOF. Add `--from-start` only when you intentionally want
@@ -978,9 +978,9 @@ Both modes use the same config and environment variable loader. `cortex mcp` is 
 The direct CLI uses the same shared service layer as the MCP tool, so results and validation match the MCP actions without needing an MCP client:
 
 ```bash
-cortex search 'error AND nginx' --hostname proxy --limit 10
-cortex tail -n 20 --app-name kernel
-cortex errors --from 2026-01-01T00:00:00Z
+cortex search 'error AND nginx' --host proxy --limit 10
+cortex tail -n 20 --app kernel
+cortex errors --since 2026-01-01T00:00:00Z
 cortex hosts
 cortex correlate --reference-time 2026-01-01T12:00:00Z --window-minutes 10 --severity-min warning
 cortex entity host tootie
@@ -1001,7 +1001,7 @@ cortex clock-skew   --since 2026-05-20T00:00:00Z
 cortex anomalies    --recent-minutes 30 --baseline-minutes 720
 cortex compare      --a-from 2026-05-20T00:00:00Z --a-to 2026-05-20T23:59:59Z \
                     --b-from 2026-05-21T00:00:00Z --b-to 2026-05-21T23:59:59Z
-cortex apps         --hostname dookie --limit 50
+cortex apps         --host dookie --limit 50
 ```
 
 ### REST endpoints (2026-05-22 surface parity)

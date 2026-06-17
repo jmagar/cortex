@@ -1627,7 +1627,7 @@ impl AppsArgs {
 #[test]
 fn parse_apps_with_hostname_limit() {
     let cmd = CliCommand::parse(strings(&[
-        "apps", "--hostname", "dookie", "--limit", "50",
+        "apps", "--host", "dookie", "--limit", "50",
     ]))
     .expect("parse apps");
     match cmd {
@@ -1660,11 +1660,11 @@ pub(crate) fn parse_apps(args: &[String]) -> Result<CliCommand> {
     while let Some(arg) = flags.next() {
         if arg == "--json" {
             parsed.json = true;
-        } else if let Some(v) = flags.match_value(&arg, "--hostname")? {
+        } else if let Some(v) = flags.match_value(&arg, "--host")? {
             parsed.hostname = Some(v.to_owned());
-        } else if let Some(v) = flags.match_value(&arg, "--from")? {
+        } else if let Some(v) = flags.match_value(&arg, "--since")? {
             parsed.from = Some(v.to_owned());
-        } else if let Some(v) = flags.match_value(&arg, "--to")? {
+        } else if let Some(v) = flags.match_value(&arg, "--until")? {
             parsed.to = Some(v.to_owned());
         } else if let Some(v) = flags.match_value(&arg, "--limit")? {
             parsed.limit = Some(parse_u32_flag("--limit", v)?);
@@ -1824,7 +1824,7 @@ syslog silent-hosts [--silent-minutes N] [--json]
 syslog clock-skew   [--since RFC3339] [--json]
 syslog anomalies    [--recent-minutes N] [--baseline-minutes N] [--json]
 syslog compare      --a-from RFC3339 --a-to RFC3339 --b-from RFC3339 --b-to RFC3339 [--json]
-syslog apps         [--hostname H] [--from RFC3339] [--to RFC3339] [--limit N] [--offset N] [--json]
+syslog apps         [--host H] [--since RFC3339] [--until RFC3339] [--limit N] [--offset N] [--json]
 ```
 
 - [ ] **Step 5: Add smoke-test entries to tests/test_live.sh**

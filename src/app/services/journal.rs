@@ -94,17 +94,18 @@ pub async fn run_service_logs(
         "--output".to_string(),
         "json".to_string(),
     ];
-    if let Some(from) = &req.from {
+    if let Some(from) = &req.since {
         // Validate as RFC 3339 before passing to journalctl to prevent
         // argument injection (e.g. "--rotate", "--vacuum-size=1").
-        chrono::DateTime::parse_from_rfc3339(from)
-            .map_err(|_| ServiceError::InvalidInput(format!("invalid `from` timestamp: {from}")))?;
+        chrono::DateTime::parse_from_rfc3339(from).map_err(|_| {
+            ServiceError::InvalidInput(format!("invalid `since` timestamp: {from}"))
+        })?;
         args.push("--since".to_string());
         args.push(from.clone());
     }
-    if let Some(to) = &req.to {
+    if let Some(to) = &req.until {
         chrono::DateTime::parse_from_rfc3339(to)
-            .map_err(|_| ServiceError::InvalidInput(format!("invalid `to` timestamp: {to}")))?;
+            .map_err(|_| ServiceError::InvalidInput(format!("invalid `until` timestamp: {to}")))?;
         args.push("--until".to_string());
         args.push(to.clone());
     }
@@ -125,8 +126,8 @@ pub async fn run_service_logs(
     }
     Ok(ServiceLogsResponse {
         service,
-        from: req.from,
-        to: req.to,
+        from: req.since,
+        to: req.until,
         tail,
         entries,
         dropped_lines,

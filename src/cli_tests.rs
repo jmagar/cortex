@@ -38,20 +38,20 @@ fn parse_search_collects_query_and_filters() {
         "search",
         "disk",
         "full",
-        "--hostname",
+        "--host",
         "nas",
-        "--source-ip=10.0.0.5:514",
+        "--source=10.0.0.5:514",
         "--severity",
         "err",
-        "--app-name=kernel",
+        "--app=kernel",
         "--facility=auth",
         "--exclude-facility",
         "transcript",
-        "--from",
+        "--since",
         "2026-01-01T00:00:00Z",
-        "--to=2026-01-02T00:00:00Z",
-        "--received-from=2026-01-01T00:00:30Z",
-        "--received-to",
+        "--until=2026-01-02T00:00:00Z",
+        "--received-since=2026-01-01T00:00:30Z",
+        "--received-until",
         "2026-01-02T00:00:30Z",
         "--limit",
         "25",
@@ -64,16 +64,16 @@ fn parse_search_collects_query_and_filters() {
         CliCommand::Search(SearchArgs {
             query: Some("disk full".into()),
             grep: None,
-            hostname: Some("nas".into()),
-            source_ip: Some("10.0.0.5:514".into()),
+            host: Some("nas".into()),
+            source: Some("10.0.0.5:514".into()),
             severity: Some("err".into()),
-            app_name: Some("kernel".into()),
+            app: Some("kernel".into()),
             facility: Some("auth".into()),
             exclude_facility: Some("transcript".into()),
-            from: Some("2026-01-01T00:00:00+00:00".into()),
-            to: Some("2026-01-02T00:00:00+00:00".into()),
-            received_from: Some("2026-01-01T00:00:30+00:00".into()),
-            received_to: Some("2026-01-02T00:00:30+00:00".into()),
+            since: Some("2026-01-01T00:00:00+00:00".into()),
+            until: Some("2026-01-02T00:00:00+00:00".into()),
+            received_since: Some("2026-01-01T00:00:30+00:00".into()),
+            received_until: Some("2026-01-02T00:00:30+00:00".into()),
             limit: Some(25),
             json: true,
         })
@@ -82,13 +82,13 @@ fn parse_search_collects_query_and_filters() {
 
 #[test]
 fn parse_tail_accepts_positional_count() {
-    let parsed = CliCommand::parse(strings(&["tail", "10", "--hostname", "router"])).unwrap();
+    let parsed = CliCommand::parse(strings(&["tail", "10", "--host", "router"])).unwrap();
 
     assert_eq!(
         parsed,
         CliCommand::Tail(TailArgs {
             n: Some(10),
-            hostname: Some("router".into()),
+            host: Some("router".into()),
             ..Default::default()
         })
     );
@@ -100,9 +100,9 @@ fn parse_service_logs_accepts_time_range_and_json() {
         "service",
         "logs",
         "cortex-ai-watch",
-        "--from",
+        "--since",
         "2026-05-19 19:55:00",
-        "--to=2026-05-19 20:05:00",
+        "--until=2026-05-19 20:05:00",
         "--tail",
         "50",
         "--json",
@@ -113,8 +113,8 @@ fn parse_service_logs_accepts_time_range_and_json() {
         parsed,
         CliCommand::Service(ServiceCommand::Logs(ServiceLogsArgs {
             service: "cortex-ai-watch".into(),
-            from: Some("2026-05-19 19:55:00".into()),
-            to: Some("2026-05-19 20:05:00".into()),
+            since: Some("2026-05-19 19:55:00".into()),
+            until: Some("2026-05-19 20:05:00".into()),
             tail: Some(50),
             json: true,
         }))
@@ -146,7 +146,7 @@ fn parse_incident_accepts_window_service_and_json() {
             around: "2026-05-20T04:00:00+00:00".into(),
             minutes: Some(10),
             service: Some("cortex-ai-watch".into()),
-            hostname: Some("dookie".into()),
+            host: Some("dookie".into()),
             limit: Some(25),
             json: true,
         })
@@ -304,9 +304,9 @@ fn parse_ai_correlate_collects_cross_reference_filters() {
         "--ai-query",
         "deploy",
         "--log-query=error",
-        "--hostname",
+        "--host",
         "host-a",
-        "--app-name",
+        "--app",
         "dockerd",
         "--window-minutes",
         "15",
@@ -325,8 +325,8 @@ fn parse_ai_correlate_collects_cross_reference_filters() {
             session_id: Some("sess-1".into()),
             ai_query: Some("deploy".into()),
             log_query: Some("error".into()),
-            hostname: Some("host-a".into()),
-            app_name: Some("dockerd".into()),
+            host: Some("host-a".into()),
+            app: Some("dockerd".into()),
             window_minutes: Some(15),
             severity_min: Some("err".into()),
             events_per_anchor: Some(12),
@@ -1521,11 +1521,11 @@ fn parse_compare_with_ranges() {
 
 #[test]
 fn parse_apps_with_hostname_limit() {
-    let cmd = CliCommand::parse(strings(&["apps", "--hostname", "dookie", "--limit", "50"]))
+    let cmd = CliCommand::parse(strings(&["apps", "--host", "dookie", "--limit", "50"]))
         .expect("parse apps");
     match cmd {
         CliCommand::Apps(args) => {
-            assert_eq!(args.hostname.as_deref(), Some("dookie"));
+            assert_eq!(args.host.as_deref(), Some("dookie"));
             assert_eq!(args.limit, Some(50));
         }
         other => panic!("expected Apps, got {other:?}"),

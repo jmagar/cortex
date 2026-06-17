@@ -60,9 +60,9 @@ pub struct DockerCheckpoint {
 pub struct ListAiSessionsParams {
     pub ai_project: Option<String>,
     pub ai_tool: Option<String>,
-    pub hostname: Option<String>,
-    pub from: Option<String>,
-    pub to: Option<String>,
+    pub host: Option<String>,
+    pub since: Option<String>,
+    pub until: Option<String>,
     pub limit: Option<u32>,
 }
 
@@ -84,11 +84,11 @@ pub struct SearchAiSessionsParams {
     pub ai_project: Option<String>,
     pub ai_tool: Option<String>,
     /// Filter AI transcript sessions to those where the session's host matches.
-    pub hostname: Option<String>,
+    pub host: Option<String>,
     /// Filter AI transcript sessions to those where the session's app matches.
-    pub app_name: Option<String>,
-    pub from: Option<String>,
-    pub to: Option<String>,
+    pub app: Option<String>,
+    pub since: Option<String>,
+    pub until: Option<String>,
     pub limit: Option<u32>,
 }
 
@@ -165,8 +165,8 @@ pub struct SearchAiSessionsResult {
 pub struct AiAbuseParams {
     pub ai_project: Option<String>,
     pub ai_tool: Option<String>,
-    pub from: Option<String>,
-    pub to: Option<String>,
+    pub since: Option<String>,
+    pub until: Option<String>,
     pub limit: Option<u32>,
     pub before: Option<u32>,
     pub after: Option<u32>,
@@ -197,8 +197,8 @@ pub struct AiCorrelateParams {
     pub ai_tool: Option<String>,
     pub ai_session_id: Option<String>,
     pub ai_query: Option<String>,
-    pub from: Option<String>,
-    pub to: Option<String>,
+    pub since: Option<String>,
+    pub until: Option<String>,
     pub limit: Option<u32>,
 }
 
@@ -213,10 +213,10 @@ pub struct AiRelatedWindow {
 pub struct AiRelatedLogsParams {
     pub windows: Vec<AiRelatedWindow>,
     pub query: Option<String>,
-    pub hostname: Option<String>,
-    pub source_ip: Option<String>,
+    pub host: Option<String>,
+    pub source: Option<String>,
     pub severity_in: Vec<String>,
-    pub app_name: Option<String>,
+    pub app: Option<String>,
     pub limit_per_anchor: u32,
 }
 
@@ -231,8 +231,8 @@ pub struct AiRelatedLogsForAnchor {
 pub struct AiUsageBlocksParams {
     pub ai_project: Option<String>,
     pub ai_tool: Option<String>,
-    pub from: Option<String>,
-    pub to: Option<String>,
+    pub since: Option<String>,
+    pub until: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -275,8 +275,8 @@ pub struct AiProjectContext {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListAiToolsParams {
     pub ai_project: Option<String>,
-    pub from: Option<String>,
-    pub to: Option<String>,
+    pub since: Option<String>,
+    pub until: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -298,8 +298,8 @@ pub struct ListAiToolsResult {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListAiProjectsParams {
     pub ai_tool: Option<String>,
-    pub from: Option<String>,
-    pub to: Option<String>,
+    pub since: Option<String>,
+    pub until: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -376,11 +376,11 @@ pub struct SearchParams {
     /// Full-text search query (FTS5 syntax)
     pub query: Option<String>,
     /// Filter by hostname
-    pub hostname: Option<String>,
+    pub host: Option<String>,
     /// Filter by source identifier. Syslog uses verified network sender address
     /// (IP:port); OTLP uses peer IP; Docker ingest uses
     /// docker://host/container/stream or docker-event://host/container/action.
-    pub source_ip: Option<String>,
+    pub source: Option<String>,
     /// Filter by source identifier prefix using an indexed range predicate.
     pub source_ip_prefix: Option<String>,
     /// Filter by severity (exact match: emerg, alert, crit, err, warning, notice, info, debug)
@@ -388,7 +388,7 @@ pub struct SearchParams {
     /// Filter by one of a set of severity levels (for threshold queries)
     pub severity_in: Option<Vec<String>>,
     /// Filter by app name
-    pub app_name: Option<String>,
+    pub app: Option<String>,
     /// Filter by syslog facility name (e.g. `kern`, `auth`, `daemon`)
     pub facility: Option<String>,
     /// Exclude a syslog facility while keeping rows with unknown facility.
@@ -396,13 +396,13 @@ pub struct SearchParams {
     /// Filter by process_id (exact match)
     pub process_id: Option<String>,
     /// Start of time range (ISO 8601)
-    pub from: Option<String>,
+    pub since: Option<String>,
     /// End of time range (ISO 8601)
-    pub to: Option<String>,
+    pub until: Option<String>,
     /// Start of receive-time range (ISO 8601)
-    pub received_from: Option<String>,
+    pub received_since: Option<String>,
     /// End of receive-time range (ISO 8601)
-    pub received_to: Option<String>,
+    pub received_until: Option<String>,
     /// Max results to return
     pub limit: Option<u32>,
     pub ai_tool: Option<String>,
@@ -419,7 +419,7 @@ impl SearchParams {
     /// search uses this to choose the index-led intersect plan — which leads
     /// with the filter's composite index and intersects the FTS match set —
     /// instead of scanning the entire match set and filtering post-hoc (the
-    /// pathology that made `search <q> --hostname <h>` ~200s).
+    /// pathology that made `search <q> --host <h>` ~200s).
     ///
     /// `severity`/`severity_in` are deliberately EXCLUDED: a single severity
     /// can be >90% of the table, so leading with `idx_logs_sev_time` for a
@@ -428,10 +428,10 @@ impl SearchParams {
     /// path instead; severity combined with a selective filter still uses the
     /// fast path via the selective column's index.
     pub(crate) fn has_indexed_equality_filter(&self) -> bool {
-        self.hostname.is_some()
-            || self.source_ip.is_some()
+        self.host.is_some()
+            || self.source.is_some()
             || self.source_ip_prefix.is_some()
-            || self.app_name.is_some()
+            || self.app.is_some()
             || self.event_action.is_some()
             || self.ai_project.is_some()
     }
@@ -445,8 +445,8 @@ impl SearchParams {
 pub struct AiIncidentParams {
     pub ai_project: Option<String>,
     pub ai_tool: Option<String>,
-    pub from: Option<String>,
-    pub to: Option<String>,
+    pub since: Option<String>,
+    pub until: Option<String>,
     /// Max incidents to return. Default 20, clamp 1..=100.
     pub limit: Option<u32>,
     /// Grouping window in minutes. Default 10, clamp 1..=120.
@@ -497,8 +497,8 @@ pub struct AiInvestigateParams {
     pub incident_id: Option<String>,
     pub ai_project: Option<String>,
     pub ai_tool: Option<String>,
-    pub from: Option<String>,
-    pub to: Option<String>,
+    pub since: Option<String>,
+    pub until: Option<String>,
     /// Max incidents to investigate. Default 3, clamp 1..=10.
     pub limit: Option<u32>,
     /// Incident grouping window minutes. Default 10, clamp 1..=120.
@@ -540,12 +540,12 @@ pub struct AiInvestigateResult {
 #[derive(Debug, Clone, Default)]
 pub struct SimilarIncidentsParams {
     pub query: String,
-    pub hostname: Option<String>,
-    pub app_name: Option<String>,
+    pub host: Option<String>,
+    pub app: Option<String>,
     /// Minimum severity (e.g. "warning"). None = all severities.
     pub severity_min: Option<String>,
-    pub from: Option<String>,
-    pub to: Option<String>,
+    pub since: Option<String>,
+    pub until: Option<String>,
     /// Cluster grouping window in minutes. Default 30, clamp 5..=120.
     pub window_minutes: Option<u32>,
     /// Max clusters to return. Default 10, clamp 1..=50.
@@ -590,10 +590,10 @@ pub struct SimilarIncidentsResult {
 #[derive(Debug, Clone, Default)]
 pub struct AskHistoryParams {
     pub query: String,
-    pub hostname: Option<String>,
-    pub app_name: Option<String>,
-    pub from: Option<String>,
-    pub to: Option<String>,
+    pub host: Option<String>,
+    pub app: Option<String>,
+    pub since: Option<String>,
+    pub until: Option<String>,
     /// Max sessions to return. Default 10, clamp 1..=50.
     pub limit: Option<u32>,
 }
@@ -611,10 +611,10 @@ pub struct AskHistoryResult {
 
 #[derive(Debug, Clone, Default)]
 pub struct IncidentContextParams {
-    pub from: String,
-    pub to: String,
-    pub hostname: Option<String>,
-    pub app_name: Option<String>,
+    pub since: String,
+    pub until: String,
+    pub host: Option<String>,
+    pub app: Option<String>,
     // `query` is accepted at the app layer (IncidentContextRequest) but
     // deferred to v2 where it will apply FTS5 filtering on error_logs.
     pub severity_min: Option<String>,

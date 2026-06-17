@@ -5,9 +5,9 @@ use super::*;
 pub struct ListSessionsRequest {
     pub project: Option<String>,
     pub tool: Option<String>,
-    pub hostname: Option<String>,
-    pub from: Option<String>,
-    pub to: Option<String>,
+    pub host: Option<String>,
+    pub since: Option<String>,
+    pub until: Option<String>,
     pub limit: Option<u32>,
 }
 
@@ -68,8 +68,8 @@ pub struct SearchSessionsRequest {
     pub query: String,
     pub project: Option<String>,
     pub tool: Option<String>,
-    pub from: Option<String>,
-    pub to: Option<String>,
+    pub since: Option<String>,
+    pub until: Option<String>,
     pub limit: Option<u32>,
 }
 
@@ -154,8 +154,8 @@ impl From<db::SearchAiSessionsResult> for SearchSessionsResponse {
 pub struct AbuseSearchRequest {
     pub project: Option<String>,
     pub tool: Option<String>,
-    pub from: Option<String>,
-    pub to: Option<String>,
+    pub since: Option<String>,
+    pub until: Option<String>,
     pub limit: Option<u32>,
     pub before: Option<u32>,
     pub after: Option<u32>,

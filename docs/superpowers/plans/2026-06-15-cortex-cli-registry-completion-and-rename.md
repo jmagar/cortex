@@ -24,16 +24,16 @@
 
 | Concept | Canonical | Old CLI flag | Old MCP property |
 |---|---|---|---|
-| host | `--host` | `--hostname` | `hostname` |
+| host | `--host` | `--host` | `hostname` |
 | literal text | `--grep` | (Plan 1) | (n/a) |
 | limit | `-n`, `--limit` | `--limit` | `limit` |
 | min severity | `-s`, `--severity` | `--severity` | `severity` |
-| app | `--app` | `--app-name` | `app_name` |
-| source id | `--source` | `--source-ip` | `source_ip` |
+| app | `--app` | `--app` | `app_name` |
+| source id | `--source` | `--source` | `source_ip` |
 | event-time start | `--since` | `--from` | `from` |
 | event-time end | `--until` | `--to` | `to` |
-| received start | `--received-since` | `--received-from` | `received_from` |
-| received end | `--received-until` | `--received-to` | `received_to` |
+| received start | `--received-since` | `--received-since` | `received_from` |
+| received end | `--received-until` | `--received-until` | `received_to` |
 
 `--container`, `--stream`, `--source-kind`, `--json`, `--facility`,
 `--exclude-facility` keep their names.
@@ -281,11 +281,11 @@ to every `parse_*` fn. One worked example + a completeness gate keeps it honest.
 In `src/cli/parse_logs.rs::parse_search`, rename per the table. Before:
 
 ```rust
-"--hostname" => parsed.hostname = Some(flags.value("--hostname")?),
-"--source-ip" => parsed.source_ip = Some(flags.value("--source-ip")?),
-"--app-name" => parsed.app_name = Some(flags.value("--app-name")?),
-"--from" => parsed.from = Some(norm_time(flags.value("--from")?)?),
-"--to" => parsed.to = Some(norm_time(flags.value("--to")?)?),
+"--host" => parsed.hostname = Some(flags.value("--host")?),
+"--source" => parsed.source_ip = Some(flags.value("--source")?),
+"--app" => parsed.app_name = Some(flags.value("--app")?),
+"--since" => parsed.from = Some(norm_time(flags.value("--since")?)?),
+"--until" => parsed.to = Some(norm_time(flags.value("--until")?)?),
 ```
 
 After (note `-s`/`-n` short forms and `--since/--until`):
@@ -311,7 +311,7 @@ one asserting the old name now errors:
 ```rust
 #[test]
 fn search_rejects_legacy_hostname_flag() {
-    let err = parse_search(&["x".into(), "--hostname".into(), "dookie".into()])
+    let err = parse_search(&["x".into(), "--host".into(), "dookie".into()])
         .unwrap_err().to_string();
     assert!(err.contains("--host"), "should suggest canonical flag: {err}");
 }
@@ -329,7 +329,7 @@ renamed flags. Work file-by-file; after each file run its sidecar tests.
 Run:
 
 ```bash
-rg -n -- '--hostname|--source-ip|--app-name|"--from"|"--to"|--received-from|--received-to' src/cli
+rg -n -- '--host|--source|--app|"--since"|"--until"|--received-since|--received-until' src/cli
 ```
 
 Expected: **no matches in `parse_*`/command code** (matches only allowed in help text
@@ -813,7 +813,7 @@ git commit -m "feat(cli): registry-driven overview + missing-arg examples"
 - [ ] **Step 1: Find every legacy name reference**
 
 ```bash
-rg -n -- '--hostname|--source-ip|--app-name|action=.*hostname=|"hostname"|"source_ip"|"app_name"| from=| to=' \
+rg -n -- '--host|--source|--app|action=.*hostname=|"hostname"|"source_ip"|"app_name"| from=| to=' \
   plugins CLAUDE.md README* docs scripts config
 ```
 

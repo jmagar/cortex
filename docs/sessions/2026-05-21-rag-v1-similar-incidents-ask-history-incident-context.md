@@ -123,7 +123,7 @@ gh pr create --title "feat(rag): RAG v1 ..." --body "..."
 - `syslog similar_incidents` — given a query, returns time-windowed incident clusters from system logs, each with severity peak, representative messages, and overlapping AI sessions
 - `syslog ask_history` — given a query, returns AI sessions ranked by match count with system log context from the top session's time window
 - `syslog incident_context` — given `from`/`to`, returns a full context bundle: total logs, by-severity, by-app, error rows, active AI sessions
-- CLI: `syslog ai similar <query>`, `syslog ai ask-history <query>`, `syslog ai incident-context --from X --to Y`
+- CLI: `syslog ai similar <query>`, `syslog ai ask-history <query>`, `syslog ai incident-context --since X --until Y`
 
 ## Verification Evidence
 

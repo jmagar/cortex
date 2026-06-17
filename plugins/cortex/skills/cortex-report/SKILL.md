@@ -22,16 +22,16 @@ Use the `cortex` MCP tool as the source of truth for recent device logs. Query b
    - If the MCP tool is unavailable, report that no live syslog evidence could be collected and include the failure details.
 
 3. Collect incident candidates.
-   - Call `cortex action=errors from=<start> to=<end>` for warning/error summaries grouped by host and severity.
-   - Call `cortex action=search query=error from=<start> to=<end> limit=1000` for error detail inside the report window.
-   - Call `cortex action=search query="warning OR warn" from=<start> to=<end> limit=1000` when warning coverage is not already clear from `errors`.
+   - Call `cortex action=errors since=<start> until=<end>` for warning/error summaries grouped by host and severity.
+   - Call `cortex action=search query=error since=<start> until=<end> limit=1000` for error detail inside the report window.
+   - Call `cortex action=search query="warning OR warn" since=<start> until=<end> limit=1000` when warning coverage is not already clear from `errors`.
    - Call `cortex action=tail n=100` for recent fleet-wide context.
    - Use host/app/time filters when available to narrow noisy hosts or services.
 
 4. Correlate likely related events.
    - Call `cortex action=correlate` around high-severity timestamps or spikes.
    - Prefer small focused windows around incidents over one huge correlation query.
-   - Use `cortex action=timeline from=<start> to=<end> bucket=hour group_by=severity` or a narrower bucket to find spikes before correlation when the incident time is not obvious.
+   - Use `cortex action=timeline since=<start> until=<end> bucket=hour group_by=severity` or a narrower bucket to find spikes before correlation when the incident time is not obvious.
    - Group events by likely shared cause only when timestamps, hosts, apps, or message content support that relationship.
 
 5. Write an actionable markdown report.

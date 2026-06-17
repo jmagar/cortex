@@ -104,7 +104,7 @@ pub(crate) fn print_search_sessions_response(
     );
     if response.candidate_window_truncated {
         println!(
-            "search window capped at {} matching rows; use --project, --tool, --from, or --to to narrow exact grouping",
+            "search window capped at {} matching rows; use --project, --tool, --since, or --until to narrow exact grouping",
             cyan(&response.candidate_cap.to_string())
         );
     }
@@ -147,7 +147,7 @@ pub(crate) fn print_abuse_search_response(
     );
     if response.candidate_window_truncated {
         println!(
-            "abuse scan capped at {} candidate rows; use --project, --tool, --from, or --to to narrow it",
+            "abuse scan capped at {} candidate rows; use --project, --tool, --since, or --until to narrow it",
             cyan(&response.candidate_cap.to_string())
         );
     }

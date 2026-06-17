@@ -81,7 +81,7 @@ fn parse_add(args: &[String]) -> Result<FileTailAddArgs> {
         id: String::new(),
         path: String::new(),
         tag: String::new(),
-        hostname: None,
+        host: None,
         facility: None,
         severity: None,
         start_at_end: true,
@@ -102,9 +102,9 @@ fn parse_add(args: &[String]) -> Result<FileTailAddArgs> {
                 i += 1;
                 out.tag = required(args, i, "--tag")?;
             }
-            "--hostname" => {
+            "--host" => {
                 i += 1;
-                out.hostname = Some(required(args, i, "--hostname")?);
+                out.host = Some(required(args, i, "--host")?);
             }
             "--facility" => {
                 i += 1;
@@ -126,7 +126,7 @@ fn parse_add(args: &[String]) -> Result<FileTailAddArgs> {
                         "--id",
                         "--path",
                         "--tag",
-                        "--hostname",
+                        "--host",
                         "--facility",
                         "--severity",
                         "--from-start",
@@ -137,8 +137,8 @@ fn parse_add(args: &[String]) -> Result<FileTailAddArgs> {
         }
         i += 1;
     }
-    if out.id.is_empty() || out.path.is_empty() || out.tag.is_empty() || out.hostname.is_none() {
-        bail!("file-tail add requires --id, --path, --tag, and --hostname");
+    if out.id.is_empty() || out.path.is_empty() || out.tag.is_empty() || out.host.is_none() {
+        bail!("file-tail add requires --id, --path, --tag, and --host");
     }
     Ok(out)
 }
@@ -154,5 +154,5 @@ fn required(args: &[String], index: usize, flag: &str) -> Result<String> {
 }
 
 fn usage() -> &'static str {
-    "Usage: cortex file-tail list [--json]\n       cortex file-tail status [--json]\n       cortex file-tail add --id ID --path PATH --tag TAG --hostname HOST [--facility FACILITY] [--severity SEVERITY] [--from-start] [--json]\n       cortex file-tail remove --id ID [--json]\n       cortex file-tail enable --id ID [--json]\n       cortex file-tail disable --id ID [--json]"
+    "Usage: cortex file-tail list [--json]\n       cortex file-tail status [--json]\n       cortex file-tail add --id ID --path PATH --tag TAG --host HOST [--facility FACILITY] [--severity SEVERITY] [--from-start] [--json]\n       cortex file-tail remove --id ID [--json]\n       cortex file-tail enable --id ID [--json]\n       cortex file-tail disable --id ID [--json]"
 }

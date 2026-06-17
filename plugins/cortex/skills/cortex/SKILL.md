@@ -151,8 +151,8 @@ curl -s -X POST "$CLAUDE_PLUGIN_OPTION_SERVER_URL/mcp" \
 
 ```
 mcp__cortex__cortex(action="errors")
-mcp__cortex__cortex(action="tail", hostname="unraid", n=50)
-mcp__cortex__cortex(action="search", query='OOM OR "out of memory"', hostname="unraid")
+mcp__cortex__cortex(action="tail", host="unraid", n=50)
+mcp__cortex__cortex(action="search", query='OOM OR "out of memory"', host="unraid")
 ```
 
 ### Incident investigation
@@ -175,7 +175,7 @@ mcp__cortex__cortex(action="hosts")
 
 ```
 # Docker ingest sets source_ip to docker://host/container/stream
-mcp__cortex__cortex(action="search", source_ip="docker://squirts/postgres/stdout", limit=50)
+mcp__cortex__cortex(action="search", source="docker://squirts/postgres/stdout", limit=50)
 ```
 
 ### Storage health

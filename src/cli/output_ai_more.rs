@@ -180,7 +180,7 @@ pub(crate) fn print_ai_incidents_response(response: &AiIncidentResponse, json: b
         },
         if response.candidate_window_truncated {
             format!(
-                "\n{}: candidate scan capped at {} rows; narrow with --project/--tool/--from/--to",
+                "\n{}: candidate scan capped at {} rows; narrow with --project/--tool/--since/--until",
                 warn("warning"),
                 cyan(&response.candidate_cap.to_string())
             )

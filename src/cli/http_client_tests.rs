@@ -512,8 +512,8 @@ async fn ai_abuse_request_round_trips_through_serde_qs() {
     let req = AbuseSearchRequest {
         project: Some("proj".into()),
         tool: Some("Bash".into()),
-        from: None,
-        to: None,
+        since: None,
+        until: None,
         limit: Some(25),
         before: Some(2),
         after: Some(3),
@@ -603,11 +603,11 @@ async fn similar_incidents_round_trips_typed_response() {
 
     let req = SimilarIncidentsRequest {
         query: "disk full".into(),
-        hostname: None,
-        app_name: None,
+        host: None,
+        app: None,
         severity_min: None,
-        from: None,
-        to: None,
+        since: None,
+        until: None,
         window_minutes: None,
         limit: None,
     };
@@ -661,8 +661,8 @@ async fn incident_context_round_trips_typed_response() {
     Mock::given(method("GET"))
         .and(path("/api/incident-context"))
         .and(header("authorization", "Bearer test-value"))
-        .and(query_param("from", "2026-05-01T00:00:00Z"))
-        .and(query_param("to", "2026-05-01T01:00:00Z"))
+        .and(query_param("since", "2026-05-01T00:00:00Z"))
+        .and(query_param("until", "2026-05-01T01:00:00Z"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "window_from": "2026-05-01T00:00:00Z",
             "window_to":   "2026-05-01T01:00:00Z",
@@ -678,8 +678,8 @@ async fn incident_context_round_trips_typed_response() {
         .await;
 
     let req = IncidentContextRequest {
-        from: "2026-05-01T00:00:00Z".into(),
-        to: "2026-05-01T01:00:00Z".into(),
+        since: "2026-05-01T00:00:00Z".into(),
+        until: "2026-05-01T01:00:00Z".into(),
         ..Default::default()
     };
     let resp = client

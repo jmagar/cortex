@@ -105,7 +105,7 @@ mcporter call --config config/mcporter.json cortex.cortex action=apps
 mcporter call --config config/mcporter.json cortex.cortex action=source_ips
 mcporter call --config config/mcporter.json cortex.cortex action=timeline
 mcporter call --config config/mcporter.json cortex.cortex action=patterns
-mcporter call --config config/mcporter.json cortex.cortex action=context hostname=host timestamp=2026-01-01T00:00:00Z
+mcporter call --config config/mcporter.json cortex.cortex action=context host=host timestamp=2026-01-01T00:00:00Z
 mcporter call --config config/mcporter.json cortex.cortex action=get id=1
 mcporter call --config config/mcporter.json cortex.cortex action=ingest_rate
 mcporter call --config config/mcporter.json cortex.cortex action=silent_hosts
@@ -146,7 +146,7 @@ cortex ai incidents --limit 3 --json
 cortex ai investigate --limit 1 --json
 
 # Heartbeat fleet state parity commands
-cortex host-state --hostname tootie --json
+cortex host-state --host tootie --json
 cortex fleet-state --json
 cortex correlate-state --reference-time 2026-01-01T00:00:00Z --window-minutes 10 --json
 

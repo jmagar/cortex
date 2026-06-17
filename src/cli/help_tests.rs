@@ -235,3 +235,16 @@ fn classify_help_distinguishes_top_level_command_and_none() {
         HelpRequest::None
     );
 }
+
+#[test]
+fn command_help_includes_registry_examples() {
+    let body = render_command("search", false).expect("search help renders");
+    assert!(
+        body.contains("Examples"),
+        "search help should have an Examples block"
+    );
+    assert!(
+        body.contains("cortex search"),
+        "search help should include a registry example: {body}"
+    );
+}

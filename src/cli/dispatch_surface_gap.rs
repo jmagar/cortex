@@ -68,9 +68,9 @@ impl CompareArgs {
 impl AppsArgs {
     pub(crate) fn into_request(self) -> ListAppsRequest {
         ListAppsRequest {
-            hostname: self.hostname,
-            from: self.from,
-            to: self.to,
+            host: self.host,
+            since: self.since,
+            until: self.until,
             limit: self.limit,
             offset: self.offset,
         }
@@ -210,7 +210,7 @@ impl HostStateArgs {
     pub(crate) fn into_request(self) -> HostStateRequest {
         HostStateRequest {
             host_id: self.host_id,
-            hostname: self.hostname,
+            host: self.host,
             since: self.since,
             limit: self.limit,
         }

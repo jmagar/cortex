@@ -43,8 +43,8 @@ async fn tool_search_logs(state: &AppState, args: Value) -> anyhow::Result<Value
         .service
         .search_logs(SearchLogsRequest {
             query: string_arg(&args, "query"),
-            hostname: string_arg(&args, "hostname"),
-            source_ip: string_arg(&args, "source_ip"),
+            host: string_arg(&args, "host"),
+            source: string_arg(&args, "source"),
             // ...
         })
         .await?;

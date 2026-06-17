@@ -518,7 +518,7 @@ phase_tools() {
         --arg id "${source_id}" \
         --arg path "${server_path}" \
         --arg tag "${tag}" \
-        '{"action":"file_tails","op":"add","id":$id,"path":$path,"tag":$tag,"hostname":"live-smoke","facility":"local7","severity":"info","start_at_end":true}')")" || add_result=""
+        '{"action":"file_tails","op":"add","id":$id,"path":$path,"tag":$tag,"host":"live-smoke","facility":"local7","severity":"info","start_at_end":true}')")" || add_result=""
       assert_jq "cortex file_tails — add smoke source" "${add_result}" '.sources | type == "array"'
       printf '%s\n' "${marker}" >> "${write_path}"
       count=0
@@ -526,7 +526,7 @@ phase_tools() {
         search_result="$(call_tool cortex "$(jq -nc \
           --arg q "\"${marker}\"" \
           --arg tag "${tag}" \
-          '{"action":"search","query":$q,"source_kind":"file-tail","app_name":$tag,"limit":5}')")" || search_result=""
+          '{"action":"search","query":$q,"source_kind":"file-tail","app":$tag,"limit":5}')")" || search_result=""
         count="$(printf '%s' "${search_result}" | jq -r '.count // 0' 2>/dev/null)" || count=0
         [[ "${count}" -ge 1 ]] && break
         sleep 0.5
@@ -1066,7 +1066,7 @@ phase_surface_parity_rest() {
     "GET /api/anomalies|hosts"
     "GET /api/apps?limit=10|apps"
     "GET /api/similar-incidents?query=test&window_minutes=30|clusters"
-    "GET /api/incident-context?from=2026-01-01T00:00:00Z&to=2026-12-31T23:59:59Z|error_logs"
+    "GET /api/incident-context?since=2026-01-01T00:00:00Z&until=2026-12-31T23:59:59Z|error_logs"
     "GET /api/ai/ask-history?query=test|sessions"
     "GET /api/ai/incidents?limit=5|incidents"
     "GET /api/ai/investigate?limit=5|evidence"

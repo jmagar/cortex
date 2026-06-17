@@ -2,17 +2,17 @@ use super::*;
 
 pub(super) fn search_request_to_params(req: SearchLogsRequest) -> ServiceResult<SearchParams> {
     request_parts_to_params(FilterRequestParts {
-        hostname: req.hostname.clone(),
-        source_ip: req.source_ip.clone(),
+        hostname: req.host.clone(),
+        source_ip: req.source.clone(),
         severity: req.severity,
-        app_name: req.app_name.clone(),
+        app_name: req.app.clone(),
         facility: req.facility.clone(),
         exclude_facility: req.exclude_facility.clone(),
         process_id: req.process_id.clone(),
-        from: req.from,
-        to: req.to,
-        received_from: req.received_from,
-        received_to: req.received_to,
+        from: req.since,
+        to: req.until,
+        received_since: req.received_since,
+        received_until: req.received_until,
         limit: req.limit,
         source_kind: req.source_kind,
         tool: req.tool,
@@ -27,17 +27,17 @@ pub(super) fn search_request_to_params(req: SearchLogsRequest) -> ServiceResult<
 
 pub(super) fn filter_request_to_params(req: FilterLogsRequest) -> ServiceResult<SearchParams> {
     request_parts_to_params(FilterRequestParts {
-        hostname: req.hostname,
-        source_ip: req.source_ip,
+        hostname: req.host,
+        source_ip: req.source,
         severity: req.severity,
-        app_name: req.app_name,
+        app_name: req.app,
         facility: req.facility,
         exclude_facility: req.exclude_facility,
         process_id: req.process_id,
-        from: req.from,
-        to: req.to,
-        received_from: req.received_from,
-        received_to: req.received_to,
+        from: req.since,
+        to: req.until,
+        received_since: req.received_since,
+        received_until: req.received_until,
         limit: req.limit,
         source_kind: req.source_kind,
         tool: req.tool,
@@ -60,8 +60,8 @@ struct FilterRequestParts {
     process_id: Option<String>,
     from: Option<String>,
     to: Option<String>,
-    received_from: Option<String>,
-    received_to: Option<String>,
+    received_since: Option<String>,
+    received_until: Option<String>,
     limit: Option<u32>,
     source_kind: Option<String>,
     tool: Option<String>,
@@ -77,19 +77,19 @@ fn request_parts_to_params(req: FilterRequestParts) -> ServiceResult<SearchParam
     let severity = validate_optional_severity(req.severity.clone())?;
     let mut params = SearchParams {
         query: None,
-        hostname: req.hostname.clone(),
-        source_ip: req.source_ip.clone(),
+        host: req.hostname.clone(),
+        source: req.source_ip.clone(),
         source_ip_prefix: None,
         severity,
         severity_in: None,
-        app_name: req.app_name.clone(),
+        app: req.app_name.clone(),
         facility: req.facility.clone(),
         exclude_facility: req.exclude_facility.clone(),
         process_id: req.process_id.clone(),
-        from: parse_optional_timestamp(req.from.as_deref(), "from")?,
-        to: parse_optional_timestamp(req.to.as_deref(), "to")?,
-        received_from: parse_optional_timestamp(req.received_from.as_deref(), "received_from")?,
-        received_to: parse_optional_timestamp(req.received_to.as_deref(), "received_to")?,
+        since: parse_optional_timestamp(req.from.as_deref(), "since")?,
+        until: parse_optional_timestamp(req.to.as_deref(), "until")?,
+        received_since: parse_optional_timestamp(req.received_since.as_deref(), "received_since")?,
+        received_until: parse_optional_timestamp(req.received_until.as_deref(), "received_until")?,
         limit: req.limit,
         ai_tool: req.tool.clone(),
         ai_project: req.project.clone(),
@@ -120,19 +120,19 @@ fn apply_log_filter_aliases(
     match source_kind {
         None => {
             if let Some(container) = &req.container {
-                params.app_name.get_or_insert_with(|| container.clone());
+                params.app.get_or_insert_with(|| container.clone());
             }
         }
         Some("docker-stream") => {
             params.source_ip_prefix = Some(docker_source_prefix("docker://", req));
             if let Some(container) = &req.container {
-                params.app_name.get_or_insert_with(|| container.clone());
+                params.app.get_or_insert_with(|| container.clone());
             }
         }
         Some("docker-event") => {
             params.source_ip_prefix = Some(docker_source_prefix("docker-event://", req));
             if let Some(container) = &req.container {
-                params.app_name.get_or_insert_with(|| container.clone());
+                params.app.get_or_insert_with(|| container.clone());
             }
         }
         Some("agent-command") => {
@@ -158,7 +158,7 @@ fn apply_log_filter_aliases(
         }
         Some("syslog-udp") | Some("syslog-tcp") | Some("otlp") => {
             return Err(ServiceError::InvalidInput(format!(
-                "source_kind={} is not indexed separately in v1; filter by hostname, source_ip, app_name, facility, and time range instead",
+                "source_kind={} is not indexed separately in v1; filter by host, source, app, facility, and time range instead",
                 source_kind.unwrap()
             )));
         }

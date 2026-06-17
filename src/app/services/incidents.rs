@@ -50,10 +50,10 @@ fn incident_sort_key(timestamp: &str) -> i64 {
 
 impl CortexService {
     pub async fn incident(&self, req: IncidentRequest) -> ServiceResult<IncidentResponse> {
-        if req.hostname.is_some() && req.service.is_some() {
+        if req.host.is_some() && req.service.is_some() {
             return Err(ServiceError::InvalidInput(
-                "hostname and service cannot be combined: journal entries are always local \
-                 and cannot be filtered by remote hostname"
+                "host and service cannot be combined: journal entries are always local \
+                 and cannot be filtered by remote host"
                     .into(),
             ));
         }
@@ -67,19 +67,19 @@ impl CortexService {
         let app_name = req.service.as_deref().map(service_app_filter);
         let params = SearchParams {
             query: None,
-            hostname: req.hostname.clone(),
-            source_ip: None,
+            host: req.host.clone(),
+            source: None,
             source_ip_prefix: None,
             severity: None,
             severity_in: None,
-            app_name,
+            app: app_name,
             facility: None,
             exclude_facility: None,
             process_id: None,
-            from: Some(from.clone()),
-            to: Some(to.clone()),
-            received_from: None,
-            received_to: None,
+            since: Some(from.clone()),
+            until: Some(to.clone()),
+            received_since: None,
+            received_until: None,
             limit: Some(limit + 1),
             ai_tool: None,
             ai_project: None,
@@ -103,8 +103,8 @@ impl CortexService {
             match self
                 .service_logs(ServiceLogsRequest {
                     service,
-                    from: Some(from.clone()),
-                    to: Some(to.clone()),
+                    since: Some(from.clone()),
+                    until: Some(to.clone()),
                     tail: Some(limit.saturating_add(1)),
                 })
                 .await

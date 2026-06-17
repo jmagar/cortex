@@ -4,7 +4,7 @@ use super::*;
 #[serde(deny_unknown_fields)]
 pub struct ContextRequest {
     pub log_id: Option<i64>,
-    pub hostname: Option<String>,
+    pub host: Option<String>,
     pub timestamp: Option<String>,
     pub before: Option<u32>,
     pub after: Option<u32>,

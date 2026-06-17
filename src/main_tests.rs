@@ -27,7 +27,7 @@ fn mode_parse_accepts_heartbeat_state_commands() {
     assert!(matches!(
         Mode::parse(vec![
             "host-state".into(),
-            "--hostname".into(),
+            "--host".into(),
             "tootie".into(),
             "--json".into()
         ])

@@ -19,51 +19,53 @@ pub(crate) fn parse_search(args: &[String]) -> Result<CliCommand> {
     while let Some(arg) = flags.next() {
         match arg.as_str() {
             "--json" => parsed.json = true,
-            "--hostname" => parsed.hostname = Some(flags.value("--hostname")?),
-            "--source-ip" => parsed.source_ip = Some(flags.value("--source-ip")?),
+            "--host" => parsed.host = Some(flags.value("--host")?),
+            "--source" => parsed.source = Some(flags.value("--source")?),
             "--severity" => parsed.severity = Some(flags.value("--severity")?),
-            "--app-name" => parsed.app_name = Some(flags.value("--app-name")?),
+            "--app" => parsed.app = Some(flags.value("--app")?),
             "--facility" => parsed.facility = Some(flags.value("--facility")?),
             "--exclude-facility" => {
                 parsed.exclude_facility = Some(flags.value("--exclude-facility")?)
             }
-            "--from" => parsed.from = Some(norm_time(flags.value("--from")?)?),
-            "--to" => parsed.to = Some(norm_time(flags.value("--to")?)?),
-            "--received-from" => {
-                parsed.received_from = Some(norm_time(flags.value("--received-from")?)?)
+            "--since" => parsed.since = Some(norm_time(flags.value("--since")?)?),
+            "--until" => parsed.until = Some(norm_time(flags.value("--until")?)?),
+            "--received-since" => {
+                parsed.received_since = Some(norm_time(flags.value("--received-since")?)?)
             }
-            "--received-to" => parsed.received_to = Some(norm_time(flags.value("--received-to")?)?),
+            "--received-until" => {
+                parsed.received_until = Some(norm_time(flags.value("--received-until")?)?)
+            }
             "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
             "-h" | "--help" => bail!("use `cortex --help` for usage"),
-            _ if arg.starts_with("--hostname=") => {
-                parsed.hostname = Some(value_after_equals(arg, "--hostname")?)
+            _ if arg.starts_with("--host=") => {
+                parsed.host = Some(value_after_equals(arg, "--host")?)
             }
-            _ if arg.starts_with("--source-ip=") => {
-                parsed.source_ip = Some(value_after_equals(arg, "--source-ip")?)
+            _ if arg.starts_with("--source=") => {
+                parsed.source = Some(value_after_equals(arg, "--source")?)
             }
             _ if arg.starts_with("--severity=") => {
                 parsed.severity = Some(value_after_equals(arg, "--severity")?)
             }
-            _ if arg.starts_with("--app-name=") => {
-                parsed.app_name = Some(value_after_equals(arg, "--app-name")?)
-            }
+            _ if arg.starts_with("--app=") => parsed.app = Some(value_after_equals(arg, "--app")?),
             _ if arg.starts_with("--facility=") => {
                 parsed.facility = Some(value_after_equals(arg, "--facility")?)
             }
             _ if arg.starts_with("--exclude-facility=") => {
                 parsed.exclude_facility = Some(value_after_equals(arg, "--exclude-facility")?)
             }
-            _ if arg.starts_with("--from=") => {
-                parsed.from = Some(norm_time(value_after_equals(arg, "--from")?)?)
+            _ if arg.starts_with("--since=") => {
+                parsed.since = Some(norm_time(value_after_equals(arg, "--since")?)?)
             }
-            _ if arg.starts_with("--to=") => {
-                parsed.to = Some(norm_time(value_after_equals(arg, "--to")?)?)
+            _ if arg.starts_with("--until=") => {
+                parsed.until = Some(norm_time(value_after_equals(arg, "--until")?)?)
             }
-            _ if arg.starts_with("--received-from=") => {
-                parsed.received_from = Some(norm_time(value_after_equals(arg, "--received-from")?)?)
+            _ if arg.starts_with("--received-since=") => {
+                parsed.received_since =
+                    Some(norm_time(value_after_equals(arg, "--received-since")?)?)
             }
-            _ if arg.starts_with("--received-to=") => {
-                parsed.received_to = Some(norm_time(value_after_equals(arg, "--received-to")?)?)
+            _ if arg.starts_with("--received-until=") => {
+                parsed.received_until =
+                    Some(norm_time(value_after_equals(arg, "--received-until")?)?)
             }
             _ if arg.starts_with("--limit=") => {
                 parsed.limit = Some(parse_u32_flag(
@@ -95,21 +97,23 @@ pub(crate) fn parse_filter(args: &[String]) -> Result<CliCommand> {
     while let Some(arg) = flags.next() {
         match arg.as_str() {
             "--json" => parsed.json = true,
-            "--hostname" => parsed.hostname = Some(flags.value("--hostname")?),
-            "--source-ip" => parsed.source_ip = Some(flags.value("--source-ip")?),
+            "--host" => parsed.host = Some(flags.value("--host")?),
+            "--source" => parsed.source = Some(flags.value("--source")?),
             "--severity" => parsed.severity = Some(flags.value("--severity")?),
-            "--app-name" => parsed.app_name = Some(flags.value("--app-name")?),
+            "--app" => parsed.app = Some(flags.value("--app")?),
             "--facility" => parsed.facility = Some(flags.value("--facility")?),
             "--exclude-facility" => {
                 parsed.exclude_facility = Some(flags.value("--exclude-facility")?)
             }
             "--process-id" => parsed.process_id = Some(flags.value("--process-id")?),
-            "--from" => parsed.from = Some(norm_time(flags.value("--from")?)?),
-            "--to" => parsed.to = Some(norm_time(flags.value("--to")?)?),
-            "--received-from" => {
-                parsed.received_from = Some(norm_time(flags.value("--received-from")?)?)
+            "--since" => parsed.since = Some(norm_time(flags.value("--since")?)?),
+            "--until" => parsed.until = Some(norm_time(flags.value("--until")?)?),
+            "--received-since" => {
+                parsed.received_since = Some(norm_time(flags.value("--received-since")?)?)
             }
-            "--received-to" => parsed.received_to = Some(norm_time(flags.value("--received-to")?)?),
+            "--received-until" => {
+                parsed.received_until = Some(norm_time(flags.value("--received-until")?)?)
+            }
             "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
             "--source-kind" => parsed.source_kind = Some(flags.value("--source-kind")?),
             "--tool" => parsed.tool = Some(flags.value("--tool")?),
@@ -120,18 +124,16 @@ pub(crate) fn parse_filter(args: &[String]) -> Result<CliCommand> {
             "--stream" => parsed.stream = Some(flags.value("--stream")?),
             "--event-action" => parsed.event_action = Some(flags.value("--event-action")?),
             "-h" | "--help" => bail!("use `cortex --help` for usage"),
-            _ if arg.starts_with("--hostname=") => {
-                parsed.hostname = Some(value_after_equals(arg, "--hostname")?)
+            _ if arg.starts_with("--host=") => {
+                parsed.host = Some(value_after_equals(arg, "--host")?)
             }
-            _ if arg.starts_with("--source-ip=") => {
-                parsed.source_ip = Some(value_after_equals(arg, "--source-ip")?)
+            _ if arg.starts_with("--source=") => {
+                parsed.source = Some(value_after_equals(arg, "--source")?)
             }
             _ if arg.starts_with("--severity=") => {
                 parsed.severity = Some(value_after_equals(arg, "--severity")?)
             }
-            _ if arg.starts_with("--app-name=") => {
-                parsed.app_name = Some(value_after_equals(arg, "--app-name")?)
-            }
+            _ if arg.starts_with("--app=") => parsed.app = Some(value_after_equals(arg, "--app")?),
             _ if arg.starts_with("--facility=") => {
                 parsed.facility = Some(value_after_equals(arg, "--facility")?)
             }
@@ -141,17 +143,19 @@ pub(crate) fn parse_filter(args: &[String]) -> Result<CliCommand> {
             _ if arg.starts_with("--process-id=") => {
                 parsed.process_id = Some(value_after_equals(arg, "--process-id")?)
             }
-            _ if arg.starts_with("--from=") => {
-                parsed.from = Some(norm_time(value_after_equals(arg, "--from")?)?)
+            _ if arg.starts_with("--since=") => {
+                parsed.since = Some(norm_time(value_after_equals(arg, "--since")?)?)
             }
-            _ if arg.starts_with("--to=") => {
-                parsed.to = Some(norm_time(value_after_equals(arg, "--to")?)?)
+            _ if arg.starts_with("--until=") => {
+                parsed.until = Some(norm_time(value_after_equals(arg, "--until")?)?)
             }
-            _ if arg.starts_with("--received-from=") => {
-                parsed.received_from = Some(norm_time(value_after_equals(arg, "--received-from")?)?)
+            _ if arg.starts_with("--received-since=") => {
+                parsed.received_since =
+                    Some(norm_time(value_after_equals(arg, "--received-since")?)?)
             }
-            _ if arg.starts_with("--received-to=") => {
-                parsed.received_to = Some(norm_time(value_after_equals(arg, "--received-to")?)?)
+            _ if arg.starts_with("--received-until=") => {
+                parsed.received_until =
+                    Some(norm_time(value_after_equals(arg, "--received-until")?)?)
             }
             _ if arg.starts_with("--limit=") => {
                 parsed.limit = Some(parse_u32_flag(
@@ -198,19 +202,17 @@ pub(crate) fn parse_tail(args: &[String]) -> Result<CliCommand> {
     while let Some(arg) = flags.next() {
         match arg.as_str() {
             "--json" => parsed.json = true,
-            "--hostname" => parsed.hostname = Some(flags.value("--hostname")?),
-            "--source-ip" => parsed.source_ip = Some(flags.value("--source-ip")?),
-            "--app-name" => parsed.app_name = Some(flags.value("--app-name")?),
+            "--host" => parsed.host = Some(flags.value("--host")?),
+            "--source" => parsed.source = Some(flags.value("--source")?),
+            "--app" => parsed.app = Some(flags.value("--app")?),
             "--n" | "-n" => parsed.n = Some(parse_u32_flag(&arg, flags.value(&arg)?)?),
-            _ if arg.starts_with("--hostname=") => {
-                parsed.hostname = Some(value_after_equals(arg, "--hostname")?)
+            _ if arg.starts_with("--host=") => {
+                parsed.host = Some(value_after_equals(arg, "--host")?)
             }
-            _ if arg.starts_with("--source-ip=") => {
-                parsed.source_ip = Some(value_after_equals(arg, "--source-ip")?)
+            _ if arg.starts_with("--source=") => {
+                parsed.source = Some(value_after_equals(arg, "--source")?)
             }
-            _ if arg.starts_with("--app-name=") => {
-                parsed.app_name = Some(value_after_equals(arg, "--app-name")?)
-            }
+            _ if arg.starts_with("--app=") => parsed.app = Some(value_after_equals(arg, "--app")?),
             _ if arg.starts_with("--n=") => {
                 parsed.n = Some(parse_u32_flag("--n", value_after_equals(arg, "--n")?)?)
             }
@@ -227,14 +229,14 @@ pub(crate) fn parse_errors(args: &[String]) -> Result<CliCommand> {
     while let Some(arg) = flags.next() {
         match arg.as_str() {
             "--json" => parsed.json = true,
-            "--from" => parsed.from = Some(norm_time(flags.value("--from")?)?),
-            "--to" => parsed.to = Some(norm_time(flags.value("--to")?)?),
+            "--since" => parsed.since = Some(norm_time(flags.value("--since")?)?),
+            "--until" => parsed.until = Some(norm_time(flags.value("--until")?)?),
             "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
-            _ if arg.starts_with("--from=") => {
-                parsed.from = Some(norm_time(value_after_equals(arg, "--from")?)?)
+            _ if arg.starts_with("--since=") => {
+                parsed.since = Some(norm_time(value_after_equals(arg, "--since")?)?)
             }
-            _ if arg.starts_with("--to=") => {
-                parsed.to = Some(norm_time(value_after_equals(arg, "--to")?)?)
+            _ if arg.starts_with("--until=") => {
+                parsed.until = Some(norm_time(value_after_equals(arg, "--until")?)?)
             }
             _ if arg.starts_with("--limit=") => {
                 parsed.limit = Some(parse_u32_flag(
@@ -260,9 +262,9 @@ pub(crate) fn parse_sessions(args: &[String]) -> Result<CliCommand> {
             "--json" => parsed.json = true,
             "--project" => parsed.project = Some(flags.value("--project")?),
             "--tool" => parsed.tool = Some(flags.value("--tool")?),
-            "--hostname" => parsed.hostname = Some(flags.value("--hostname")?),
-            "--from" => parsed.from = Some(norm_time(flags.value("--from")?)?),
-            "--to" => parsed.to = Some(norm_time(flags.value("--to")?)?),
+            "--host" => parsed.host = Some(flags.value("--host")?),
+            "--since" => parsed.since = Some(norm_time(flags.value("--since")?)?),
+            "--until" => parsed.until = Some(norm_time(flags.value("--until")?)?),
             "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
             _ if arg.starts_with("--project=") => {
                 parsed.project = Some(value_after_equals(arg, "--project")?)
@@ -270,14 +272,14 @@ pub(crate) fn parse_sessions(args: &[String]) -> Result<CliCommand> {
             _ if arg.starts_with("--tool=") => {
                 parsed.tool = Some(value_after_equals(arg, "--tool")?)
             }
-            _ if arg.starts_with("--hostname=") => {
-                parsed.hostname = Some(value_after_equals(arg, "--hostname")?)
+            _ if arg.starts_with("--host=") => {
+                parsed.host = Some(value_after_equals(arg, "--host")?)
             }
-            _ if arg.starts_with("--from=") => {
-                parsed.from = Some(norm_time(value_after_equals(arg, "--from")?)?)
+            _ if arg.starts_with("--since=") => {
+                parsed.since = Some(norm_time(value_after_equals(arg, "--since")?)?)
             }
-            _ if arg.starts_with("--to=") => {
-                parsed.to = Some(norm_time(value_after_equals(arg, "--to")?)?)
+            _ if arg.starts_with("--until=") => {
+                parsed.until = Some(norm_time(value_after_equals(arg, "--until")?)?)
             }
             _ if arg.starts_with("--limit=") => {
                 parsed.limit = Some(parse_u32_flag(
@@ -307,7 +309,7 @@ pub(crate) fn parse_incident(args: &[String]) -> Result<CliCommand> {
                 parsed.minutes = Some(parse_u32_flag("--minutes", flags.value("--minutes")?)?)
             }
             "--service" => parsed.service = Some(flags.value("--service")?),
-            "--hostname" | "--host" => parsed.hostname = Some(flags.value(&arg)?),
+            "--host" => parsed.host = Some(flags.value(&arg)?),
             "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
             _ if arg.starts_with("--around=") => {
                 parsed.around = norm_time(value_after_equals(arg, "--around")?)?
@@ -321,11 +323,8 @@ pub(crate) fn parse_incident(args: &[String]) -> Result<CliCommand> {
             _ if arg.starts_with("--service=") => {
                 parsed.service = Some(value_after_equals(arg, "--service")?)
             }
-            _ if arg.starts_with("--hostname=") => {
-                parsed.hostname = Some(value_after_equals(arg, "--hostname")?)
-            }
             _ if arg.starts_with("--host=") => {
-                parsed.hostname = Some(value_after_equals(arg, "--host")?)
+                parsed.host = Some(value_after_equals(arg, "--host")?)
             }
             _ if arg.starts_with("--limit=") => {
                 parsed.limit = Some(parse_u32_flag(
@@ -359,8 +358,8 @@ pub(crate) fn parse_correlate(args: &[String]) -> Result<CliCommand> {
                 )?)
             }
             "--severity-min" => parsed.severity_min = Some(flags.value("--severity-min")?),
-            "--hostname" => parsed.hostname = Some(flags.value("--hostname")?),
-            "--source-ip" => parsed.source_ip = Some(flags.value("--source-ip")?),
+            "--host" => parsed.host = Some(flags.value("--host")?),
+            "--source" => parsed.source = Some(flags.value("--source")?),
             "--query" => parsed.query = Some(flags.value("--query")?),
             "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
             _ if arg.starts_with("--reference-time=") => {
@@ -375,11 +374,11 @@ pub(crate) fn parse_correlate(args: &[String]) -> Result<CliCommand> {
             _ if arg.starts_with("--severity-min=") => {
                 parsed.severity_min = Some(value_after_equals(arg, "--severity-min")?)
             }
-            _ if arg.starts_with("--hostname=") => {
-                parsed.hostname = Some(value_after_equals(arg, "--hostname")?)
+            _ if arg.starts_with("--host=") => {
+                parsed.host = Some(value_after_equals(arg, "--host")?)
             }
-            _ if arg.starts_with("--source-ip=") => {
-                parsed.source_ip = Some(value_after_equals(arg, "--source-ip")?)
+            _ if arg.starts_with("--source=") => {
+                parsed.source = Some(value_after_equals(arg, "--source")?)
             }
             _ if arg.starts_with("--query=") => {
                 parsed.query = Some(value_after_equals(arg, "--query")?)
@@ -428,14 +427,14 @@ pub(crate) fn parse_timeline(args: &[String]) -> Result<CliCommand> {
             parsed.bucket = Some(v);
         } else if let Some(v) = flags.match_value(&arg, "--group-by")? {
             parsed.group_by = Some(v);
-        } else if let Some(v) = flags.match_value(&arg, "--from")? {
-            parsed.from = Some(norm_time(v)?);
-        } else if let Some(v) = flags.match_value(&arg, "--to")? {
-            parsed.to = Some(norm_time(v)?);
-        } else if let Some(v) = flags.match_value(&arg, "--hostname")? {
-            parsed.hostname = Some(v);
-        } else if let Some(v) = flags.match_value(&arg, "--app-name")? {
-            parsed.app_name = Some(v);
+        } else if let Some(v) = flags.match_value(&arg, "--since")? {
+            parsed.since = Some(norm_time(v)?);
+        } else if let Some(v) = flags.match_value(&arg, "--until")? {
+            parsed.until = Some(norm_time(v)?);
+        } else if let Some(v) = flags.match_value(&arg, "--host")? {
+            parsed.host = Some(v);
+        } else if let Some(v) = flags.match_value(&arg, "--app")? {
+            parsed.app = Some(v);
         } else if let Some(v) = flags.match_value(&arg, "--severity-min")? {
             parsed.severity_min = Some(v);
         } else {
@@ -451,14 +450,14 @@ pub(crate) fn parse_patterns(args: &[String]) -> Result<CliCommand> {
     while let Some(arg) = flags.next() {
         if arg == "--json" {
             parsed.json = true;
-        } else if let Some(v) = flags.match_value(&arg, "--from")? {
-            parsed.from = Some(norm_time(v)?);
-        } else if let Some(v) = flags.match_value(&arg, "--to")? {
-            parsed.to = Some(norm_time(v)?);
-        } else if let Some(v) = flags.match_value(&arg, "--hostname")? {
-            parsed.hostname = Some(v);
-        } else if let Some(v) = flags.match_value(&arg, "--app-name")? {
-            parsed.app_name = Some(v);
+        } else if let Some(v) = flags.match_value(&arg, "--since")? {
+            parsed.since = Some(norm_time(v)?);
+        } else if let Some(v) = flags.match_value(&arg, "--until")? {
+            parsed.until = Some(norm_time(v)?);
+        } else if let Some(v) = flags.match_value(&arg, "--host")? {
+            parsed.host = Some(v);
+        } else if let Some(v) = flags.match_value(&arg, "--app")? {
+            parsed.app = Some(v);
         } else if let Some(v) = flags.match_value(&arg, "--severity-min")? {
             parsed.severity_min = Some(v);
         } else if let Some(v) = flags.match_value(&arg, "--scan-limit")? {

@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.26.1] - 2026-06-16
+
+### Fixed
+
+- **Canonical-rename stragglers** — fixed user-facing strings that still referenced the pre-rename flag/arg vocabulary after the 1.26.0 canonical rename: `file-tail add` usage and required-flag error (`--hostname`→`--host`), the `ai incident-context` required-flag errors (`--from`/`--to`→`--since`/`--until`), the search/abuse/ask-history "scan capped" hints (`--from`/`--to`→`--since`/`--until`), the `file_tails op=add` admin help parameter (`hostname`→`host`), and the `similar_incidents` MCP input example (`app_name`→`app`). Also corrected the `similar_incidents` doc "Response fields" line back to the unchanged output names (`hostname`/`app_name`), matching the actual response contract.
+
+## [1.26.0] - 2026-06-16
+
+### Added
+
+- **Shell completion** — `cortex completions zsh` installs a tab-completion function that completes command names (with descriptions), per-command flags, and **live values** (hostnames, apps, source IDs pulled from the DB, cached ~60s with a 150 ms timeout that degrades silently). Driven by a hidden `cortex __complete` command and the single `ACTION_SPECS` registry.
+- **Per-command examples in help** — `cortex <command> --help` now shows copy-paste examples sourced from `ACTION_SPECS`, kept in lockstep with the canonical flags.
+
+### Changed
+
+- **Canonical flag/argument vocabulary (breaking)** — unified the CLI flags and MCP tool-argument names so they match everywhere: `--hostname`→`--host`, `--source-ip`→`--source`, `--app-name`→`--app`, `--from`→`--since`, `--to`→`--until`, `--received-from`→`--received-since`, `--received-to`→`--received-until` (with `-s`/`-n` short forms for severity/limit). The rename spans every CLI command, the MCP tool arguments (the request-arg domain fields were renamed so the wire key = field name, no serde aliases), help text, the bundled skills, and docs. Response/output field names (e.g. a log entry's `hostname`/`source_ip`) are unchanged — the output contract is unaffected.
+- `ACTION_SPECS` now carries per-action flag and example metadata; the CLI parser, completion, and help all derive from it.
+
 ## [1.25.1] - 2026-06-16
 
 ### Added
@@ -2376,7 +2394,10 @@ start and verify with `cortex --http db status`.
 
 ---
 
-[Unreleased]: https://github.com/jmagar/cortex/compare/v1.20.0...HEAD
+[Unreleased]: https://github.com/jmagar/cortex/compare/v1.26.1...HEAD
+[1.26.1]: https://github.com/jmagar/cortex/compare/v1.26.0...v1.26.1
+[1.26.0]: https://github.com/jmagar/cortex/compare/v1.25.1...v1.26.0
+[1.25.1]: https://github.com/jmagar/cortex/compare/v1.20.0...v1.25.1
 [1.20.0]: https://github.com/jmagar/cortex/compare/v1.19.0...v1.20.0
 [1.14.0]: https://github.com/jmagar/cortex/compare/v1.13.3...v1.14.0
 [1.13.3]: https://github.com/jmagar/cortex/compare/v1.13.2...v1.13.3

@@ -146,8 +146,8 @@ Tasks:
 
 Proposed new CLI commands:
 
-- `syslog ai search QUERY [--project PATH] [--tool TOOL] [--from TIME] [--to TIME] [--limit N] [--json]`
-- `syslog ai blocks [--project PATH] [--tool TOOL] [--from TIME] [--to TIME] [--json]`
+- `syslog ai search QUERY [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--json]`
+- `syslog ai blocks [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--json]`
 - `syslog ai context --project PATH [--tool TOOL] [--limit N] [--json]`
 - `syslog ai tools [--project PATH] [--json]`
 - `syslog ai projects [--tool TOOL] [--json]`

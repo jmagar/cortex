@@ -1,6 +1,6 @@
 [package]
 name = "cortex"
-version = "1.25.1"
+version = "1.26.1"
 edition = "2024"
 rust-version = "1.86"
 license = "MIT"
@@ -42,7 +42,7 @@ rmcp = { version = "1.7", default-features = false, features = [
 tower-http = { version = "0.6", features = ["cors", "limit", "trace"] }
 
 # SQLite
-rusqlite = { version = "0.39", features = ["bundled", "vtab", "backup"] }
+rusqlite = { version = "0.39", features = ["bundled", "vtab", "backup", "hooks"] }
 parking_lot = "0.12"
 r2d2 = "0.8"
 r2d2_sqlite = "0.33"

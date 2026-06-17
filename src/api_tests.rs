@@ -165,7 +165,7 @@ async fn file_tails_route_adds_and_lists_sources() {
         "id": "swag-access",
         "path": log_path,
         "tag": "swag-access",
-        "hostname": "squirts",
+        "host": "squirts",
         "facility": "local4",
         "severity": "info",
         "start_at_end": true
@@ -459,8 +459,7 @@ async fn tail_route_returns_plain_api_json() {
     .unwrap();
 
     let app = router(state).unwrap();
-    let (status, value) =
-        get_json(app, "/api/tail?source_ip=10.0.0.2:514&n=5", Some("secret")).await;
+    let (status, value) = get_json(app, "/api/tail?source=10.0.0.2:514&n=5", Some("secret")).await;
     assert_eq!(status, axum::http::StatusCode::OK);
     assert!(
         value.get("content").is_none(),
@@ -2181,7 +2180,7 @@ async fn incident_context_returns_200_with_token() {
     let app = test_router(state);
     let (status, _value) = get_json(
         app,
-        "/api/incident-context?from=2026-05-21T11:00:00Z&to=2026-05-21T13:00:00Z",
+        "/api/incident-context?since=2026-05-21T11:00:00Z&until=2026-05-21T13:00:00Z",
         Some("secret"),
     )
     .await;
@@ -2456,7 +2455,7 @@ async fn host_state_returns_400_for_invalid_since_timestamp() {
     let app = test_router(state);
     let (status, value) = get_json(
         app,
-        "/api/host-state?hostname=foo&since=not-a-timestamp",
+        "/api/host-state?host=foo&since=not-a-timestamp",
         Some("secret"),
     )
     .await;
@@ -2468,8 +2467,7 @@ async fn host_state_returns_400_for_invalid_since_timestamp() {
 async fn host_state_returns_404_for_unknown_host() {
     let (state, _pool, _dir) = test_state(Some("secret".into()));
     let app = test_router(state);
-    let (status, _value) =
-        get_json(app, "/api/host-state?hostname=nonexistent", Some("secret")).await;
+    let (status, _value) = get_json(app, "/api/host-state?host=nonexistent", Some("secret")).await;
     assert_eq!(status, axum::http::StatusCode::NOT_FOUND);
 }
 
@@ -2601,7 +2599,7 @@ async fn graph_routes_return_shared_service_payloads() {
 async fn host_state_route_requires_bearer() {
     let (state, _pool, _dir) = test_state(Some("secret".into()));
     let app = router(state).unwrap();
-    let (status, _) = get_json(app, "/api/host-state?hostname=foo", None).await;
+    let (status, _) = get_json(app, "/api/host-state?host=foo", None).await;
     assert_eq!(status, axum::http::StatusCode::UNAUTHORIZED);
 }
 
@@ -2642,7 +2640,7 @@ async fn graph_routes_require_bearer() {
 async fn unknown_query_param_returns_400_on_host_state() {
     let (state, _pool, _dir) = test_state(Some("secret".into()));
     let app = router(state).unwrap();
-    let (status, _) = get_json(app, "/api/host-state?hostname=foo&bogus=1", Some("secret")).await;
+    let (status, _) = get_json(app, "/api/host-state?host=foo&bogus=1", Some("secret")).await;
     assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
 }
 

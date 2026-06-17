@@ -312,7 +312,7 @@ async fn host_state_action_returns_bounded_heartbeat_state() {
     let value = execute_tool(
         &h.state,
         "cortex",
-        json!({"action": "host_state", "hostname": "tootie", "limit": 1}),
+        json!({"action": "host_state", "host": "tootie", "limit": 1}),
         None,
     )
     .await
@@ -1045,7 +1045,7 @@ async fn host_state_action_reports_ambiguous_hostname() {
     let error = execute_tool(
         &h.state,
         "cortex",
-        json!({"action": "host_state", "hostname": "shared"}),
+        json!({"action": "host_state", "host": "shared"}),
         None,
     )
     .await
@@ -1099,7 +1099,7 @@ fn sample_args_for_action(action: &str) -> Option<serde_json::Value> {
         "ai_correlate" => json!({"action": action, "project": "/tmp/project"}),
         "project_context" => json!({"action": action, "project": "/tmp/project"}),
         "context" => {
-            json!({"action": action, "hostname": "schema-test-host", "timestamp": "2026-01-01T00:00:00Z"})
+            json!({"action": action, "host": "schema-test-host", "timestamp": "2026-01-01T00:00:00Z"})
         }
         "get" => json!({"action": action, "id": 1}),
         "compare" => {
@@ -1110,10 +1110,10 @@ fn sample_args_for_action(action: &str) -> Option<serde_json::Value> {
         }
         "similar_incidents" | "ask_history" => json!({"action": action, "query": "test"}),
         "incident_context" => {
-            json!({"action": action, "from": "2026-01-01T00:00:00Z", "to": "2026-01-01T01:00:00Z"})
+            json!({"action": action, "since": "2026-01-01T00:00:00Z", "until": "2026-01-01T01:00:00Z"})
         }
         "file_tails" => json!({"action": action, "op": "status"}),
-        "filter" => json!({"action": action, "hostname": "schema-test-host"}),
+        "filter" => json!({"action": action, "host": "schema-test-host"}),
         "map" => json!({"action": action, "mode": "snapshot"}),
         "abuse" => json!({"action": action, "terms": ["schema"]}),
         "fleet_state"

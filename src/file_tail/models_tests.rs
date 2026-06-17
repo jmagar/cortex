@@ -6,7 +6,7 @@ fn add_request_builds_enabled_source_with_defaults() {
         id: "swag-access".into(),
         path: "/mnt/appdata/swag/log/nginx/access.log".into(),
         tag: "swag-access".into(),
-        hostname: Some("squirts".into()),
+        host: Some("squirts".into()),
         facility: None,
         severity: None,
         start_at_end: None,
@@ -33,7 +33,7 @@ fn add_request_normalizes_and_validates_hostname() {
             id: "swag-access".into(),
             path: "/mnt/appdata/swag/log/nginx/access.log".into(),
             tag: "swag-access".into(),
-            hostname: Some(" Squirts.LOCAL ".into()),
+            host: Some(" Squirts.LOCAL ".into()),
             facility: None,
             severity: None,
             start_at_end: None,
@@ -48,7 +48,7 @@ fn add_request_normalizes_and_validates_hostname() {
             id: "bad-host".into(),
             path: "/mnt/appdata/swag/log/nginx/access.log".into(),
             tag: "bad-host".into(),
-            hostname: Some("bad host/name".into()),
+            host: Some("bad host/name".into()),
             facility: None,
             severity: None,
             start_at_end: None,
@@ -66,7 +66,7 @@ fn file_tail_request_rejects_missing_fields_for_add() {
         id: None,
         path: None,
         tag: None,
-        hostname: None,
+        host: None,
         facility: None,
         severity: None,
         start_at_end: None,
@@ -74,7 +74,7 @@ fn file_tail_request_rejects_missing_fields_for_add() {
 
     assert_eq!(
         req.into_add().unwrap_err(),
-        "file_tails op=add requires id, path, tag, and hostname"
+        "file_tails op=add requires id, path, tag, and host"
     );
 }
 
@@ -85,7 +85,7 @@ fn add_request_rejects_missing_hostname() {
             id: "swag-access".into(),
             path: "/mnt/appdata/swag/log/nginx/access.log".into(),
             tag: "swag-access".into(),
-            hostname: None,
+            host: None,
             facility: None,
             severity: None,
             start_at_end: None,
@@ -94,10 +94,7 @@ fn add_request_rejects_missing_hostname() {
     )
     .unwrap_err();
 
-    assert_eq!(
-        err,
-        "file_tails op=add requires id, path, tag, and hostname"
-    );
+    assert_eq!(err, "file_tails op=add requires id, path, tag, and host");
 }
 
 #[test]
@@ -107,7 +104,7 @@ fn file_tail_request_rejects_path_traversal_ids() {
         id: Some("../swag".into()),
         path: None,
         tag: None,
-        hostname: None,
+        host: None,
         facility: None,
         severity: None,
         start_at_end: None,

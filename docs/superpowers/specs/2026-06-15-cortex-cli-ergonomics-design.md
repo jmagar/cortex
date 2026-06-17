@@ -12,7 +12,7 @@ each with its own flag set, reachable only by repeatedly consulting `help`. Four
 distinct pains, all confirmed as real:
 
 1. **Discoverability** — you know what you want to know, not which action provides it.
-2. **Flag recall** — you know the action, not its knobs (`--hostname` vs `--source-ip`,
+2. **Flag recall** — you know the action, not its knobs (`--host` vs `--source`,
    time formats, severity levels).
 3. **Query syntax** — FTS5 gotchas (hyphen = NOT operator, phrase quoting for
    hyphenated terms) produce cryptic DB errors.
@@ -85,18 +85,18 @@ One name per concept, identical across every action and across CLI + MCP:
 
 | Concept | Canonical | Replaces | Notes |
 |---|---|---|---|
-| host | `--host` (+ positional where obvious) | `--hostname` | dynamic completion |
+| host | `--host` (+ positional where obvious) | `--host` | dynamic completion |
 | FTS5 query | `--query` (+ positional) | `query` | raw FTS5 |
 | literal text | `--grep` | (new) | substring, FTS5-safe (Component 3) |
 | result limit | `-n`, `--limit` | `--limit` | |
 | min severity | `-s`, `--severity` | `--severity` | enum completion |
-| app / program | `--app` | `--app-name` | |
-| source id | `--source` | `--source-ip` | `docker://…` or `IP:port` |
+| app / program | `--app` | `--app` | |
+| source id | `--source` | `--source` | `docker://…` or `IP:port` |
 | container | `--container` | `--container` | unchanged |
 | stream | `--stream` | `--stream` | `stdout`/`stderr` enum |
 | source kind | `--source-kind` | `--source-kind` | enum |
 | event-time window | `--since`, `--until` | `--from`, `--to` | unified parser (Component 6) |
-| received-time window | `--received-since`, `--received-until` | `--received-from`, `--received-to` | |
+| received-time window | `--received-since`, `--received-until` | `--received-since`, `--received-until` | |
 | JSON output | `--json` | `--json` | global |
 
 The canonical name and aliases (`-n`, `-s`) live in `ACTION_SPECS` as flag metadata so

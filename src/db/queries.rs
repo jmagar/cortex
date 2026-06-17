@@ -484,7 +484,7 @@ pub fn list_ai_sessions(
     pool: &DbPool,
     params: &ListAiSessionsParams,
 ) -> Result<Vec<AiSessionEntry>> {
-    let time_filtered = params.from.is_some() || params.to.is_some();
+    let time_filtered = params.since.is_some() || params.until.is_some();
     if !time_filtered && ai_session_rollup_is_populated(pool)? {
         return list_ai_sessions_from_rollup(pool, params);
     }
@@ -527,17 +527,17 @@ pub fn list_ai_sessions_live(
         bindings.push(rusqlite::types::Value::Text(tool.clone()));
         idx += 1;
     }
-    if let Some(hostname) = &params.hostname {
+    if let Some(hostname) = &params.host {
         sql.push_str(&format!(" AND hostname = ?{idx}"));
         bindings.push(rusqlite::types::Value::Text(hostname.clone()));
         idx += 1;
     }
-    if let Some(from) = &params.from {
+    if let Some(from) = &params.since {
         sql.push_str(&format!(" AND timestamp >= ?{idx}"));
         bindings.push(rusqlite::types::Value::Text(from.clone()));
         idx += 1;
     }
-    if let Some(to) = &params.to {
+    if let Some(to) = &params.until {
         sql.push_str(&format!(" AND timestamp <= ?{idx}"));
         bindings.push(rusqlite::types::Value::Text(to.clone()));
     }
@@ -589,7 +589,7 @@ fn list_ai_sessions_from_rollup(
         bindings.push(rusqlite::types::Value::Text(tool.clone()));
         idx += 1;
     }
-    if let Some(hostname) = &params.hostname {
+    if let Some(hostname) = &params.host {
         sql.push_str(&format!(" AND hostname = ?{idx}"));
         bindings.push(rusqlite::types::Value::Text(hostname.clone()));
     }
@@ -1103,14 +1103,14 @@ fn search_ai_sessions_sql(
         "l",
         &params.ai_project,
         &params.ai_tool,
-        &params.from,
-        &params.to,
+        &params.since,
+        &params.until,
     );
-    if let Some(hostname) = &params.hostname {
+    if let Some(hostname) = &params.host {
         let idx = query_params.push_text(hostname.clone());
         sql.push_str(&format!(" AND l.hostname = ?{idx}"));
     }
-    if let Some(app_name) = &params.app_name {
+    if let Some(app_name) = &params.app {
         let idx = query_params.push_text(app_name.clone());
         sql.push_str(&format!(" AND l.app_name = ?{idx}"));
     }
@@ -1207,12 +1207,12 @@ pub fn search_ai_anchors(pool: &DbPool, params: &AiCorrelateParams) -> Result<Ve
         bindings.push(rusqlite::types::Value::Text(session_id.clone()));
         idx += 1;
     }
-    if let Some(from) = &params.from {
+    if let Some(from) = &params.since {
         filters.push_str(&format!(" AND l.timestamp >= ?{idx}"));
         bindings.push(rusqlite::types::Value::Text(from.clone()));
         idx += 1;
     }
-    if let Some(to) = &params.to {
+    if let Some(to) = &params.until {
         filters.push_str(&format!(" AND l.timestamp <= ?{idx}"));
         bindings.push(rusqlite::types::Value::Text(to.clone()));
     }
@@ -1295,19 +1295,19 @@ pub fn search_ai_related_logs(
     let mut sql_params = SqlParams::new(first_filter_idx);
     let search_params = SearchParams {
         query: None,
-        hostname: params.hostname.clone(),
-        source_ip: params.source_ip.clone(),
+        host: params.host.clone(),
+        source: params.source.clone(),
         source_ip_prefix: None,
         severity: None,
         severity_in: Some(params.severity_in.clone()),
-        app_name: params.app_name.clone(),
+        app: params.app.clone(),
         facility: None,
         exclude_facility: None,
         process_id: None,
-        from: None,
-        to: None,
-        received_from: None,
-        received_to: None,
+        since: None,
+        until: None,
+        received_since: None,
+        received_until: None,
         limit: None,
         ai_tool: None,
         ai_project: None,
@@ -1415,12 +1415,12 @@ pub fn search_ai_abuse(pool: &DbPool, params: &AiAbuseParams) -> Result<AiAbuseR
         bindings.push(rusqlite::types::Value::Text(tool.clone()));
         idx += 1;
     }
-    if let Some(from) = &params.from {
+    if let Some(from) = &params.since {
         sql.push_str(&format!(" AND l.timestamp >= ?{idx}"));
         bindings.push(rusqlite::types::Value::Text(from.clone()));
         idx += 1;
     }
-    if let Some(to) = &params.to {
+    if let Some(to) = &params.until {
         sql.push_str(&format!(" AND l.timestamp <= ?{idx}"));
         bindings.push(rusqlite::types::Value::Text(to.clone()));
     }
@@ -1491,12 +1491,12 @@ pub fn list_ai_tools(pool: &DbPool, params: &ListAiToolsParams) -> Result<ListAi
         bindings.push(rusqlite::types::Value::Text(project.clone()));
         idx += 1;
     }
-    if let Some(from) = &params.from {
+    if let Some(from) = &params.since {
         sql.push_str(&format!(" AND timestamp >= ?{idx}"));
         bindings.push(rusqlite::types::Value::Text(from.clone()));
         idx += 1;
     }
-    if let Some(to) = &params.to {
+    if let Some(to) = &params.until {
         sql.push_str(&format!(" AND timestamp <= ?{idx}"));
         bindings.push(rusqlite::types::Value::Text(to.clone()));
     }
@@ -1550,12 +1550,12 @@ pub fn list_ai_projects(
         bindings.push(rusqlite::types::Value::Text(tool.clone()));
         idx += 1;
     }
-    if let Some(from) = &params.from {
+    if let Some(from) = &params.since {
         sql.push_str(&format!(" AND timestamp >= ?{idx}"));
         bindings.push(rusqlite::types::Value::Text(from.clone()));
         idx += 1;
     }
-    if let Some(to) = &params.to {
+    if let Some(to) = &params.until {
         sql.push_str(&format!(" AND timestamp <= ?{idx}"));
         bindings.push(rusqlite::types::Value::Text(to.clone()));
     }
@@ -1815,12 +1815,12 @@ fn ai_incident_anchor_sql(
         bindings.push(rusqlite::types::Value::Text(tool.clone()));
         idx += 1;
     }
-    if let Some(from) = &params.from {
+    if let Some(from) = &params.since {
         sql.push_str(&format!(" AND l.timestamp >= ?{idx}"));
         bindings.push(rusqlite::types::Value::Text(from.clone()));
         idx += 1;
     }
-    if let Some(to) = &params.to {
+    if let Some(to) = &params.until {
         sql.push_str(&format!(" AND l.timestamp <= ?{idx}"));
         bindings.push(rusqlite::types::Value::Text(to.clone()));
     }
@@ -1857,8 +1857,8 @@ pub fn investigate_ai_incidents(
         &AiIncidentParams {
             ai_project: params.ai_project.clone(),
             ai_tool: params.ai_tool.clone(),
-            from: params.from.clone(),
-            to: params.to.clone(),
+            since: params.since.clone(),
+            until: params.until.clone(),
             limit: Some(incident_lookup_limit),
             window_minutes: params.window_minutes,
             terms: params.terms.clone(),
@@ -2313,12 +2313,12 @@ fn append_filters(
     idx: &mut usize,
     params: &SearchParams,
 ) {
-    if let Some(ref h) = params.hostname {
+    if let Some(ref h) = params.host {
         sql.push_str(&format!(" AND l.hostname = ?{}", *idx));
         bindings.push(rusqlite::types::Value::Text(h.clone()));
         *idx += 1;
     }
-    if let Some(ref source_ip) = params.source_ip {
+    if let Some(ref source_ip) = params.source {
         sql.push_str(&format!(" AND l.source_ip = ?{}", *idx));
         bindings.push(rusqlite::types::Value::Text(source_ip.clone()));
         *idx += 1;
@@ -2352,7 +2352,7 @@ fn append_filters(
             }
         }
     }
-    if let Some(ref a) = params.app_name {
+    if let Some(ref a) = params.app {
         sql.push_str(&format!(" AND l.app_name = ?{}", *idx));
         bindings.push(rusqlite::types::Value::Text(a.clone()));
         *idx += 1;
@@ -2375,22 +2375,22 @@ fn append_filters(
         bindings.push(rusqlite::types::Value::Text(pid.clone()));
         *idx += 1;
     }
-    if let Some(ref from) = params.from {
+    if let Some(ref from) = params.since {
         sql.push_str(&format!(" AND l.timestamp >= ?{}", *idx));
         bindings.push(rusqlite::types::Value::Text(from.clone()));
         *idx += 1;
     }
-    if let Some(ref to) = params.to {
+    if let Some(ref to) = params.until {
         sql.push_str(&format!(" AND l.timestamp <= ?{}", *idx));
         bindings.push(rusqlite::types::Value::Text(to.clone()));
         *idx += 1;
     }
-    if let Some(ref from) = params.received_from {
+    if let Some(ref from) = params.received_since {
         sql.push_str(&format!(" AND l.received_at >= ?{}", *idx));
         bindings.push(rusqlite::types::Value::Text(from.clone()));
         *idx += 1;
     }
-    if let Some(ref to) = params.received_to {
+    if let Some(ref to) = params.received_until {
         sql.push_str(&format!(" AND l.received_at <= ?{}", *idx));
         bindings.push(rusqlite::types::Value::Text(to.clone()));
         *idx += 1;
@@ -2540,19 +2540,19 @@ pub fn similar_incidents_clusters(
         .bindings
         .push(rusqlite::types::Value::Text(params.query.clone()));
 
-    if let Some(hostname) = &params.hostname {
+    if let Some(hostname) = &params.host {
         let idx = query_params.push_text(hostname.clone());
         sql.push_str(&format!(" AND l.hostname = ?{idx}"));
     }
-    if let Some(app_name) = &params.app_name {
+    if let Some(app_name) = &params.app {
         let idx = query_params.push_text(app_name.clone());
         sql.push_str(&format!(" AND l.app_name = ?{idx}"));
     }
-    if let Some(from) = &params.from {
+    if let Some(from) = &params.since {
         let idx = query_params.push_text(from.clone());
         sql.push_str(&format!(" AND l.timestamp >= ?{idx}"));
     }
-    if let Some(to) = &params.to {
+    if let Some(to) = &params.until {
         let idx = query_params.push_text(to.clone());
         sql.push_str(&format!(" AND l.timestamp <= ?{idx}"));
     }
@@ -2813,10 +2813,10 @@ pub fn ask_history_sessions(pool: &DbPool, params: &AskHistoryParams) -> Result<
         query: params.query.clone(),
         ai_project: None,
         ai_tool: None,
-        hostname: params.hostname.clone(),
-        app_name: params.app_name.clone(),
-        from: params.from.clone(),
-        to: params.to.clone(),
+        host: params.host.clone(),
+        app: params.app.clone(),
+        since: params.since.clone(),
+        until: params.until.clone(),
         limit: Some(params.limit.unwrap_or(10).clamp(1, 50)),
     };
     let session_result = search_ai_sessions(pool, &ai_params)?;
@@ -2843,11 +2843,11 @@ pub fn ask_history_sessions(pool: &DbPool, params: &AskHistoryParams) -> Result<
              WHERE (ai_project IS NULL OR ai_project = '')
                AND timestamp BETWEEN ?1 AND ?2",
         );
-        if let Some(hostname) = &params.hostname {
+        if let Some(hostname) = &params.host {
             let idx = ctx_params.push_text(hostname.clone());
             ctx_sql.push_str(&format!(" AND hostname = ?{idx}"));
         }
-        if let Some(app_name) = &params.app_name {
+        if let Some(app_name) = &params.app {
             let idx = ctx_params.push_text(app_name.clone());
             ctx_sql.push_str(&format!(" AND app_name = ?{idx}"));
         }
@@ -2910,17 +2910,17 @@ pub fn incident_context_summary(
     let mut agg_params = SqlParams::new(3);
     agg_params
         .bindings
-        .push(rusqlite::types::Value::Text(params.from.clone()));
+        .push(rusqlite::types::Value::Text(params.since.clone()));
     agg_params
         .bindings
-        .push(rusqlite::types::Value::Text(params.to.clone()));
+        .push(rusqlite::types::Value::Text(params.until.clone()));
     let mut agg_host_clause = String::new();
     let mut agg_app_clause = String::new();
-    if let Some(hostname) = &params.hostname {
+    if let Some(hostname) = &params.host {
         let idx = agg_params.push_text(hostname.clone());
         agg_host_clause = format!(" AND hostname = ?{idx}");
     }
-    if let Some(app_name) = &params.app_name {
+    if let Some(app_name) = &params.app {
         let idx = agg_params.push_text(app_name.clone());
         agg_app_clause = format!(" AND app_name = ?{idx}");
     }
@@ -2996,10 +2996,10 @@ pub fn incident_context_summary(
     let mut err_params = SqlParams::new(3);
     err_params
         .bindings
-        .push(rusqlite::types::Value::Text(params.from.clone()));
+        .push(rusqlite::types::Value::Text(params.since.clone()));
     err_params
         .bindings
-        .push(rusqlite::types::Value::Text(params.to.clone()));
+        .push(rusqlite::types::Value::Text(params.until.clone()));
 
     let sev_placeholders: Vec<String> = error_severities
         .iter()
@@ -3021,11 +3021,11 @@ pub fn incident_context_summary(
         sev_placeholders.join(", ")
     );
 
-    if let Some(hostname) = &params.hostname {
+    if let Some(hostname) = &params.host {
         let idx = err_params.push_text(hostname.clone());
         err_sql.push_str(&format!(" AND hostname = ?{idx}"));
     }
-    if let Some(app_name) = &params.app_name {
+    if let Some(app_name) = &params.app {
         let idx = err_params.push_text(app_name.clone());
         err_sql.push_str(&format!(" AND app_name = ?{idx}"));
     }
@@ -3067,10 +3067,10 @@ pub fn incident_context_summary(
                AND timestamp BETWEEN ?1 AND ?2",
         );
         let mut ai_bindings: Vec<rusqlite::types::Value> = vec![
-            rusqlite::types::Value::Text(params.from.clone()),
-            rusqlite::types::Value::Text(params.to.clone()),
+            rusqlite::types::Value::Text(params.since.clone()),
+            rusqlite::types::Value::Text(params.until.clone()),
         ];
-        if let Some(hostname) = &params.hostname {
+        if let Some(hostname) = &params.host {
             ai_bindings.push(rusqlite::types::Value::Text(hostname.clone()));
             ai_sql.push_str(&format!(" AND hostname = ?{}", ai_bindings.len()));
         }
@@ -3099,8 +3099,8 @@ pub fn incident_context_summary(
     };
 
     Ok(IncidentContextResult {
-        window_from: params.from.clone(),
-        window_to: params.to.clone(),
+        window_from: params.since.clone(),
+        window_to: params.until.clone(),
         total_logs,
         by_severity,
         by_app,

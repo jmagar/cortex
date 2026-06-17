@@ -8,11 +8,11 @@ use super::*;
 #[serde(deny_unknown_fields)]
 pub struct SimilarIncidentsRequest {
     pub query: String,
-    pub hostname: Option<String>,
-    pub app_name: Option<String>,
+    pub host: Option<String>,
+    pub app: Option<String>,
     pub severity_min: Option<String>,
-    pub from: Option<String>,
-    pub to: Option<String>,
+    pub since: Option<String>,
+    pub until: Option<String>,
     /// Cluster window in minutes. Default 30, clamp 5..=120.
     pub window_minutes: Option<u32>,
     /// Max clusters to return. Default 10, clamp 1..=50.
@@ -92,10 +92,10 @@ impl From<db::SimilarIncidentsResult> for SimilarIncidentsResponse {
 #[serde(deny_unknown_fields)]
 pub struct AskHistoryRequest {
     pub query: String,
-    pub hostname: Option<String>,
-    pub app_name: Option<String>,
-    pub from: Option<String>,
-    pub to: Option<String>,
+    pub host: Option<String>,
+    pub app: Option<String>,
+    pub since: Option<String>,
+    pub until: Option<String>,
     /// Max sessions to return. Default 10, clamp 1..=50.
     pub limit: Option<u32>,
 }
@@ -124,10 +124,10 @@ impl From<db::AskHistoryResult> for AskHistoryResponse {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct IncidentContextRequest {
-    pub from: String,
-    pub to: String,
-    pub hostname: Option<String>,
-    pub app_name: Option<String>,
+    pub since: String,
+    pub until: String,
+    pub host: Option<String>,
+    pub app: Option<String>,
     pub query: Option<String>,
     pub severity_min: Option<String>,
     /// Max error log rows. Default 50, clamp 1..=200.

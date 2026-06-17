@@ -7,7 +7,7 @@ fn parse_timeline_collects_bucket_group_and_filters() {
         "hour",
         "--group-by",
         "hostname",
-        "--hostname=host1",
+        "--host=host1",
         "--json",
     ]);
 
@@ -17,7 +17,7 @@ fn parse_timeline_collects_bucket_group_and_filters() {
         crate::cli::CliCommand::Timeline(args) => {
             assert_eq!(args.bucket.as_deref(), Some("hour"));
             assert_eq!(args.group_by.as_deref(), Some("hostname"));
-            assert_eq!(args.hostname.as_deref(), Some("host1"));
+            assert_eq!(args.host.as_deref(), Some("host1"));
             assert!(args.json);
         }
         other => panic!("unexpected command: {other:?}"),
@@ -41,13 +41,13 @@ fn parse_source_ips_accepts_limit_and_offset() {
 
 #[test]
 fn parse_errors_accepts_limit_for_bounded_agent_output() {
-    let args = strings(&["--from=2026-01-01T00:00:00Z", "--limit", "10", "--json"]);
+    let args = strings(&["--since=2026-01-01T00:00:00Z", "--limit", "10", "--json"]);
 
     let command = parse_errors(&args).unwrap();
 
     match command {
         crate::cli::CliCommand::Errors(args) => {
-            assert_eq!(args.from.as_deref(), Some("2026-01-01T00:00:00+00:00"));
+            assert_eq!(args.since.as_deref(), Some("2026-01-01T00:00:00+00:00"));
             assert_eq!(args.limit, Some(10));
             assert!(args.json);
         }
@@ -103,16 +103,16 @@ fn parse_filter_collects_structured_filters_and_rejects_query_terms() {
 #[test]
 fn parse_search_tail_sessions_incident_and_correlate_cover_common_filters() {
     let search = parse_search(&strings(&[
-        "--hostname=host1",
-        "--source-ip=10.0.0.1",
+        "--host=host1",
+        "--source=10.0.0.1",
         "--severity=err",
-        "--app-name=cortex",
+        "--app=cortex",
         "--facility=daemon",
         "--exclude-facility=kern",
-        "--from=2026-01-01T00:00:00Z",
-        "--to=2026-01-02T00:00:00Z",
-        "--received-from=2026-01-03T00:00:00Z",
-        "--received-to=2026-01-04T00:00:00Z",
+        "--since=2026-01-01T00:00:00Z",
+        "--until=2026-01-02T00:00:00Z",
+        "--received-since=2026-01-03T00:00:00Z",
+        "--received-until=2026-01-04T00:00:00Z",
         "--limit=30",
         "--json",
         "disk",
@@ -122,9 +122,9 @@ fn parse_search_tail_sessions_incident_and_correlate_cover_common_filters() {
     match search {
         crate::cli::CliCommand::Search(args) => {
             assert_eq!(args.query.as_deref(), Some("disk full"));
-            assert_eq!(args.hostname.as_deref(), Some("host1"));
+            assert_eq!(args.host.as_deref(), Some("host1"));
             assert_eq!(
-                args.received_to.as_deref(),
+                args.received_until.as_deref(),
                 Some("2026-01-04T00:00:00+00:00")
             );
             assert_eq!(args.limit, Some(30));
@@ -133,16 +133,10 @@ fn parse_search_tail_sessions_incident_and_correlate_cover_common_filters() {
         other => panic!("unexpected command: {other:?}"),
     }
 
-    let tail = parse_tail(&strings(&[
-        "--hostname=host1",
-        "--source-ip=10.0.0.1",
-        "-n",
-        "12",
-    ]))
-    .unwrap();
+    let tail = parse_tail(&strings(&["--host=host1", "--source=10.0.0.1", "-n", "12"])).unwrap();
     match tail {
         crate::cli::CliCommand::Tail(args) => {
-            assert_eq!(args.hostname.as_deref(), Some("host1"));
+            assert_eq!(args.host.as_deref(), Some("host1"));
             assert_eq!(args.n, Some(12));
         }
         other => panic!("unexpected command: {other:?}"),
@@ -151,9 +145,9 @@ fn parse_search_tail_sessions_incident_and_correlate_cover_common_filters() {
     let sessions = parse_sessions(&strings(&[
         "--project=/repo",
         "--tool=Bash",
-        "--hostname=host1",
-        "--from=2026-01-01T00:00:00Z",
-        "--to=2026-01-02T00:00:00Z",
+        "--host=host1",
+        "--since=2026-01-01T00:00:00Z",
+        "--until=2026-01-02T00:00:00Z",
         "--limit=4",
     ]))
     .unwrap();
@@ -178,7 +172,7 @@ fn parse_search_tail_sessions_incident_and_correlate_cover_common_filters() {
             // The time value is normalized to RFC3339 at parse time.
             assert_eq!(args.around, "2026-01-01T00:00:00+00:00");
             assert_eq!(args.minutes, Some(10));
-            assert_eq!(args.hostname.as_deref(), Some("host1"));
+            assert_eq!(args.host.as_deref(), Some("host1"));
         }
         other => panic!("unexpected command: {other:?}"),
     }
@@ -187,8 +181,8 @@ fn parse_search_tail_sessions_incident_and_correlate_cover_common_filters() {
         "--reference-time=2026-01-01T00:00:00Z",
         "--window-minutes=5",
         "--severity-min=warn",
-        "--hostname=host1",
-        "--source-ip=10.0.0.1",
+        "--host=host1",
+        "--source=10.0.0.1",
         "--query=panic",
         "--limit=99",
     ]))
@@ -263,11 +257,11 @@ fn strings(values: &[&str]) -> Vec<String> {
 
 #[test]
 fn search_normalizes_relative_from() {
-    let cmd = parse_search(&strings(&["error", "--from", "1h"])).unwrap();
+    let cmd = parse_search(&strings(&["error", "--since", "1h"])).unwrap();
     let crate::cli::CliCommand::Search(args) = cmd else {
         panic!("expected Search");
     };
-    let from = args.from.expect("from set");
+    let from = args.since.expect("from set");
     // Relative input is normalized to an absolute RFC3339 timestamp at parse time.
     assert!(
         from.contains('T') && from.ends_with("+00:00"),
@@ -303,54 +297,54 @@ fn search_grep_equals_form_and_rejects_empty() {
 
 #[test]
 fn filter_and_sessions_normalize_relative_from() {
-    let filter = parse_filter(&strings(&["--from", "2d"])).unwrap();
+    let filter = parse_filter(&strings(&["--since", "2d"])).unwrap();
     let crate::cli::CliCommand::Filter(args) = filter else {
         panic!("expected Filter");
     };
     assert!(
-        args.from.as_deref().unwrap().ends_with("+00:00"),
-        "filter --from should normalize: {:?}",
-        args.from
+        args.since.as_deref().unwrap().ends_with("+00:00"),
+        "filter --since should normalize: {:?}",
+        args.since
     );
 
     // Equals form is normalized too.
-    let sessions = parse_sessions(&strings(&["--from=1h"])).unwrap();
+    let sessions = parse_sessions(&strings(&["--since=1h"])).unwrap();
     let crate::cli::CliCommand::Sessions(args) = sessions else {
         panic!("expected Sessions");
     };
     assert!(
-        args.from.as_deref().unwrap().ends_with("+00:00"),
-        "sessions --from= should normalize: {:?}",
-        args.from
+        args.since.as_deref().unwrap().ends_with("+00:00"),
+        "sessions --since= should normalize: {:?}",
+        args.since
     );
 }
 
 #[test]
 fn timeline_patterns_incident_correlate_normalize_relative_time() {
-    // timeline --from/--to accept relative values like the other time flags.
-    let timeline = parse_timeline(&strings(&["--from", "2d", "--to=1h"])).unwrap();
+    // timeline --since/--until accept relative values like the other time flags.
+    let timeline = parse_timeline(&strings(&["--since", "2d", "--until=1h"])).unwrap();
     let crate::cli::CliCommand::Timeline(args) = timeline else {
         panic!("expected Timeline");
     };
     assert!(
-        args.from.as_deref().unwrap().ends_with("+00:00"),
-        "timeline --from should normalize: {:?}",
-        args.from
+        args.since.as_deref().unwrap().ends_with("+00:00"),
+        "timeline --since should normalize: {:?}",
+        args.since
     );
     assert!(
-        args.to.as_deref().unwrap().ends_with("+00:00"),
-        "timeline --to= should normalize: {:?}",
-        args.to
+        args.until.as_deref().unwrap().ends_with("+00:00"),
+        "timeline --until= should normalize: {:?}",
+        args.until
     );
 
-    let patterns = parse_patterns(&strings(&["--from=yesterday"])).unwrap();
+    let patterns = parse_patterns(&strings(&["--since=yesterday"])).unwrap();
     let crate::cli::CliCommand::Patterns(args) = patterns else {
         panic!("expected Patterns");
     };
     assert!(
-        args.from.as_deref().unwrap().ends_with("+00:00"),
-        "patterns --from= should normalize: {:?}",
-        args.from
+        args.since.as_deref().unwrap().ends_with("+00:00"),
+        "patterns --since= should normalize: {:?}",
+        args.since
     );
 
     // incident --around and correlate --reference-time normalize and reject garbage.
