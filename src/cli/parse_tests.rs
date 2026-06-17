@@ -272,6 +272,19 @@ fn parse_host_state_binds_bare_positional_to_host() {
 }
 
 #[test]
+fn parse_host_state_positional_and_host_flag_are_mutually_exclusive() {
+    let err = parse_command(vec![
+        "host-state".to_string(),
+        "dookie".to_string(),
+        "--host".to_string(),
+        "tootie".to_string(),
+    ])
+    .unwrap_err()
+    .to_string();
+    assert!(err.contains("mutually exclusive"), "{err}");
+}
+
+#[test]
 fn parse_host_state_requires_host_selector_with_usage() {
     let err = parse_command(vec!["host-state".to_string()])
         .unwrap_err()
@@ -559,13 +572,24 @@ fn time_flags_normalize_relative_across_state_admin_and_ai_commands() {
     };
     assert!(c.since.unwrap().ends_with("+00:00"));
 
-    // compare --a-from (and the other three share the code path)
-    let CliCommand::Compare(cmp) =
-        parse_command(vec!["compare".into(), "--a-from".into(), "1h".into()]).unwrap()
-    else {
-        panic!("expected Compare")
-    };
-    assert!(cmp.a_from.unwrap().ends_with("+00:00"));
+    // compare: each of the four window flags normalizes independently.
+    for flag in ["--a-from", "--a-to", "--b-from", "--b-to"] {
+        let CliCommand::Compare(cmp) =
+            parse_command(vec!["compare".into(), flag.into(), "1h".into()]).unwrap()
+        else {
+            panic!("expected Compare")
+        };
+        let v = match flag {
+            "--a-from" => cmp.a_from,
+            "--a-to" => cmp.a_to,
+            "--b-from" => cmp.b_from,
+            _ => cmp.b_to,
+        };
+        assert!(
+            v.unwrap().ends_with("+00:00"),
+            "compare {flag} should normalize"
+        );
+    }
 
     // correlate-state --reference-time
     let CliCommand::CorrelateState(cs) = parse_command(vec![

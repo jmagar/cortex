@@ -105,7 +105,7 @@ Flags:
 | Flag | Description |
 | --- | --- |
 | positional `HOST` | Hostname filter — shorthand for `--host` |
-| `-n N`, `--n N`, `--limit N` | Number of rows to return (default 50) |
+| `-n N`, `--limit N` | Number of rows to return (default 50) |
 | `--host HOST` | Exact claimed hostname filter |
 | `--source SOURCE` | Exact source identifier filter |
 | `--app APP` | Application/process name filter |

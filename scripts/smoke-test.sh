@@ -1192,7 +1192,15 @@ echo ""
 echo "CLI: positionals + defaults"
 if CLI_BIN="$(resolve_cortex_bin)"; then
     # `cortex tail dookie` — bare positional binds to --host; default n=50.
-    CLI_TAIL_HOST="${SEED_HOST:-$(mcp_call hosts 2>/dev/null | python3 -c "import sys,json; h=json.load(sys.stdin).get('hostnames') or json.load(sys.stdin).get('hosts') or []; print(h[0] if h else '')" 2>/dev/null)}"
+    CLI_TAIL_HOST="${SEED_HOST:-$(mcp_call hosts 2>/dev/null | python3 -c '
+import sys, json
+d = json.load(sys.stdin)
+hostnames = d.get("hostnames") or []
+if not hostnames:
+    hosts = d.get("hosts") or []
+    hostnames = [h.get("hostname") for h in hosts if isinstance(h, dict) and h.get("hostname")]
+print(hostnames[0] if hostnames else "")
+' 2>/dev/null)}"
     if [[ -n "$CLI_TAIL_HOST" ]]; then
         if "$CLI_BIN" tail "$CLI_TAIL_HOST" -n 1 >/dev/null 2>&1; then
             pass "cli: tail positional host (cortex tail $CLI_TAIL_HOST -n 1)"

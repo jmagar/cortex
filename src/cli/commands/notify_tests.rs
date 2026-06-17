@@ -28,7 +28,11 @@ fn parse_notify_recent_rejects_non_time_since() {
     let err = parse_notify(&strings(&["recent", "--since", "-3600"]))
         .unwrap_err()
         .to_string();
-    assert!(!err.is_empty());
+    // Must fail specifically on the time value, not some unrelated parser error.
+    assert!(
+        err.contains("time") || err.contains("--since"),
+        "expected a time-specific error, got: {err}"
+    );
 }
 
 fn strings(values: &[&str]) -> Vec<String> {

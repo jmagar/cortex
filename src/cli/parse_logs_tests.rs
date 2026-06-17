@@ -348,6 +348,28 @@ fn tail_rejects_two_positionals() {
 }
 
 #[test]
+fn tail_accepts_limit_flag_for_count() {
+    // `--limit` is a documented alias for `-n`; both set the row count.
+    for cmd in [
+        parse_tail(&strings(&["--limit", "7"])).unwrap(),
+        parse_tail(&strings(&["--limit=7"])).unwrap(),
+    ] {
+        let crate::cli::CliCommand::Tail(args) = cmd else {
+            panic!("expected Tail")
+        };
+        assert_eq!(args.n, Some(7));
+    }
+}
+
+#[test]
+fn tail_positional_and_host_flag_are_mutually_exclusive() {
+    let err = parse_tail(&strings(&["bar", "--host", "foo"]))
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("mutually exclusive"), "{err}");
+}
+
+#[test]
 fn search_applies_default_limit() {
     let cmd = parse_search(&strings(&["oom"])).unwrap();
     let crate::cli::CliCommand::Search(args) = cmd else {
@@ -374,6 +396,16 @@ fn errors_defaults_to_one_hour_window() {
     };
     let since = args.since.expect("default since applied");
     assert!(since.ends_with("+00:00"), "{since}"); // absolute RFC3339 from the 1h default
+    // Pin the actual one-hour semantics, not just the shape: the default window
+    // should land ~1h before now (allow slack for clock + execution time).
+    let parsed = chrono::DateTime::parse_from_rfc3339(&since).expect("rfc3339");
+    let age_min = chrono::Utc::now()
+        .signed_duration_since(parsed.with_timezone(&chrono::Utc))
+        .num_minutes();
+    assert!(
+        (55..=65).contains(&age_min),
+        "default window should be ~1h ago, was {age_min} min: {since}"
+    );
 }
 
 #[test]

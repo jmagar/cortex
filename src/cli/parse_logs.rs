@@ -208,7 +208,7 @@ pub(crate) fn parse_tail(args: &[String]) -> Result<CliCommand> {
             "--host" => parsed.host = Some(flags.value("--host")?),
             "--source" => parsed.source = Some(flags.value("--source")?),
             "--app" => parsed.app = Some(flags.value("--app")?),
-            "--n" | "-n" => parsed.n = Some(parse_u32_flag(&arg, flags.value(&arg)?)?),
+            "--n" | "-n" | "--limit" => parsed.n = Some(parse_u32_flag(&arg, flags.value(&arg)?)?),
             _ if arg.starts_with("--host=") => {
                 parsed.host = Some(value_after_equals(arg, "--host")?)
             }
@@ -219,6 +219,12 @@ pub(crate) fn parse_tail(args: &[String]) -> Result<CliCommand> {
             _ if arg.starts_with("--n=") => {
                 parsed.n = Some(parse_u32_flag("--n", value_after_equals(arg, "--n")?)?)
             }
+            _ if arg.starts_with("--limit=") => {
+                parsed.n = Some(parse_u32_flag(
+                    "--limit",
+                    value_after_equals(arg, "--limit")?,
+                )?)
+            }
             _ if arg.starts_with('-') => bail!("unknown tail option: {arg}"),
             // A bare positional binds to --host (e.g. `cortex tail dookie`); the
             // result count is set with -n/--limit.
@@ -226,6 +232,9 @@ pub(crate) fn parse_tail(args: &[String]) -> Result<CliCommand> {
         }
     }
     if let Some(host) = positional_value("tail", &positionals)? {
+        if parsed.host.is_some() {
+            bail!("--host and a positional host are mutually exclusive");
+        }
         parsed.host = Some(host);
     }
     parsed.n = effective_limit("tail", parsed.n);

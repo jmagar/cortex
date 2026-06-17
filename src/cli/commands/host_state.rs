@@ -39,6 +39,9 @@ pub(crate) fn parse_host_state(args: &[String]) -> Result<CliCommand> {
         }
     }
     if let Some(host) = positional_value("host_state", &positionals)? {
+        if parsed.host.is_some() {
+            bail!("--host and a positional host are mutually exclusive");
+        }
         parsed.host = Some(host);
     }
     if parsed.host_id.is_none() && parsed.host.is_none() {
