@@ -7,14 +7,20 @@ ARG CORTEX_BUILD_PROFILE=release
 RUN case "$CORTEX_BUILD_PROFILE" in release|debug) ;; *) echo "invalid CORTEX_BUILD_PROFILE=$CORTEX_BUILD_PROFILE"; exit 1; esac
 RUN apt-get update && apt-get install -y --no-install-recommends pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
 
-# Cache deps
+# Cache deps. The repo is a cargo workspace (cortex + the dev-only `xtask`
+# release-tooling crate); the image only builds the cortex server, but cargo
+# must load every workspace member's manifest — so copy xtask's manifest and a
+# stub target too, and scope the build to `-p cortex --bin cortex` so xtask's
+# dev deps are never compiled into the image.
 COPY Cargo.toml Cargo.lock ./
+COPY xtask/Cargo.toml xtask/Cargo.toml
 RUN --mount=type=cache,id=cortex-cargo-registry-v2,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,id=cortex-cargo-git-v2,target=/usr/local/cargo/git,sharing=locked \
     --mount=type=cache,id=cortex-cargo-target-v2,target=/app/target,sharing=locked \
     case "$CORTEX_BUILD_PROFILE" in release|debug) ;; *) echo "invalid CORTEX_BUILD_PROFILE=$CORTEX_BUILD_PROFILE"; exit 1; esac && \
     mkdir src && echo "fn main() {}" > src/main.rs && \
-    if [ "$CORTEX_BUILD_PROFILE" = "release" ]; then cargo build --release --locked; else cargo build --locked; fi && \
+    mkdir -p xtask/src && echo "fn main() {}" > xtask/src/main.rs && \
+    if [ "$CORTEX_BUILD_PROFILE" = "release" ]; then cargo build -p cortex --bin cortex --release --locked; else cargo build -p cortex --bin cortex --locked; fi && \
     rm -rf src
 
 # Build real binary
@@ -28,9 +34,9 @@ RUN --mount=type=cache,id=cortex-cargo-registry-v2,target=/usr/local/cargo/regis
     case "$CORTEX_BUILD_PROFILE" in release|debug) ;; *) echo "invalid CORTEX_BUILD_PROFILE=$CORTEX_BUILD_PROFILE"; exit 1; esac && \
     touch src/main.rs && \
     if [ "$CORTEX_BUILD_PROFILE" = "release" ]; then \
-      cargo build --release --locked && cp target/release/cortex /usr/local/bin/cortex; \
+      cargo build -p cortex --bin cortex --release --locked && cp target/release/cortex /usr/local/bin/cortex; \
     else \
-      cargo build --locked && cp target/debug/cortex /usr/local/bin/cortex; \
+      cargo build -p cortex --bin cortex --locked && cp target/debug/cortex /usr/local/bin/cortex; \
     fi
 
 # Runtime
