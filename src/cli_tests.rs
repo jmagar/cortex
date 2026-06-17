@@ -81,8 +81,10 @@ fn parse_search_collects_query_and_filters() {
 }
 
 #[test]
-fn parse_tail_accepts_positional_count() {
-    let parsed = CliCommand::parse(strings(&["tail", "10", "--host", "router"])).unwrap();
+fn parse_tail_binds_positional_to_host_with_explicit_count() {
+    // Plan 3 semantics: a bare positional binds to --host; the result count
+    // comes from -n/--limit (no longer a bare-number positional).
+    let parsed = CliCommand::parse(strings(&["tail", "router", "-n", "10"])).unwrap();
 
     assert_eq!(
         parsed,

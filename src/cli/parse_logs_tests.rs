@@ -316,3 +316,69 @@ fn filter_and_sessions_normalize_relative_from() {
         args.since
     );
 }
+
+#[test]
+fn tail_positional_sets_host_and_default_limit() {
+    let cmd = parse_tail(&strings(&["dookie"])).unwrap();
+    let crate::cli::CliCommand::Tail(args) = cmd else {
+        panic!("expected Tail")
+    };
+    assert_eq!(args.host.as_deref(), Some("dookie"));
+    assert_eq!(args.n, Some(50)); // default applied when -n/--limit omitted
+}
+
+#[test]
+fn tail_explicit_limit_overrides_default() {
+    let cmd = parse_tail(&strings(&["dookie", "-n", "10"])).unwrap();
+    let crate::cli::CliCommand::Tail(args) = cmd else {
+        panic!("expected Tail")
+    };
+    assert_eq!(args.host.as_deref(), Some("dookie"));
+    assert_eq!(args.n, Some(10));
+}
+
+#[test]
+fn tail_rejects_two_positionals() {
+    let err = parse_tail(&strings(&["dookie", "tootie"]))
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("at most one"), "{err}");
+}
+
+#[test]
+fn search_applies_default_limit() {
+    let cmd = parse_search(&strings(&["oom"])).unwrap();
+    let crate::cli::CliCommand::Search(args) = cmd else {
+        panic!("expected Search")
+    };
+    assert_eq!(args.query.as_deref(), Some("oom"));
+    assert_eq!(args.limit, Some(50));
+}
+
+#[test]
+fn search_explicit_limit_overrides_default() {
+    let cmd = parse_search(&strings(&["oom", "--limit", "5"])).unwrap();
+    let crate::cli::CliCommand::Search(args) = cmd else {
+        panic!("expected Search")
+    };
+    assert_eq!(args.limit, Some(5));
+}
+
+#[test]
+fn errors_defaults_to_one_hour_window() {
+    let cmd = parse_errors(&strings(&[])).unwrap();
+    let crate::cli::CliCommand::Errors(args) = cmd else {
+        panic!("expected Errors")
+    };
+    let since = args.since.expect("default since applied");
+    assert!(since.ends_with("+00:00"), "{since}"); // absolute RFC3339 from the 1h default
+}
+
+#[test]
+fn errors_explicit_since_overrides_default() {
+    let cmd = parse_errors(&strings(&["--since", "2026-01-01T00:00:00Z"])).unwrap();
+    let crate::cli::CliCommand::Errors(args) = cmd else {
+        panic!("expected Errors")
+    };
+    assert_eq!(args.since.as_deref(), Some("2026-01-01T00:00:00+00:00"));
+}

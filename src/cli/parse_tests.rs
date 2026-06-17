@@ -263,6 +263,15 @@ fn parse_routes_host_state() {
 }
 
 #[test]
+fn parse_host_state_binds_bare_positional_to_host() {
+    let cmd = parse_command(vec!["host-state".to_string(), "dookie".to_string()]).unwrap();
+    let CliCommand::HostState(args) = cmd else {
+        panic!("expected HostState")
+    };
+    assert_eq!(args.host.as_deref(), Some("dookie"));
+}
+
+#[test]
 fn parse_host_state_requires_host_selector_with_usage() {
     let err = parse_command(vec!["host-state".to_string()])
         .unwrap_err()

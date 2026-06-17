@@ -5,11 +5,13 @@
 
 use anyhow::{Result, bail};
 
+use super::super::argdefaults::positional_value;
 use super::super::args::{CliCommand, HostStateArgs};
 use super::super::{FlagCursor, parse_u32_flag};
 
 pub(crate) fn parse_host_state(args: &[String]) -> Result<CliCommand> {
     let mut parsed = HostStateArgs::default();
+    let mut positionals: Vec<String> = Vec::new();
     let mut flags = FlagCursor::new(args);
     while let Some(arg) = flags.next() {
         if arg == "--json" {
@@ -22,7 +24,7 @@ pub(crate) fn parse_host_state(args: &[String]) -> Result<CliCommand> {
             parsed.since = Some(v);
         } else if let Some(v) = flags.match_value(&arg, "--limit")? {
             parsed.limit = Some(parse_u32_flag("--limit", v)?);
-        } else {
+        } else if arg.starts_with('-') {
             bail!(
                 "{}",
                 super::super::suggest::unknown_option(
@@ -31,7 +33,13 @@ pub(crate) fn parse_host_state(args: &[String]) -> Result<CliCommand> {
                     &["--json", "--host-id", "--host", "--since", "--limit"],
                 )
             );
+        } else {
+            // A bare positional binds to --host (e.g. `cortex host-state dookie`).
+            positionals.push(arg);
         }
+    }
+    if let Some(host) = positional_value("host_state", &positionals)? {
+        parsed.host = Some(host);
     }
     if parsed.host_id.is_none() && parsed.host.is_none() {
         bail!(

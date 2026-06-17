@@ -35,6 +35,7 @@ pub(crate) use run::ENV_USE_HTTP;
 pub(crate) use run::{CliMode, GlobalFlags, run};
 
 mod ai_watch;
+mod argdefaults;
 pub(crate) mod color;
 mod complete;
 mod completions;
@@ -102,6 +103,17 @@ pub(crate) fn registry_flags(cli_command: &str) -> &'static [cortex::mcp::FlagSp
 /// Copy-paste examples for a CLI command (empty slice when none).
 pub(crate) fn registry_examples(cli_command: &str) -> &'static [&'static str] {
     cortex::mcp::examples_for(&cli_command.replace('-', "_")).unwrap_or(&[])
+}
+
+/// Canonical flag a bare positional binds to for a CLI command (`None` = the
+/// command takes no positional).
+pub(crate) fn registry_positional(cli_command: &str) -> Option<&'static str> {
+    cortex::mcp::positional_for(&cli_command.replace('-', "_"))
+}
+
+/// Zero-flag defaults for a CLI command (empty defaults when none).
+pub(crate) fn registry_defaults(cli_command: &str) -> cortex::mcp::Defaults {
+    cortex::mcp::defaults_for(&cli_command.replace('-', "_"))
 }
 
 /// `cortex __complete <ctx> ...` — print shell-completion candidates to stdout.
