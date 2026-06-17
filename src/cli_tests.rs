@@ -63,16 +63,17 @@ fn parse_search_collects_query_and_filters() {
         parsed,
         CliCommand::Search(SearchArgs {
             query: Some("disk full".into()),
+            grep: None,
             hostname: Some("nas".into()),
             source_ip: Some("10.0.0.5:514".into()),
             severity: Some("err".into()),
             app_name: Some("kernel".into()),
             facility: Some("auth".into()),
             exclude_facility: Some("transcript".into()),
-            from: Some("2026-01-01T00:00:00Z".into()),
-            to: Some("2026-01-02T00:00:00Z".into()),
-            received_from: Some("2026-01-01T00:00:30Z".into()),
-            received_to: Some("2026-01-02T00:00:30Z".into()),
+            from: Some("2026-01-01T00:00:00+00:00".into()),
+            to: Some("2026-01-02T00:00:00+00:00".into()),
+            received_from: Some("2026-01-01T00:00:30+00:00".into()),
+            received_to: Some("2026-01-02T00:00:30+00:00".into()),
             limit: Some(25),
             json: true,
         })
@@ -141,7 +142,8 @@ fn parse_incident_accepts_window_service_and_json() {
     assert_eq!(
         parsed,
         CliCommand::Incident(IncidentArgs {
-            around: "2026-05-20T04:00:00Z".into(),
+            // `--around` is normalized to RFC3339 (`+00:00`) at parse time.
+            around: "2026-05-20T04:00:00+00:00".into(),
             minutes: Some(10),
             service: Some("cortex-ai-watch".into()),
             hostname: Some("dookie".into()),
@@ -176,7 +178,8 @@ fn parse_correlate_accepts_reference_time_and_filters() {
     assert_eq!(
         parsed,
         CliCommand::Correlate(CorrelateArgs {
-            reference_time: "2026-01-01T00:00:00Z".into(),
+            // `--reference-time` is normalized to RFC3339 (`+00:00`) at parse time.
+            reference_time: "2026-01-01T00:00:00+00:00".into(),
             window_minutes: Some(15),
             severity_min: Some("warning".into()),
             query: Some("timeout".into()),

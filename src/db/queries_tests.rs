@@ -2756,3 +2756,49 @@ fn inline_log_projections_match_map_row_column_order() {
          may have rotted (found {checked})"
     );
 }
+
+#[test]
+fn lint_flags_unquoted_infix_hyphen_term() {
+    let err = validate_fts_query("smoke-test").unwrap_err().to_string();
+    assert!(
+        err.contains("NOT operator"),
+        "should explain hyphen trap: {err}"
+    );
+    assert!(
+        err.contains("--grep") || err.contains("\"smoke-test\""),
+        "should suggest a fix: {err}"
+    );
+}
+
+#[test]
+fn lint_accepts_quoted_phrase() {
+    // Already-quoted hyphenated phrase is valid FTS5 and must pass.
+    assert!(validate_fts_query("\"smoke-test\"").is_ok());
+}
+
+#[test]
+fn lint_accepts_normal_boolean_query() {
+    assert!(validate_fts_query("error AND nginx").is_ok());
+}
+
+#[test]
+fn lint_leaves_leading_hyphen_not_term_alone() {
+    // `-nginx` is an intentional FTS5 NOT, not the hyphenated-word trap.
+    assert!(validate_fts_query("error -nginx").is_ok());
+}
+
+#[test]
+fn lint_flags_unbalanced_quote() {
+    let err = validate_fts_query("\"oops").unwrap_err().to_string();
+    assert!(err.contains("unbalanced quote"), "{err}");
+}
+
+#[test]
+fn lint_flags_unquoted_hyphen_term_alongside_a_quoted_phrase() {
+    // The hyphen check is per-term: a quoted phrase elsewhere must not mask an
+    // unquoted hyphenated term (regression for a query-wide quote gate).
+    let err = validate_fts_query("\"disk full\" smoke-test")
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("NOT operator"), "{err}");
+}

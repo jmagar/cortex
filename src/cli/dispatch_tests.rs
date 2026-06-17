@@ -87,6 +87,7 @@ fn empty_search_logs_body() -> serde_json::Value {
 fn search_args_into_request_snapshot() {
     let args = SearchArgs {
         query: Some("foo".into()),
+        grep: None,
         hostname: Some("h1".into()),
         source_ip: Some("10.0.0.1".into()),
         severity: Some("error".into()),
@@ -1597,4 +1598,23 @@ fn sig_unack_args_with_reason() {
         format!("{req:?}"),
         "UnackErrorRequest { signature_hash: \"def456\", reason: Some(\"regression fixed in v0.27.3\") }"
     );
+}
+
+#[test]
+fn grep_becomes_quoted_phrase_query() {
+    let args = SearchArgs {
+        grep: Some("smoke-test".into()),
+        ..Default::default()
+    };
+    let req = args.into_request();
+    // --grep is wrapped as a literal FTS5 phrase.
+    assert_eq!(req.query.as_deref(), Some("\"smoke-test\""));
+
+    // Embedded double-quotes are doubled per FTS5 string rules.
+    let escaped = SearchArgs {
+        grep: Some(r#"say "hi""#.into()),
+        ..Default::default()
+    }
+    .into_request();
+    assert_eq!(escaped.query.as_deref(), Some("\"say \"\"hi\"\"\""));
 }

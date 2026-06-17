@@ -1,10 +1,17 @@
 use anyhow::{Result, bail};
 
 use super::parse_common::{FlagCursor, parse_output_args, parse_u32_flag, value_after_equals};
+use super::timearg::parse_time_arg;
 use super::{
     CliCommand, CorrelateArgs, FilterArgs, IncidentArgs, IngestRateArgs, PatternsArgs, SearchArgs,
     SessionsArgs, SourceIpsArgs, TailArgs, TimeRangeArgs, TimelineArgs,
 };
+
+/// Normalize a user time value (relative or absolute) to RFC3339 at parse time.
+fn norm_time(raw: String) -> Result<String> {
+    parse_time_arg(&raw, chrono::Utc::now())
+}
+
 pub(crate) fn parse_search(args: &[String]) -> Result<CliCommand> {
     let mut parsed = SearchArgs::default();
     let mut query = Vec::new();
@@ -20,10 +27,12 @@ pub(crate) fn parse_search(args: &[String]) -> Result<CliCommand> {
             "--exclude-facility" => {
                 parsed.exclude_facility = Some(flags.value("--exclude-facility")?)
             }
-            "--from" => parsed.from = Some(flags.value("--from")?),
-            "--to" => parsed.to = Some(flags.value("--to")?),
-            "--received-from" => parsed.received_from = Some(flags.value("--received-from")?),
-            "--received-to" => parsed.received_to = Some(flags.value("--received-to")?),
+            "--from" => parsed.from = Some(norm_time(flags.value("--from")?)?),
+            "--to" => parsed.to = Some(norm_time(flags.value("--to")?)?),
+            "--received-from" => {
+                parsed.received_from = Some(norm_time(flags.value("--received-from")?)?)
+            }
+            "--received-to" => parsed.received_to = Some(norm_time(flags.value("--received-to")?)?),
             "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
             "-h" | "--help" => bail!("use `cortex --help` for usage"),
             _ if arg.starts_with("--hostname=") => {
@@ -45,14 +54,16 @@ pub(crate) fn parse_search(args: &[String]) -> Result<CliCommand> {
                 parsed.exclude_facility = Some(value_after_equals(arg, "--exclude-facility")?)
             }
             _ if arg.starts_with("--from=") => {
-                parsed.from = Some(value_after_equals(arg, "--from")?)
+                parsed.from = Some(norm_time(value_after_equals(arg, "--from")?)?)
             }
-            _ if arg.starts_with("--to=") => parsed.to = Some(value_after_equals(arg, "--to")?),
+            _ if arg.starts_with("--to=") => {
+                parsed.to = Some(norm_time(value_after_equals(arg, "--to")?)?)
+            }
             _ if arg.starts_with("--received-from=") => {
-                parsed.received_from = Some(value_after_equals(arg, "--received-from")?)
+                parsed.received_from = Some(norm_time(value_after_equals(arg, "--received-from")?)?)
             }
             _ if arg.starts_with("--received-to=") => {
-                parsed.received_to = Some(value_after_equals(arg, "--received-to")?)
+                parsed.received_to = Some(norm_time(value_after_equals(arg, "--received-to")?)?)
             }
             _ if arg.starts_with("--limit=") => {
                 parsed.limit = Some(parse_u32_flag(
@@ -60,11 +71,21 @@ pub(crate) fn parse_search(args: &[String]) -> Result<CliCommand> {
                     value_after_equals(arg, "--limit")?,
                 )?)
             }
+            "--grep" => parsed.grep = Some(flags.value("--grep")?),
+            _ if arg.starts_with("--grep=") => {
+                parsed.grep = Some(value_after_equals(arg, "--grep")?)
+            }
             _ if arg.starts_with('-') => bail!("unknown search option: {arg}"),
             _ => query.push(arg),
         }
     }
     parsed.query = (!query.is_empty()).then(|| query.join(" "));
+    if parsed.grep.is_some() && parsed.query.is_some() {
+        bail!("--grep and a positional query are mutually exclusive; use one or the other");
+    }
+    if parsed.grep.as_deref().is_some_and(|g| g.trim().is_empty()) {
+        bail!("--grep requires non-empty text");
+    }
     Ok(CliCommand::Search(parsed))
 }
 
@@ -83,10 +104,12 @@ pub(crate) fn parse_filter(args: &[String]) -> Result<CliCommand> {
                 parsed.exclude_facility = Some(flags.value("--exclude-facility")?)
             }
             "--process-id" => parsed.process_id = Some(flags.value("--process-id")?),
-            "--from" => parsed.from = Some(flags.value("--from")?),
-            "--to" => parsed.to = Some(flags.value("--to")?),
-            "--received-from" => parsed.received_from = Some(flags.value("--received-from")?),
-            "--received-to" => parsed.received_to = Some(flags.value("--received-to")?),
+            "--from" => parsed.from = Some(norm_time(flags.value("--from")?)?),
+            "--to" => parsed.to = Some(norm_time(flags.value("--to")?)?),
+            "--received-from" => {
+                parsed.received_from = Some(norm_time(flags.value("--received-from")?)?)
+            }
+            "--received-to" => parsed.received_to = Some(norm_time(flags.value("--received-to")?)?),
             "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
             "--source-kind" => parsed.source_kind = Some(flags.value("--source-kind")?),
             "--tool" => parsed.tool = Some(flags.value("--tool")?),
@@ -119,14 +142,16 @@ pub(crate) fn parse_filter(args: &[String]) -> Result<CliCommand> {
                 parsed.process_id = Some(value_after_equals(arg, "--process-id")?)
             }
             _ if arg.starts_with("--from=") => {
-                parsed.from = Some(value_after_equals(arg, "--from")?)
+                parsed.from = Some(norm_time(value_after_equals(arg, "--from")?)?)
             }
-            _ if arg.starts_with("--to=") => parsed.to = Some(value_after_equals(arg, "--to")?),
+            _ if arg.starts_with("--to=") => {
+                parsed.to = Some(norm_time(value_after_equals(arg, "--to")?)?)
+            }
             _ if arg.starts_with("--received-from=") => {
-                parsed.received_from = Some(value_after_equals(arg, "--received-from")?)
+                parsed.received_from = Some(norm_time(value_after_equals(arg, "--received-from")?)?)
             }
             _ if arg.starts_with("--received-to=") => {
-                parsed.received_to = Some(value_after_equals(arg, "--received-to")?)
+                parsed.received_to = Some(norm_time(value_after_equals(arg, "--received-to")?)?)
             }
             _ if arg.starts_with("--limit=") => {
                 parsed.limit = Some(parse_u32_flag(
@@ -202,13 +227,15 @@ pub(crate) fn parse_errors(args: &[String]) -> Result<CliCommand> {
     while let Some(arg) = flags.next() {
         match arg.as_str() {
             "--json" => parsed.json = true,
-            "--from" => parsed.from = Some(flags.value("--from")?),
-            "--to" => parsed.to = Some(flags.value("--to")?),
+            "--from" => parsed.from = Some(norm_time(flags.value("--from")?)?),
+            "--to" => parsed.to = Some(norm_time(flags.value("--to")?)?),
             "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
             _ if arg.starts_with("--from=") => {
-                parsed.from = Some(value_after_equals(arg, "--from")?)
+                parsed.from = Some(norm_time(value_after_equals(arg, "--from")?)?)
             }
-            _ if arg.starts_with("--to=") => parsed.to = Some(value_after_equals(arg, "--to")?),
+            _ if arg.starts_with("--to=") => {
+                parsed.to = Some(norm_time(value_after_equals(arg, "--to")?)?)
+            }
             _ if arg.starts_with("--limit=") => {
                 parsed.limit = Some(parse_u32_flag(
                     "--limit",
@@ -234,8 +261,8 @@ pub(crate) fn parse_sessions(args: &[String]) -> Result<CliCommand> {
             "--project" => parsed.project = Some(flags.value("--project")?),
             "--tool" => parsed.tool = Some(flags.value("--tool")?),
             "--hostname" => parsed.hostname = Some(flags.value("--hostname")?),
-            "--from" => parsed.from = Some(flags.value("--from")?),
-            "--to" => parsed.to = Some(flags.value("--to")?),
+            "--from" => parsed.from = Some(norm_time(flags.value("--from")?)?),
+            "--to" => parsed.to = Some(norm_time(flags.value("--to")?)?),
             "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
             _ if arg.starts_with("--project=") => {
                 parsed.project = Some(value_after_equals(arg, "--project")?)
@@ -247,9 +274,11 @@ pub(crate) fn parse_sessions(args: &[String]) -> Result<CliCommand> {
                 parsed.hostname = Some(value_after_equals(arg, "--hostname")?)
             }
             _ if arg.starts_with("--from=") => {
-                parsed.from = Some(value_after_equals(arg, "--from")?)
+                parsed.from = Some(norm_time(value_after_equals(arg, "--from")?)?)
             }
-            _ if arg.starts_with("--to=") => parsed.to = Some(value_after_equals(arg, "--to")?),
+            _ if arg.starts_with("--to=") => {
+                parsed.to = Some(norm_time(value_after_equals(arg, "--to")?)?)
+            }
             _ if arg.starts_with("--limit=") => {
                 parsed.limit = Some(parse_u32_flag(
                     "--limit",
@@ -273,7 +302,7 @@ pub(crate) fn parse_incident(args: &[String]) -> Result<CliCommand> {
     while let Some(arg) = flags.next() {
         match arg.as_str() {
             "--json" => parsed.json = true,
-            "--around" => parsed.around = flags.value("--around")?,
+            "--around" => parsed.around = norm_time(flags.value("--around")?)?,
             "--minutes" => {
                 parsed.minutes = Some(parse_u32_flag("--minutes", flags.value("--minutes")?)?)
             }
@@ -281,7 +310,7 @@ pub(crate) fn parse_incident(args: &[String]) -> Result<CliCommand> {
             "--hostname" | "--host" => parsed.hostname = Some(flags.value(&arg)?),
             "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
             _ if arg.starts_with("--around=") => {
-                parsed.around = value_after_equals(arg, "--around")?
+                parsed.around = norm_time(value_after_equals(arg, "--around")?)?
             }
             _ if arg.starts_with("--minutes=") => {
                 parsed.minutes = Some(parse_u32_flag(
@@ -320,7 +349,9 @@ pub(crate) fn parse_correlate(args: &[String]) -> Result<CliCommand> {
     while let Some(arg) = flags.next() {
         match arg.as_str() {
             "--json" => parsed.json = true,
-            "--reference-time" => parsed.reference_time = flags.value("--reference-time")?,
+            "--reference-time" => {
+                parsed.reference_time = norm_time(flags.value("--reference-time")?)?
+            }
             "--window-minutes" => {
                 parsed.window_minutes = Some(parse_u32_flag(
                     "--window-minutes",
@@ -333,7 +364,7 @@ pub(crate) fn parse_correlate(args: &[String]) -> Result<CliCommand> {
             "--query" => parsed.query = Some(flags.value("--query")?),
             "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
             _ if arg.starts_with("--reference-time=") => {
-                parsed.reference_time = value_after_equals(arg, "--reference-time")?
+                parsed.reference_time = norm_time(value_after_equals(arg, "--reference-time")?)?
             }
             _ if arg.starts_with("--window-minutes=") => {
                 parsed.window_minutes = Some(parse_u32_flag(
@@ -360,7 +391,7 @@ pub(crate) fn parse_correlate(args: &[String]) -> Result<CliCommand> {
                 )?)
             }
             _ if arg.starts_with('-') => bail!("unknown correlate option: {arg}"),
-            _ if parsed.reference_time.is_empty() => parsed.reference_time = arg,
+            _ if parsed.reference_time.is_empty() => parsed.reference_time = norm_time(arg)?,
             _ => bail!("unexpected correlate argument: {arg}"),
         }
     }
@@ -398,9 +429,9 @@ pub(crate) fn parse_timeline(args: &[String]) -> Result<CliCommand> {
         } else if let Some(v) = flags.match_value(&arg, "--group-by")? {
             parsed.group_by = Some(v);
         } else if let Some(v) = flags.match_value(&arg, "--from")? {
-            parsed.from = Some(v);
+            parsed.from = Some(norm_time(v)?);
         } else if let Some(v) = flags.match_value(&arg, "--to")? {
-            parsed.to = Some(v);
+            parsed.to = Some(norm_time(v)?);
         } else if let Some(v) = flags.match_value(&arg, "--hostname")? {
             parsed.hostname = Some(v);
         } else if let Some(v) = flags.match_value(&arg, "--app-name")? {
@@ -421,9 +452,9 @@ pub(crate) fn parse_patterns(args: &[String]) -> Result<CliCommand> {
         if arg == "--json" {
             parsed.json = true;
         } else if let Some(v) = flags.match_value(&arg, "--from")? {
-            parsed.from = Some(v);
+            parsed.from = Some(norm_time(v)?);
         } else if let Some(v) = flags.match_value(&arg, "--to")? {
-            parsed.to = Some(v);
+            parsed.to = Some(norm_time(v)?);
         } else if let Some(v) = flags.match_value(&arg, "--hostname")? {
             parsed.hostname = Some(v);
         } else if let Some(v) = flags.match_value(&arg, "--app-name")? {

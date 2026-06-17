@@ -47,7 +47,7 @@ fn parse_errors_accepts_limit_for_bounded_agent_output() {
 
     match command {
         crate::cli::CliCommand::Errors(args) => {
-            assert_eq!(args.from.as_deref(), Some("2026-01-01T00:00:00Z"));
+            assert_eq!(args.from.as_deref(), Some("2026-01-01T00:00:00+00:00"));
             assert_eq!(args.limit, Some(10));
             assert!(args.json);
         }
@@ -109,10 +109,10 @@ fn parse_search_tail_sessions_incident_and_correlate_cover_common_filters() {
         "--app-name=cortex",
         "--facility=daemon",
         "--exclude-facility=kern",
-        "--from=t0",
-        "--to=t1",
-        "--received-from=r0",
-        "--received-to=r1",
+        "--from=2026-01-01T00:00:00Z",
+        "--to=2026-01-02T00:00:00Z",
+        "--received-from=2026-01-03T00:00:00Z",
+        "--received-to=2026-01-04T00:00:00Z",
         "--limit=30",
         "--json",
         "disk",
@@ -123,7 +123,10 @@ fn parse_search_tail_sessions_incident_and_correlate_cover_common_filters() {
         crate::cli::CliCommand::Search(args) => {
             assert_eq!(args.query.as_deref(), Some("disk full"));
             assert_eq!(args.hostname.as_deref(), Some("host1"));
-            assert_eq!(args.received_to.as_deref(), Some("r1"));
+            assert_eq!(
+                args.received_to.as_deref(),
+                Some("2026-01-04T00:00:00+00:00")
+            );
             assert_eq!(args.limit, Some(30));
             assert!(args.json);
         }
@@ -149,8 +152,8 @@ fn parse_search_tail_sessions_incident_and_correlate_cover_common_filters() {
         "--project=/repo",
         "--tool=Bash",
         "--hostname=host1",
-        "--from=t0",
-        "--to=t1",
+        "--from=2026-01-01T00:00:00Z",
+        "--to=2026-01-02T00:00:00Z",
         "--limit=4",
     ]))
     .unwrap();
@@ -164,7 +167,7 @@ fn parse_search_tail_sessions_incident_and_correlate_cover_common_filters() {
     }
 
     let incident = parse_incident(&strings(&[
-        "--around=t0",
+        "--around=2026-01-01T00:00:00Z",
         "--minutes=10",
         "--host=host1",
         "--limit=50",
@@ -172,7 +175,8 @@ fn parse_search_tail_sessions_incident_and_correlate_cover_common_filters() {
     .unwrap();
     match incident {
         crate::cli::CliCommand::Incident(args) => {
-            assert_eq!(args.around, "t0");
+            // The time value is normalized to RFC3339 at parse time.
+            assert_eq!(args.around, "2026-01-01T00:00:00+00:00");
             assert_eq!(args.minutes, Some(10));
             assert_eq!(args.hostname.as_deref(), Some("host1"));
         }
@@ -180,7 +184,7 @@ fn parse_search_tail_sessions_incident_and_correlate_cover_common_filters() {
     }
 
     let correlate = parse_correlate(&strings(&[
-        "--reference-time=t0",
+        "--reference-time=2026-01-01T00:00:00Z",
         "--window-minutes=5",
         "--severity-min=warn",
         "--hostname=host1",
@@ -191,7 +195,8 @@ fn parse_search_tail_sessions_incident_and_correlate_cover_common_filters() {
     .unwrap();
     match correlate {
         crate::cli::CliCommand::Correlate(args) => {
-            assert_eq!(args.reference_time, "t0");
+            // The time value is normalized to RFC3339 at parse time.
+            assert_eq!(args.reference_time, "2026-01-01T00:00:00+00:00");
             assert_eq!(args.window_minutes, Some(5));
             assert_eq!(args.query.as_deref(), Some("panic"));
         }
@@ -254,4 +259,133 @@ fn parse_patterns_accepts_limit_alias_for_top_n() {
 
 fn strings(values: &[&str]) -> Vec<String> {
     values.iter().map(|value| (*value).to_string()).collect()
+}
+
+#[test]
+fn search_normalizes_relative_from() {
+    let cmd = parse_search(&strings(&["error", "--from", "1h"])).unwrap();
+    let crate::cli::CliCommand::Search(args) = cmd else {
+        panic!("expected Search");
+    };
+    let from = args.from.expect("from set");
+    // Relative input is normalized to an absolute RFC3339 timestamp at parse time.
+    assert!(
+        from.contains('T') && from.ends_with("+00:00"),
+        "expected normalized RFC3339, got {from}"
+    );
+}
+
+#[test]
+fn search_grep_sets_literal_and_rejects_with_query() {
+    let cmd = parse_search(&strings(&["--grep", "smoke-test"])).unwrap();
+    let crate::cli::CliCommand::Search(args) = cmd else {
+        panic!("expected Search");
+    };
+    assert_eq!(args.grep.as_deref(), Some("smoke-test"));
+
+    // --grep together with a positional query is an error.
+    let err = parse_search(&strings(&["error", "--grep", "x"]))
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("--grep"), "should explain the conflict: {err}");
+}
+
+#[test]
+fn search_grep_equals_form_and_rejects_empty() {
+    let cmd = parse_search(&strings(&["--grep=smoke-test"])).unwrap();
+    let crate::cli::CliCommand::Search(args) = cmd else {
+        panic!("expected Search");
+    };
+    assert_eq!(args.grep.as_deref(), Some("smoke-test"));
+    // Whitespace-only --grep is rejected rather than matching nothing silently.
+    assert!(parse_search(&strings(&["--grep", "   "])).is_err());
+}
+
+#[test]
+fn filter_and_sessions_normalize_relative_from() {
+    let filter = parse_filter(&strings(&["--from", "2d"])).unwrap();
+    let crate::cli::CliCommand::Filter(args) = filter else {
+        panic!("expected Filter");
+    };
+    assert!(
+        args.from.as_deref().unwrap().ends_with("+00:00"),
+        "filter --from should normalize: {:?}",
+        args.from
+    );
+
+    // Equals form is normalized too.
+    let sessions = parse_sessions(&strings(&["--from=1h"])).unwrap();
+    let crate::cli::CliCommand::Sessions(args) = sessions else {
+        panic!("expected Sessions");
+    };
+    assert!(
+        args.from.as_deref().unwrap().ends_with("+00:00"),
+        "sessions --from= should normalize: {:?}",
+        args.from
+    );
+}
+
+#[test]
+fn timeline_patterns_incident_correlate_normalize_relative_time() {
+    // timeline --from/--to accept relative values like the other time flags.
+    let timeline = parse_timeline(&strings(&["--from", "2d", "--to=1h"])).unwrap();
+    let crate::cli::CliCommand::Timeline(args) = timeline else {
+        panic!("expected Timeline");
+    };
+    assert!(
+        args.from.as_deref().unwrap().ends_with("+00:00"),
+        "timeline --from should normalize: {:?}",
+        args.from
+    );
+    assert!(
+        args.to.as_deref().unwrap().ends_with("+00:00"),
+        "timeline --to= should normalize: {:?}",
+        args.to
+    );
+
+    let patterns = parse_patterns(&strings(&["--from=yesterday"])).unwrap();
+    let crate::cli::CliCommand::Patterns(args) = patterns else {
+        panic!("expected Patterns");
+    };
+    assert!(
+        args.from.as_deref().unwrap().ends_with("+00:00"),
+        "patterns --from= should normalize: {:?}",
+        args.from
+    );
+
+    // incident --around and correlate --reference-time normalize and reject garbage.
+    let incident = parse_incident(&strings(&["--around", "1h"])).unwrap();
+    let crate::cli::CliCommand::Incident(args) = incident else {
+        panic!("expected Incident");
+    };
+    assert!(
+        args.around.ends_with("+00:00"),
+        "incident --around should normalize: {:?}",
+        args.around
+    );
+
+    let correlate = parse_correlate(&strings(&["--reference-time=1h"])).unwrap();
+    let crate::cli::CliCommand::Correlate(args) = correlate else {
+        panic!("expected Correlate");
+    };
+    assert!(
+        args.reference_time.ends_with("+00:00"),
+        "correlate --reference-time= should normalize: {:?}",
+        args.reference_time
+    );
+
+    // Correlate also accepts a positional reference time, normalized identically.
+    let correlate_pos = parse_correlate(&strings(&["2d"])).unwrap();
+    let crate::cli::CliCommand::Correlate(args) = correlate_pos else {
+        panic!("expected Correlate");
+    };
+    assert!(
+        args.reference_time.ends_with("+00:00"),
+        "correlate positional time should normalize: {:?}",
+        args.reference_time
+    );
+
+    // A non-time value is now rejected at parse time instead of passing through.
+    assert!(parse_incident(&strings(&["--around=not-a-time"])).is_err());
+    assert!(parse_correlate(&strings(&["--reference-time=not-a-time"])).is_err());
 }

@@ -63,6 +63,7 @@ mod setup;
 mod sparkline;
 mod suggest;
 mod table;
+mod timearg;
 
 pub(crate) use config_cmd::run_config;
 pub(crate) use heartbeat_agent::run_heartbeat_no_db;
