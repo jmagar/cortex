@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.27.0] - 2026-06-16
+
+### Added
+
+- **Flagless common case (positionals + smart defaults)** — a bare positional now binds to each action's primary selector: `cortex tail dookie` and `cortex host-state dookie` set `--host`, `cortex search "oom killer"` sets the query. `tail` and `search` apply a default limit of 50 and `errors` defaults to a last-hour window when you omit the flags, so the everyday commands need no flags at all. The positional mapping and defaults are declarative metadata on `ACTION_SPECS` (`positional`/`defaults`), applied through shared `argdefaults` helpers — not per-command special-casing. Per-command `--help` examples now lead with the flagless form.
+
+### Changed
+
+- **`cortex tail <arg>` now treats `<arg>` as a hostname, not a line count.** Use `-n`/`--limit` for the count (e.g. `cortex tail dookie -n 100`). This is the only behavioral break in the positional rework; the old bare-number-as-count form is removed.
+
 ## [1.26.1] - 2026-06-16
 
 ### Fixed
