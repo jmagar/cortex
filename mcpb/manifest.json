@@ -1,17 +1,45 @@
 {
   "$schema": "https://raw.githubusercontent.com/anthropics/mcpb/main/schemas/mcpb-manifest-v0.4.schema.json",
+  "manifest_version": "0.4",
+  "name": "cortex",
+  "display_name": "Cortex",
+  "version": "1.28.0",
+  "description": "Query local cortex SQLite logs through a bundled stdio MCP server.",
+  "long_description": "cortex packages the existing cortex stdio entrypoint as a local MCP Bundle. It is query-only: it reads the configured SQLite database and does not start syslog listeners, HTTP servers, Docker Compose, REST, or deploy flows.",
   "author": {
     "name": "jmagar",
     "url": "https://github.com/jmagar"
   },
-  "compatibility": {
-    "platforms": [
-      "linux"
-    ]
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jmagar/cortex"
   },
-  "description": "Query local cortex SQLite logs through a bundled stdio MCP server.",
-  "display_name": "Cortex",
   "documentation": "https://github.com/jmagar/cortex/tree/main/docs/mcp",
+  "server": {
+    "type": "binary",
+    "entry_point": "server/cortex",
+    "mcp_config": {
+      "command": "${__dirname}/server/cortex",
+      "args": [
+        "mcp"
+      ],
+      "env": {
+        "CORTEX_DB_PATH": "${user_config.data_dir}/cortex.db",
+        "CORTEX_RETENTION_DAYS": "0",
+        "CORTEX_MAX_DB_SIZE_MB": "0",
+        "CORTEX_RECOVERY_DB_SIZE_MB": "0",
+        "CORTEX_MIN_FREE_DISK_MB": "0",
+        "CORTEX_RECOVERY_FREE_DISK_MB": "0",
+        "RUST_LOG": "warn"
+      }
+    }
+  },
+  "tools": [
+    {
+      "name": "cortex",
+      "description": "Search, tail, summarize, and inspect logs from the configured local cortex SQLite database."
+    }
+  ],
   "keywords": [
     "cortex",
     "syslog",
@@ -20,46 +48,18 @@
     "homelab"
   ],
   "license": "MIT",
-  "long_description": "cortex packages the existing cortex stdio entrypoint as a local MCP Bundle. It is query-only: it reads the configured SQLite database and does not start syslog listeners, HTTP servers, Docker Compose, REST, or deploy flows.",
-  "manifest_version": "0.4",
-  "name": "cortex",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/jmagar/cortex"
+  "compatibility": {
+    "platforms": [
+      "linux"
+    ]
   },
-  "server": {
-    "entry_point": "server/cortex",
-    "mcp_config": {
-      "args": [
-        "mcp"
-      ],
-      "command": "${__dirname}/server/cortex",
-      "env": {
-        "CORTEX_DB_PATH": "${user_config.data_dir}/cortex.db",
-        "CORTEX_MAX_DB_SIZE_MB": "0",
-        "CORTEX_MIN_FREE_DISK_MB": "0",
-        "CORTEX_RECOVERY_DB_SIZE_MB": "0",
-        "CORTEX_RECOVERY_FREE_DISK_MB": "0",
-        "CORTEX_RETENTION_DAYS": "0",
-        "RUST_LOG": "warn"
-      }
-    },
-    "type": "binary"
-  },
-  "tools": [
-    {
-      "description": "Search, tail, summarize, and inspect logs from the configured local cortex SQLite database.",
-      "name": "cortex"
-    }
-  ],
   "user_config": {
     "data_dir": {
-      "default": "${HOME}/.cortex/data",
+      "type": "directory",
+      "title": "Data directory",
       "description": "Directory containing cortex.db plus WAL/SHM sidecars. The bundled stdio server reads this database as CORTEX_DB_PATH=<data_dir>/cortex.db.",
       "required": true,
-      "title": "Data directory",
-      "type": "directory"
+      "default": "${HOME}/.cortex/data"
     }
-  },
-  "version": "1.28.0"
+  }
 }

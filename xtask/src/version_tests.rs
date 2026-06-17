@@ -72,6 +72,24 @@ fn replace_json_version_preserves_other_fields() {
 }
 
 #[test]
+fn replace_json_version_preserves_key_order() {
+    // Keys deliberately NOT in alphabetical order. Without serde_json's
+    // preserve_order feature this round-trips through a BTreeMap and comes back
+    // sorted ($schema, name, version -> alphabetized), producing a huge diff.
+    let json = "{\n  \"$schema\": \"x\",\n  \"name\": \"cortex\",\n  \"version\": \"1.2.3\",\n  \"packages\": []\n}\n";
+    let out = replace_json_version(json, Some("/version"), "2.0.0").unwrap();
+    let schema = out.find("\"$schema\"").unwrap();
+    let name = out.find("\"name\"").unwrap();
+    let version = out.find("\"version\"").unwrap();
+    let packages = out.find("\"packages\"").unwrap();
+    assert!(
+        schema < name && name < version && version < packages,
+        "key order must be preserved, got:\n{out}"
+    );
+    assert!(out.contains("\"version\": \"2.0.0\""));
+}
+
+#[test]
 fn replace_regex_version_replaces_all_occurrences() {
     let body = "a cortex:v1.0.0 b cortex:v1.0.0\n";
     let out = replace_regex_version(body, Some(r"cortex:v(\d+\.\d+\.\d+)"), "2.3.4").unwrap();
