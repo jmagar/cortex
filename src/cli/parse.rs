@@ -44,6 +44,7 @@ pub(crate) const TOP_LEVEL_COMMANDS: &[&str] = &[
     "fleet-state",
     "correlate-state",
     "file-tail",
+    "completions",
 ];
 
 pub(crate) fn parse_command(args: Vec<String>) -> Result<CliCommand> {

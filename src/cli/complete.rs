@@ -10,11 +10,15 @@
 
 use anyhow::{Result, bail};
 use cortex::mcp::ValueKind;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 const CACHE_TTL_SECS: u64 = 60;
 const DYNAMIC_CANDIDATE_CAP: usize = 500;
 const DB_BUSY_TIMEOUT_MS: u64 = 150;
+/// Hard wall-clock deadline for the distinct-column scan itself. `busy_timeout`
+/// only bounds lock-wait, not execution, so a progress handler enforces this to
+/// keep Tab snappy even on a large DB.
+const DB_QUERY_DEADLINE_MS: u64 = 150;
 
 /// Top-level completion entry. `args[0]` is the context kind.
 pub(crate) fn complete(args: &[String]) -> Result<Vec<String>> {
@@ -115,6 +119,12 @@ fn query_distinct(column: &str) -> Result<Vec<String>> {
         rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )?;
     conn.busy_timeout(Duration::from_millis(DB_BUSY_TIMEOUT_MS))?;
+    // `busy_timeout` only bounds lock contention, not query execution. Enforce a
+    // real per-query deadline with a progress handler: it fires every ~1000 VM
+    // steps and aborts the statement (→ SQLITE_INTERRUPT → Err → caller falls
+    // back to cache/empty) once the deadline passes.
+    let deadline = Instant::now() + Duration::from_millis(DB_QUERY_DEADLINE_MS);
+    conn.progress_handler(1000, Some(move || Instant::now() >= deadline))?;
     let sql = format!(
         "SELECT DISTINCT {column} FROM \
          (SELECT {column} FROM logs ORDER BY id DESC LIMIT 100000) sub \

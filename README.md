@@ -189,12 +189,12 @@ Full-text search across all syslog messages with optional filters. Uses SQLite F
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `query` | string | no | — | FTS5 search query (see [FTS5 query syntax](#fts5-query-syntax)) |
-| `hostname` | string | no | — | Exact hostname match. Use `cortex` with `action: "hosts"` to enumerate. |
-| `source_ip` | string | no | — | Exact source identifier. Syslog entries use the verified network sender address (`IP:port`); OTLP rows use the verified peer IP; Docker ingest stream rows use `docker://host/container/stream`; Docker lifecycle event rows use `docker-event://host/container/action`. |
+| `host` | string | no | — | Exact hostname match. Use `cortex` with `action: "hosts"` to enumerate. |
+| `source` | string | no | — | Exact source identifier. Syslog entries use the verified network sender address (`IP:port`); OTLP rows use the verified peer IP; Docker ingest stream rows use `docker://host/container/stream`; Docker lifecycle event rows use `docker-event://host/container/action`. |
 | `severity` | string | no | — | One of: `emerg alert crit err warning notice info debug` |
-| `app_name` | string | no | — | Application name, e.g. `sshd`, `dockerd`, `kernel` |
-| `from` | string | no | — | Start of time range (ISO 8601 / RFC 3339, e.g. `2025-01-15T00:00:00Z`) |
-| `to` | string | no | — | End of time range (ISO 8601) |
+| `app` | string | no | — | Application name, e.g. `sshd`, `dockerd`, `kernel` |
+| `since` | string | no | — | Start of time range (relative like `1h`/`yesterday`, or ISO 8601 / RFC 3339, e.g. `2025-01-15T00:00:00Z`) |
+| `until` | string | no | — | End of time range (relative or ISO 8601) |
 | `limit` | integer | no | 100 | Max results (hard cap: 1000) |
 
 **Response**

@@ -2,8 +2,8 @@ use super::*;
 
 impl CortexService {
     pub async fn list_apps(&self, req: ListAppsRequest) -> ServiceResult<ListAppsResponse> {
-        let from = parse_optional_timestamp(req.since.as_deref(), "from")?;
-        let to = parse_optional_timestamp(req.until.as_deref(), "to")?;
+        let from = parse_optional_timestamp(req.since.as_deref(), "since")?;
+        let to = parse_optional_timestamp(req.until.as_deref(), "until")?;
         let result = self
             .run_db("list_apps", move |pool| {
                 db::list_apps(
@@ -73,8 +73,8 @@ impl CortexService {
                 .map(|dt| dt.to_rfc3339()),
             (other, _) => other,
         };
-        let from = parse_optional_timestamp(from_raw.as_deref(), "from")?;
-        let to = parse_optional_timestamp(req.until.as_deref(), "to")?;
+        let from = parse_optional_timestamp(from_raw.as_deref(), "since")?;
+        let to = parse_optional_timestamp(req.until.as_deref(), "until")?;
         let severity_in = match req.severity_min.as_deref() {
             Some(min) => Some(severity_at_or_above(min)?),
             None => None,
@@ -112,8 +112,8 @@ impl CortexService {
     }
 
     pub async fn patterns(&self, req: PatternsRequest) -> ServiceResult<PatternsResponse> {
-        let from = parse_optional_timestamp(req.since.as_deref(), "from")?;
-        let to = parse_optional_timestamp(req.until.as_deref(), "to")?;
+        let from = parse_optional_timestamp(req.since.as_deref(), "since")?;
+        let to = parse_optional_timestamp(req.until.as_deref(), "until")?;
         let severity_in = match req.severity_min.as_deref() {
             Some(min) => Some(severity_at_or_above(min)?),
             None => None,
@@ -229,7 +229,7 @@ impl CortexService {
                     let msg = inner.to_string();
                     if msg == "context_missing_pivot" {
                         ServiceError::InvalidInput(
-                            "Either `log_id` or both `hostname` + `timestamp` are required".into(),
+                            "Either `log_id` or both `host` + `timestamp` are required".into(),
                         )
                     } else if let Some(id) = msg.strip_prefix("context_log_not_found:") {
                         ServiceError::NotFound(format!("No log found for id {id}"))

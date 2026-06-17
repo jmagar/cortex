@@ -901,8 +901,10 @@ pub(crate) fn render_top_level(color: bool) -> String {
 
 /// Render per-command help, or `None` if the command is unknown.
 pub(crate) fn render_command(name: &str, color: bool) -> Option<String> {
+    let mut out = String::with_capacity(512);
+    // Header + usage differ between nested (`db status`) and top-level commands,
+    // but both render the shared Examples block below.
     if let Some(doc) = nested_lookup(name) {
-        let mut out = String::with_capacity(512);
         out.push_str(&format!(
             "  {}  {}\n\n",
             heading(color, doc.path),
@@ -912,21 +914,21 @@ pub(crate) fn render_command(name: &str, color: bool) -> Option<String> {
         for line in doc.usage {
             out.push_str(&format!("  {}\n", paint(color, CYAN_ANSI, line)));
         }
-        return Some(out);
-    }
-    let doc = lookup(name)?;
-    let mut out = String::with_capacity(512);
-    out.push_str(&format!(
-        "  {}  {}\n\n",
-        heading(color, doc.name),
-        paint(color, MUTED_ANSI, doc.summary)
-    ));
-    out.push_str(&format!("  {}\n", heading(color, "Usage")));
-    for line in doc.usage {
-        out.push_str(&format!("  {}\n", paint(color, CYAN_ANSI, line)));
+    } else {
+        let doc = lookup(name)?;
+        out.push_str(&format!(
+            "  {}  {}\n\n",
+            heading(color, doc.name),
+            paint(color, MUTED_ANSI, doc.summary)
+        ));
+        out.push_str(&format!("  {}\n", heading(color, "Usage")));
+        for line in doc.usage {
+            out.push_str(&format!("  {}\n", paint(color, CYAN_ANSI, line)));
+        }
     }
     // Copy-paste examples, sourced from the single ACTION_SPECS registry so they
-    // stay in lockstep with the canonical flags.
+    // stay in lockstep with the canonical flags. Rendered for both nested and
+    // top-level help paths.
     let examples = crate::cli::registry_examples(name);
     if !examples.is_empty() {
         out.push('\n');

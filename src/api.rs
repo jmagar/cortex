@@ -558,6 +558,7 @@ async fn source_ips(
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct TimelineQuery {
     bucket: Option<String>,
     group_by: Option<String>,
@@ -573,7 +574,7 @@ async fn timeline(
     Query(query): Query<TimelineQuery>,
 ) -> impl IntoResponse {
     // Default lookback is centralized in `CortexService::timeline` (bead dyqw):
-    // it applies a bucket-sized window only when neither `from` nor `to` is set,
+    // it applies a bucket-sized window only when neither `since` nor `until` is set,
     // preventing full table scans without recreating the logic per transport.
     respond(
         state
@@ -592,6 +593,7 @@ async fn timeline(
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct PatternsQuery {
     since: Option<String>,
     until: Option<String>,

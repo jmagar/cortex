@@ -38,7 +38,7 @@ impl CortexService {
             }
             _ => {
                 return Err(ServiceError::InvalidInput(
-                    "host_state requires host_id or hostname".into(),
+                    "host_state requires host_id or host".into(),
                 ));
             }
         };
@@ -314,8 +314,8 @@ impl CortexService {
     }
 
     pub async fn get_errors(&self, req: GetErrorsRequest) -> ServiceResult<GetErrorsResponse> {
-        let from = parse_optional_timestamp(req.since.as_deref(), "from")?;
-        let to = parse_optional_timestamp(req.until.as_deref(), "to")?;
+        let from = parse_optional_timestamp(req.since.as_deref(), "since")?;
+        let to = parse_optional_timestamp(req.until.as_deref(), "until")?;
         let group_by_app = match req.group_by.as_deref() {
             None => false,
             Some("app_name") | Some("app") => true,

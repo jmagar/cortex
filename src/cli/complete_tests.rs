@@ -1,4 +1,12 @@
 use super::*;
+use std::sync::{Mutex, OnceLock};
+
+/// Serializes tests that mutate the process-global `CORTEX_DB_PATH` so parallel
+/// execution can't race on it.
+fn env_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
 
 #[test]
 fn completes_action_names_with_descriptions() {
@@ -34,17 +42,25 @@ fn completes_time_hints() {
 fn dynamic_value_degrades_to_ok_without_db() {
     // Point at a nonexistent DB; host completion must return Ok (empty), never
     // panic or error — completion degrades silently to static candidates.
-    let prev = std::env::var_os("CORTEX_DB_PATH");
+    let _guard = env_lock().lock().expect("env lock poisoned");
+    // Restore CORTEX_DB_PATH on scope exit (including panic) so other tests that
+    // read it are unaffected.
+    struct RestoreDbPath(Option<std::ffi::OsString>);
+    impl Drop for RestoreDbPath {
+        fn drop(&mut self) {
+            unsafe {
+                match self.0.take() {
+                    Some(v) => std::env::set_var("CORTEX_DB_PATH", v),
+                    None => std::env::remove_var("CORTEX_DB_PATH"),
+                }
+            }
+        }
+    }
+    let _restore = RestoreDbPath(std::env::var_os("CORTEX_DB_PATH"));
     unsafe {
         std::env::set_var("CORTEX_DB_PATH", "/nonexistent/cortex-complete-test.db");
     }
     let out = complete(&["value".into(), "--host".into()]);
-    unsafe {
-        match prev {
-            Some(v) => std::env::set_var("CORTEX_DB_PATH", v),
-            None => std::env::remove_var("CORTEX_DB_PATH"),
-        }
-    }
     assert!(out.is_ok(), "dynamic completion must not error: {out:?}");
 }
 
