@@ -526,7 +526,7 @@ phase_tools() {
         search_result="$(call_tool cortex "$(jq -nc \
           --arg q "\"${marker}\"" \
           --arg tag "${tag}" \
-          '{"action":"search","query":,"source_kind":"file-tail","app":,"limit":5}')")" || search_result=""
+          '{"action":"search","query":$q,"source_kind":"file-tail","app":$tag,"limit":5}')")" || search_result=""
         count="$(printf '%s' "${search_result}" | jq -r '.count // 0' 2>/dev/null)" || count=0
         [[ "${count}" -ge 1 ]] && break
         sleep 0.5
