@@ -304,7 +304,7 @@ pub(crate) fn parse_incident(args: &[String]) -> Result<CliCommand> {
     while let Some(arg) = flags.next() {
         match arg.as_str() {
             "--json" => parsed.json = true,
-            "--around" => parsed.around = flags.value("--around")?,
+            "--around" => parsed.around = norm_time(flags.value("--around")?)?,
             "--minutes" => {
                 parsed.minutes = Some(parse_u32_flag("--minutes", flags.value("--minutes")?)?)
             }
@@ -312,7 +312,7 @@ pub(crate) fn parse_incident(args: &[String]) -> Result<CliCommand> {
             "--host" => parsed.host = Some(flags.value(&arg)?),
             "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
             _ if arg.starts_with("--around=") => {
-                parsed.around = value_after_equals(arg, "--around")?
+                parsed.around = norm_time(value_after_equals(arg, "--around")?)?
             }
             _ if arg.starts_with("--minutes=") => {
                 parsed.minutes = Some(parse_u32_flag(
@@ -348,7 +348,9 @@ pub(crate) fn parse_correlate(args: &[String]) -> Result<CliCommand> {
     while let Some(arg) = flags.next() {
         match arg.as_str() {
             "--json" => parsed.json = true,
-            "--reference-time" => parsed.reference_time = flags.value("--reference-time")?,
+            "--reference-time" => {
+                parsed.reference_time = norm_time(flags.value("--reference-time")?)?
+            }
             "--window-minutes" => {
                 parsed.window_minutes = Some(parse_u32_flag(
                     "--window-minutes",
@@ -361,7 +363,7 @@ pub(crate) fn parse_correlate(args: &[String]) -> Result<CliCommand> {
             "--query" => parsed.query = Some(flags.value("--query")?),
             "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
             _ if arg.starts_with("--reference-time=") => {
-                parsed.reference_time = value_after_equals(arg, "--reference-time")?
+                parsed.reference_time = norm_time(value_after_equals(arg, "--reference-time")?)?
             }
             _ if arg.starts_with("--window-minutes=") => {
                 parsed.window_minutes = Some(parse_u32_flag(
@@ -388,7 +390,7 @@ pub(crate) fn parse_correlate(args: &[String]) -> Result<CliCommand> {
                 )?)
             }
             _ if arg.starts_with('-') => bail!("unknown correlate option: {arg}"),
-            _ if parsed.reference_time.is_empty() => parsed.reference_time = arg,
+            _ if parsed.reference_time.is_empty() => parsed.reference_time = norm_time(arg)?,
             _ => bail!("unexpected correlate argument: {arg}"),
         }
     }
@@ -426,9 +428,9 @@ pub(crate) fn parse_timeline(args: &[String]) -> Result<CliCommand> {
         } else if let Some(v) = flags.match_value(&arg, "--group-by")? {
             parsed.group_by = Some(v);
         } else if let Some(v) = flags.match_value(&arg, "--since")? {
-            parsed.since = Some(v);
+            parsed.since = Some(norm_time(v)?);
         } else if let Some(v) = flags.match_value(&arg, "--until")? {
-            parsed.until = Some(v);
+            parsed.until = Some(norm_time(v)?);
         } else if let Some(v) = flags.match_value(&arg, "--host")? {
             parsed.host = Some(v);
         } else if let Some(v) = flags.match_value(&arg, "--app")? {
@@ -449,9 +451,9 @@ pub(crate) fn parse_patterns(args: &[String]) -> Result<CliCommand> {
         if arg == "--json" {
             parsed.json = true;
         } else if let Some(v) = flags.match_value(&arg, "--since")? {
-            parsed.since = Some(v);
+            parsed.since = Some(norm_time(v)?);
         } else if let Some(v) = flags.match_value(&arg, "--until")? {
-            parsed.until = Some(v);
+            parsed.until = Some(norm_time(v)?);
         } else if let Some(v) = flags.match_value(&arg, "--host")? {
             parsed.host = Some(v);
         } else if let Some(v) = flags.match_value(&arg, "--app")? {
