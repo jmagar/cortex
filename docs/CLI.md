@@ -64,11 +64,13 @@ cortex search 'error AND nginx' --limit 5 --json
 
 ### `cortex search`
 
-Search logs with optional FTS5 query and filters.
+Search logs with optional FTS5 query and filters. The query is a bare positional;
+with no `--limit` the result count defaults to **50**.
 
 ```bash
+cortex search "oom killer"                       # bare query, limit 50
 cortex search 'error AND nginx' --host proxy --limit 10
-cortex search '"disk full"' --source 10.0.0.5:514 --since 2026-01-01T00:00:00Z
+cortex search --grep "smoke-test" --since 1h     # literal text, last hour
 ```
 
 Flags:
@@ -76,30 +78,34 @@ Flags:
 | Flag | Description |
 | --- | --- |
 | positional query | Optional SQLite FTS5 query. Multiple words are joined with spaces. |
+| `--grep TEXT` | Literal (FTS5-safe) substring; mutually exclusive with the positional query |
 | `--host HOST` | Exact claimed hostname filter |
 | `--source SOURCE` | Exact source identifier filter |
 | `--severity LEVEL` | Syslog severity filter: `emerg`, `alert`, `crit`, `err`, `warning`, `notice`, `info`, `debug` |
 | `--app APP` | Application/process name filter |
-| `--since TIME` | RFC3339 start timestamp |
-| `--until TIME` | RFC3339 end timestamp |
-| `--limit N` | Maximum returned rows |
+| `--since TIME` | Start of window — relative (`1h`, `2d`, `yesterday`) or RFC3339 |
+| `--until TIME` | End of window — relative or RFC3339 |
+| `--limit N` | Maximum returned rows (default 50) |
 | `--json` | Print JSON response |
 
 ### `cortex tail`
 
-Return recent log entries, optionally filtered by host, source, or app.
+Return recent log entries, optionally filtered by host, source, or app. A bare
+positional argument is a hostname (shorthand for `--host`); with no `-n`/`--limit`
+the row count defaults to **50**.
 
 ```bash
-cortex tail -n 20
-cortex tail 50 --host nas --app kernel
+cortex tail                       # 50 most recent across all hosts
+cortex tail dookie                # bare positional → --host dookie
+cortex tail nas --app kernel -n 100
 ```
 
 Flags:
 
 | Flag | Description |
 | --- | --- |
-| positional `N` | Number of rows to return |
-| `-n N`, `--n N` | Number of rows to return |
+| positional `HOST` | Hostname filter — shorthand for `--host` |
+| `-n N`, `--limit N` | Number of rows to return (default 50) |
 | `--host HOST` | Exact claimed hostname filter |
 | `--source SOURCE` | Exact source identifier filter |
 | `--app APP` | Application/process name filter |
@@ -107,10 +113,12 @@ Flags:
 
 ### `cortex errors`
 
-Summarize error and warning counts by host and severity.
+Summarize error and warning counts by host and severity. With no `--since` the
+window defaults to the **last hour**.
 
 ```bash
-cortex errors
+cortex errors                     # last hour
+cortex errors --since 6h --limit 50
 cortex errors --since 2026-01-01T00:00:00Z --until 2026-01-02T00:00:00Z --json
 ```
 
@@ -118,8 +126,8 @@ Flags:
 
 | Flag | Description |
 | --- | --- |
-| `--since TIME` | RFC3339 start timestamp |
-| `--until TIME` | RFC3339 end timestamp |
+| `--since TIME` | Start of window — relative (`1h`, `6h`, `yesterday`) or RFC3339 (default: last hour) |
+| `--until TIME` | End of window — relative or RFC3339 |
 | `--json` | Print JSON response |
 
 ### `cortex hosts`
@@ -683,10 +691,11 @@ Flags:
 
 ### `cortex host-state`
 
-Return the latest bounded heartbeat state for one host.
+Return the latest bounded heartbeat state for one host. A bare positional
+argument is a hostname (shorthand for `--host`).
 
 ```bash
-cortex host-state --host tootie
+cortex host-state tootie          # bare positional → --host tootie
 cortex host-state --host-id host-a --limit 5 --json
 ```
 
@@ -694,6 +703,7 @@ Flags:
 
 | Flag | Description |
 | --- | --- |
+| positional `HOST` | Hostname — shorthand for `--host` |
 | `--host-id ID` | Authoritative heartbeat host identity |
 | `--host HOST` | Self-reported hostname fallback (must resolve to one host) |
 | `--since TIME` | Minimum `sampled_at` timestamp (ISO 8601) |

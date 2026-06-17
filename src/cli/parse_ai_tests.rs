@@ -80,8 +80,8 @@ fn parse_ai_search_abuse_and_correlate_accept_equals_forms() {
     let abuse = parse_ai_abuse(&strings(&[
         "--project=/repo",
         "--tool=Bash",
-        "--since=old",
-        "--until=new",
+        "--since=2026-01-01T00:00:00Z",
+        "--until=2026-01-02T00:00:00Z",
         "--limit=10",
         "--before=2",
         "--after=3",
@@ -108,8 +108,8 @@ fn parse_ai_search_abuse_and_correlate_accept_equals_forms() {
         "--host=host1",
         "--source=10.0.0.8",
         "--app=cortex",
-        "--since=t0",
-        "--until=t1",
+        "--since=2026-01-01T00:00:00Z",
+        "--until=2026-01-02T00:00:00Z",
         "--window-minutes=15",
         "--severity-min=warn",
         "--limit=20",
@@ -142,8 +142,8 @@ fn parse_ai_inventory_and_indexing_commands_accept_flags() {
 
     let tools = parse_ai_tools(&strings(&[
         "--project=/repo",
-        "--since=a",
-        "--until=b",
+        "--since=2026-01-01T00:00:00Z",
+        "--until=2026-01-02T00:00:00Z",
         "--json",
     ]))
     .unwrap();
@@ -155,26 +155,30 @@ fn parse_ai_inventory_and_indexing_commands_accept_flags() {
         other => panic!("unexpected command: {other:?}"),
     }
 
-    let projects =
-        parse_ai_projects(&strings(&["--tool=Write", "--since=a", "--until=b"])).unwrap();
+    let projects = parse_ai_projects(&strings(&[
+        "--tool=Write",
+        "--since=2026-01-01T00:00:00Z",
+        "--until=2026-01-02T00:00:00Z",
+    ]))
+    .unwrap();
     match projects {
         crate::cli::CliCommand::Ai(crate::cli::AiCommand::Projects(args)) => {
             assert_eq!(args.tool.as_deref(), Some("Write"));
-            assert_eq!(args.until.as_deref(), Some("b"));
+            assert_eq!(args.until.as_deref(), Some("2026-01-02T00:00:00+00:00"));
         }
         other => panic!("unexpected command: {other:?}"),
     }
 
     let index = parse_ai_index(&strings(&[
         "--path=/tmp/transcripts",
-        "--since=2026",
+        "--since=2026-01-01T00:00:00Z",
         "--force",
     ]))
     .unwrap();
     match index {
         crate::cli::CliCommand::Ai(crate::cli::AiCommand::Index(args)) => {
             assert_eq!(args.path.as_deref(), Some("/tmp/transcripts"));
-            assert_eq!(args.since.as_deref(), Some("2026"));
+            assert_eq!(args.since.as_deref(), Some("2026-01-01T00:00:00+00:00"));
             assert!(args.force);
         }
         other => panic!("unexpected command: {other:?}"),

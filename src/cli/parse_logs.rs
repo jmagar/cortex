@@ -1,5 +1,6 @@
 use anyhow::{Result, bail};
 
+use super::argdefaults::{effective_limit, effective_since, positional_value};
 use super::parse_common::{FlagCursor, parse_output_args, parse_u32_flag, value_after_equals};
 use super::timearg::parse_time_arg;
 use super::{
@@ -88,6 +89,7 @@ pub(crate) fn parse_search(args: &[String]) -> Result<CliCommand> {
     if parsed.grep.as_deref().is_some_and(|g| g.trim().is_empty()) {
         bail!("--grep requires non-empty text");
     }
+    parsed.limit = effective_limit("search", parsed.limit);
     Ok(CliCommand::Search(parsed))
 }
 
@@ -198,6 +200,7 @@ pub(crate) fn parse_filter(args: &[String]) -> Result<CliCommand> {
 
 pub(crate) fn parse_tail(args: &[String]) -> Result<CliCommand> {
     let mut parsed = TailArgs::default();
+    let mut positionals: Vec<String> = Vec::new();
     let mut flags = FlagCursor::new(args);
     while let Some(arg) = flags.next() {
         match arg.as_str() {
@@ -205,7 +208,7 @@ pub(crate) fn parse_tail(args: &[String]) -> Result<CliCommand> {
             "--host" => parsed.host = Some(flags.value("--host")?),
             "--source" => parsed.source = Some(flags.value("--source")?),
             "--app" => parsed.app = Some(flags.value("--app")?),
-            "--n" | "-n" => parsed.n = Some(parse_u32_flag(&arg, flags.value(&arg)?)?),
+            "--n" | "-n" | "--limit" => parsed.n = Some(parse_u32_flag(&arg, flags.value(&arg)?)?),
             _ if arg.starts_with("--host=") => {
                 parsed.host = Some(value_after_equals(arg, "--host")?)
             }
@@ -216,10 +219,25 @@ pub(crate) fn parse_tail(args: &[String]) -> Result<CliCommand> {
             _ if arg.starts_with("--n=") => {
                 parsed.n = Some(parse_u32_flag("--n", value_after_equals(arg, "--n")?)?)
             }
+            _ if arg.starts_with("--limit=") => {
+                parsed.n = Some(parse_u32_flag(
+                    "--limit",
+                    value_after_equals(arg, "--limit")?,
+                )?)
+            }
             _ if arg.starts_with('-') => bail!("unknown tail option: {arg}"),
-            _ => parsed.n = Some(parse_u32_flag("n", arg)?),
+            // A bare positional binds to --host (e.g. `cortex tail dookie`); the
+            // result count is set with -n/--limit.
+            _ => positionals.push(arg),
         }
     }
+    if let Some(host) = positional_value("tail", &positionals)? {
+        if parsed.host.is_some() {
+            bail!("--host and a positional host are mutually exclusive");
+        }
+        parsed.host = Some(host);
+    }
+    parsed.n = effective_limit("tail", parsed.n);
     Ok(CliCommand::Tail(parsed))
 }
 
@@ -247,6 +265,8 @@ pub(crate) fn parse_errors(args: &[String]) -> Result<CliCommand> {
             _ => bail!("unknown errors option: {arg}"),
         }
     }
+    // Default to a recent window (last hour) when the user gives no --since.
+    parsed.since = effective_since("errors", parsed.since)?;
     Ok(CliCommand::Errors(parsed))
 }
 

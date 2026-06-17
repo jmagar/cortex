@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.27.1] - 2026-06-16
+
+### Fixed
+
+- **Silent wrong results from relative time on `apps`/`clock-skew`/`compare`/`correlate-state`/`host-state`/`notify recent`/`ai *`** — these commands captured their time-window flags (`--since`/`--until`, `--reference-time`, compare's `--a-from`/`--a-to`/`--b-from`/`--b-to`, notify's `--since`) as raw strings and bound them straight into SQL timestamp comparisons. A relative value like `1h` was compared *lexically* against RFC3339 timestamps (`timestamp >= '1h'`), silently returning wrong rows with no error. All such flags now route through a shared `norm_time` helper, so relative/keyword forms normalize to RFC3339 and non-time input is rejected. (`timeline`/`patterns`/`incident`/`correlate` in `parse_logs.rs` are addressed by the Plan 1 review fix.) `service logs` is unaffected — its `--since`/`--until` are forwarded to `docker compose logs`, not bound into cortex SQL.
+
+## [1.27.0] - 2026-06-16
+
+### Added
+
+- **Flagless common case (positionals + smart defaults)** — a bare positional now binds to each action's primary selector: `cortex tail dookie` and `cortex host-state dookie` set `--host`, `cortex search "oom killer"` sets the query. `tail` and `search` apply a default limit of 50 and `errors` defaults to a last-hour window when you omit the flags, so the everyday commands need no flags at all. The positional mapping and defaults are declarative metadata on `ACTION_SPECS` (`positional`/`defaults`), applied through shared `argdefaults` helpers — not per-command special-casing. Per-command `--help` examples now lead with the flagless form.
+
+### Changed
+
+- **`cortex tail <arg>` now treats `<arg>` as a hostname, not a line count.** Use `-n`/`--limit` for the count (e.g. `cortex tail dookie -n 100`). This is the only behavioral break in the positional rework; the old bare-number-as-count form is removed.
+
 ## [1.26.1] - 2026-06-16
 
 ### Fixed
@@ -2394,7 +2410,9 @@ start and verify with `cortex --http db status`.
 
 ---
 
-[Unreleased]: https://github.com/jmagar/cortex/compare/v1.26.1...HEAD
+[Unreleased]: https://github.com/jmagar/cortex/compare/v1.27.1...HEAD
+[1.27.1]: https://github.com/jmagar/cortex/compare/v1.27.0...v1.27.1
+[1.27.0]: https://github.com/jmagar/cortex/compare/v1.26.1...v1.27.0
 [1.26.1]: https://github.com/jmagar/cortex/compare/v1.26.0...v1.26.1
 [1.26.0]: https://github.com/jmagar/cortex/compare/v1.25.1...v1.26.0
 [1.25.1]: https://github.com/jmagar/cortex/compare/v1.20.0...v1.25.1

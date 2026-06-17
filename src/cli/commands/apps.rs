@@ -6,7 +6,7 @@
 use anyhow::{Result, bail};
 
 use super::super::args::{AppsArgs, CliCommand};
-use super::super::{FlagCursor, parse_u32_flag};
+use super::super::{FlagCursor, norm_time, parse_u32_flag};
 
 pub(crate) fn parse_apps(args: &[String]) -> Result<CliCommand> {
     let mut parsed = AppsArgs::default();
@@ -17,9 +17,9 @@ pub(crate) fn parse_apps(args: &[String]) -> Result<CliCommand> {
         } else if let Some(v) = flags.match_value(&arg, "--host")? {
             parsed.host = Some(v);
         } else if let Some(v) = flags.match_value(&arg, "--since")? {
-            parsed.since = Some(v);
+            parsed.since = Some(norm_time(v)?);
         } else if let Some(v) = flags.match_value(&arg, "--until")? {
-            parsed.until = Some(v);
+            parsed.until = Some(norm_time(v)?);
         } else if let Some(v) = flags.match_value(&arg, "--limit")? {
             parsed.limit = Some(parse_u32_flag("--limit", v)?);
         } else if let Some(v) = flags.match_value(&arg, "--offset")? {

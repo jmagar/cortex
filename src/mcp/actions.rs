@@ -9,7 +9,7 @@
 //! Now there is one metadata table: [`ACTION_SPECS`]. The schema, scope gates,
 //! help text, and action metadata are computed from it.
 
-use super::action_flags::{COMMON_LOG_FLAGS, FlagSpec};
+use super::action_flags::{COMMON_LOG_FLAGS, Defaults, FlagSpec};
 
 /// The scope required to invoke a given action.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -117,12 +117,19 @@ pub(super) struct ActionSpec {
     pub flags: &'static [FlagSpec],
     /// Copy-paste example invocations.
     pub examples: &'static [&'static str],
+    /// Canonical flag a bare positional argument binds to (`None` = the action
+    /// takes no positional). E.g. `tail dookie` binds the positional to
+    /// `--host`.
+    pub positional: Option<&'static str>,
+    /// Zero-flag defaults applied when the user omits `--limit` / `--since`.
+    pub defaults: Defaults,
 }
 
 macro_rules! action_spec {
-    // Full form: with flag + example metadata.
+    // Canonical form: flags + examples + positional + defaults.
     ($name:literal, $scope:ident, $description:literal, $cost:ident, $handler:ident,
-     flags: $flags:expr, examples: $examples:expr) => {
+     flags: $flags:expr, examples: $examples:expr,
+     positional: $positional:expr, defaults: $defaults:expr) => {
         ActionSpec {
             name: $name,
             scope: Scope::$scope,
@@ -131,13 +138,25 @@ macro_rules! action_spec {
             handler: ActionHandler::$handler,
             flags: $flags,
             examples: $examples,
+            positional: $positional,
+            defaults: $defaults,
         }
+    };
+    // Full form: flag + example metadata, no positional/defaults.
+    ($name:literal, $scope:ident, $description:literal, $cost:ident, $handler:ident,
+     flags: $flags:expr, examples: $examples:expr) => {
+        action_spec!(
+            $name, $scope, $description, $cost, $handler,
+            flags: $flags, examples: $examples,
+            positional: None, defaults: Defaults::new()
+        )
     };
     // Short form: no flag/example metadata yet (defaults to empty).
     ($name:literal, $scope:ident, $description:literal, $cost:ident, $handler:ident) => {
         action_spec!(
             $name, $scope, $description, $cost, $handler,
-            flags: &[], examples: &[]
+            flags: &[], examples: &[],
+            positional: None, defaults: Defaults::new()
         )
     };
 }
@@ -158,9 +177,12 @@ pub(super) const ACTION_SPECS: &[ActionSpec] = &[
         SearchLogs,
         flags: COMMON_LOG_FLAGS,
         examples: &[
-            "cortex search \"oom killer\" --host dookie --since 1h",
+            "cortex search \"oom killer\"",
+            "cortex search \"oom\" --host dookie --since 1h",
             "cortex search --grep \"smoke-test\" --limit 20",
-        ]
+        ],
+        positional: Some("--query"),
+        defaults: Defaults { limit: Some(50), since: None }
     ),
     action_spec!(
         "filter",
@@ -178,7 +200,9 @@ pub(super) const ACTION_SPECS: &[ActionSpec] = &[
         Cheap,
         TailLogs,
         flags: COMMON_LOG_FLAGS,
-        examples: &["cortex tail --host dookie -n 100"]
+        examples: &["cortex tail dookie", "cortex tail --host dookie -n 100"],
+        positional: Some("--host"),
+        defaults: Defaults { limit: Some(50), since: None }
     ),
     action_spec!(
         "errors",
@@ -187,7 +211,9 @@ pub(super) const ACTION_SPECS: &[ActionSpec] = &[
         Cheap,
         GetErrors,
         flags: COMMON_LOG_FLAGS,
-        examples: &["cortex errors --since 1h"]
+        examples: &["cortex errors", "cortex errors --since 6h --limit 50"],
+        positional: None,
+        defaults: Defaults { limit: None, since: Some("1h") }
     ),
     action_spec!(
         "hosts",
@@ -210,7 +236,11 @@ pub(super) const ACTION_SPECS: &[ActionSpec] = &[
         Read,
         "Fetch latest bounded heartbeat state for a host",
         Moderate,
-        HostState
+        HostState,
+        flags: &[],
+        examples: &["cortex host-state dookie", "cortex host-state dookie --since 30m"],
+        positional: Some("--host"),
+        defaults: Defaults::new()
     ),
     action_spec!(
         "fleet_state",
@@ -534,6 +564,24 @@ pub fn description_for(action: &str) -> Option<&'static str> {
         .iter()
         .find(|s| s.name == action)
         .map(|s| s.description)
+}
+
+/// The canonical flag a bare positional binds to for `action` (`None` when the
+/// action takes no positional or is unknown).
+pub fn positional_for(action: &str) -> Option<&'static str> {
+    ACTION_SPECS
+        .iter()
+        .find(|s| s.name == action)
+        .and_then(|s| s.positional)
+}
+
+/// Zero-flag defaults for `action` (empty defaults when the action is unknown).
+pub fn defaults_for(action: &str) -> Defaults {
+    ACTION_SPECS
+        .iter()
+        .find(|s| s.name == action)
+        .map(|s| s.defaults)
+        .unwrap_or_default()
 }
 
 /// Map an action name to its required MCP scope string.

@@ -42,3 +42,34 @@ fn all_cli_query_actions_have_examples() {
         );
     }
 }
+
+#[test]
+fn tail_binds_positional_to_host_and_defaults_limit() {
+    assert_eq!(positional_for("tail"), Some("--host"));
+    assert_eq!(defaults_for("tail").limit, Some(50));
+}
+
+#[test]
+fn search_positional_binds_to_query() {
+    assert_eq!(positional_for("search"), Some("--query"));
+    assert_eq!(defaults_for("search").limit, Some(50));
+}
+
+#[test]
+fn errors_defaults_to_one_hour_window() {
+    assert_eq!(positional_for("errors"), None);
+    assert_eq!(defaults_for("errors").since, Some("1h"));
+}
+
+#[test]
+fn host_state_binds_positional_to_host() {
+    assert_eq!(positional_for("host_state"), Some("--host"));
+}
+
+#[test]
+fn actions_without_positional_metadata_default_to_none() {
+    assert_eq!(positional_for("hosts"), None);
+    let d = defaults_for("hosts");
+    assert_eq!(d.limit, None);
+    assert_eq!(d.since, None);
+}

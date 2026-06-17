@@ -35,6 +35,7 @@ pub(crate) use run::ENV_USE_HTTP;
 pub(crate) use run::{CliMode, GlobalFlags, run};
 
 mod ai_watch;
+mod argdefaults;
 pub(crate) mod color;
 mod complete;
 mod completions;
@@ -69,7 +70,7 @@ mod timearg;
 
 pub(crate) use config_cmd::run_config;
 pub(crate) use heartbeat_agent::run_heartbeat_no_db;
-pub(crate) use parse_common::{FlagCursor, parse_i64_flag, parse_u32_flag};
+pub(crate) use parse_common::{FlagCursor, norm_time, parse_i64_flag, parse_u32_flag};
 pub(crate) use setup::install_self;
 pub(crate) use setup::run_setup;
 
@@ -102,6 +103,17 @@ pub(crate) fn registry_flags(cli_command: &str) -> &'static [cortex::mcp::FlagSp
 /// Copy-paste examples for a CLI command (empty slice when none).
 pub(crate) fn registry_examples(cli_command: &str) -> &'static [&'static str] {
     cortex::mcp::examples_for(&cli_command.replace('-', "_")).unwrap_or(&[])
+}
+
+/// Canonical flag a bare positional binds to for a CLI command (`None` = the
+/// command takes no positional).
+pub(crate) fn registry_positional(cli_command: &str) -> Option<&'static str> {
+    cortex::mcp::positional_for(&cli_command.replace('-', "_"))
+}
+
+/// Zero-flag defaults for a CLI command (empty defaults when none).
+pub(crate) fn registry_defaults(cli_command: &str) -> cortex::mcp::Defaults {
+    cortex::mcp::defaults_for(&cli_command.replace('-', "_"))
 }
 
 /// `cortex __complete <ctx> ...` — print shell-completion candidates to stdout.

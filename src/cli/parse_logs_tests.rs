@@ -320,6 +320,104 @@ fn filter_and_sessions_normalize_relative_from() {
 }
 
 #[test]
+fn tail_positional_sets_host_and_default_limit() {
+    let cmd = parse_tail(&strings(&["dookie"])).unwrap();
+    let crate::cli::CliCommand::Tail(args) = cmd else {
+        panic!("expected Tail")
+    };
+    assert_eq!(args.host.as_deref(), Some("dookie"));
+    assert_eq!(args.n, Some(50)); // default applied when -n/--limit omitted
+}
+
+#[test]
+fn tail_explicit_limit_overrides_default() {
+    let cmd = parse_tail(&strings(&["dookie", "-n", "10"])).unwrap();
+    let crate::cli::CliCommand::Tail(args) = cmd else {
+        panic!("expected Tail")
+    };
+    assert_eq!(args.host.as_deref(), Some("dookie"));
+    assert_eq!(args.n, Some(10));
+}
+
+#[test]
+fn tail_rejects_two_positionals() {
+    let err = parse_tail(&strings(&["dookie", "tootie"]))
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("at most one"), "{err}");
+}
+
+#[test]
+fn tail_accepts_limit_flag_for_count() {
+    // `--limit` is a documented alias for `-n`; both set the row count.
+    for cmd in [
+        parse_tail(&strings(&["--limit", "7"])).unwrap(),
+        parse_tail(&strings(&["--limit=7"])).unwrap(),
+    ] {
+        let crate::cli::CliCommand::Tail(args) = cmd else {
+            panic!("expected Tail")
+        };
+        assert_eq!(args.n, Some(7));
+    }
+}
+
+#[test]
+fn tail_positional_and_host_flag_are_mutually_exclusive() {
+    let err = parse_tail(&strings(&["bar", "--host", "foo"]))
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("mutually exclusive"), "{err}");
+}
+
+#[test]
+fn search_applies_default_limit() {
+    let cmd = parse_search(&strings(&["oom"])).unwrap();
+    let crate::cli::CliCommand::Search(args) = cmd else {
+        panic!("expected Search")
+    };
+    assert_eq!(args.query.as_deref(), Some("oom"));
+    assert_eq!(args.limit, Some(50));
+}
+
+#[test]
+fn search_explicit_limit_overrides_default() {
+    let cmd = parse_search(&strings(&["oom", "--limit", "5"])).unwrap();
+    let crate::cli::CliCommand::Search(args) = cmd else {
+        panic!("expected Search")
+    };
+    assert_eq!(args.limit, Some(5));
+}
+
+#[test]
+fn errors_defaults_to_one_hour_window() {
+    let cmd = parse_errors(&strings(&[])).unwrap();
+    let crate::cli::CliCommand::Errors(args) = cmd else {
+        panic!("expected Errors")
+    };
+    let since = args.since.expect("default since applied");
+    assert!(since.ends_with("+00:00"), "{since}"); // absolute RFC3339 from the 1h default
+    // Pin the actual one-hour semantics, not just the shape: the default window
+    // should land ~1h before now (allow slack for clock + execution time).
+    let parsed = chrono::DateTime::parse_from_rfc3339(&since).expect("rfc3339");
+    let age_min = chrono::Utc::now()
+        .signed_duration_since(parsed.with_timezone(&chrono::Utc))
+        .num_minutes();
+    assert!(
+        (55..=65).contains(&age_min),
+        "default window should be ~1h ago, was {age_min} min: {since}"
+    );
+}
+
+#[test]
+fn errors_explicit_since_overrides_default() {
+    let cmd = parse_errors(&strings(&["--since", "2026-01-01T00:00:00Z"])).unwrap();
+    let crate::cli::CliCommand::Errors(args) = cmd else {
+        panic!("expected Errors")
+    };
+    assert_eq!(args.since.as_deref(), Some("2026-01-01T00:00:00+00:00"));
+}
+
+#[test]
 fn timeline_patterns_incident_correlate_normalize_relative_time() {
     // timeline --since/--until accept relative values like the other time flags.
     let timeline = parse_timeline(&strings(&["--since", "2d", "--until=1h"])).unwrap();

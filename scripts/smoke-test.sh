@@ -226,6 +226,20 @@ run_cortex_ai_add() {
     CORTEX_DB_PATH="$db_path" "$cortex_bin" ai add --file "$fixture" --json
 }
 
+# Resolve the cortex CLI binary (env CORTEX_BIN, PATH, or debug build), echoing
+# its path. Returns 127 when no binary is found.
+resolve_cortex_bin() {
+    if [[ -n "${CORTEX_BIN:-}" ]]; then
+        echo "$CORTEX_BIN"
+    elif command -v cortex >/dev/null 2>&1; then
+        command -v cortex
+    elif [[ -x "target/debug/cortex" ]]; then
+        echo "target/debug/cortex"
+    else
+        return 127
+    fi
+}
+
 seed_ai_fixture() {
     [[ -f "$AI_SMOKE_FIXTURE" ]] || return 1
 
@@ -1171,6 +1185,40 @@ if command -v sqlite3 >/dev/null 2>&1; then
     fi
 else
     echo "SKIP: enrichment smoke — sqlite3 not available"
+fi
+
+# ── CLI positionals + zero-flag defaults (Plan 3) ─────────────────────────────
+echo ""
+echo "CLI: positionals + defaults"
+if CLI_BIN="$(resolve_cortex_bin)"; then
+    # `cortex tail dookie` — bare positional binds to --host; default n=50.
+    CLI_TAIL_HOST="${SEED_HOST:-$(mcp_call hosts 2>/dev/null | python3 -c '
+import sys, json
+d = json.load(sys.stdin)
+hostnames = d.get("hostnames") or []
+if not hostnames:
+    hosts = d.get("hosts") or []
+    hostnames = [h.get("hostname") for h in hosts if isinstance(h, dict) and h.get("hostname")]
+print(hostnames[0] if hostnames else "")
+' 2>/dev/null)}"
+    if [[ -n "$CLI_TAIL_HOST" ]]; then
+        if "$CLI_BIN" tail "$CLI_TAIL_HOST" -n 1 >/dev/null 2>&1; then
+            pass "cli: tail positional host (cortex tail $CLI_TAIL_HOST -n 1)"
+        else
+            fail "cli: tail positional host (cortex tail $CLI_TAIL_HOST -n 1)"
+        fi
+    else
+        skip "cli: tail positional host (no known hostname to target)"
+    fi
+
+    # `cortex errors` — no flags; default 1h window applied.
+    if "$CLI_BIN" errors >/dev/null 2>&1; then
+        pass "cli: errors default window (cortex errors)"
+    else
+        fail "cli: errors default window (cortex errors)"
+    fi
+else
+    skip "cli: positional/default checks require the cortex binary (set CORTEX_BIN or build it)"
 fi
 
 # ─── Phase 4: Summary ────────────────────────────────────────────────────────

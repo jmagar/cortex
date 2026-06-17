@@ -32,6 +32,31 @@ pub enum ValueKind {
     Time,
 }
 
+/// Zero-flag defaults applied to an action when the user omits them.
+///
+/// Kept deliberately small: the only knobs worth defaulting at the CLI layer
+/// are the result `limit` and the start-of-window `since`. `None` in either
+/// field means "leave it to the server / unbounded" — i.e. no default.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Defaults {
+    /// Default `--limit` when the user passes none (`None` = server default).
+    pub limit: Option<u32>,
+    /// Default `--since` window when unset, expressed as a relative literal the
+    /// time parser understands (e.g. `"1h"`). `None` = unbounded.
+    pub since: Option<&'static str>,
+}
+
+impl Defaults {
+    /// Const constructor for the empty (no-defaults) case, usable inside the
+    /// `const ACTION_SPECS` table where `Default::default()` cannot be called.
+    pub const fn new() -> Self {
+        Self {
+            limit: None,
+            since: None,
+        }
+    }
+}
+
 pub(super) const SEVERITIES: &[&str] = &[
     "emerg", "alert", "crit", "err", "warning", "notice", "info", "debug",
 ];

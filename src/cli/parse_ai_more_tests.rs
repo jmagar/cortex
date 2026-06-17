@@ -23,8 +23,8 @@ fn parse_ai_similar_and_ask_history_accept_all_filters() {
         "--host=host1",
         "--app=cortex",
         "--severity-min=err",
-        "--since=t0",
-        "--until=t1",
+        "--since=2026-01-01T00:00:00Z",
+        "--until=2026-01-01T00:10:00Z",
         "--window-minutes=45",
         "--limit=8",
         "disk",
@@ -43,8 +43,8 @@ fn parse_ai_similar_and_ask_history_accept_all_filters() {
     let ask = parse_ai_ask_history(&strings(&[
         "--host=host1",
         "--app=cortex",
-        "--since=t0",
-        "--until=t1",
+        "--since=2026-01-01T00:00:00Z",
+        "--until=2026-01-01T00:10:00Z",
         "--limit=5",
         "--json",
         "why",
@@ -87,8 +87,8 @@ fn parse_ai_incident_context_accepts_full_filter_set() {
 
     match command {
         crate::cli::CliCommand::Ai(crate::cli::AiCommand::IncidentContext(args)) => {
-            assert_eq!(args.since, "2026-01-01T00:00:00Z");
-            assert_eq!(args.until, "2026-01-01T00:10:00Z");
+            assert_eq!(args.since, "2026-01-01T00:00:00+00:00");
+            assert_eq!(args.until, "2026-01-01T00:10:00+00:00");
             assert_eq!(args.query.as_deref(), Some("panic"));
             assert_eq!(args.limit, Some(12));
             assert!(args.json);
@@ -102,8 +102,8 @@ fn parse_ai_incidents_accepts_terms_and_window_filters() {
     let command = parse_ai_incidents(&strings(&[
         "--project=/repo",
         "--tool=Bash",
-        "--since=t0",
-        "--until=t1",
+        "--since=2026-01-01T00:00:00Z",
+        "--until=2026-01-01T00:10:00Z",
         "--limit=13",
         "--window-minutes=60",
         "--term=panic",
@@ -153,8 +153,8 @@ fn parse_ai_investigate_accepts_incident_filters_and_limits() {
     let command = parse_ai_investigate(&strings(&[
         "--project=/repo",
         "--tool=Edit",
-        "--since=t0",
-        "--until=t1",
+        "--since=2026-01-01T00:00:00Z",
+        "--until=2026-01-01T00:10:00Z",
         "--limit=21",
         "--window-minutes=30",
         "--correlation-window-minutes=7",
@@ -185,8 +185,8 @@ fn parse_ai_assess_accepts_incident_and_investigation_filters() {
         "--model=gemini-test",
         "--project=/repo",
         "--tool=Bash",
-        "--since=t0",
-        "--until=t1",
+        "--since=2026-01-01T00:00:00Z",
+        "--until=2026-01-01T00:10:00Z",
         "--limit=34",
         "--window-minutes=44",
         "--correlation-window-minutes=9",
@@ -221,7 +221,11 @@ fn parse_ai_more_reports_required_query_and_unexpected_argument_errors() {
         (parse_ai_ask_history, vec!["--limit=1"], "requires a query"),
         (
             parse_ai_incident_context,
-            vec!["--since=t0", "--until=t1", "extra"],
+            vec![
+                "--since=2026-01-01T00:00:00Z",
+                "--until=2026-01-01T00:10:00Z",
+                "extra",
+            ],
             "unexpected positional argument",
         ),
         (

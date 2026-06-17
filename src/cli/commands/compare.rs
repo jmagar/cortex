@@ -8,8 +8,8 @@
 
 use anyhow::{Result, bail};
 
-use super::super::FlagCursor;
 use super::super::args::{CliCommand, CompareArgs};
+use super::super::{FlagCursor, norm_time};
 
 pub(crate) fn parse_compare(args: &[String]) -> Result<CliCommand> {
     let mut parsed = CompareArgs::default();
@@ -18,13 +18,13 @@ pub(crate) fn parse_compare(args: &[String]) -> Result<CliCommand> {
         if arg == "--json" {
             parsed.json = true;
         } else if let Some(v) = flags.match_value(&arg, "--a-from")? {
-            parsed.a_from = Some(v);
+            parsed.a_from = Some(norm_time(v)?);
         } else if let Some(v) = flags.match_value(&arg, "--a-to")? {
-            parsed.a_to = Some(v);
+            parsed.a_to = Some(norm_time(v)?);
         } else if let Some(v) = flags.match_value(&arg, "--b-from")? {
-            parsed.b_from = Some(v);
+            parsed.b_from = Some(norm_time(v)?);
         } else if let Some(v) = flags.match_value(&arg, "--b-to")? {
-            parsed.b_to = Some(v);
+            parsed.b_to = Some(norm_time(v)?);
         } else {
             bail!("unknown compare option: {arg}");
         }
