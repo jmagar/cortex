@@ -70,7 +70,7 @@ mod timearg;
 
 pub(crate) use config_cmd::run_config;
 pub(crate) use heartbeat_agent::run_heartbeat_no_db;
-pub(crate) use parse_common::{FlagCursor, parse_i64_flag, parse_u32_flag};
+pub(crate) use parse_common::{FlagCursor, norm_time, parse_i64_flag, parse_u32_flag};
 pub(crate) use setup::install_self;
 pub(crate) use setup::run_setup;
 

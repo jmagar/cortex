@@ -5,7 +5,7 @@
 use anyhow::{Result, anyhow, bail};
 
 use super::super::args::{CliCommand, NotifyCommand, NotifyRecentArgs, NotifyTestArgs};
-use super::super::{FlagCursor, parse_i64_flag};
+use super::super::{FlagCursor, norm_time, parse_i64_flag};
 
 /// Dispatch `cortex notify <subcommand> [args]`.
 pub(crate) fn parse_notify(args: &[String]) -> Result<CliCommand> {
@@ -35,7 +35,7 @@ fn parse_notify_recent(args: &[String]) -> Result<CliCommand> {
         } else if let Some(v) = flags.match_value(&arg, "--rule-id")? {
             parsed.rule_id = Some(v);
         } else if let Some(v) = flags.match_value(&arg, "--since")? {
-            parsed.since = Some(v);
+            parsed.since = Some(norm_time(v)?);
         } else if let Some(v) = flags.match_value(&arg, "--limit")? {
             parsed.limit = Some(parse_i64_flag("--limit", v)?);
         } else {

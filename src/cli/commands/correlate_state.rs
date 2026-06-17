@@ -6,7 +6,7 @@
 use anyhow::{Result, bail};
 
 use super::super::args::{CliCommand, CorrelateStateArgs};
-use super::super::{FlagCursor, parse_u32_flag};
+use super::super::{FlagCursor, norm_time, parse_u32_flag};
 
 pub(crate) fn parse_correlate_state(args: &[String]) -> Result<CliCommand> {
     let mut parsed = CorrelateStateArgs::default();
@@ -15,7 +15,7 @@ pub(crate) fn parse_correlate_state(args: &[String]) -> Result<CliCommand> {
         if arg == "--json" {
             parsed.json = true;
         } else if let Some(v) = flags.match_value(&arg, "--reference-time")? {
-            parsed.reference_time = Some(v);
+            parsed.reference_time = Some(norm_time(v)?);
         } else if let Some(v) = flags.match_value(&arg, "--window-minutes")? {
             parsed.window_minutes = Some(parse_u32_flag("--window-minutes", v)?);
         } else if let Some(v) = flags.match_value(&arg, "--host")? {

@@ -415,7 +415,7 @@ fn parse_ai_index_collects_reindex_controls() {
         parsed,
         CliCommand::Ai(AiCommand::Index(AiIndexArgs {
             path: Some("/tmp/session.jsonl".into()),
-            since: Some("2026-05-14T00:00:00Z".into()),
+            since: Some("2026-05-14T00:00:00+00:00".into()),
             force: true,
             json: true,
         }))
@@ -1470,7 +1470,7 @@ fn parse_clock_skew_with_since() {
         .expect("parse clock-skew");
     match cmd {
         CliCommand::ClockSkew(args) => {
-            assert_eq!(args.since.as_deref(), Some("2026-05-20T00:00:00Z"));
+            assert_eq!(args.since.as_deref(), Some("2026-05-20T00:00:00+00:00"));
             assert!(!args.json);
         }
         other => panic!("expected ClockSkew, got {other:?}"),
@@ -1512,8 +1512,8 @@ fn parse_compare_with_ranges() {
     .expect("parse compare");
     match cmd {
         CliCommand::Compare(args) => {
-            assert_eq!(args.a_from.as_deref(), Some("2026-05-20T00:00:00Z"));
-            assert_eq!(args.b_to.as_deref(), Some("2026-05-21T23:59:59Z"));
+            assert_eq!(args.a_from.as_deref(), Some("2026-05-20T00:00:00+00:00"));
+            assert_eq!(args.b_to.as_deref(), Some("2026-05-21T23:59:59+00:00"));
         }
         other => panic!("expected Compare, got {other:?}"),
     }

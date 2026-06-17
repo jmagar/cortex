@@ -1,6 +1,6 @@
 use super::super::{
-    FileTailAddArgs, FileTailCommand, FileTailListArgs, HeartbeatAgentArgs, HeartbeatCommand,
-    InventoryArgs, InventoryCommand, OutputArgs,
+    AiCommand, FileTailAddArgs, FileTailCommand, FileTailListArgs, HeartbeatAgentArgs,
+    HeartbeatCommand, InventoryArgs, InventoryCommand, OutputArgs,
 };
 use super::*;
 
@@ -532,4 +532,110 @@ fn parse_correlate_state_rejects_unknown_flag() {
         .unwrap_err()
         .to_string();
     assert!(err.contains("unknown correlate-state option"), "got: {err}");
+}
+
+// Regression: every CLI flag whose value is bound into a SQL timestamp
+// comparison must route through the shared time parser, so relative/keyword
+// input is normalized to RFC3339 (and non-time input is rejected) rather than
+// stored raw and compared lexically — a silent-failure source. parse_logs's
+// search/filter/tail/errors/timeline/patterns/incident/correlate are covered
+// elsewhere; this pins the previously-unnormalized commands.
+#[test]
+fn time_flags_normalize_relative_across_state_admin_and_ai_commands() {
+    // apps --since/--until
+    let CliCommand::Apps(a) =
+        parse_command(vec!["apps".into(), "--since".into(), "1h".into()]).unwrap()
+    else {
+        panic!("expected Apps")
+    };
+    let s = a.since.expect("apps since");
+    assert!(s.ends_with("+00:00"), "apps --since not normalized: {s}");
+
+    // clock-skew --since
+    let CliCommand::ClockSkew(c) =
+        parse_command(vec!["clock-skew".into(), "--since".into(), "2d".into()]).unwrap()
+    else {
+        panic!("expected ClockSkew")
+    };
+    assert!(c.since.unwrap().ends_with("+00:00"));
+
+    // compare --a-from (and the other three share the code path)
+    let CliCommand::Compare(cmp) =
+        parse_command(vec!["compare".into(), "--a-from".into(), "1h".into()]).unwrap()
+    else {
+        panic!("expected Compare")
+    };
+    assert!(cmp.a_from.unwrap().ends_with("+00:00"));
+
+    // correlate-state --reference-time
+    let CliCommand::CorrelateState(cs) = parse_command(vec![
+        "correlate-state".into(),
+        "--reference-time".into(),
+        "1h".into(),
+    ])
+    .unwrap() else {
+        panic!("expected CorrelateState")
+    };
+    assert!(cs.reference_time.unwrap().ends_with("+00:00"));
+
+    // host-state (bare positional host) --since
+    let CliCommand::HostState(hs) = parse_command(vec![
+        "host-state".into(),
+        "dookie".into(),
+        "--since".into(),
+        "30m".into(),
+    ])
+    .unwrap() else {
+        panic!("expected HostState")
+    };
+    assert!(hs.since.unwrap().ends_with("+00:00"));
+
+    // ai search --since
+    let CliCommand::Ai(AiCommand::Search(ai)) = parse_command(vec![
+        "ai".into(),
+        "search".into(),
+        "boom".into(),
+        "--since".into(),
+        "1h".into(),
+    ])
+    .unwrap() else {
+        panic!("expected Ai Search")
+    };
+    assert!(ai.since.unwrap().ends_with("+00:00"));
+}
+
+#[test]
+fn time_flags_reject_non_time_values() {
+    for cmd in [
+        vec!["apps".to_string(), "--since".into(), "notatime".into()],
+        vec![
+            "clock-skew".to_string(),
+            "--since".into(),
+            "notatime".into(),
+        ],
+        vec!["compare".to_string(), "--a-from".into(), "notatime".into()],
+        vec![
+            "correlate-state".to_string(),
+            "--reference-time".into(),
+            "notatime".into(),
+        ],
+        vec![
+            "host-state".to_string(),
+            "dookie".into(),
+            "--since".into(),
+            "notatime".into(),
+        ],
+        vec![
+            "ai".to_string(),
+            "search".into(),
+            "q".into(),
+            "--since".into(),
+            "notatime".into(),
+        ],
+    ] {
+        assert!(
+            parse_command(cmd.clone()).is_err(),
+            "expected error for {cmd:?}"
+        );
+    }
 }
