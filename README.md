@@ -978,6 +978,10 @@ Both modes use the same config and environment variable loader. `cortex mcp` is 
 The direct CLI uses the same shared service layer as the MCP tool, so results and validation match the MCP actions without needing an MCP client:
 
 ```bash
+cortex search "oom killer"                 # bare query; default limit 50
+cortex tail dookie                         # bare positional → --host; default n=50
+cortex errors                              # defaults to the last hour
+cortex host-state tootie                   # bare positional → --host
 cortex search 'error AND nginx' --host proxy --limit 10
 cortex tail -n 20 --app kernel
 cortex errors --since 2026-01-01T00:00:00Z
