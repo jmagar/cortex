@@ -7,11 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.25.0] - 2026-06-16
+## [1.25.1] - 2026-06-16
 
 ### Added
 
-- **Relative & natural time arguments** — `--from`/`--to`/`--received-from`/`--received-to` on `search`/`filter`/`sessions`/`errors` now accept relative durations (`1h`, `30m`, `2d`, `90s`), keywords (`now`, `today`, `yesterday`), and `YYYY-MM-DD`/`YYYY-MM-DD HH:MM` forms in addition to RFC3339. Values are normalized to RFC3339 at parse time (e.g. a trailing `Z` becomes `+00:00`).
+- **Relative & natural time arguments** — every CLI time flag now accepts relative durations (`1h`, `30m`, `2d`, `90s`), keywords (`now`, `today`, `yesterday`), and `YYYY-MM-DD`/`YYYY-MM-DD HH:MM` forms in addition to RFC3339: `--from`/`--to`/`--received-from`/`--received-to` on `search`/`filter`/`sessions`/`errors`, `--from`/`--to` on `timeline`/`patterns`, `incident --around`, and `correlate --reference-time` (including its positional form). Values are normalized to RFC3339 at parse time (e.g. a trailing `Z` becomes `+00:00`); a non-time value is now rejected with a clear error instead of being passed through to the query layer.
 - **`--grep` literal search** — `cortex search --grep "smoke-test"` matches literal text (including hyphenated terms) by wrapping it as a safe FTS5 phrase, bypassing FTS5 operator syntax. Mutually exclusive with a positional query.
 
 ### Changed
