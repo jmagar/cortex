@@ -36,6 +36,7 @@ use crate::otlp::{self, OtlpCounters, OtlpState};
 use crate::receiver::enrichment::EnrichmentConfig;
 use crate::{docker_ingest, mcp, receiver};
 
+mod graph_refresh;
 mod inventory_refresh;
 
 pub struct RuntimeCore {
@@ -74,6 +75,7 @@ pub struct MaintenanceHandles {
     notification_digest: Option<JoinHandle<()>>,
     inventory_refresh: Option<JoinHandle<()>>,
     inventory_backfill: Option<JoinHandle<()>>,
+    graph_refresh: Option<JoinHandle<()>>,
     session_rollup: Option<JoinHandle<()>>,
     timeline_rollup: Option<JoinHandle<()>>,
     optimize: Option<JoinHandle<()>>,
@@ -130,6 +132,7 @@ impl MaintenanceHandles {
             self.notification_digest,
             self.inventory_refresh,
             self.inventory_backfill,
+            self.graph_refresh,
             self.session_rollup,
             self.timeline_rollup,
             self.optimize,
@@ -424,6 +427,12 @@ impl RuntimeCore {
             Arc::clone(&self.observability),
         );
         let inventory_backfill = self.spawn_inventory_backfill_task(token.clone());
+        let graph_refresh = graph_refresh::spawn(
+            token.clone(),
+            Arc::clone(&self.pool),
+            Arc::clone(&self.maintenance_permit),
+            Arc::clone(&self.observability),
+        );
         let session_rollup = self.spawn_session_rollup_task(token.clone());
         let timeline_rollup = self.spawn_timeline_rollup_task(token.clone());
         let optimize = self.spawn_optimize_task(token.clone());
@@ -440,6 +449,7 @@ impl RuntimeCore {
             notification_digest,
             inventory_refresh,
             inventory_backfill,
+            graph_refresh,
             session_rollup,
             timeline_rollup,
             optimize,

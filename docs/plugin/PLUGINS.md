@@ -49,11 +49,14 @@ placeholders. Keep docs and validation scripts aligned with that syntax.
 
 ## Version synchronization
 
-Use `just publish [major|minor|patch]` for releases. That flow bumps
-`Cargo.toml`, `server.json`, `mcpb/manifest.json`, and `CHANGELOG.md`. Keep
+Use `just publish [major|minor|patch]` for releases. That flow runs
+`cargo xtask bump-version`, which bumps every file declared in
+`release/components.toml` (`Cargo.toml`, `Cargo.lock`, `server.json`,
+`mcpb/manifest.json`, `docker-compose.prod.yml`, and `CHANGELOG.md`). Keep
 `.claude-plugin/plugin.json` and any future Claude/Codex/Gemini plugin
 manifests free of a top-level `version` key; CI runs
-`scripts/check-plugin-manifest-versions.sh` to enforce that convention.
+`cargo xtask check-version-sync` (the manifest's `json_no_version` row) to
+enforce that convention.
 
 ## See also
 

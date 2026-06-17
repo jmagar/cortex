@@ -369,3 +369,164 @@ fn refresh_graph_projection_reports_status_failures_and_single_flight() {
     assert!(status.is_degraded);
     assert!(status.last_error.is_some());
 }
+
+#[test]
+fn parse_log_watermark_extracts_log_cursor() {
+    assert_eq!(
+        parse_log_watermark("logs:42;heartbeats:3;signatures:7"),
+        Some(42)
+    );
+    // Order-independent.
+    assert_eq!(
+        parse_log_watermark("heartbeats:3;logs:99;signatures:7"),
+        Some(99)
+    );
+    assert_eq!(parse_log_watermark("logs:0"), Some(0));
+    assert_eq!(parse_log_watermark(""), None);
+    assert_eq!(parse_log_watermark("heartbeats:3;signatures:7"), None);
+    assert_eq!(parse_log_watermark("logs:notanumber"), None);
+}
+
+#[test]
+fn incremental_projection_falls_back_to_full_build_when_unbuilt() {
+    let _guard = GRAPH_TEST_LOCK.lock();
+    let dir = tempfile::tempdir().unwrap();
+    let pool = init_pool(&test_storage_config(
+        dir.path().join("graph-inc-fallback.db"),
+    ))
+    .unwrap();
+
+    insert_logs_batch(
+        &pool,
+        &[make_entry(
+            "2026-01-01T00:00:00Z",
+            "host-a",
+            Some("sshd"),
+            "accepted publickey",
+        )],
+    )
+    .unwrap();
+
+    // No prior projection: incremental must perform a full build.
+    let stats = match refresh_graph_projection_incremental(&pool).unwrap() {
+        GraphRebuildOutcome::Rebuilt(stats) => stats,
+        GraphRebuildOutcome::AlreadyRunning => panic!("unexpected single-flight skip"),
+    };
+    assert!(stats.entity_count >= 3);
+    let status = graph_projection_status(&pool).unwrap();
+    assert_eq!(status.projection_status, "ready");
+    assert!(!status.is_degraded);
+}
+
+/// The gold-standard correctness check: a full build followed by an incremental
+/// delta must yield the same graph (entity/relationship/evidence counts and
+/// accumulated evidence totals) as a single full rebuild over all the same logs.
+#[test]
+fn incremental_projection_matches_full_rebuild() {
+    let _guard = GRAPH_TEST_LOCK.lock();
+
+    let batch1 = || {
+        vec![
+            make_entry("2026-01-01T00:00:00Z", "host-a", Some("sshd"), "login a"),
+            make_entry("2026-01-01T00:05:00Z", "host-a", Some("sshd"), "login b"),
+        ]
+    };
+    // batch2 reuses host-a/sshd (accumulates evidence on existing edges) and
+    // introduces host-b/nginx (new entities + edges discovered incrementally).
+    let batch2 = || {
+        vec![
+            make_entry("2026-01-01T01:00:00Z", "host-a", Some("sshd"), "login c"),
+            make_entry("2026-01-01T01:05:00Z", "host-b", Some("nginx"), "GET /"),
+        ]
+    };
+
+    // DB A: full build over batch1, then an incremental pass over batch2.
+    let dir_a = tempfile::tempdir().unwrap();
+    let pool_a = init_pool(&test_storage_config(dir_a.path().join("graph-inc-a.db"))).unwrap();
+    insert_logs_batch(&pool_a, &batch1()).unwrap();
+    refresh_graph_projection(&pool_a).unwrap();
+    insert_logs_batch(&pool_a, &batch2()).unwrap();
+    let incremental = match refresh_graph_projection_incremental(&pool_a).unwrap() {
+        GraphRebuildOutcome::Rebuilt(stats) => stats,
+        GraphRebuildOutcome::AlreadyRunning => panic!("unexpected single-flight skip"),
+    };
+
+    // DB B: a single full rebuild over batch1 + batch2.
+    let dir_b = tempfile::tempdir().unwrap();
+    let pool_b = init_pool(&test_storage_config(dir_b.path().join("graph-inc-b.db"))).unwrap();
+    insert_logs_batch(&pool_b, &batch1()).unwrap();
+    insert_logs_batch(&pool_b, &batch2()).unwrap();
+    let full = match refresh_graph_projection(&pool_b).unwrap() {
+        GraphRebuildOutcome::Rebuilt(stats) => stats,
+        GraphRebuildOutcome::AlreadyRunning => panic!("unexpected single-flight skip"),
+    };
+
+    assert_eq!(
+        incremental.entity_count, full.entity_count,
+        "entity count must match a full rebuild"
+    );
+    assert_eq!(
+        incremental.relationship_count, full.relationship_count,
+        "relationship count must match a full rebuild"
+    );
+    assert_eq!(
+        incremental.evidence_count, full.evidence_count,
+        "evidence row count must match a full rebuild"
+    );
+
+    let conn_a = pool_a.get().unwrap();
+    let conn_b = pool_b.get().unwrap();
+    // Accumulated evidence totals must match (guards against double-counting or
+    // dropped evidence in the incremental merge).
+    let ev_sum = "SELECT COALESCE(SUM(evidence_count), 0) FROM graph_relationship_evidence";
+    assert_eq!(
+        count(&conn_a, ev_sum),
+        count(&conn_b, ev_sum),
+        "summed evidence_count must match a full rebuild"
+    );
+    let rel_ev_sum = "SELECT COALESCE(SUM(evidence_count), 0) FROM graph_relationships";
+    assert_eq!(
+        count(&conn_a, rel_ev_sum),
+        count(&conn_b, rel_ev_sum),
+        "relationship evidence_count rollups must match a full rebuild"
+    );
+    // host-b only appears in batch2, so the incremental pass must have created it.
+    assert_eq!(
+        count(
+            &conn_a,
+            "SELECT COUNT(*) FROM graph_entities WHERE entity_type='host' AND canonical_key='host-b'"
+        ),
+        1,
+        "incremental pass must create entities first seen in the delta"
+    );
+}
+
+/// A second incremental pass with no new logs must be a no-op for counts (the
+/// bounded snapshot re-projection stays idempotent).
+#[test]
+fn incremental_projection_is_idempotent_without_new_logs() {
+    let _guard = GRAPH_TEST_LOCK.lock();
+    let dir = tempfile::tempdir().unwrap();
+    let pool = init_pool(&test_storage_config(dir.path().join("graph-inc-idem.db"))).unwrap();
+    insert_logs_batch(
+        &pool,
+        &[
+            make_entry("2026-01-01T00:00:00Z", "host-a", Some("sshd"), "login a"),
+            make_entry("2026-01-01T00:05:00Z", "host-a", Some("sshd"), "login b"),
+        ],
+    )
+    .unwrap();
+    refresh_graph_projection(&pool).unwrap();
+
+    let first = match refresh_graph_projection_incremental(&pool).unwrap() {
+        GraphRebuildOutcome::Rebuilt(stats) => stats,
+        GraphRebuildOutcome::AlreadyRunning => panic!("unexpected single-flight skip"),
+    };
+    let second = match refresh_graph_projection_incremental(&pool).unwrap() {
+        GraphRebuildOutcome::Rebuilt(stats) => stats,
+        GraphRebuildOutcome::AlreadyRunning => panic!("unexpected single-flight skip"),
+    };
+    assert_eq!(first.entity_count, second.entity_count);
+    assert_eq!(first.relationship_count, second.relationship_count);
+    assert_eq!(first.evidence_count, second.evidence_count);
+}

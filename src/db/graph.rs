@@ -678,7 +678,12 @@ pub fn refresh_graph_projection(pool: &DbPool) -> Result<GraphRebuildOutcome> {
     let Some(_rebuild_guard) = GRAPH_REBUILD_LOCK.try_lock() else {
         return Ok(GraphRebuildOutcome::AlreadyRunning);
     };
+    full_rebuild_locked(pool)
+}
 
+/// Full rebuild body, run while holding [`GRAPH_REBUILD_LOCK`]. Rescans every
+/// source row and atomically swaps the projection. Callers MUST hold the lock.
+fn full_rebuild_locked(pool: &DbPool) -> Result<GraphRebuildOutcome> {
     mark_graph_projection_building(pool)?;
     let started = Instant::now();
     match refresh_graph_projection_inner(pool, started) {
@@ -688,6 +693,330 @@ pub fn refresh_graph_projection(pool: &DbPool) -> Result<GraphRebuildOutcome> {
             Err(err)
         }
     }
+}
+
+/// Incremental refresh: project only logs newer than the recorded watermark into
+/// the live graph tables, then re-project the bounded heartbeat/error-signature
+/// snapshots. Reuses the existing staging extractors but merges the delta into
+/// the live tables by natural key (remapping staging row ids to final ids and
+/// recomputing each `relationship_key` from final entity ids) instead of the
+/// full DELETE-all swap. Falls back to a full rebuild when no usable prior
+/// projection exists. Safe to run while the server ingests: the long log scan
+/// builds into per-connection TEMP staging without the write lock; only the
+/// final merge transaction briefly takes [`write_lock`].
+pub fn refresh_graph_projection_incremental(pool: &DbPool) -> Result<GraphRebuildOutcome> {
+    let Some(_rebuild_guard) = GRAPH_REBUILD_LOCK.try_lock() else {
+        return Ok(GraphRebuildOutcome::AlreadyRunning);
+    };
+
+    let status = graph_projection_status(pool)?;
+    let after_log_id = if status.projection_status == "ready" && !status.is_degraded {
+        parse_log_watermark(&status.source_watermark)
+    } else {
+        None
+    };
+    let Some(after_log_id) = after_log_id else {
+        // No usable prior projection (never built, mid-build, degraded, or an
+        // unparseable watermark) — fall back to a clean full rebuild.
+        return full_rebuild_locked(pool);
+    };
+
+    let started = Instant::now();
+    match project_graph_delta(pool, after_log_id, started) {
+        Ok(stats) => Ok(GraphRebuildOutcome::Rebuilt(stats)),
+        Err(err) => {
+            let _ = mark_graph_projection_failed(pool, &err);
+            Err(err)
+        }
+    }
+}
+
+/// Parse the `logs:<id>` cursor out of a `graph_source_watermark` string of the
+/// form `logs:N;heartbeats:M;signatures:K`. Returns None when absent/unparseable
+/// so the caller can fall back to a full rebuild.
+fn parse_log_watermark(watermark: &str) -> Option<i64> {
+    watermark
+        .split(';')
+        .find_map(|part| part.trim().strip_prefix("logs:"))
+        .and_then(|value| value.trim().parse::<i64>().ok())
+}
+
+fn project_graph_delta(
+    pool: &DbPool,
+    after_log_id: i64,
+    started: Instant,
+) -> Result<GraphRebuildStats> {
+    let mut conn = pool.get()?;
+    create_graph_staging_tables(&conn)?;
+
+    // Build delta staging from logs newer than the watermark. Short per-chunk
+    // transactions against TEMP staging — no global write lock held here.
+    let mut delta_log_rows = 0_i64;
+    let mut chunk_count = 0_i64;
+    let max_log_id: i64 =
+        conn.query_row("SELECT COALESCE(MAX(id), 0) FROM logs", [], |r| r.get(0))?;
+    let mut cursor = after_log_id;
+    while cursor < max_log_id {
+        let rows = fetch_log_graph_rows(&conn, cursor, GRAPH_REBUILD_CHUNK_SIZE)?;
+        if rows.is_empty() {
+            break;
+        }
+        chunk_count += 1;
+        {
+            let tx = conn.transaction()?;
+            for row in &rows {
+                cursor = cursor.max(row.id);
+                delta_log_rows += 1;
+                extract_log_row(&tx, row)?;
+            }
+            tx.commit()?;
+        }
+    }
+
+    // Heartbeat + error-signature projections are bounded snapshots (capped at
+    // 14 days / signature count), so re-project them in full every pass. Their
+    // evidence keys are stable, so the merge upsert is idempotent.
+    extract_heartbeat_latest(&conn)?;
+    extract_error_signatures(&conn)?;
+
+    let source_watermark = graph_source_watermark(&conn)?;
+    let runtime_ms = started.elapsed().as_millis().min(i64::MAX as u128) as i64;
+    let stats = merge_graph_delta(&mut conn, &source_watermark, runtime_ms, chunk_count)?;
+    let _ = conn.execute("DROP TABLE IF EXISTS _graph_entities_staging", []);
+    let _ = conn.execute("DROP TABLE IF EXISTS _graph_aliases_staging", []);
+    let _ = conn.execute("DROP TABLE IF EXISTS _graph_relationships_staging", []);
+    let _ = conn.execute("DROP TABLE IF EXISTS _graph_evidence_staging", []);
+    tracing::info!(
+        delta_log_rows,
+        chunk_count,
+        entities = stats.entity_count,
+        relationships = stats.relationship_count,
+        evidence = stats.evidence_count,
+        runtime_ms,
+        "graph incremental projection merged delta into live tables"
+    );
+    Ok(stats)
+}
+
+/// Merge the delta staging tables into the live graph tables by natural key.
+///
+/// Runs as a single transaction under [`write_lock`]. Staging row ids are local
+/// to this delta, so they are remapped to live ids and each `relationship_key`
+/// is recomputed from final entity ids — keeping keys consistent with what the
+/// last full rebuild wrote (which copied staging ids verbatim, so live id ==
+/// the staging id encoded in existing keys).
+fn merge_graph_delta(
+    conn: &mut rusqlite::Connection,
+    source_watermark: &str,
+    runtime_ms: i64,
+    chunk_count: i64,
+) -> Result<GraphRebuildStats> {
+    let _guard = write_lock();
+    let tx = conn.transaction()?;
+
+    // 1. Entities: upsert by (entity_type, canonical_key), widening seen window.
+    tx.execute(
+        "INSERT INTO graph_entities
+             (entity_type, canonical_key, display_label, source_kind, source_id,
+              trust_level, first_seen_at, last_seen_at)
+         SELECT entity_type, canonical_key, display_label, source_kind, source_id,
+                trust_level, first_seen_at, last_seen_at
+         FROM _graph_entities_staging
+         WHERE true
+         ON CONFLICT(entity_type, canonical_key) DO UPDATE SET
+             display_label = CASE
+                 WHEN graph_entities.display_label = '' THEN excluded.display_label
+                 ELSE graph_entities.display_label END,
+             first_seen_at = CASE
+                 WHEN graph_entities.first_seen_at IS NULL THEN excluded.first_seen_at
+                 WHEN excluded.first_seen_at IS NULL THEN graph_entities.first_seen_at
+                 WHEN excluded.first_seen_at < graph_entities.first_seen_at THEN excluded.first_seen_at
+                 ELSE graph_entities.first_seen_at END,
+             last_seen_at = CASE
+                 WHEN graph_entities.last_seen_at IS NULL THEN excluded.last_seen_at
+                 WHEN excluded.last_seen_at IS NULL THEN graph_entities.last_seen_at
+                 WHEN excluded.last_seen_at > graph_entities.last_seen_at THEN excluded.last_seen_at
+                 ELSE graph_entities.last_seen_at END,
+             updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
+        [],
+    )?;
+
+    // 2. Map staging entity ids -> live entity ids by natural key.
+    tx.execute("DROP TABLE IF EXISTS _graph_entity_idmap", [])?;
+    tx.execute(
+        "CREATE TEMP TABLE _graph_entity_idmap AS
+         SELECT s.id AS staging_id, f.id AS final_id
+         FROM _graph_entities_staging s
+         JOIN graph_entities f
+           ON f.entity_type = s.entity_type AND f.canonical_key = s.canonical_key",
+        [],
+    )?;
+    tx.execute(
+        "CREATE INDEX _ix_graph_entity_idmap ON _graph_entity_idmap(staging_id)",
+        [],
+    )?;
+
+    // 3. Aliases: remap entity_id, upsert by natural key.
+    tx.execute(
+        "INSERT INTO graph_entity_aliases
+             (entity_id, alias_type, alias_key, alias_value, source_kind,
+              trust_level, first_seen_at, last_seen_at)
+         SELECT m.final_id, a.alias_type, a.alias_key, a.alias_value, a.source_kind,
+                a.trust_level, a.first_seen_at, a.last_seen_at
+         FROM _graph_aliases_staging a
+         JOIN _graph_entity_idmap m ON m.staging_id = a.entity_id
+         WHERE true
+         ON CONFLICT(entity_id, alias_type, alias_key, source_kind) DO UPDATE SET
+             last_seen_at = CASE
+                 WHEN graph_entity_aliases.last_seen_at IS NULL THEN excluded.last_seen_at
+                 WHEN excluded.last_seen_at IS NULL THEN graph_entity_aliases.last_seen_at
+                 WHEN excluded.last_seen_at > graph_entity_aliases.last_seen_at THEN excluded.last_seen_at
+                 ELSE graph_entity_aliases.last_seen_at END,
+             updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
+        [],
+    )?;
+
+    // 4. Relationships: remap src/dst ids, recompute relationship_key from live
+    //    ids, upsert. evidence_count is recomputed in step 7.
+    tx.execute(
+        "INSERT INTO graph_relationships
+             (relationship_key, src_entity_id, dst_entity_id, relationship_type,
+              reason_code, trust_level, confidence, evidence_count,
+              first_seen_at, last_seen_at)
+         SELECT ms.final_id || ':' || r.relationship_type || ':' || md.final_id,
+                ms.final_id, md.final_id, r.relationship_type, r.reason_code,
+                r.trust_level, r.confidence, 0, r.first_seen_at, r.last_seen_at
+         FROM _graph_relationships_staging r
+         JOIN _graph_entity_idmap ms ON ms.staging_id = r.src_entity_id
+         JOIN _graph_entity_idmap md ON md.staging_id = r.dst_entity_id
+         WHERE true
+         ON CONFLICT(relationship_key) DO UPDATE SET
+             confidence = MAX(graph_relationships.confidence, excluded.confidence),
+             first_seen_at = CASE
+                 WHEN graph_relationships.first_seen_at IS NULL THEN excluded.first_seen_at
+                 WHEN excluded.first_seen_at IS NULL THEN graph_relationships.first_seen_at
+                 WHEN excluded.first_seen_at < graph_relationships.first_seen_at THEN excluded.first_seen_at
+                 ELSE graph_relationships.first_seen_at END,
+             last_seen_at = CASE
+                 WHEN graph_relationships.last_seen_at IS NULL THEN excluded.last_seen_at
+                 WHEN excluded.last_seen_at IS NULL THEN graph_relationships.last_seen_at
+                 WHEN excluded.last_seen_at > graph_relationships.last_seen_at THEN excluded.last_seen_at
+                 ELSE graph_relationships.last_seen_at END,
+             updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
+        [],
+    )?;
+
+    // 5. Map staging relationship ids -> live relationship ids.
+    tx.execute("DROP TABLE IF EXISTS _graph_rel_idmap", [])?;
+    tx.execute(
+        "CREATE TEMP TABLE _graph_rel_idmap AS
+         SELECT r.id AS staging_id, f.id AS final_id
+         FROM _graph_relationships_staging r
+         JOIN _graph_entity_idmap ms ON ms.staging_id = r.src_entity_id
+         JOIN _graph_entity_idmap md ON md.staging_id = r.dst_entity_id
+         JOIN graph_relationships f
+           ON f.relationship_key = ms.final_id || ':' || r.relationship_type || ':' || md.final_id",
+        [],
+    )?;
+    tx.execute(
+        "CREATE INDEX _ix_graph_rel_idmap ON _graph_rel_idmap(staging_id)",
+        [],
+    )?;
+
+    // 6. Evidence: remap relationship_id, upsert by (relationship_id, key). Each
+    //    log evidence key is unique per log row (never re-seen thanks to the
+    //    watermark) and snapshot keys are stable, so replacing evidence_count is
+    //    idempotent.
+    tx.execute(
+        "INSERT INTO graph_relationship_evidence
+             (relationship_id, evidence_key, source_kind, source_id, source_log_id,
+              source_heartbeat_id, source_signature_hash, observed_at, reason_code,
+              reason_text, confidence_delta, trust_level, safe_excerpt, metadata_path,
+              evidence_count)
+         SELECT rm.final_id, e.evidence_key, e.source_kind, e.source_id, e.source_log_id,
+                e.source_heartbeat_id, e.source_signature_hash, e.observed_at, e.reason_code,
+                e.reason_text, e.confidence_delta, e.trust_level, e.safe_excerpt, e.metadata_path,
+                e.evidence_count
+         FROM _graph_evidence_staging e
+         JOIN _graph_rel_idmap rm ON rm.staging_id = e.relationship_id
+         WHERE true
+         ON CONFLICT(relationship_id, evidence_key) DO UPDATE SET
+             evidence_count = excluded.evidence_count,
+             observed_at = CASE
+                 WHEN excluded.observed_at > graph_relationship_evidence.observed_at THEN excluded.observed_at
+                 ELSE graph_relationship_evidence.observed_at END",
+        [],
+    )?;
+
+    // 7. Recompute evidence_count for relationships touched this pass.
+    tx.execute(
+        "UPDATE graph_relationships
+         SET evidence_count = (
+                 SELECT COALESCE(SUM(evidence_count), 0)
+                 FROM graph_relationship_evidence
+                 WHERE relationship_id = graph_relationships.id
+             ),
+             updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+         WHERE id IN (SELECT final_id FROM _graph_rel_idmap)",
+        [],
+    )?;
+
+    // 8. Refresh projection metadata. source_row_count tracks the cumulative
+    //    source footprint so `graph status` stays representative across deltas.
+    let entity_count: i64 =
+        tx.query_row("SELECT COUNT(*) FROM graph_entities", [], |r| r.get(0))?;
+    let relationship_count: i64 =
+        tx.query_row("SELECT COUNT(*) FROM graph_relationships", [], |r| r.get(0))?;
+    let evidence_count: i64 = tx.query_row(
+        "SELECT COUNT(*) FROM graph_relationship_evidence",
+        [],
+        |r| r.get(0),
+    )?;
+    let source_row_count: i64 = tx.query_row(
+        "SELECT (SELECT COUNT(*) FROM logs)
+              + (SELECT COUNT(*) FROM host_heartbeats_latest)
+              + (SELECT COUNT(*) FROM error_signatures)",
+        [],
+        |r| r.get(0),
+    )?;
+    tx.execute(
+        "UPDATE graph_projection_meta
+         SET projection_status = 'ready',
+             last_completed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+             source_watermark = ?1,
+             source_row_count = ?2,
+             entity_count = ?3,
+             relationship_count = ?4,
+             evidence_count = ?5,
+             is_degraded = 0,
+             last_error = NULL,
+             last_runtime_ms = ?6,
+             last_chunk_count = ?7,
+             updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+         WHERE id = 1",
+        params![
+            source_watermark,
+            source_row_count,
+            entity_count,
+            relationship_count,
+            evidence_count,
+            runtime_ms,
+            chunk_count
+        ],
+    )?;
+    tx.execute("DROP TABLE IF EXISTS _graph_entity_idmap", [])?;
+    tx.execute("DROP TABLE IF EXISTS _graph_rel_idmap", [])?;
+    tx.commit()?;
+
+    Ok(GraphRebuildStats {
+        source_row_count,
+        entity_count,
+        relationship_count,
+        evidence_count,
+        source_watermark: source_watermark.to_string(),
+        runtime_ms,
+        chunk_count,
+    })
 }
 
 fn refresh_graph_projection_inner(pool: &DbPool, started: Instant) -> Result<GraphRebuildStats> {

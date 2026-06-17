@@ -1,0 +1,28 @@
+# Release component manifest — the single source of truth for cortex's
+# version-bearing files. Consumed by `cargo xtask` (bump-version,
+# check-version-sync, check-release-versions).
+#
+# cortex ships exactly one component. The `version_source` is the canonical
+# version (Cargo.toml `[package]`); every entry in `version_files` must agree
+# with it. To add a new version carrier, add a row here — no code changes.
+
+schema_version = 1
+
+[[components]]
+id = "cortex"
+name = "Cortex"
+tag_prefix = "v"
+version_source = { kind = "cargo_package", path = "Cargo.toml", package = "cortex" }
+version_files = [
+  { kind = "cargo_package", path = "Cargo.toml", package = "cortex" },
+  { kind = "cargo_lock_package", path = "Cargo.lock", package = "cortex" },
+  { kind = "json_version", path = "server.json", json_pointer = "/version" },
+  # server.json pins the deploy image tag: ghcr.io/jmagar/cortex:vX.Y.Z
+  { kind = "regex_version", path = "server.json", pattern = 'cortex:v(\d+\.\d+\.\d+)' },
+  { kind = "json_version", path = "mcpb/manifest.json", json_pointer = "/version" },
+  # docker-compose.prod.yml default image tag: ${CORTEX_VERSION:-X.Y.Z}
+  { kind = "regex_version", path = "docker-compose.prod.yml", pattern = 'CORTEX_VERSION:-(\d+\.\d+\.\d+)' },
+  { kind = "changelog_heading", path = "CHANGELOG.md" },
+  # Plugin manifests are versioned by the marketplace, never inline.
+  { kind = "json_no_version", path = ".claude-plugin/plugin.json" },
+]

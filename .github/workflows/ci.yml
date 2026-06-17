@@ -21,11 +21,12 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - name: Check version sync
-        run: bash scripts/check-version-sync.sh
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
 
-      - name: Check plugin manifest version policy
-        run: bash scripts/check-plugin-manifest-versions.sh
+      # Drives release/components.toml: every version-bearing file must agree
+      # with Cargo.toml, and plugin manifests must carry no top-level version.
+      - name: Check version sync
+        run: cargo xtask check-version-sync
 
       - name: Check agent memory symlinks
         run: bash scripts/check-agent-memory-symlinks.sh

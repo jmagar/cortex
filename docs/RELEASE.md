@@ -13,8 +13,7 @@ cargo fmt -- --check
 cargo test
 cargo clippy --all-targets -- -D warnings
 cargo deny check
-bash scripts/check-version-sync.sh
-bash scripts/check-plugin-manifest-versions.sh
+cargo xtask check-version-sync
 bash scripts/check-agent-memory-symlinks.sh
 bash scripts/check-public-identity.sh
 git diff --check
@@ -23,12 +22,16 @@ git diff --check
 For release commits, also require:
 
 ```bash
-bash scripts/check-version-sync.sh --require-changelog
+cargo xtask check-release-versions
 ```
 
-Version-bearing files are `Cargo.toml`, `server.json`, `mcpb/manifest.json`,
-`Cargo.lock`, and `CHANGELOG.md`. Plugin manifests are intentionally
-unversioned.
+Version-bearing files are declared in `release/components.toml`: `Cargo.toml`
+(canonical), `Cargo.lock`, `server.json` (version + `cortex:vX.Y.Z` image tag),
+`mcpb/manifest.json`, `docker-compose.prod.yml` (`${CORTEX_VERSION:-X.Y.Z}`),
+and `CHANGELOG.md`. Plugin manifests are intentionally unversioned —
+`check-version-sync` rejects a top-level `version` key in
+`.claude-plugin/plugin.json`. Bump everything at once with
+`cargo xtask bump-version patch|minor|major`.
 
 ## Live Gates
 

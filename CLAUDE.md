@@ -145,7 +145,8 @@ CORTEX_ALLOWED_ORIGINS=https://app  # optional; comma-separated extra Origin all
 
 # Storage
 CORTEX_DB_PATH=data/cortex.db
-CORTEX_POOL_SIZE=4                # MCP reads get pool_size - 1 permits (1 reserved for writer)
+CORTEX_POOL_SIZE=8                # MCP reads get pool_size - 1 permits (1 reserved for writer)
+CORTEX_GRAPH_REFRESH_INTERVAL_SECS=300  # in-server graph projection scheduler; 0 disables (CLI rebuild still works)
 CORTEX_RETENTION_DAYS=90     # 0 = keep forever; hourly purge, err+ exempt (see Retention)
 CORTEX_MAX_DB_SIZE_MB=1024        # 0 = disable logical DB size guard (breach deletes oldest)
 CORTEX_RECOVERY_DB_SIZE_MB=900    # cleanup target after DB-size breach
@@ -198,9 +199,9 @@ RUST_LOG=info
 | `scripts/smoke-test.sh` | Live smoke test — all MCP actions via mcporter, strict PASS/FAIL |
 | `scripts/backup.sh` | WAL-safe SQLite backup script (checkpoint + `.backup` method) |
 | `scripts/reset-db.sh` | WAL-safe backup + destructive DB reset helper for local/dev recovery |
-| `scripts/bump-version.sh` | Bump version across all version-bearing files; called by `just publish` |
+| `release/components.toml` | Declarative source of truth for version-bearing files; consumed by `cargo xtask` |
+| `xtask/` | `cargo xtask` workspace crate: `bump-version`, `check-version-sync`, `check-release-versions` |
 | `cortex db status\|integrity\|checkpoint\|vacuum\|backup` | Direct SQLite maintenance commands for the configured DB |
-| `scripts/check-version-sync.sh` | Assert all version-bearing files have the same version (used in CI) |
 | `scripts/block-env-commits.sh` | Pre-commit hook that blocks commits containing env credential patterns |
 | `CHANGELOG.md` | Version history; entry required per version bump |
 | `.lavra/memory/recall.sh` | Query the local knowledge DB: `bash .lavra/memory/recall.sh <keyword>` |
@@ -326,22 +327,36 @@ bd close <id>         # Complete work
 
 **Every feature branch push MUST bump the version in ALL version-bearing files.**
 
+Versioning is managed by `cargo xtask`, a declarative port of axon's release-
+version system. `release/components.toml` is the single source of truth for the
+version-bearing files and how each one is read/rewritten — add a row there to
+track a new carrier, no code change needed. `Cargo.toml` `[package]` is the
+canonical version; every other file must agree with it.
+
+```bash
+cargo xtask bump-version patch|minor|major   # bump every version-bearing file at once
+cargo xtask check-version-sync               # all files agree (CI gate)
+cargo xtask check-release-versions           # sync + CHANGELOG entry (release gate)
+```
+
 Bump type is determined by the commit message prefix:
 - `feat!:` or `BREAKING CHANGE` → **major** (X+1.0.0)
 - `feat` or `feat(...)` → **minor** (X.Y+1.0)
 - Everything else (`fix`, `chore`, `refactor`, `test`, `docs`, etc.) → **patch** (X.Y.Z+1)
 
-**Canonical version-bearing files:**
-- `Cargo.toml` — `version = "X.Y.Z"` in `[package]`
-- `server.json` — MCP Registry `"version": "X.Y.Z"` plus package image tag
-- `mcpb/manifest.json` — MCP Bundle `"version": "X.Y.Z"`
-- `Cargo.lock` — updated when Cargo records the package version
+**Version-bearing files (declared in `release/components.toml`):**
+- `Cargo.toml` — `version = "X.Y.Z"` in `[package]` (canonical source)
+- `Cargo.lock` — the `cortex` package entry
+- `server.json` — MCP Registry `"version"` plus the `cortex:vX.Y.Z` image tag
+- `mcpb/manifest.json` — MCP Bundle `"version"`
+- `docker-compose.prod.yml` — `${CORTEX_VERSION:-X.Y.Z}` default image tag
 - `CHANGELOG.md` — new entry under the bumped version
 
-Optional package metadata such as `package.json` or `pyproject.toml` must join
-the same version set if introduced. Claude/Codex/Gemini plugin manifests are
-intentionally unversioned; `scripts/check-plugin-manifest-versions.sh` rejects
-top-level `version` keys in plugin manifests.
+Claude/Codex/Gemini plugin manifests are intentionally unversioned;
+`release/components.toml` lists `.claude-plugin/plugin.json` with the
+`json_no_version` kind, so `check-version-sync` rejects any top-level
+`version` key. To version-track a new file (e.g. `package.json`), add a row to
+`release/components.toml`.
 
 All files MUST have the same version. Never bump only one file.
 CHANGELOG.md must have an entry for every version bump.

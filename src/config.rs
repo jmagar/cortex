@@ -534,7 +534,12 @@ fn default_write_channel_capacity() -> usize {
     10_000
 }
 fn default_pool_size() -> u32 {
-    4
+    // 8 (up from 4): the graph projection scheduler holds one pooled connection
+    // for the duration of a rebuild — a full first build can run for minutes —
+    // so the previous default of 4 (3 read permits) left too little headroom for
+    // concurrent MCP reads + the batch writer. Incremental passes are short, but
+    // the larger pool keeps a full reconcile from starving readers.
+    8
 }
 fn default_retention_days() -> u32 {
     90
@@ -885,6 +890,10 @@ impl Config {
         env_override_str(
             "CORTEX_NOTIFICATIONS_APPRISE_URL",
             &mut config.notifications.apprise_url,
+        );
+        env_override_list(
+            "CORTEX_NOTIFICATIONS_APPRISE_URLS",
+            &mut config.notifications.apprise_urls,
         );
 
         env_override_bool(
@@ -1488,14 +1497,30 @@ fn validate_notifications_config(cfg: &NotificationsConfig) -> anyhow::Result<()
         );
     }
     // Trim whitespace before checking emptiness to catch " " entries.
-    let has_apprise_url = !cfg.apprise_url.trim().is_empty();
-    let has_apprise_urls = cfg.apprise_urls.iter().any(|u| !u.trim().is_empty());
-    if cfg.enabled && !has_apprise_url && !has_apprise_urls {
-        anyhow::bail!(
-            "[notifications] enabled = true but no apprise_urls configured; \
-             all notifications will be silently dropped. \
-             Configure apprise_urls (or apprise_url) or set enabled = false."
-        );
+    // Delivery requires BOTH the Apprise API base URL (`apprise_url`, where the
+    // dispatcher POSTs `{base}/notify/`) AND at least one target URL
+    // (`apprise_urls`, sent in the request body). The base URL alone cannot
+    // deliver anything in Apprise stateless mode — the dispatcher logs
+    // "no apprise URLs configured" and drops every firing. Fail loud at startup
+    // instead of dropping silently.
+    if cfg.enabled {
+        let has_apprise_url = !cfg.apprise_url.trim().is_empty();
+        let has_apprise_urls = cfg.apprise_urls.iter().any(|u| !u.trim().is_empty());
+        if !has_apprise_url {
+            anyhow::bail!(
+                "[notifications] enabled = true but apprise_url (the Apprise API \
+                 base URL, e.g. http://apprise:8000) is empty. \
+                 Set apprise_url / CORTEX_NOTIFICATIONS_APPRISE_URL or set enabled = false."
+            );
+        }
+        if !has_apprise_urls {
+            anyhow::bail!(
+                "[notifications] enabled = true but no apprise_urls (delivery \
+                 target URLs, e.g. gotify://host/token) are configured; all \
+                 notifications would be silently dropped. Set apprise_urls / \
+                 CORTEX_NOTIFICATIONS_APPRISE_URLS or set enabled = false."
+            );
+        }
     }
     Ok(())
 }
