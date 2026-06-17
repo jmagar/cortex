@@ -215,6 +215,77 @@ build-mcpb:
 runtime-current:
     bash scripts/check-runtime-current.sh
 
+# Build the local release-fast binary when stale, point PATH + plugin symlinks at
+# it, rebuild the Docker image only when its inputs changed, then (re)start the
+# cortex compose service. Synchronous, cortex-adapted port of axon's sync-container.
+sync-container:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if command -v mold >/dev/null 2>&1; then
+      export RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=-fuse-ld=mold"
+    fi
+
+    profile="release-fast"
+    CORTEX_TARGET_DIR="${CARGO_TARGET_DIR:-.cache/cargo}"
+    case "$CORTEX_TARGET_DIR" in
+      /*) CORTEX_BIN="$CORTEX_TARGET_DIR/$profile/cortex" ;;
+      *)  CORTEX_BIN="$(pwd)/$CORTEX_TARGET_DIR/$profile/cortex" ;;
+    esac
+
+    # 1. Rebuild the local binary only if a tracked source is newer than it.
+    release_stale=0
+    if [ ! -x "$CORTEX_BIN" ]; then
+      release_stale=1
+    else
+      while IFS= read -r -d '' input; do
+        if [ "$input" -nt "$CORTEX_BIN" ]; then
+          release_stale=1
+          break
+        fi
+      done < <(git ls-files -z -- Cargo.toml Cargo.lock .cargo src config.toml)
+    fi
+    if [ "$release_stale" -eq 1 ]; then
+      CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-16}" cargo build --profile "$profile" --locked --bin cortex
+    else
+      echo "release binary is current: $CORTEX_BIN"
+    fi
+
+    # 2. Point PATH + plugin cache slots at the fresh binary (mirrors `just link-bin`,
+    #    but for the release-fast binary rather than the release one).
+    mkdir -p ~/.local/bin
+    ln -sf "$CORTEX_BIN" ~/.local/bin/cortex
+    while IFS= read -r -d '' plugin_bin; do
+      ln -sf "$CORTEX_BIN" "$plugin_bin"
+    done < <(find "${HOME}/.claude/plugins/cache/jmagar-lab/cortex" -maxdepth 3 -name "cortex" \( -type f -o -type l \) -print0 2>/dev/null)
+    echo "cortex → $CORTEX_BIN"
+
+    # 3. Rebuild the Docker image only when its build inputs changed (tracked via a
+    #    sentinel), then (re)start the cortex compose service.
+    container_sentinel="$CORTEX_TARGET_DIR/.container-built"
+    image_stale=0
+    if [ ! -f "$container_sentinel" ]; then
+      image_stale=1
+    else
+      while IFS= read -r -d '' input; do
+        if [ "$input" -nt "$container_sentinel" ]; then
+          image_stale=1
+          break
+        fi
+      done < <(git ls-files -z -- config/Dockerfile docker-compose.yml)
+    fi
+    if [ "$image_stale" -eq 1 ]; then
+      docker compose build cortex
+      mkdir -p "$(dirname "$container_sentinel")"
+      touch "$container_sentinel"
+      docker compose up -d cortex --no-deps
+    else
+      echo "docker image is current"
+      docker compose up -d cortex --no-deps --no-build
+    fi
+    docker compose restart cortex
+    docker compose ps cortex
+    echo "container synced"
+
 # Publish: bump version, tag, push (triggers crates.io + Docker publish)
 publish bump="patch":
     #!/usr/bin/env bash

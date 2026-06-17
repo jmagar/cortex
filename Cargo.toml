@@ -136,6 +136,14 @@ test-support = []
 lto = "thin"
 strip = "symbols"
 
+# Faster local/dev release builds: skip LTO and parallelize codegen. Trades a
+# little runtime perf + binary size for much shorter compile times. Used by
+# `just sync-container` for the local-binary + container refresh loop.
+[profile.release-fast]
+inherits = "release"
+lto = false
+codegen-units = 16
+
 [dev-dependencies]
 cortex = { path = ".", features = ["test-support"] }
 serial_test = "3"
