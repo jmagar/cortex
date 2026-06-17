@@ -138,7 +138,7 @@ fn parse_add(args: &[String]) -> Result<FileTailAddArgs> {
         i += 1;
     }
     if out.id.is_empty() || out.path.is_empty() || out.tag.is_empty() || out.host.is_none() {
-        bail!("file-tail add requires --id, --path, --tag, and --hostname");
+        bail!("file-tail add requires --id, --path, --tag, and --host");
     }
     Ok(out)
 }
@@ -154,5 +154,5 @@ fn required(args: &[String], index: usize, flag: &str) -> Result<String> {
 }
 
 fn usage() -> &'static str {
-    "Usage: cortex file-tail list [--json]\n       cortex file-tail status [--json]\n       cortex file-tail add --id ID --path PATH --tag TAG --hostname HOST [--facility FACILITY] [--severity SEVERITY] [--from-start] [--json]\n       cortex file-tail remove --id ID [--json]\n       cortex file-tail enable --id ID [--json]\n       cortex file-tail disable --id ID [--json]"
+    "Usage: cortex file-tail list [--json]\n       cortex file-tail status [--json]\n       cortex file-tail add --id ID --path PATH --tag TAG --host HOST [--facility FACILITY] [--severity SEVERITY] [--from-start] [--json]\n       cortex file-tail remove --id ID [--json]\n       cortex file-tail enable --id ID [--json]\n       cortex file-tail disable --id ID [--json]"
 }

@@ -573,7 +573,7 @@ const ADMIN_ACTION_HELP: &[AdminActionHelp] = &[
             "`id` (string, required for add/remove/enable/disable) — stable file-tail source id",
             "`path` (string, required for add) — local log file path",
             "`tag` (string, required for add) — app/tag stored on ingested rows",
-            "`hostname`, `facility`, `severity`, `start_at_end` (optional) — row envelope defaults",
+            "`host`, `facility`, `severity`, `start_at_end` (optional) — row envelope defaults",
         ],
     },
     AdminActionHelp {
@@ -1112,10 +1112,10 @@ whose transcript timestamps overlap the cluster window.
              `window_minutes` (cluster window, default 30, clamp 5..=120),
              `limit` (default 10, max 50)
 
-Example: `{"action":"similar_incidents","query":"upstream connect error","app_name":"nginx"}`
+Example: `{"action":"similar_incidents","query":"upstream connect error","app":"nginx"}`
 
 Response fields: `query`, `total_clusters`, `truncated`, `clusters` where each
-cluster has: `host`, `app`, `window_start`, `window_end`, `log_count`,
+cluster has: `hostname`, `app_name`, `window_start`, `window_end`, `log_count`,
 `severity_peak`, `representative_messages` (up to 3), `correlated_sessions` (up to 5).
 
 ---

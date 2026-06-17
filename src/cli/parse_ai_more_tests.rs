@@ -68,7 +68,7 @@ fn parse_ai_incident_context_requires_from_and_to() {
 
     let err = parse_ai_incident_context(&args).unwrap_err().to_string();
 
-    assert!(err.contains("requires --to"));
+    assert!(err.contains("requires --until"));
 }
 
 #[test]

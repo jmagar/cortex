@@ -183,8 +183,8 @@ cortex ai search authentication --tool claude --limit 10
 Human output now states that grouping is computed over the newest matching
 candidate window. JSON includes `total_candidates`, `candidate_rows`,
 `candidate_cap`, `candidate_window_truncated`, and `truncated`; when the
-candidate window is truncated, narrow with `--project`, `--tool`, `--from`, or
-`--to` for exact grouping within that filter.
+candidate window is truncated, narrow with `--project`, `--tool`, `--since`, or
+`--until` for exact grouping within that filter.
 
 ### `cortex ai abuse`
 
@@ -251,7 +251,7 @@ Bucket AI activity into 5-hour UTC windows.
 cortex ai blocks --project /home/jmagar/workspace/cortex
 ```
 
-When `--from` is omitted, usage blocks default to the last 30 days. Returned
+When `--since` is omitted, usage blocks default to the last 30 days. Returned
 JSON includes `total_blocks` and `truncated`; at most 1000 buckets are returned.
 
 ### `cortex ai context`

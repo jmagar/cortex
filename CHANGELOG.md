@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.26.1] - 2026-06-16
+
+### Fixed
+
+- **Canonical-rename stragglers** — fixed user-facing strings that still referenced the pre-rename flag/arg vocabulary after the 1.26.0 canonical rename: `file-tail add` usage and required-flag error (`--hostname`→`--host`), the `ai incident-context` required-flag errors (`--from`/`--to`→`--since`/`--until`), the search/abuse/ask-history "scan capped" hints (`--from`/`--to`→`--since`/`--until`), the `file_tails op=add` admin help parameter (`hostname`→`host`), and the `similar_incidents` MCP input example (`app_name`→`app`). Also corrected the `similar_incidents` doc "Response fields" line back to the unchanged output names (`hostname`/`app_name`), matching the actual response contract.
+
 ## [1.26.0] - 2026-06-16
 
 ### Added

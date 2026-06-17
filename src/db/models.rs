@@ -419,7 +419,7 @@ impl SearchParams {
     /// search uses this to choose the index-led intersect plan — which leads
     /// with the filter's composite index and intersects the FTS match set —
     /// instead of scanning the entire match set and filtering post-hoc (the
-    /// pathology that made `search <q> --hostname <h>` ~200s).
+    /// pathology that made `search <q> --host <h>` ~200s).
     ///
     /// `severity`/`severity_in` are deliberately EXCLUDED: a single severity
     /// can be >90% of the table, so leading with `idx_logs_sev_time` for a

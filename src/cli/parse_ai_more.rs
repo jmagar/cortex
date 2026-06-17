@@ -135,10 +135,10 @@ pub(crate) fn parse_ai_incident_context(args: &[String]) -> Result<CliCommand> {
         }
     }
     if parsed.since.is_empty() {
-        bail!("ai incident-context requires --from");
+        bail!("ai incident-context requires --since");
     }
     if parsed.until.is_empty() {
-        bail!("ai incident-context requires --to");
+        bail!("ai incident-context requires --until");
     }
     Ok(CliCommand::Ai(AiCommand::IncidentContext(parsed)))
 }

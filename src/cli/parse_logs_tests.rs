@@ -301,7 +301,7 @@ fn filter_and_sessions_normalize_relative_from() {
     };
     assert!(
         args.since.as_deref().unwrap().ends_with("+00:00"),
-        "filter --from should normalize: {:?}",
+        "filter --since should normalize: {:?}",
         args.since
     );
 
