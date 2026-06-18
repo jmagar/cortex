@@ -182,8 +182,12 @@ raw syslog frame or full `metadata_json`.
   edges for pressure, reboot, disk, memory, or network signals.
 - Error signature links are summary-level connections, not per-log causal
   chains.
-- Projection is full rebuild, not incremental.
-- Rebuild runtime on multi-million-row databases is minutes-scale.
+- Full-rebuild runtime on multi-million-row databases is minutes-scale; an
+  incremental watermark-based delta path is the default at high row counts.
+- `docker_network` and `reverse_proxy_config` topology is projected from the
+  homelab inventory snapshot only (the docker log rows carry no network or
+  reverse-proxy membership); `compose_config` is projected from both the
+  inventory snapshot and docker compose labels on log rows.
 
 ## Future Work
 

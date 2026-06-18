@@ -2036,6 +2036,64 @@ fn extract_docker_log_row(conn: &rusqlite::Connection, row: &LogGraphRow) -> Res
                 metadata_path: Some("metadata_json.compose_service"),
             },
         )?;
+
+        // Log-derived compose topology: when the row carries an explicit
+        // `compose_project` label (not the docker_host fallback), project a
+        // `compose_project --defines_service--> service` edge. This activates
+        // the compose_config inventory path from already-ingested docker rows,
+        // so `topic_correlate <project>` reaches the project's services and
+        // containers even when the SSH inventory snapshot is not configured.
+        // Inferred (label-derived); the SSH inventory path emits the same edge
+        // at higher trust when available, and the two converge by natural key.
+        if let Some(compose_project) =
+            metadata_text(&meta, &["compose_project", "docker.compose_project"])
+                .and_then(normalized_value)
+        {
+            let project_key = format!(
+                "{}:{}",
+                normalize_key(docker_host),
+                normalize_key(compose_project)
+            );
+            let project_id = ensure_entity(
+                conn,
+                ENTITY_TYPE_COMPOSE_PROJECT,
+                &project_key,
+                compose_project,
+                SOURCE_KIND_LOG,
+                &source_id,
+                TRUST_INFERRED,
+                Some(&row.timestamp),
+                Some(&row.timestamp),
+            )?;
+            ensure_relationship_with_evidence(
+                conn,
+                project_id,
+                service_id,
+                REL_DEFINES_SERVICE,
+                REASON_COMPOSE_CONFIG,
+                TRUST_INFERRED,
+                0.7,
+                EvidenceInput {
+                    evidence_key: evidence_bucket_key(
+                        "log",
+                        row.id,
+                        REASON_COMPOSE_CONFIG,
+                        &row.timestamp,
+                    ),
+                    source_kind: SOURCE_KIND_LOG,
+                    source_id: &source_id,
+                    source_log_id: Some(row.id),
+                    source_heartbeat_id: None,
+                    source_signature_hash: None,
+                    observed_at: &row.timestamp,
+                    reason_text: Some("docker compose project label defines this service"),
+                    confidence_delta: 0.7,
+                    trust_level: TRUST_INFERRED,
+                    safe_excerpt: Some(&service_label),
+                    metadata_path: Some("metadata_json.compose_project"),
+                },
+            )?;
+        }
     }
     Ok(())
 }

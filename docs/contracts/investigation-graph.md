@@ -453,12 +453,20 @@ Fields:
 | --- | --- | --- | --- | --- |
 | `service runs_on host` | `inventory_service` | `inferred` | `0.85` | `app_inventory` |
 | `compose_project defines_service service` | `compose_config` | `verified` | `0.90` | `app_inventory` |
+| `compose_project defines_service service` | `compose_config` | `inferred` | `0.70` | `log` |
 | `compose_project has_artifact config_artifact` | `config_artifact` | `verified` | `0.95` | `app_inventory` |
 | `reverse_proxy exposes_domain domain` | `reverse_proxy_config` | `verified` | `0.95` | `app_inventory` |
 | `reverse_proxy routes_to service` | `reverse_proxy_config` | `verified` | `0.85` | `app_inventory` |
 | `service attached_to network` | `docker_network` | `verified` | `0.80` | `app_inventory` |
 | `service mounts storage` | `storage_probe` | `inferred` | `0.65` | `app_inventory` |
 | `host backed_by storage` | `storage_probe` | `verified` | `0.75` | `source_inventory` |
+
+The inventory projection paths (`compose_config`, `reverse_proxy_config`,
+`docker_network`) are **active**, projected from the homelab inventory snapshot
+(`app_inventory`). `compose_config` is additionally projected from `compose_project`
+labels on already-ingested docker log rows (`log` source, inferred trust), so
+compose topology is available even without an inventory snapshot; the two
+sources converge by natural key.
 
 Bare service-name matches are valid only when the service name is unique across
 the inventory snapshot. Ambiguous service names MUST be matched through a

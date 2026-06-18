@@ -864,3 +864,45 @@ fn shell_history_git_commit_links_commit_to_host() {
         1
     );
 }
+
+#[test]
+fn docker_compose_label_projects_compose_project_defines_service() {
+    let _guard = GRAPH_TEST_LOCK.lock();
+    let dir = tempfile::tempdir().unwrap();
+    let pool = init_pool(&test_storage_config(dir.path().join("graph-compose.db"))).unwrap();
+
+    let mut row = make_entry(
+        "2026-01-01T00:00:00Z",
+        "dookie",
+        Some("axon-qdrant"),
+        "started",
+    );
+    row.source_ip = "docker-event://dookie/axon-qdrant".to_string();
+    row.metadata_json = Some(
+        r#"{"source_kind":"docker-event","compose_project":"axon","compose_service":"qdrant"}"#
+            .to_string(),
+    );
+    insert_logs_batch(&pool, &[row]).unwrap();
+    refresh_graph_projection(&pool).unwrap();
+
+    let conn = pool.get().unwrap();
+    // compose_project entity created from the docker label.
+    let project_key: String = conn
+        .query_row(
+            "SELECT canonical_key FROM graph_entities WHERE entity_type = 'compose_project'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(project_key, "dookie:axon");
+
+    // compose_project --defines_service--> service edge (compose_config).
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*) FROM graph_relationships
+             WHERE reason_code = 'compose_config' AND relationship_type = 'defines_service'"
+        ),
+        1
+    );
+}
