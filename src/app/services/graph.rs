@@ -170,6 +170,9 @@ impl CortexService {
             });
         };
 
+        // Single `now` for the whole traversal so temporal decay scoring is
+        // consistent across chains.
+        let scoring_now = Utc::now();
         let mut queue = VecDeque::new();
         queue.push_back(ExplainPath::root(root.id));
         let mut relationship_map: HashMap<i64, GraphRelationship> = HashMap::new();
@@ -228,7 +231,7 @@ impl CortexService {
                 next.depth += 1;
                 next.seen_entity_ids.insert(next_id);
                 next.relationship_ids.push(relationship.id);
-                next.score += relationship_score(&relationship);
+                next.score += relationship_score(&relationship, scoring_now);
                 queue.push_back(next);
             }
             if !path.relationship_ids.is_empty() {

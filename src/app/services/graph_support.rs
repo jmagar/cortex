@@ -66,15 +66,51 @@ pub(super) fn graph_relationship_to_model(
     }
 }
 
-pub(super) fn relationship_score(relationship: &GraphRelationship) -> f64 {
+/// Per-observation corroboration confidence used to fold same-source evidence
+/// repetition into a relationship's score (BEWA diminishing returns).
+const CORROBORATION_PER_OBSERVATION: f64 = 0.3;
+
+pub(super) fn relationship_score(
+    relationship: &GraphRelationship,
+    now: chrono::DateTime<Utc>,
+) -> f64 {
     let trust_weight = match relationship.trust_level.as_str() {
         db::graph::TRUST_VERIFIED => 1.0,
         db::graph::TRUST_INFERRED => 0.75,
         db::graph::TRUST_CLAIMED => 0.55,
         _ => 0.4,
     };
-    let evidence_weight = (relationship.evidence_count.min(10) as f64 / 10.0).max(0.1);
-    relationship.confidence * trust_weight + evidence_weight
+    // The trust-weighted, temporally-decayed confidence is one independent
+    // signal; same-source evidence repetition (BEWA diminishing returns) is
+    // another. Combine them with noisy-OR so corroboration lifts the score
+    // without ever exceeding 1.0, and stale volatile edges fall behind
+    // structural ones.
+    let decayed = relationship_effective_confidence(relationship, now) * trust_weight;
+    let corroboration = db::graph_confidence::confidence_from_repeated(
+        CORROBORATION_PER_OBSERVATION,
+        relationship.evidence_count,
+    );
+    db::graph_confidence::noisy_or_combine(&[decayed, corroboration])
+}
+
+/// Query-time effective confidence for a relationship: the stored peak decayed
+/// by its reason-code half-life since `last_seen_at`. Structural edges (λ=0) and
+/// edges with an unparseable `last_seen_at` keep their stored confidence.
+pub(super) fn relationship_effective_confidence(
+    relationship: &GraphRelationship,
+    now: chrono::DateTime<Utc>,
+) -> f64 {
+    let delta_hours = relationship
+        .last_seen_at
+        .as_deref()
+        .and_then(|ts| chrono::DateTime::parse_from_rfc3339(ts).ok())
+        .map(|seen| (now - seen.with_timezone(&Utc)).num_seconds().max(0) as f64 / 3600.0)
+        .unwrap_or(0.0);
+    db::graph_confidence::compute_effective_confidence(
+        relationship.confidence,
+        &relationship.reason_code,
+        delta_hours,
+    )
 }
 
 pub(super) fn narrative_chain_from_path(
@@ -128,14 +164,16 @@ pub(super) fn narrative_chain_from_path(
 }
 
 fn confidence_from_score(score: f64, relationship_count: usize) -> String {
+    // Per-relationship score is the noisy-OR of the decayed, trust-weighted
+    // confidence and same-source corroboration — bounded to [0, 1].
     let normalized = if relationship_count == 0 {
         0.0
     } else {
         score / relationship_count as f64
     };
-    if normalized >= 1.35 {
+    if normalized >= 0.7 {
         "high".to_string()
-    } else if normalized >= 0.85 {
+    } else if normalized >= 0.45 {
         "medium".to_string()
     } else {
         "low".to_string()
