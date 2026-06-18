@@ -9,6 +9,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.29.0] - 2026-06-18
 
+### Added
+
+- **Graph-anchored universal correlation (`topic_correlate`).** New MCP action and
+  `cortex topic-correlate <topic>` CLI subcommand: resolve a free-text topic
+  (e.g. `axon`, `dookie dns adguard`) to investigation-graph entities, expand the
+  graph N hops, and return a unified timeline of every related log annotated by
+  source kind and discovery lane, plus resolved entities, graph expansion,
+  discovered hosts, and heartbeat pressure. Graph-first query order (traverse →
+  entity set → log join) backed by a new `(hostname, app_name, timestamp)`
+  covering index.
+- **Session-anchored graph correlation for `ai_correlate`.** When a `session_id`
+  is supplied, `ai_correlate` adds a `graph_correlation` block: it traverses the
+  graph from the session entity to discover related hosts and fans logs out across
+  all source kinds within the session's time bounds, annotated by lane
+  (`agent_command` / `shell_history` / `graph:host:<host>`) with heartbeat
+  summaries. Additive — existing fields and the time-windowed path are unchanged.
+- **New graph topology projected from logs:** explicit agent-command → AI-session
+  edges (with cwd-based project inference that converges agent-command and
+  transcript sessions); `git_commit` entities linking sessions/hosts to commits;
+  `user`/`device` identity entities with `authenticated_as`/`accessed` edges from
+  AdGuard, Authelia, and shell-history rows; and a log-derived `compose_config`
+  path (`compose_project --defines_service--> service`).
+- **Reusable N-hop graph traversal** (`graph_walk_n_hops`) and graph-anchored log
+  fan-out (`search_logs_from_graph_related_entities`).
+
+### Changed
+
+- **Confidence model upgraded** to noisy-OR combination, BEWA same-source
+  diminishing returns, and CountTRuCoLa-style per-relationship temporal decay,
+  applied at query time in graph_explain chain scoring (no schema change) so stale
+  volatile edges fall behind structural ones.
+- **Investigation-graph vocabulary widened** (schema migrations 32–36): new
+  `git_commit`/`user`/`device` entity types, `authenticated_as`/`accessed`/
+  `communicates_with` relationship types, a `refuted` trust level (refuted edges
+  are excluded from all traversals), a `correlated` confidence ceiling, and a
+  hierarchical v2 reason-code namespace registry (stored v1 values unchanged).
+
 ## [1.28.1] - 2026-06-18
 
 ### Fixed
