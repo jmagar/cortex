@@ -39,7 +39,7 @@ pub fn write_lock() -> parking_lot::ReentrantMutexGuard<'static, ()> {
     WRITE_LOCK.lock()
 }
 
-pub const KNOWN_SCHEMA_VERSION: i64 = 31;
+pub const KNOWN_SCHEMA_VERSION: i64 = 32;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SchemaVersionInfo {
@@ -1326,6 +1326,42 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
              INSERT OR IGNORE INTO schema_migrations (version) VALUES (31);",
         )?;
         tracing::info!("Migration 31: added graph relationship type index for topology findings");
+    }
+
+    // Migration 32: covering index for the graph→log join used by graph-anchored
+    // correlation (topic_correlate, ai_correlate rewrite). N-hop graph traversal
+    // resolves to a set of entity canonical keys, which become a
+    // `hostname IN (...)` filter over a bounded time window, frequently further
+    // narrowed by app_name. The existing idx_logs_host_time (hostname, timestamp)
+    // seeks the hostname+time range but must then fetch each candidate row from
+    // the heap to evaluate app_name — pathological across 5+ hostnames on wide
+    // windows. (hostname, app_name, timestamp) lets the planner satisfy the inner
+    // filter index-only. The second index covers the session_id-anchored fan-out
+    // (all logs for one AI session ordered by time) without touching the heap.
+    //
+    // First-run cost: building these on a populated DB scans the table and holds
+    // the write lock for the duration (seconds to minutes at multi-million-row
+    // volumes); /health may gap and syslog packets may drop during that window —
+    // the same one-time cost as the earlier index migrations.
+    if !migration_applied(&conn, 32)? {
+        tracing::info!(
+            "Migration 32: building graph→log covering indexes \
+             (idx_logs_hostname_appname_time, idx_logs_ai_session_time) \
+             — may take minutes on large DBs, write lock held"
+        );
+        let started = std::time::Instant::now();
+        conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_logs_hostname_appname_time
+                 ON logs(hostname, app_name, timestamp);
+             CREATE INDEX IF NOT EXISTS idx_logs_ai_session_time
+                 ON logs(ai_session_id, timestamp)
+                 WHERE ai_session_id IS NOT NULL;
+             INSERT OR IGNORE INTO schema_migrations (version) VALUES (32);",
+        )?;
+        tracing::info!(
+            elapsed_ms = started.elapsed().as_millis(),
+            "Migration 32: graph→log covering indexes created"
+        );
     }
 
     // A server crash/restart mid-check leaves an orphaned 'running' maintenance

@@ -1002,6 +1002,72 @@ fn migrations_23_24_yield_final_covering_index_set() {
 }
 
 #[test]
+fn migration_32_covers_graph_to_log_join() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = test_storage_config(dir.path().join("graph-log-cover.db"));
+    let pool = init_pool(&config).unwrap();
+    let conn = pool.get().unwrap();
+
+    // Index DDL is present and carries the expected column order.
+    let index_sql = |name: &str| -> Option<String> {
+        conn.query_row(
+            "SELECT sql FROM sqlite_schema WHERE type = 'index' AND name = ?1",
+            [name],
+            |row| row.get::<_, String>(0),
+        )
+        .ok()
+    };
+
+    let cover = index_sql("idx_logs_hostname_appname_time")
+        .expect("graph→log covering index must exist after migration 32");
+    let h = cover.find("hostname").unwrap();
+    let a = cover.find("app_name").unwrap();
+    let t = cover.find("timestamp").unwrap();
+    assert!(
+        h < a && a < t,
+        "column order must be hostname, app_name, timestamp: {cover}"
+    );
+
+    let session_cover = index_sql("idx_logs_ai_session_time")
+        .expect("session-anchored covering index must exist after migration 32");
+    assert!(session_cover.contains("ai_session_id"));
+    assert!(session_cover.contains("timestamp"));
+    assert!(session_cover.contains("ai_session_id IS NOT NULL"));
+
+    // The planner must pick the covering index for the topic_correlate join shape:
+    // hostname IN (...) AND timestamp BETWEEN ... AND app_name = ...
+    let plan_details = |sql: &str| -> Vec<String> {
+        let mut stmt = conn.prepare(sql).unwrap();
+        stmt.query_map([], |row| row.get::<_, String>(3))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap()
+    };
+    let join_plan = plan_details(
+        "EXPLAIN QUERY PLAN
+         SELECT id FROM logs
+         WHERE hostname IN ('dookie', 'squirts')
+           AND app_name = 'swag'
+           AND timestamp BETWEEN '2026-06-18T00:00:00Z' AND '2026-06-18T01:00:00Z'",
+    );
+    assert!(
+        join_plan
+            .iter()
+            .any(|p| p.contains("idx_logs_hostname_appname_time")),
+        "graph→log join must use idx_logs_hostname_appname_time: {join_plan:?}"
+    );
+
+    let applied: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM schema_migrations WHERE version = 32",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(applied, 1, "migration 32 must be recorded");
+}
+
+#[test]
 fn init_db_creates_inventory_stats_tables_and_triggers() {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("test.db");
