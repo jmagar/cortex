@@ -4,16 +4,6 @@ use super::*;
 /// Clamped again to `[1, 1000]` inside `db::correlate_session_graph`.
 const GRAPH_SESSION_LOG_LIMIT: usize = 500;
 
-/// Parse the `source_kind` recorded in a log row's `metadata_json`, if present.
-fn row_source_kind(entry: &db::LogEntry) -> Option<String> {
-    let meta = entry.metadata_json.as_deref()?;
-    let value: serde_json::Value = serde_json::from_str(meta).ok()?;
-    value
-        .get("source_kind")
-        .and_then(|v| v.as_str())
-        .map(str::to_string)
-}
-
 /// Shape the DB-layer `SessionGraphInputs` into the API response, classifying
 /// each row into a source lane (`agent_command` / `shell_history` /
 /// `graph:host:<host>`) and counting the agent-command and shell-history lanes.

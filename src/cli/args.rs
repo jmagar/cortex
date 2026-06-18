@@ -12,7 +12,7 @@ pub(crate) use ai::{
 };
 pub(crate) use surface::{
     AnomaliesArgs, AppsArgs, ClockSkewArgs, CompareArgs, CorrelateStateArgs, FleetStateArgs,
-    HostStateArgs, SilentHostsArgs,
+    HostStateArgs, SilentHostsArgs, TopicCorrelateArgs,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,6 +50,7 @@ pub(crate) enum CliCommand {
     HostState(HostStateArgs),
     FleetState(FleetStateArgs),
     CorrelateState(CorrelateStateArgs),
+    TopicCorrelate(TopicCorrelateArgs),
     Entity(EntityArgs),
     Graph(GraphCommand),
     FileTail(FileTailCommand),

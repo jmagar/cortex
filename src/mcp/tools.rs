@@ -26,8 +26,8 @@ use crate::app::{
     ListAiToolsRequest, ListAppsRequest, ListSessionsRequest, ListSourceIpsRequest,
     NotificationsRecentRequest, PatternsRequest, ProjectContextRequest, RequestActor,
     SearchLogsRequest, SearchSessionsRequest, SilentHostsRequest, SimilarIncidentsRequest,
-    TailLogsRequest, TimelineRequest, UnackErrorRequest, UnaddressedErrorsRequest,
-    UsageBlocksRequest,
+    TailLogsRequest, TimelineRequest, TopicCorrelateRequest, UnackErrorRequest,
+    UnaddressedErrorsRequest, UsageBlocksRequest,
 };
 
 use super::AppState;
@@ -90,6 +90,7 @@ async fn dispatch_cortex_action(
         H::AbuseIncidents => tool_abuse_incidents(state, args).await,
         H::AbuseInvestigate => tool_abuse_investigate(state, args).await,
         H::AiCorrelate => tool_ai_correlate(state, args).await,
+        H::TopicCorrelate => tool_topic_correlate(state, args).await,
         H::UsageBlocks => tool_usage_blocks(state, args).await,
         H::ProjectContext => tool_project_context(state, args).await,
         H::ListAiTools => tool_list_ai_tools(state, args).await,
@@ -229,6 +230,12 @@ async fn tool_abuse_investigate(state: &AppState, args: Value) -> anyhow::Result
 async fn tool_ai_correlate(state: &AppState, args: Value) -> anyhow::Result<Value> {
     let req: AiCorrelateRequest = action_payload(args, "ai_correlate")?;
     let response = state.service.correlate_ai_logs(req).await?;
+    Ok(serde_json::to_value(response)?)
+}
+
+async fn tool_topic_correlate(state: &AppState, args: Value) -> anyhow::Result<Value> {
+    let req: TopicCorrelateRequest = action_payload(args, "topic_correlate")?;
+    let response = state.service.topic_correlate(req).await?;
     Ok(serde_json::to_value(response)?)
 }
 
@@ -869,6 +876,20 @@ Related rows explicitly exclude AI transcript rows, so the result surfaces host,
 - `events_per_anchor` (integer, optional) — max related non-AI rows per anchor (default 25, max 200)
 
 When `session_id` is supplied, the response additionally carries a `graph_correlation` block: the session's time bounds, the hosts/entities discovered by traversing the investigation graph from the session entity, logs fanned out across all source kinds within the session window (annotated with a `discovery` lane — `agent_command`, `shell_history`, or `graph:host:<host>`), agent-command/shell-history lane counts, and heartbeat pressure summaries for the discovered hosts. `used_graph=false` indicates the time-windowed fallback (session not yet projected into the graph). Existing fields are unchanged.
+
+---
+
+## cortex topic_correlate
+Resolve a free-text topic to investigation-graph entities, expand the graph, and return a unified timeline of every related log annotated by source kind and graph discovery lane. Graph-first: name-match the topic to entities, traverse the graph, then join logs (not an FTS scan).
+
+**Parameters:**
+- `topic` (string, required) — topic to correlate, e.g. `axon` or `dookie dns adguard` (terms OR-ed)
+- `since`, `until` (string, optional) — time window (ISO 8601 or relative like `1h`); defaults to the last hour
+- `depth` (integer, optional) — graph traversal depth (default 2, max 6)
+- `source_kinds` (array of string, optional) — restrict the timeline to these source kinds (kebab-case, e.g. `docker-stream`, `agent-command`)
+- `limit` (integer, optional) — max timeline rows (default 200, max 1000)
+
+The response contains `resolved_entities` (with `match_kind`: exact/prefix/label/alias), `graph_expansion` (entities reached by traversal), `discovered_hosts`, a `timeline` (each row annotated with `source_kind` and an `entity_path` lane), and `heartbeat_summaries` for the discovered hosts.
 
 ---
 

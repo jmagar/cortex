@@ -28,6 +28,7 @@ A single MCP tool, `mcp__cortex__cortex`, dispatches on a required `action` argu
 | `abuse_incidents` | Groups abuse hits into scored incident candidates |
 | `abuse_investigate` | Expands incidents into deterministic evidence bundles |
 | `ai_correlate` | AI transcript anchors cross-referenced against non-AI logs |
+| `topic_correlate` | Resolve a topic to graph entities and correlate all related logs into a unified timeline |
 | `usage_blocks` | AI activity in 5-hour windows |
 | `project_context` | Summary for one AI project path |
 | `list_ai_tools` | Distinct AI tools with counts |

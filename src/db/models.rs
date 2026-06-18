@@ -222,6 +222,26 @@ pub struct SessionGraphInputs {
     pub logs: Vec<LogEntry>,
 }
 
+/// A graph entity matched while resolving a topic string, with how it matched
+/// (`exact` canonical key, `prefix` of a key, or `alias`).
+#[derive(Debug, Clone)]
+pub struct ResolvedTopicEntity {
+    pub entity_type: String,
+    pub canonical_key: String,
+    pub match_kind: &'static str,
+}
+
+/// DB-layer carrier for topic correlation: the entities the topic resolved to,
+/// the entities/hosts reached by graph expansion, and the fanned-out logs.
+#[derive(Debug, Clone, Default)]
+pub struct TopicGraphInputs {
+    pub resolved: Vec<ResolvedTopicEntity>,
+    /// Entities reached by traversal that were not themselves resolved seeds.
+    pub expansion: Vec<(String, String)>,
+    pub discovered_hosts: Vec<String>,
+    pub logs: Vec<LogEntry>,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AiRelatedLogsParams {
     pub windows: Vec<AiRelatedWindow>,

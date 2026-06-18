@@ -1097,6 +1097,7 @@ fn sample_args_for_action(action: &str) -> Option<serde_json::Value> {
         }
         "search_sessions" => json!({"action": action, "query": "schema"}),
         "ai_correlate" => json!({"action": action, "project": "/tmp/project"}),
+        "topic_correlate" => json!({"action": action, "topic": "schema-test"}),
         "project_context" => json!({"action": action, "project": "/tmp/project"}),
         "context" => {
             json!({"action": action, "host": "schema-test-host", "timestamp": "2026-01-01T00:00:00Z"})

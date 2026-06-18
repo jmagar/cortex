@@ -33,3 +33,4 @@ pub(crate) mod host_state;
 pub(crate) mod notify;
 pub(crate) mod sig;
 pub(crate) mod silent_hosts;
+pub(crate) mod topic_correlate;

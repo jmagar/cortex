@@ -10,14 +10,14 @@ use anyhow::Result;
 use cortex::app::{
     AnomaliesRequest, ClockSkewRequest, CompareRequest, CorrelateStateRequest, FleetStateRequest,
     GraphAroundRequest, GraphEntityLookupRequest, GraphEvidenceLookupRequest, GraphExplainRequest,
-    HostStateRequest, ListAppsRequest, SilentHostsRequest,
+    HostStateRequest, ListAppsRequest, SilentHostsRequest, TopicCorrelateRequest,
 };
 
 use super::CliMode;
 use super::args::{
     AnomaliesArgs, AppsArgs, ClockSkewArgs, CompareArgs, CorrelateStateArgs, EntityArgs,
     FleetStateArgs, GraphAroundArgs, GraphEvidenceArgs, GraphExplainArgs, GraphRebuildArgs,
-    GraphStatusArgs, HostStateArgs, SilentHostsArgs,
+    GraphStatusArgs, HostStateArgs, SilentHostsArgs, TopicCorrelateArgs,
 };
 
 impl SilentHostsArgs {
@@ -402,6 +402,70 @@ pub(crate) async fn run_correlate_state(mode: &CliMode, args: CorrelateStateArgs
             summary.samples,
             summary.partial_samples,
             h.logs.len()
+        );
+    }
+    Ok(())
+}
+
+impl TopicCorrelateArgs {
+    pub(crate) fn into_request(self) -> Result<TopicCorrelateRequest> {
+        let topic = self
+            .topic
+            .ok_or_else(|| anyhow::anyhow!("a topic is required"))?;
+        Ok(TopicCorrelateRequest {
+            topic,
+            since: self.since,
+            until: self.until,
+            depth: self.depth,
+            source_kinds: self.source_kinds,
+            limit: self.limit,
+        })
+    }
+}
+
+pub(crate) async fn run_topic_correlate(mode: &CliMode, args: TopicCorrelateArgs) -> Result<()> {
+    let json = args.json;
+    let req = args.into_request()?;
+    let response = match mode {
+        CliMode::Local(service) => service.topic_correlate(req).await?,
+        CliMode::Http(client) => http_or_cancel(client.topic_correlate(&req)).await?,
+    };
+    if json {
+        return print_json(&response);
+    }
+    println!(
+        "topic '{}' → {} entit{} resolved, {} expanded, {} timeline row(s){}",
+        response.topic,
+        response.resolved_entities.len(),
+        if response.resolved_entities.len() == 1 {
+            "y"
+        } else {
+            "ies"
+        },
+        response.graph_expansion.len(),
+        response.timeline.len(),
+        if response.truncated {
+            " (truncated)"
+        } else {
+            ""
+        },
+    );
+    for entity in &response.resolved_entities {
+        println!(
+            "  resolved {}:{} ({})",
+            entity.entity_type, entity.key, entity.match_kind
+        );
+    }
+    if !response.discovered_hosts.is_empty() {
+        println!("  hosts: {}", response.discovered_hosts.join(", "));
+    }
+    for row in &response.timeline {
+        println!(
+            "  {}  [{}]  {}  {}",
+            row.timestamp,
+            row.entity_path,
+            row.hostname,
+            row.message.chars().take(120).collect::<String>(),
         );
     }
     Ok(())

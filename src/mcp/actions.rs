@@ -9,7 +9,7 @@
 //! Now there is one metadata table: [`ACTION_SPECS`]. The schema, scope gates,
 //! help text, and action metadata are computed from it.
 
-use super::action_flags::{COMMON_LOG_FLAGS, Defaults, FlagSpec};
+use super::action_flags::{COMMON_LOG_FLAGS, Defaults, FlagSpec, TOPIC_CORRELATE_FLAGS};
 
 /// The scope required to invoke a given action.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -71,6 +71,7 @@ pub(super) enum ActionHandler {
     AbuseIncidents,
     AbuseInvestigate,
     AiCorrelate,
+    TopicCorrelate,
     UsageBlocks,
     ProjectContext,
     ListAiTools,
@@ -333,6 +334,22 @@ pub(super) const ACTION_SPECS: &[ActionSpec] = &[
         "Correlate AI transcript events with syslog",
         Moderate,
         AiCorrelate
+    ),
+    action_spec!(
+        "topic_correlate",
+        Read,
+        "Resolve a topic to graph entities and correlate all related logs into a unified timeline",
+        Moderate,
+        TopicCorrelate,
+        flags: TOPIC_CORRELATE_FLAGS,
+        examples: &[
+            "cortex topic-correlate axon",
+            "cortex topic-correlate axon --since 1h --limit 200",
+            "cortex topic-correlate 'dookie dns adguard' --since 6h",
+            "cortex topic-correlate axon --source-kinds docker-stream,agent-command",
+        ],
+        positional: Some("--topic"),
+        defaults: Defaults { limit: Some(200), since: Some("1h") }
     ),
     action_spec!(
         "usage_blocks",

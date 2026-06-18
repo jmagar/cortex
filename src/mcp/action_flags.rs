@@ -112,3 +112,43 @@ pub(super) const COMMON_LOG_FLAGS: &[FlagSpec] = &[
         value_kind: ValueKind::None,
     },
 ];
+
+/// Flags for `topic_correlate`: graph-anchored universal correlation.
+pub(super) const TOPIC_CORRELATE_FLAGS: &[FlagSpec] = &[
+    FlagSpec {
+        flag: "--since",
+        short: "",
+        help: "Start of window (1h, 2d, yesterday, RFC3339)",
+        value_kind: ValueKind::Time,
+    },
+    FlagSpec {
+        flag: "--until",
+        short: "",
+        help: "End of window",
+        value_kind: ValueKind::Time,
+    },
+    FlagSpec {
+        flag: "--depth",
+        short: "",
+        help: "Graph traversal depth (default 2, max 6)",
+        value_kind: ValueKind::Text,
+    },
+    FlagSpec {
+        flag: "--source-kinds",
+        short: "",
+        help: "Comma-separated source kinds (e.g. docker-stream,agent-command)",
+        value_kind: ValueKind::Text,
+    },
+    FlagSpec {
+        flag: "--limit",
+        short: "-n",
+        help: "Max timeline rows",
+        value_kind: ValueKind::Text,
+    },
+    FlagSpec {
+        flag: "--json",
+        short: "",
+        help: "JSON output",
+        value_kind: ValueKind::None,
+    },
+];

@@ -35,6 +35,7 @@ that registry by `src/mcp/schemas.rs::tool_definitions()`.
 | `abuse_incidents` | Groups abuse hits into scored incident candidates | no |
 | `abuse_investigate` | Expands incidents into deterministic evidence bundles | no |
 | `ai_correlate` | AI transcript anchors cross-referenced against nearby non-AI logs | no |
+| `topic_correlate` | Resolve a topic to graph entities and correlate all related logs into a unified timeline | no |
 | `usage_blocks` | AI transcript activity grouped into deterministic 5-hour UTC blocks | no |
 | `project_context` | Summary and recent entries for one AI project path | no |
 | `list_ai_tools` | Distinct AI tools with counts | no |

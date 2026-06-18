@@ -36,12 +36,13 @@ use super::models::{
     ListAiToolsResponse, ListAppsRequest, ListAppsResponse, ListHostsResponse, ListSessionsRequest,
     ListSessionsResponse, ListSourceIpsRequest, ListSourceIpsResponse, LogEntry,
     MaintenanceJobStatus, NotificationsRecentRequest, PatternsRequest, PatternsResponse,
-    ProjectContextRequest, ProjectContextResponse, RequestActor, SearchLogsRequest,
-    SearchLogsResponse, SearchSessionsRequest, SearchSessionsResponse, ServiceJournalEntry,
-    ServiceLogsRequest, ServiceLogsResponse, SilentHostsRequest, SilentHostsResponse,
-    SimilarIncidentsRequest, SimilarIncidentsResponse, TailLogsRequest, TimelineRequest,
-    TimelineResponse, TopologyFinding, TopologyFindingEntity, TopologyFindingEvidence,
-    UsageBlocksRequest, UsageBlocksResponse,
+    ProjectContextRequest, ProjectContextResponse, RequestActor, ResolvedTopicEntity,
+    SearchLogsRequest, SearchLogsResponse, SearchSessionsRequest, SearchSessionsResponse,
+    ServiceJournalEntry, ServiceLogsRequest, ServiceLogsResponse, SilentHostsRequest,
+    SilentHostsResponse, SimilarIncidentsRequest, SimilarIncidentsResponse, TailLogsRequest,
+    TimelineRequest, TimelineResponse, TopicCorrelateRequest, TopicCorrelateResponse,
+    TopicExpansionEntity, TopicTimelineEntry, TopologyFinding, TopologyFindingEntity,
+    TopologyFindingEvidence, UsageBlocksRequest, UsageBlocksResponse,
 };
 use super::os_adapter::{OsAdapter, SystemOsAdapter};
 use super::time::{parse_optional_timestamp, parse_required_timestamp, rfc3339_z};
@@ -75,11 +76,23 @@ mod map;
 mod map_answers;
 mod map_findings;
 mod rag;
+mod topic_correlate;
 
 pub use compose::run_compose_status;
 pub use journal::run_service_logs;
 #[cfg(test)]
 use journal::{normalize_syslog_owned_service, parse_journal_json_lines};
+
+/// Parse the `source_kind` recorded in a log row's `metadata_json`, if present.
+/// Shared by the `ai_correlate` and `topic_correlate` lanes.
+pub(crate) fn row_source_kind(entry: &db::LogEntry) -> Option<String> {
+    let meta = entry.metadata_json.as_deref()?;
+    let value: serde_json::Value = serde_json::from_str(meta).ok()?;
+    value
+        .get("source_kind")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+}
 
 /// Service-layer entry point bridging request structs to SQLite.
 ///

@@ -244,6 +244,69 @@ pub struct AiCorrelateResponse {
     pub graph_correlation: Option<GraphSessionCorrelation>,
 }
 
+/// Request for `topic_correlate`: a free-text topic resolved to graph entities,
+/// expanded, and correlated across all source kinds.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TopicCorrelateRequest {
+    /// Topic string, e.g. `axon` or `dookie dns adguard` (terms OR-ed).
+    pub topic: String,
+    pub since: Option<String>,
+    pub until: Option<String>,
+    /// Graph traversal depth (default 2, clamped to 6).
+    pub depth: Option<u8>,
+    /// Restrict the timeline to these source kinds (kebab-case wire names).
+    #[serde(default)]
+    pub source_kinds: Option<Vec<String>>,
+    pub limit: Option<u32>,
+}
+
+/// A graph entity a topic term resolved to.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResolvedTopicEntity {
+    #[serde(rename = "type")]
+    pub entity_type: String,
+    pub key: String,
+    /// How it matched: `exact`, `prefix`, `label`, or `alias`.
+    pub match_kind: String,
+}
+
+/// An entity reached by graph expansion from the resolved seeds.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TopicExpansionEntity {
+    #[serde(rename = "type")]
+    pub entity_type: String,
+    pub key: String,
+}
+
+/// One unified-timeline row in a topic correlation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TopicTimelineEntry {
+    pub timestamp: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_kind: Option<String>,
+    /// Discovery lane: `agent_command`, `shell_history`, or `graph:host:<host>`.
+    pub entity_path: String,
+    pub hostname: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub app_name: Option<String>,
+    pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+}
+
+/// Response for `topic_correlate`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TopicCorrelateResponse {
+    pub topic: String,
+    pub resolved_entities: Vec<ResolvedTopicEntity>,
+    pub graph_expansion: Vec<TopicExpansionEntity>,
+    pub discovered_hosts: Vec<String>,
+    pub timeline: Vec<TopicTimelineEntry>,
+    pub heartbeat_summaries: Vec<db::HeartbeatWindowSummary>,
+    pub truncated: bool,
+}
+
 /// One log row in a graph-anchored session correlation, annotated with how it
 /// was reached and which source lane it belongs to.
 #[derive(Debug, Clone, Serialize, Deserialize)]

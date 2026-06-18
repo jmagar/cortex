@@ -25,8 +25,9 @@ use super::models::{
     AiIncidentResult, AiInvestigateParams, AiInvestigateResult, AiProjectInventoryEntry,
     AiRelatedLogsForAnchor, AiRelatedLogsParams, AiSessionEntry, AiToolInventoryEntry, DbStats,
     ErrorSummaryEntry, HostEntry, IncidentEvidence, ListAiProjectsParams, ListAiProjectsResult,
-    ListAiSessionsParams, ListAiToolsParams, ListAiToolsResult, LogEntry, SearchAiSessionsParams,
-    SearchAiSessionsResult, SearchParams, SearchedAiSessionEntry, SessionGraphInputs,
+    ListAiSessionsParams, ListAiToolsParams, ListAiToolsResult, LogEntry, ResolvedTopicEntity,
+    SearchAiSessionsParams, SearchAiSessionsResult, SearchParams, SearchedAiSessionEntry,
+    SessionGraphInputs, TopicGraphInputs,
 };
 use super::pool::DbPool;
 
@@ -1633,6 +1634,167 @@ pub fn correlate_session_graph(
         discovered_hosts,
         discovered_entities,
         used_graph,
+        logs,
+    })
+}
+
+/// Resolve topic terms to graph entities by exact / prefix / label / alias
+/// match. `terms` must already be lowercased. Strongest match wins per entity
+/// (exact > prefix > label > alias). Capped per term and overall.
+fn resolve_topic_entities(
+    conn: &rusqlite::Connection,
+    terms: &[String],
+) -> Result<Vec<ResolvedTopicEntity>> {
+    const PER_TERM_CAP: usize = 25;
+    const TOTAL_CAP: usize = 100;
+    // (entity_type, canonical_key) -> match priority (lower = stronger).
+    let mut best: std::collections::HashMap<(String, String), u8> =
+        std::collections::HashMap::new();
+
+    let mut direct = conn.prepare(
+        "SELECT entity_type, canonical_key,
+                CASE WHEN canonical_key = ?1 THEN 0
+                     WHEN canonical_key LIKE ?1 || '%' THEN 1
+                     ELSE 2 END AS pri
+         FROM graph_entities
+         WHERE canonical_key = ?1
+            OR canonical_key LIKE ?1 || '%'
+            OR lower(display_label) LIKE '%' || ?1 || '%'
+         ORDER BY pri
+         LIMIT ?2",
+    )?;
+    let mut alias = conn.prepare(
+        "SELECT e.entity_type, e.canonical_key
+         FROM graph_entity_aliases a
+         JOIN graph_entities e ON e.id = a.entity_id
+         WHERE a.alias_key = ?1
+         LIMIT ?2",
+    )?;
+
+    for term in terms {
+        let rows = direct.query_map(rusqlite::params![term, PER_TERM_CAP as i64], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)? as u8,
+            ))
+        })?;
+        for row in rows {
+            let (entity_type, key, pri) = row?;
+            let slot = best.entry((entity_type, key)).or_insert(u8::MAX);
+            *slot = (*slot).min(pri);
+        }
+        let alias_rows = alias.query_map(rusqlite::params![term, PER_TERM_CAP as i64], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        for row in alias_rows {
+            let (entity_type, key) = row?;
+            // Alias match has priority 3 (weakest), only fills if nothing stronger.
+            let slot = best.entry((entity_type, key)).or_insert(u8::MAX);
+            *slot = (*slot).min(3);
+        }
+    }
+
+    let mut resolved: Vec<ResolvedTopicEntity> = best
+        .into_iter()
+        .map(|((entity_type, canonical_key), pri)| ResolvedTopicEntity {
+            entity_type,
+            canonical_key,
+            match_kind: match pri {
+                0 => "exact",
+                1 => "prefix",
+                2 => "label",
+                _ => "alias",
+            },
+        })
+        .collect();
+    // Stable, deterministic ordering: strongest match first, then key.
+    resolved.sort_by(|a, b| {
+        let rank = |m: &str| match m {
+            "exact" => 0,
+            "prefix" => 1,
+            "label" => 2,
+            _ => 3,
+        };
+        rank(a.match_kind)
+            .cmp(&rank(b.match_kind))
+            .then_with(|| a.canonical_key.cmp(&b.canonical_key))
+    });
+    resolved.truncate(TOTAL_CAP);
+    Ok(resolved)
+}
+
+/// Topic-anchored universal correlation: resolve a set of (lowercased) topic
+/// terms to graph entities, expand the graph `max_depth` hops, and fan logs out
+/// across all source kinds within `[since, until]` via
+/// `search_logs_from_graph_related_entities` (graph-first order).
+///
+/// Returns the resolved seed entities, the graph expansion (reached entities
+/// that were not seeds), the discovered hosts, and the correlated logs. Empty
+/// when no term resolves to an entity.
+#[allow(clippy::too_many_arguments)]
+pub fn topic_correlate_inputs(
+    pool: &DbPool,
+    terms: &[String],
+    max_depth: u8,
+    since: Option<&str>,
+    until: Option<&str>,
+    source_kinds: Option<&[SourceKind]>,
+    limit: usize,
+) -> Result<TopicGraphInputs> {
+    if terms.is_empty() {
+        return Ok(TopicGraphInputs::default());
+    }
+    let conn = pool.get()?;
+    let resolved = resolve_topic_entities(&conn, terms)?;
+    if resolved.is_empty() {
+        return Ok(TopicGraphInputs::default());
+    }
+
+    let mut seeds: Vec<String> = resolved.iter().map(|r| r.canonical_key.clone()).collect();
+    seeds.sort();
+    seeds.dedup();
+    let seed_set: std::collections::HashSet<&str> = seeds.iter().map(String::as_str).collect();
+
+    // Graph expansion + host discovery.
+    let mut expansion: Vec<(String, String)> = Vec::new();
+    let mut discovered_hosts: Vec<String> = Vec::new();
+    for entity in super::graph::graph_walk_n_hops(&conn, &seeds, max_depth)? {
+        match entity.entity_type.as_str() {
+            super::graph::ENTITY_TYPE_HOST => discovered_hosts.push(entity.canonical_key.clone()),
+            super::graph::ENTITY_TYPE_CONTAINER | super::graph::ENTITY_TYPE_SERVICE => {
+                if let Some(host) = entity.canonical_key.split(':').next() {
+                    if !host.is_empty() {
+                        discovered_hosts.push(host.to_string());
+                    }
+                }
+            }
+            _ => {}
+        }
+        if !seed_set.contains(entity.canonical_key.as_str()) {
+            expansion.push((entity.entity_type, entity.canonical_key));
+        }
+    }
+    discovered_hosts.sort();
+    discovered_hosts.dedup();
+    expansion.sort();
+    expansion.dedup();
+    drop(conn);
+
+    let logs = search_logs_from_graph_related_entities(
+        pool,
+        &seeds,
+        max_depth,
+        since,
+        until,
+        source_kinds,
+        limit,
+    )?;
+
+    Ok(TopicGraphInputs {
+        resolved,
+        expansion,
+        discovered_hosts,
         logs,
     })
 }

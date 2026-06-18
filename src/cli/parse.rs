@@ -43,6 +43,7 @@ pub(crate) const TOP_LEVEL_COMMANDS: &[&str] = &[
     "host-state",
     "fleet-state",
     "correlate-state",
+    "topic-correlate",
     "file-tail",
     "completions",
 ];
@@ -89,6 +90,7 @@ pub(crate) fn parse_command(args: Vec<String>) -> Result<CliCommand> {
         "host-state" => commands::host_state::parse_host_state(rest),
         "fleet-state" => commands::fleet_state::parse_fleet_state(rest),
         "correlate-state" => commands::correlate_state::parse_correlate_state(rest),
+        "topic-correlate" => commands::topic_correlate::parse_topic_correlate(rest),
         "file-tail" => commands::file_tails::parse_file_tail(rest),
         "__complete" => Ok(CliCommand::Complete(rest.to_vec())),
         "completions" => Ok(CliCommand::Completions(rest.to_vec())),

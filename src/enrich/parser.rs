@@ -69,6 +69,27 @@ impl SourceKind {
         }
     }
 
+    /// Parse the stable kebab-case wire form back into a `SourceKind`.
+    /// Returns `None` for unrecognised values (e.g. a caller-supplied
+    /// `--source-kinds` typo), letting callers skip rather than fail.
+    pub fn from_wire(value: &str) -> Option<Self> {
+        const ALL: &[SourceKind] = &[
+            SourceKind::SyslogUdp,
+            SourceKind::SyslogTcp,
+            SourceKind::DockerStream,
+            SourceKind::DockerEvent,
+            SourceKind::Otlp,
+            SourceKind::AdguardApi,
+            SourceKind::UnifiApi,
+            SourceKind::Agent,
+            SourceKind::ShellHistory,
+            SourceKind::AgentCommand,
+            SourceKind::FileTail,
+        ];
+        let trimmed = value.trim();
+        ALL.iter().copied().find(|kind| kind.as_str() == trimmed)
+    }
+
     /// True when the source is one of the two syslog listeners — convenient
     /// for parsers like `kernel` that gate on syslog ingest regardless of
     /// transport.

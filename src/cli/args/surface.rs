@@ -64,3 +64,14 @@ pub(crate) struct CorrelateStateArgs {
     pub limit: Option<u32>,
     pub json: bool,
 }
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct TopicCorrelateArgs {
+    pub topic: Option<String>,
+    pub since: Option<String>,
+    pub until: Option<String>,
+    pub depth: Option<u8>,
+    pub source_kinds: Option<Vec<String>>,
+    pub limit: Option<u32>,
+    pub json: bool,
+}

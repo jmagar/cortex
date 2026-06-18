@@ -39,8 +39,8 @@ use crate::app::{
     ListAiProjectsRequest, ListAiToolsRequest, ListAppsRequest, ListSessionsRequest,
     ListSourceIpsRequest, NotificationsRecentRequest, PatternsRequest, ProjectContextRequest,
     RequestActor, SearchLogsRequest, SearchSessionsRequest, ServiceError, SilentHostsRequest,
-    SimilarIncidentsRequest, TailLogsRequest, TimelineRequest, UnackErrorRequest,
-    UnaddressedErrorsRequest, UsageBlocksRequest,
+    SimilarIncidentsRequest, TailLogsRequest, TimelineRequest, TopicCorrelateRequest,
+    UnackErrorRequest, UnaddressedErrorsRequest, UsageBlocksRequest,
 };
 use crate::config::ApiConfig;
 use crate::mcp::{AuthPolicy, build_auth_layer};
@@ -239,6 +239,7 @@ pub fn router(state: ApiState) -> anyhow::Result<Router> {
         .route("/api/context", get(context))
         .route("/api/fleet-state", get(fleet_state))
         .route("/api/correlate-state", get(correlate_state))
+        .route("/api/topic-correlate", post(topic_correlate))
         .route("/api/errors/unaddressed", get(unaddressed_errors))
         .route("/api/errors/ack", post(ack_error))
         .route("/api/errors/unack", post(unack_error))
@@ -681,6 +682,13 @@ async fn correlate_state(
     Query(req): Query<CorrelateStateRequest>,
 ) -> impl IntoResponse {
     respond(state.service.correlate_state(req).await)
+}
+
+async fn topic_correlate(
+    State(state): State<ApiState>,
+    Json(req): Json<TopicCorrelateRequest>,
+) -> impl IntoResponse {
+    respond(state.service.topic_correlate(req).await)
 }
 
 #[derive(Debug, Deserialize)]

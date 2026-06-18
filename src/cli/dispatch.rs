@@ -367,7 +367,7 @@ pub(crate) use super::dispatch_surface::{
     run_fleet_state, run_graph_around, run_graph_evidence, run_graph_explain, run_graph_rebuild,
     run_graph_status, run_host_state, run_ingest_rate, run_notify_recent, run_notify_test,
     run_patterns, run_sig_ack, run_sig_list, run_sig_unack, run_silent_hosts, run_source_ips,
-    run_timeline,
+    run_timeline, run_topic_correlate,
 };
 
 #[cfg(test)]

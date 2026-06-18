@@ -152,6 +152,8 @@ pub use models::{
     TailLogsRequest,
     TimelineRequest,
     TimelineResponse,
+    TopicCorrelateRequest,
+    TopicCorrelateResponse,
     UnackErrorRequest,
     UnackErrorResponse,
     UnaddressedErrorsRequest,

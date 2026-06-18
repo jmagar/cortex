@@ -65,6 +65,7 @@ const SECTIONS: &[(&str, &[&str])] = &[
             "host-state",
             "fleet-state",
             "correlate-state",
+            "topic-correlate",
             "silent-hosts",
             "clock-skew",
             "anomalies",
@@ -223,6 +224,13 @@ const CATALOG: &[CommandDoc] = &[
         summary: "Correlate host state at a reference time",
         usage: &[
             "cortex correlate-state --reference-time TIME [--window-minutes N] [--host HOST] [--severity-min LEVEL] [--limit N] [--json]",
+        ],
+    },
+    CommandDoc {
+        name: "topic-correlate",
+        summary: "Resolve a topic to graph entities and correlate all related logs into a unified timeline",
+        usage: &[
+            "cortex topic-correlate TOPIC [--since TIME] [--until TIME] [--depth N] [--source-kinds KINDS] [--limit N] [--json]",
         ],
     },
     CommandDoc {

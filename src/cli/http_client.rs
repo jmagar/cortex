@@ -81,8 +81,9 @@ use cortex::app::{
     PatternsRequest, PatternsResponse, ProjectContextRequest, ProjectContextResponse,
     SearchLogsRequest, SearchLogsResponse, SearchSessionsRequest, SearchSessionsResponse,
     SilentHostsRequest, SilentHostsResponse, SimilarIncidentsRequest, SimilarIncidentsResponse,
-    TailLogsRequest, TimelineRequest, TimelineResponse, UnackErrorRequest, UnackErrorResponse,
-    UnaddressedErrorsRequest, UnaddressedErrorsResponse, UsageBlocksRequest, UsageBlocksResponse,
+    TailLogsRequest, TimelineRequest, TimelineResponse, TopicCorrelateRequest,
+    TopicCorrelateResponse, UnackErrorRequest, UnackErrorResponse, UnaddressedErrorsRequest,
+    UnaddressedErrorsResponse, UsageBlocksRequest, UsageBlocksResponse,
 };
 use cortex::scanner::{CheckpointEntry, ParseErrorEntry, PruneCheckpointsResult};
 
@@ -733,6 +734,15 @@ impl HttpClient {
         req: &CorrelateStateRequest,
     ) -> Result<CorrelateStateResponse> {
         self.get_json("/api/correlate-state", Some(req)).await
+    }
+
+    pub async fn topic_correlate(
+        &self,
+        req: &TopicCorrelateRequest,
+    ) -> Result<TopicCorrelateResponse> {
+        // POST + JSON body: the request carries a `source_kinds` list that does
+        // not round-trip cleanly through a query string.
+        self.post_json("/api/topic-correlate", req).await
     }
 
     pub async fn similar_incidents(

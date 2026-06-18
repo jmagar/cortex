@@ -711,6 +711,18 @@ print('ok')
 " 2>/dev/null || echo "error")
 assert_eq "ai_correlate: response structure valid" "$AI_CORRELATE_VALID" "ok"
 
+TOPIC_CORRELATE=$(mcp_call topic_correlate "topic=${AI_SMOKE_PROJECT}" "limit=5" 2>&1)
+assert_no_error "topic_correlate: no error" "$TOPIC_CORRELATE"
+TOPIC_CORRELATE_VALID=$(printf '%s\n' "$TOPIC_CORRELATE" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+assert 'resolved_entities' in d and isinstance(d['resolved_entities'], list), 'resolved_entities not a list'
+assert 'timeline' in d and isinstance(d['timeline'], list), 'timeline not a list'
+assert 'graph_expansion' in d, 'graph_expansion missing'
+print('ok')
+" 2>/dev/null || echo "error")
+assert_eq "topic_correlate: response structure valid" "$TOPIC_CORRELATE_VALID" "ok"
+
 USAGE_BLOCKS=$(mcp_call usage_blocks 2>&1)
 assert_no_error "usage_blocks: no error" "$USAGE_BLOCKS"
 USAGE_BLOCKS_VALID=$(printf '%s\n' "$USAGE_BLOCKS" | python3 -c "

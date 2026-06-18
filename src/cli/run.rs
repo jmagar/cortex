@@ -145,6 +145,7 @@ pub(crate) async fn run(mode: CliMode, command: CliCommand) -> Result<()> {
         CliCommand::HostState(args) => dispatch::run_host_state(&mode, args).await,
         CliCommand::FleetState(args) => dispatch::run_fleet_state(&mode, args).await,
         CliCommand::CorrelateState(args) => dispatch::run_correlate_state(&mode, args).await,
+        CliCommand::TopicCorrelate(args) => dispatch::run_topic_correlate(&mode, args).await,
         CliCommand::Entity(args) => dispatch::run_entity_lookup(&mode, args).await,
         CliCommand::Graph(graph) => match graph {
             GraphCommand::Around(args) => dispatch::run_graph_around(&mode, args).await,

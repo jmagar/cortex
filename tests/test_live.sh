@@ -651,6 +651,11 @@ phase_tools() {
   assert_jq "cortex ai_correlate — anchors field is array" "${ai_correlate_result}" '.anchors | type' "array"
   assert_jq "cortex ai_correlate — total_related_events present" "${ai_correlate_result}" '.total_related_events != null'
 
+  local topic_correlate_result
+  topic_correlate_result="$(call_tool cortex "$(jq -nc --arg topic "${AI_SMOKE_PROJECT}" '{"action":"topic_correlate","topic":$topic,"limit":5}')")" || topic_correlate_result=""
+  assert_jq "cortex topic_correlate — timeline field is array" "${topic_correlate_result}" '.timeline | type' "array"
+  assert_jq "cortex topic_correlate — resolved_entities present" "${topic_correlate_result}" '.resolved_entities != null'
+
   local usage_blocks_result
   usage_blocks_result="$(call_tool cortex '{"action":"usage_blocks"}')" || usage_blocks_result=""
   assert_jq "cortex usage_blocks — blocks field is array" "${usage_blocks_result}" '.blocks | type' "array"

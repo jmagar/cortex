@@ -612,6 +612,8 @@ suite_sessions() {
     cortex abuse_investigate "$(jq -nc --arg project "${AI_SMOKE_PROJECT}" '{"project":$project,"limit":1}')" "evidence"
   run_test "cortex ai_correlate: returns anchors array" \
     cortex ai_correlate "$(jq -nc --arg project "${AI_SMOKE_PROJECT}" '{"project":$project,"limit":2,"events_per_anchor":3}')" "anchors"
+  run_test "cortex topic_correlate: returns timeline array" \
+    cortex topic_correlate "$(jq -nc --arg topic "${AI_SMOKE_PROJECT}" '{"topic":$topic,"limit":5}')" "timeline"
   run_test "cortex usage_blocks: returns blocks array" \
     cortex usage_blocks '{}' "blocks"
   run_test "cortex project_context: returns project field" \
