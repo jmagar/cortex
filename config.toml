@@ -106,3 +106,23 @@ dispatcher_interval_secs = 30
 evaluator_interval_secs = 30
 dedup_window_secs = 3600
 max_retry_attempts = 8
+
+[error_detection]
+# Background scan that groups recurring warning/error logs into signatures and
+# notifies on unacknowledged ones above frequency_threshold (per 1h window).
+enabled = false
+scan_interval_secs = 3600
+max_rows_per_cycle = 50000
+frequency_threshold = 30
+# Case-insensitive message substrings whose log rows are skipped during
+# scanning. Breaks the notification feedback loop: cortex POSTs to Apprise's
+# /notify endpoint, Apprise logs the delivery, those logs are forwarded back
+# into cortex and would otherwise be re-detected as recurring errors. Defaults
+# cover Apprise's own delivery log lines. Set to [] to disable, or extend for
+# other notification backends. Env: CORTEX_ERROR_DETECTION_EXCLUDE_PATTERNS
+# (comma-separated).
+exclude_patterns = [
+    "Delivered Stateless Notification",
+    "Sent Gotify notification",
+    "POST /notify",
+]

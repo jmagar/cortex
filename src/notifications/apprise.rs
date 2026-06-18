@@ -162,16 +162,28 @@ impl AppriseClient {
 
 /// Escape log-derived text for safe notification delivery.
 ///
+/// The payload is sent with `"format": "markdown"`, so raw `<`/`>` would be
+/// interpreted as HTML tags by markdown-rendering targets (Gotify, etc.) and
+/// silently dropped. The error-signature normalizer emits placeholder tokens
+/// like `<n>`, `<hex>`, `<ip>`, `<path>`, so stripping the brackets mangled
+/// every signature into unreadable runs (`<n>:<n>:<n>` → `n:n:n`). Instead we
+/// HTML-escape the markup characters: this both renders the placeholders
+/// literally and still neutralises tag/markup injection.
+///
 /// - Replaces `@` with `＠` (U+FF20) to prevent mention injection.
-/// - Strips `<` and `>` to prevent HTML/markup injection.
+/// - Escapes `&`, `<`, `>` to their HTML entities so they render verbatim.
 pub fn escape_for_notification(s: &str) -> String {
-    s.chars()
-        .filter_map(|c| match c {
-            '@' => Some('＠'),
-            '<' | '>' => None,
-            other => Some(other),
-        })
-        .collect()
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '@' => out.push('＠'),
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            other => out.push(other),
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -187,10 +199,22 @@ mod tests {
     }
 
     #[test]
-    fn escape_strips_angle_brackets() {
+    fn escape_neutralizes_angle_brackets_without_dropping_content() {
+        // Markup is escaped (not executable) but the inner text is preserved,
+        // so HTML/markdown targets cannot be injected yet nothing is silently lost.
         assert_eq!(
             escape_for_notification("<script>alert(1)</script>"),
-            "scriptalert(1)/script"
+            "&lt;script&gt;alert(1)&lt;/script&gt;"
+        );
+    }
+
+    #[test]
+    fn escape_preserves_normalizer_placeholders() {
+        // Regression: signatures emit <n>, <hex>, <path> etc. Stripping the
+        // brackets collapsed them into unreadable runs; escaping keeps them.
+        assert_eq!(
+            escape_for_notification("<n>-<n>-<n>T<n>:<n>:<n> path=<path>"),
+            "&lt;n&gt;-&lt;n&gt;-&lt;n&gt;T&lt;n&gt;:&lt;n&gt;:&lt;n&gt; path=&lt;path&gt;"
         );
     }
 
@@ -198,8 +222,13 @@ mod tests {
     fn escape_combined() {
         assert_eq!(
             escape_for_notification("Out of memory: Killed process 1234 (nginx) <@root>"),
-            "Out of memory: Killed process 1234 (nginx) ＠root"
+            "Out of memory: Killed process 1234 (nginx) &lt;＠root&gt;"
         );
+    }
+
+    #[test]
+    fn escape_ampersand() {
+        assert_eq!(escape_for_notification("a & b"), "a &amp; b");
     }
 
     #[test]

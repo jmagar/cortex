@@ -177,6 +177,14 @@ pub struct ErrorDetectionConfig {
     /// Minimum count of firings in a 1h window before a signature is
     /// considered "notable". Default: 30.
     pub frequency_threshold: u32,
+    /// Case-insensitive message substrings whose matching log rows are skipped
+    /// during scanning. Used to break notification feedback loops: cortex POSTs
+    /// to Apprise's `/notify` endpoint, Apprise logs the delivery, those logs
+    /// are forwarded back into cortex, and without this filter they would be
+    /// re-detected as recurring errors — triggering yet more notifications.
+    /// Defaults cover Apprise's own delivery log lines. Set to an empty list to
+    /// disable.
+    pub exclude_patterns: Vec<String>,
 }
 
 impl Default for ErrorDetectionConfig {
@@ -186,6 +194,11 @@ impl Default for ErrorDetectionConfig {
             scan_interval_secs: 3600,
             max_rows_per_cycle: 50_000,
             frequency_threshold: 30,
+            exclude_patterns: vec![
+                "Delivered Stateless Notification".to_string(),
+                "Sent Gotify notification".to_string(),
+                "POST /notify".to_string(),
+            ],
         }
     }
 }
@@ -883,6 +896,10 @@ impl Config {
             "CORTEX_ERROR_DETECTION_SCAN_INTERVAL_SECS",
             &mut config.error_detection.scan_interval_secs,
         )?;
+        env_override_list(
+            "CORTEX_ERROR_DETECTION_EXCLUDE_PATTERNS",
+            &mut config.error_detection.exclude_patterns,
+        );
         env_override_bool(
             "CORTEX_NOTIFICATIONS_ENABLED",
             &mut config.notifications.enabled,

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.28.1] - 2026-06-18
+
+### Fixed
+
+- **Recurring-error notifications were unreadable.** `escape_for_notification` stripped `<` and `>` from notification titles/bodies as injection hardening, but the payload is sent as markdown and the error-signature normalizer emits placeholder tokens (`<n>`, `<hex>`, `<ip>`, `<path>`, `<str>`, `<json>`, `<uuid>`, `<ts>`). Stripping the brackets collapsed every signature into unreadable runs (`<n>:<n>:<n>` → `n:n:n`, `<str>` → `str`, `<path>` → `path`). The function now HTML-escapes `&`/`<`/`>` (and keeps the `@` → `＠` mention guard), so placeholders render verbatim while tag/markup injection stays neutralised.
+
+### Added
+
+- **Error-detection exclusion patterns break the notification feedback loop.** New `[error_detection].exclude_patterns` (env `CORTEX_ERROR_DETECTION_EXCLUDE_PATTERNS`, comma-separated): case-insensitive message substrings whose log rows are skipped during scanning — they are never tracked as signatures and never notified, while the scan cursor still advances past them. Defaults cover Apprise's own delivery log lines (`Delivered Stateless Notification`, `Sent Gotify notification`, `POST /notify`), so cortex no longer re-detects its own POST-to-Apprise delivery records (forwarded back in via syslog) as recurring errors and notifies on them in a loop. Set to `[]` to disable.
+
 ## [1.28.0] - 2026-06-17
 
 ### Added
