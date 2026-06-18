@@ -68,9 +68,16 @@ pub(crate) async fn run_error_scan(
 
         let pool_chunk = Arc::clone(&pool);
         let frequency_threshold = cfg.frequency_threshold;
+        let exclude_patterns = cfg.exclude_patterns.clone();
         let result = tokio::task::spawn_blocking(move || {
             let _permit = permit;
-            process_chunk(&pool_chunk, last_id, chunk_size, frequency_threshold)
+            process_chunk(
+                &pool_chunk,
+                last_id,
+                chunk_size,
+                frequency_threshold,
+                &exclude_patterns,
+            )
         })
         .await??;
 
@@ -101,6 +108,7 @@ pub(crate) fn process_chunk(
     last_id: i64,
     chunk_size: i64,
     frequency_threshold: u32,
+    exclude_patterns: &[String],
 ) -> Result<ChunkResult> {
     let mut conn = pool.get()?;
 
@@ -155,7 +163,24 @@ pub(crate) fn process_chunk(
 
     let mut groups: HashMap<String, Group> = HashMap::new();
 
+    // Lowercased exclusion needles, computed once per chunk. Rows whose message
+    // matches are skipped entirely (not tracked as signatures and never
+    // notified). The cursor still advances past them via `max_id` above, so the
+    // skip is permanent rather than reprocessed next cycle.
+    let exclude_needles: Vec<String> = exclude_patterns
+        .iter()
+        .map(|p| p.to_lowercase())
+        .filter(|p| !p.is_empty())
+        .collect();
+
     for row in &rows {
+        if !exclude_needles.is_empty() {
+            let message_lc = row.message.to_lowercase();
+            if exclude_needles.iter().any(|n| message_lc.contains(n)) {
+                continue;
+            }
+        }
+
         let template = normalize_template(&row.message);
         let hash = signature_hash(&template);
 

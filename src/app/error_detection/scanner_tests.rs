@@ -42,7 +42,7 @@ fn test_process_chunk_skips_below_cursor() {
     }
 
     // Set cursor to 2: only row with id > 2 should be processed
-    let result = process_chunk(&pool, 2, 200, 1).unwrap();
+    let result = process_chunk(&pool, 2, 200, 1, &[]).unwrap();
 
     // Only 1 row (id=3) should be returned
     assert_eq!(
@@ -64,7 +64,7 @@ fn test_process_chunk_does_not_notify_below_threshold() {
     }
 
     // frequency_threshold=5; only 3 rows inserted
-    let result = process_chunk(&pool, 0, 200, 5).unwrap();
+    let result = process_chunk(&pool, 0, 200, 5, &[]).unwrap();
     assert_eq!(result.rows_in_chunk, 3);
 
     // No outbox row should have been inserted
@@ -95,7 +95,7 @@ fn test_process_chunk_notifies_above_threshold() {
     }
 
     // threshold=5; 6 rows inserted → should notify
-    let result = process_chunk(&pool, 0, 200, 5).unwrap();
+    let result = process_chunk(&pool, 0, 200, 5, &[]).unwrap();
     assert_eq!(result.rows_in_chunk, 6);
 
     let conn = pool.get().unwrap();
@@ -113,6 +113,54 @@ fn test_process_chunk_notifies_above_threshold() {
 }
 
 #[test]
+fn test_process_chunk_skips_excluded_patterns() {
+    let (pool, _dir) = test_pool();
+    {
+        let conn = pool.get().unwrap();
+        // Notification-delivery log lines (the feedback loop): well above the
+        // frequency threshold, but they must be skipped entirely.
+        for _ in 0..10 {
+            insert_log(
+                &conn,
+                "apprise: Sent Gotify notification",
+                "warning",
+                "tootie",
+            );
+        }
+        // A genuine error that must still be detected and counted.
+        for _ in 0..6 {
+            insert_log(&conn, "disk full on /var", "err", "host1");
+        }
+    }
+
+    let exclude = vec!["Sent Gotify notification".to_string()];
+    let result = process_chunk(&pool, 0, 200, 5, &exclude).unwrap();
+    // All 16 rows advance the cursor (skipped rows are not reprocessed).
+    assert_eq!(result.rows_in_chunk, 16);
+
+    let conn = pool.get().unwrap();
+    // The excluded pattern must not be tracked as a signature at all.
+    let excluded_sig: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM error_signatures WHERE template LIKE '%notification%'",
+            [],
+            |r| r.get::<_, i64>(0),
+        )
+        .unwrap();
+    assert_eq!(excluded_sig, 0, "excluded rows must not become signatures");
+
+    // Exactly one notification — for the real error, not the delivery logs.
+    let count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM notifications_outbox WHERE rule_id = 'unaddressed_error_signature'",
+            [],
+            |r| r.get::<_, i64>(0),
+        )
+        .unwrap();
+    assert_eq!(count, 1, "only the genuine error notifies; loop is broken");
+}
+
+#[test]
 fn test_process_chunk_suppressed_when_acked() {
     let (pool, _dir) = test_pool();
     {
@@ -124,7 +172,7 @@ fn test_process_chunk_suppressed_when_acked() {
     }
 
     // First pass: process the chunk so the signature is written
-    let result = process_chunk(&pool, 0, 200, 5).unwrap();
+    let result = process_chunk(&pool, 0, 200, 5, &[]).unwrap();
     assert_eq!(result.rows_in_chunk, 6);
 
     // Manually acknowledge the signature
@@ -163,7 +211,7 @@ fn test_process_chunk_suppressed_when_acked() {
 
     // Second pass: with cursor advanced past original rows
     let cursor = result.new_cursor;
-    let result2 = process_chunk(&pool, cursor, 200, 5).unwrap();
+    let result2 = process_chunk(&pool, cursor, 200, 5, &[]).unwrap();
     assert_eq!(result2.rows_in_chunk, 3);
 
     // Outbox should still be empty because the signature is acked
