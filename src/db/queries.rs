@@ -17,6 +17,7 @@ use anyhow::Result;
 use rusqlite::{OptionalExtension, params};
 
 use crate::config::StorageConfig;
+use crate::enrich::parser::SourceKind;
 
 use super::maintenance::{exceeds_trigger, get_storage_metrics};
 use super::models::{
@@ -1374,6 +1375,153 @@ pub fn search_ai_related_logs(
     }
 
     Ok(grouped)
+}
+
+/// Push each value as a bound `Text` parameter and return a `?, ?, …`
+/// placeholder list of matching arity for an `IN (...)` clause.
+// Consumed alongside `search_logs_from_graph_related_entities` by the
+// graph-anchored correlation actions (axon_rust-o29l.4 / .5).
+#[allow(dead_code)]
+fn bind_in_list(bindings: &mut Vec<rusqlite::types::Value>, values: &[String]) -> String {
+    let start = bindings.len();
+    for v in values {
+        bindings.push(rusqlite::types::Value::Text(v.clone()));
+    }
+    vec!["?"; bindings.len() - start].join(", ")
+}
+
+/// Graph-anchored log fan-out: traverse the investigation graph outward from a
+/// set of seed entities, then return the logs emitted by every related entity
+/// within `[since, until]`.
+///
+/// This is the **graph-first** query order (Performance Oracle research):
+/// resolve ~tens of related entity keys via the indexed recursive CTE, map them
+/// to `hostname` / `ai_project` / `ai_session_id` filters, and let the
+/// `(hostname, app_name, timestamp)` covering index (migration 32) drive the
+/// log scan — 10-100× fewer rows than an FTS-first scan over a common term.
+///
+/// Entity → log-column mapping:
+/// - `host` → `hostname`
+/// - `container` / `service` (`docker_host:…` keys) → leading `hostname`
+/// - `ai_project` → `ai_project`
+/// - `ai_session` (`project:tool:session` keys) → trailing `ai_session_id`
+///
+/// `max_depth` is clamped to `[1, GRAPH_WALK_MAX_DEPTH]` and `limit` to
+/// `[1, 1000]`. Returns raw `LogEntry` rows for the service layer to shape.
+// Wired into MCP/CLI actions by axon_rust-o29l.4 (ai_correlate) and .5
+// (topic_correlate); the `dead_code` allow drops out when those land.
+#[allow(dead_code)]
+#[allow(clippy::too_many_arguments)]
+pub fn search_logs_from_graph_related_entities(
+    pool: &DbPool,
+    entity_canonical_keys: &[String],
+    max_depth: u8,
+    since: Option<&str>,
+    until: Option<&str>,
+    source_kinds: Option<&[SourceKind]>,
+    limit: usize,
+) -> Result<Vec<LogEntry>> {
+    if entity_canonical_keys.is_empty() {
+        return Ok(Vec::new());
+    }
+    let limit = limit.clamp(1, 1000);
+    let conn = pool.get()?;
+
+    // 1. Graph-first: traverse to the related entity set (seeds + N hops).
+    let entities = super::graph::graph_walk_n_hops(&conn, entity_canonical_keys, max_depth)?;
+    if entities.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // 2. Map related entities to indexed log-column filters.
+    let mut hostnames: Vec<String> = Vec::new();
+    let mut ai_projects: Vec<String> = Vec::new();
+    let mut ai_sessions: Vec<String> = Vec::new();
+    for entity in &entities {
+        match entity.entity_type.as_str() {
+            super::graph::ENTITY_TYPE_HOST => hostnames.push(entity.canonical_key.clone()),
+            super::graph::ENTITY_TYPE_CONTAINER | super::graph::ENTITY_TYPE_SERVICE => {
+                // `docker_host:container_id` / `docker_host:project:service` —
+                // the leading segment is the host the workload runs on.
+                if let Some(host) = entity.canonical_key.split(':').next() {
+                    if !host.is_empty() {
+                        hostnames.push(host.to_string());
+                    }
+                }
+            }
+            super::graph::ENTITY_TYPE_AI_PROJECT => ai_projects.push(entity.canonical_key.clone()),
+            super::graph::ENTITY_TYPE_AI_SESSION => {
+                // `project:tool:session` — the session id is the 3rd segment.
+                if let Some(session) = entity.canonical_key.splitn(3, ':').nth(2) {
+                    if !session.is_empty() {
+                        ai_sessions.push(session.to_string());
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    hostnames.sort();
+    hostnames.dedup();
+    ai_projects.sort();
+    ai_projects.dedup();
+    ai_sessions.sort();
+    ai_sessions.dedup();
+
+    if hostnames.is_empty() && ai_projects.is_empty() && ai_sessions.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // 3. Build the graph-first log fan-out. hostname IN (...) leads on the
+    //    covering index; ai_project / ai_session_id are OR-ed in via their own
+    //    partial indexes.
+    let mut bindings: Vec<rusqlite::types::Value> = Vec::new();
+    let mut entity_clauses: Vec<String> = Vec::new();
+    if !hostnames.is_empty() {
+        let ph = bind_in_list(&mut bindings, &hostnames);
+        entity_clauses.push(format!("l.hostname IN ({ph})"));
+    }
+    if !ai_projects.is_empty() {
+        let ph = bind_in_list(&mut bindings, &ai_projects);
+        entity_clauses.push(format!("l.ai_project IN ({ph})"));
+    }
+    if !ai_sessions.is_empty() {
+        let ph = bind_in_list(&mut bindings, &ai_sessions);
+        entity_clauses.push(format!("l.ai_session_id IN ({ph})"));
+    }
+
+    let mut where_sql = format!("({})", entity_clauses.join(" OR "));
+    if let Some(since) = since {
+        where_sql.push_str(" AND l.timestamp >= ?");
+        bindings.push(rusqlite::types::Value::Text(since.to_string()));
+    }
+    if let Some(until) = until {
+        where_sql.push_str(" AND l.timestamp <= ?");
+        bindings.push(rusqlite::types::Value::Text(until.to_string()));
+    }
+    if let Some(kinds) = source_kinds {
+        if !kinds.is_empty() {
+            let kind_strs: Vec<String> = kinds.iter().map(|k| k.as_str().to_string()).collect();
+            let ph = bind_in_list(&mut bindings, &kind_strs);
+            where_sql.push_str(&format!(
+                " AND json_extract(l.metadata_json, '$.source_kind') IN ({ph})"
+            ));
+        }
+    }
+    bindings.push(rusqlite::types::Value::Integer(limit as i64));
+
+    let sql = format!(
+        "SELECT {FTS_SELECT_COLS}
+         FROM logs l
+         WHERE {where_sql}
+         ORDER BY l.timestamp DESC, l.id DESC
+         LIMIT ?"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let logs = stmt
+        .query_map(rusqlite::params_from_iter(bindings.iter()), map_row)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(logs)
 }
 
 const DEFAULT_AI_ABUSE_TERMS: &[&str] = &[
@@ -3113,3 +3261,7 @@ pub fn incident_context_summary(
 #[cfg(test)]
 #[path = "queries_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "queries_graph_tests.rs"]
+mod graph_tests;

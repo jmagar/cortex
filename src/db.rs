@@ -24,8 +24,9 @@ pub use analytics::{
 };
 pub(crate) use analytics::{cluster_pattern_rows, fetch_pattern_rows};
 pub use graph::{
-    ENTITY_TYPES, EVIDENCE_SOURCE_KINDS, PROJECTION_STATUSES, REASON_CODES, RELATIONSHIP_TYPES,
-    TRUST_LEVELS, is_known_entity_type, is_known_evidence_source_kind, is_known_reason_code,
+    ENTITY_TYPES, EVIDENCE_SOURCE_KINDS, GRAPH_WALK_MAX_DEPTH, GraphWalkEntity,
+    PROJECTION_STATUSES, REASON_CODES, RELATIONSHIP_TYPES, TRUST_LEVELS, graph_walk_n_hops,
+    is_known_entity_type, is_known_evidence_source_kind, is_known_reason_code,
     is_known_relationship_type, is_known_trust_level,
 };
 pub use graph_findings::{
@@ -72,6 +73,6 @@ pub use queries::{
     list_ai_sessions, list_ai_sessions_live, list_ai_tools, list_hosts, prune_timeline_rollup,
     refresh_ai_session_rollup, refresh_ai_session_rollup_if_stale, refresh_timeline_rollup,
     search_ai_abuse, search_ai_anchors, search_ai_incidents, search_ai_related_logs,
-    search_ai_sessions, search_logs, severity_to_num, similar_incidents_clusters, tail_logs,
-    timeline_rollup_status, validate_fts_query,
+    search_ai_sessions, search_logs, search_logs_from_graph_related_entities, severity_to_num,
+    similar_incidents_clusters, tail_logs, timeline_rollup_status, validate_fts_query,
 };
