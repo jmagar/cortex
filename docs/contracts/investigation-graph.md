@@ -111,7 +111,15 @@ network
 storage
 config_artifact
 git_commit
+user
+device
 ```
+
+`user` is a human/identity principal (operator name, authenticated username),
+keyed `{hostname}:{username}`. `device` is a client endpoint (DNS client IP,
+MAC) distinct from a server `host`, keyed by the client identifier. Both are
+projected from identity-bearing log rows (AdGuard DNS clients, Authelia
+usernames, shell-history users).
 
 `git_commit` is a commit event observed in an agent-command or shell-history
 row whose command is a `git commit`/`git push`. It is keyed by
@@ -137,7 +145,15 @@ attached_to
 mounts
 backed_by
 has_artifact
+authenticated_as
+accessed
+communicates_with
 ```
+
+`authenticated_as` links a `user` to a service/host they authenticated to
+(Authelia). `accessed` links a `user` or `device` to a domain/service/host it
+reached (AdGuard DNS, shell-history). `communicates_with` (device↔peer, UniFi
+flow data) is vocabulary-reserved for future flow ingestion.
 
 ### 4.3 Trust Levels
 
@@ -211,7 +227,15 @@ agent_command_session
 agent_command_cwd_infer
 agent_command_git_commit
 shell_history_git_commit
+adguard_client_query
+shell_history_user
+authelia_auth
 ```
+
+`adguard_client_query` links a client `device` to the queried `domain` (AdGuard
+DNS). `shell_history_user` links the operating `user` to the host (shell
+history). `authelia_auth` links a `user` to the host they authenticated to
+(Authelia).
 
 `agent_command_git_commit` links an AI session and its project to a `git_commit`
 entity when an agent-command row runs a `git commit`/`git push` (inferred — the
