@@ -36,6 +36,8 @@ pub const ENTITY_TYPE_DOMAIN: &str = "domain";
 pub const ENTITY_TYPE_NETWORK: &str = "network";
 pub const ENTITY_TYPE_STORAGE: &str = "storage";
 pub const ENTITY_TYPE_CONFIG_ARTIFACT: &str = "config_artifact";
+/// A git commit event observed in an agent-command or shell-history row.
+pub const ENTITY_TYPE_GIT_COMMIT: &str = "git_commit";
 
 pub const ENTITY_TYPES: &[&str] = &[
     ENTITY_TYPE_HOST,
@@ -52,6 +54,7 @@ pub const ENTITY_TYPES: &[&str] = &[
     ENTITY_TYPE_NETWORK,
     ENTITY_TYPE_STORAGE,
     ENTITY_TYPE_CONFIG_ARTIFACT,
+    ENTITY_TYPE_GIT_COMMIT,
 ];
 
 pub const REL_OBSERVED_AS: &str = "observed_as";
@@ -130,6 +133,12 @@ pub const REASON_AGENT_COMMAND_SESSION: &str = "agent_command_session";
 /// Agent-command `cwd` infers the AI project worked on, used when the row
 /// carries no clean project name (only the raw working directory).
 pub const REASON_AGENT_COMMAND_CWD_INFER: &str = "agent_command_cwd_infer";
+/// An agent-command row whose command is a `git commit`/`git push` — links the
+/// AI session and project to a `git_commit` entity.
+pub const REASON_AGENT_COMMAND_GIT_COMMIT: &str = "agent_command_git_commit";
+/// A shell-history row whose command is a `git commit`/`git push` — links the
+/// host to a `git_commit` entity.
+pub const REASON_SHELL_HISTORY_GIT_COMMIT: &str = "shell_history_git_commit";
 
 pub const REASON_CODES: &[&str] = &[
     REASON_SYSLOG_CLAIMED_HOSTNAME,
@@ -148,6 +157,8 @@ pub const REASON_CODES: &[&str] = &[
     REASON_CONFIG_ARTIFACT,
     REASON_AGENT_COMMAND_SESSION,
     REASON_AGENT_COMMAND_CWD_INFER,
+    REASON_AGENT_COMMAND_GIT_COMMIT,
+    REASON_SHELL_HISTORY_GIT_COMMIT,
 ];
 
 pub const PROJECTION_STATUS_NEVER_BUILT: &str = "never_built";
@@ -318,6 +329,9 @@ struct LogGraphRow {
     ai_project: Option<String>,
     ai_session_id: Option<String>,
     metadata_json: Option<String>,
+    /// The log message — for agent-command and shell-history rows this is the
+    /// (scrubbed) command surface, used to detect `git commit`/`git push`.
+    message: String,
 }
 
 pub fn graph_projection_status(pool: &DbPool) -> Result<GraphProjectionStatus> {
@@ -1280,7 +1294,7 @@ fn fetch_log_graph_rows(
 ) -> Result<Vec<LogGraphRow>> {
     let mut stmt = conn.prepare(
         "SELECT id, timestamp, hostname, app_name, source_ip, ai_tool,
-                ai_project, ai_session_id, metadata_json
+                ai_project, ai_session_id, metadata_json, message
          FROM logs
          WHERE id > ?1
          ORDER BY id ASC
@@ -1298,6 +1312,7 @@ fn fetch_log_graph_rows(
                 ai_project: row.get(6)?,
                 ai_session_id: row.get(7)?,
                 metadata_json: row.get(8)?,
+                message: row.get(9)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -1426,6 +1441,7 @@ fn extract_log_row(conn: &rusqlite::Connection, row: &LogGraphRow) -> Result<()>
     }
 
     extract_agent_command_row(conn, row)?;
+    extract_git_commit_row(conn, row)?;
     extract_ai_log_row(conn, row)?;
     extract_docker_log_row(conn, row)?;
     Ok(())
@@ -1685,6 +1701,209 @@ fn infer_project_from_cwd(cwd: &str) -> Option<String> {
     segments
         .last()
         .and_then(|s| normalized_value(s).map(str::to_string))
+}
+
+/// True when a command surface is a `git commit` or `git push` invocation.
+fn is_git_commit_command(message: &str) -> bool {
+    let lower = message.to_ascii_lowercase();
+    lower.contains("git commit") || lower.contains("git push")
+}
+
+/// Project a `git_commit` entity from an agent-command or shell-history row
+/// whose command is a `git commit` / `git push`.
+///
+/// Agent-command rows (which carry a session id and the cwd in `ai_project`)
+/// produce a commit keyed by `{inferred_project}:{timestamp}`, linked back to
+/// both the AI session (`worked_on`) and the project (`has_artifact`). Shell-
+/// history rows carry no project/session, so they produce a commit keyed by
+/// `{hostname}:{timestamp}` linked to the host (`emitted_by`). All edges are
+/// inferred — the row proves a commit happened but not the exact SHA.
+fn extract_git_commit_row(conn: &rusqlite::Connection, row: &LogGraphRow) -> Result<()> {
+    if !is_git_commit_command(&row.message) {
+        return Ok(());
+    }
+    let source_id = row.id.to_string();
+    let is_agent_command = row.source_ip.starts_with(AGENT_COMMAND_SOURCE_PREFIX);
+    let is_shell_history = row.source_ip.starts_with("shell-history://");
+    if !is_agent_command && !is_shell_history {
+        return Ok(());
+    }
+
+    if is_agent_command {
+        let Some(session) = row.ai_session_id.as_deref().and_then(normalized_value) else {
+            return Ok(());
+        };
+        let tool = row
+            .ai_tool
+            .as_deref()
+            .and_then(normalized_value)
+            .unwrap_or("unknown");
+        let inferred_project = row
+            .ai_project
+            .as_deref()
+            .and_then(normalized_value)
+            .and_then(infer_project_from_cwd);
+        let project_key_part = inferred_project
+            .as_deref()
+            .map(normalize_key)
+            .unwrap_or_else(|| "unknown".to_string());
+
+        let commit_key = format!("{project_key_part}:{}", row.timestamp);
+        let commit_entity = ensure_entity(
+            conn,
+            ENTITY_TYPE_GIT_COMMIT,
+            &commit_key,
+            &commit_key,
+            SOURCE_KIND_LOG,
+            &source_id,
+            TRUST_INFERRED,
+            Some(&row.timestamp),
+            Some(&row.timestamp),
+        )?;
+
+        // session worked_on commit
+        let session_key = format!("{project_key_part}:{}:{session}", normalize_key(tool));
+        let session_entity = ensure_entity(
+            conn,
+            ENTITY_TYPE_AI_SESSION,
+            &session_key,
+            &session_key,
+            SOURCE_KIND_LOG,
+            &source_id,
+            TRUST_VERIFIED,
+            Some(&row.timestamp),
+            Some(&row.timestamp),
+        )?;
+        ensure_relationship_with_evidence(
+            conn,
+            session_entity,
+            commit_entity,
+            REL_WORKED_ON,
+            REASON_AGENT_COMMAND_GIT_COMMIT,
+            TRUST_INFERRED,
+            0.8,
+            EvidenceInput {
+                evidence_key: evidence_bucket_key(
+                    "log",
+                    row.id,
+                    REASON_AGENT_COMMAND_GIT_COMMIT,
+                    &row.timestamp,
+                ),
+                source_kind: SOURCE_KIND_LOG,
+                source_id: &source_id,
+                source_log_id: Some(row.id),
+                source_heartbeat_id: None,
+                source_signature_hash: None,
+                observed_at: &row.timestamp,
+                reason_text: Some("agent command ran a git commit/push in this session"),
+                confidence_delta: 0.8,
+                trust_level: TRUST_INFERRED,
+                safe_excerpt: Some(&commit_key),
+                metadata_path: Some("logs.message (git commit)"),
+            },
+        )?;
+
+        // commit has_artifact project
+        if let Some(project) = inferred_project.as_deref() {
+            let project_entity = ensure_entity(
+                conn,
+                ENTITY_TYPE_AI_PROJECT,
+                &normalize_key(project),
+                project,
+                SOURCE_KIND_LOG,
+                &source_id,
+                TRUST_INFERRED,
+                Some(&row.timestamp),
+                Some(&row.timestamp),
+            )?;
+            ensure_relationship_with_evidence(
+                conn,
+                commit_entity,
+                project_entity,
+                REL_HAS_ARTIFACT,
+                REASON_AGENT_COMMAND_GIT_COMMIT,
+                TRUST_INFERRED,
+                0.9,
+                EvidenceInput {
+                    evidence_key: evidence_bucket_key(
+                        "log",
+                        row.id,
+                        REASON_AGENT_COMMAND_GIT_COMMIT,
+                        &row.timestamp,
+                    ),
+                    source_kind: SOURCE_KIND_LOG,
+                    source_id: &source_id,
+                    source_log_id: Some(row.id),
+                    source_heartbeat_id: None,
+                    source_signature_hash: None,
+                    observed_at: &row.timestamp,
+                    reason_text: Some("git commit attributed to project via cwd"),
+                    confidence_delta: 0.9,
+                    trust_level: TRUST_INFERRED,
+                    safe_excerpt: Some(project),
+                    metadata_path: Some("logs.ai_project (cwd)"),
+                },
+            )?;
+        }
+        return Ok(());
+    }
+
+    // Shell-history row: no session/project — key by host and link to the host.
+    let Some(host) = normalized(&row.hostname) else {
+        return Ok(());
+    };
+    let commit_key = format!("{host}:{}", row.timestamp);
+    let commit_entity = ensure_entity(
+        conn,
+        ENTITY_TYPE_GIT_COMMIT,
+        &commit_key,
+        &commit_key,
+        SOURCE_KIND_LOG,
+        &source_id,
+        TRUST_INFERRED,
+        Some(&row.timestamp),
+        Some(&row.timestamp),
+    )?;
+    let host_entity = ensure_entity(
+        conn,
+        ENTITY_TYPE_HOST,
+        &host,
+        &row.hostname,
+        SOURCE_KIND_LOG,
+        &source_id,
+        TRUST_CLAIMED,
+        Some(&row.timestamp),
+        Some(&row.timestamp),
+    )?;
+    ensure_relationship_with_evidence(
+        conn,
+        commit_entity,
+        host_entity,
+        REL_EMITTED_BY,
+        REASON_SHELL_HISTORY_GIT_COMMIT,
+        TRUST_INFERRED,
+        0.7,
+        EvidenceInput {
+            evidence_key: evidence_bucket_key(
+                "log",
+                row.id,
+                REASON_SHELL_HISTORY_GIT_COMMIT,
+                &row.timestamp,
+            ),
+            source_kind: SOURCE_KIND_LOG,
+            source_id: &source_id,
+            source_log_id: Some(row.id),
+            source_heartbeat_id: None,
+            source_signature_hash: None,
+            observed_at: &row.timestamp,
+            reason_text: Some("shell history ran a git commit/push on this host"),
+            confidence_delta: 0.7,
+            trust_level: TRUST_INFERRED,
+            safe_excerpt: Some(&commit_key),
+            metadata_path: Some("logs.message (git commit)"),
+        },
+    )?;
+    Ok(())
 }
 
 fn extract_docker_log_row(conn: &rusqlite::Connection, row: &LogGraphRow) -> Result<()> {

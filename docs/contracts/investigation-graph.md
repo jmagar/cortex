@@ -110,7 +110,13 @@ domain
 network
 storage
 config_artifact
+git_commit
 ```
+
+`git_commit` is a commit event observed in an agent-command or shell-history
+row whose command is a `git commit`/`git push`. It is keyed by
+`{ai_project}:{timestamp}` (agent-command rows) or `{hostname}:{timestamp}`
+(shell-history rows); the SHA is not assumed.
 
 Unknown entity types MUST be rejected on public lookup surfaces.
 
@@ -201,7 +207,14 @@ storage_probe
 config_artifact
 agent_command_session
 agent_command_cwd_infer
+agent_command_git_commit
+shell_history_git_commit
 ```
+
+`agent_command_git_commit` links an AI session and its project to a `git_commit`
+entity when an agent-command row runs a `git commit`/`git push` (inferred — the
+commit happened, but the exact SHA is not asserted). `shell_history_git_commit`
+links a host to a `git_commit` entity from a shell-history row.
 
 `agent_command_session` links an AI session to a host it provably ran commands
 on (verified, `session_id` is a hard FK on the agent-command spool record).

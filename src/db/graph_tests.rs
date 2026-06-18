@@ -721,3 +721,146 @@ fn agent_command_incremental_rebuild_adds_no_duplicate_edges() {
         "one verified host edge + one inferred project edge"
     );
 }
+
+fn make_git_commit_agent_entry(ts: &str, host: &str, session: &str, cwd: &str) -> LogBatchEntry {
+    let mut entry = make_agent_command_entry(ts, host, "claude", session, cwd);
+    entry.message = "git commit -m \"feat: add thing\"".to_string();
+    entry.raw = entry.message.clone();
+    entry
+}
+
+#[test]
+fn is_git_commit_command_matches_commit_and_push() {
+    assert!(is_git_commit_command("git commit -m x"));
+    assert!(is_git_commit_command("cd /tmp && GIT COMMIT"));
+    assert!(is_git_commit_command("git push origin main"));
+    assert!(!is_git_commit_command("cargo build"));
+    assert!(!is_git_commit_command("git status"));
+}
+
+#[test]
+fn agent_command_git_commit_creates_commit_session_and_project_edges() {
+    let _guard = GRAPH_TEST_LOCK.lock();
+    let dir = tempfile::tempdir().unwrap();
+    let pool = init_pool(&test_storage_config(dir.path().join("graph-gitcommit.db"))).unwrap();
+
+    insert_logs_batch(
+        &pool,
+        &[make_git_commit_agent_entry(
+            "2026-01-01T00:00:00Z",
+            "dookie",
+            "sess-7",
+            "/home/jmagar/workspace/cortex",
+        )],
+    )
+    .unwrap();
+    refresh_graph_projection(&pool).unwrap();
+
+    let conn = pool.get().unwrap();
+    // One git_commit entity, keyed by inferred project + timestamp.
+    let commit_key: String = conn
+        .query_row(
+            "SELECT canonical_key FROM graph_entities WHERE entity_type = 'git_commit'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(
+        commit_key.starts_with("cortex:"),
+        "commit key keyed by inferred project: {commit_key}"
+    );
+
+    // session worked_on commit (inferred, 0.8).
+    let (trust, conf): (String, f64) = conn
+        .query_row(
+            "SELECT trust_level, confidence FROM graph_relationships
+             WHERE reason_code = 'agent_command_git_commit'
+               AND relationship_type = 'worked_on'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(trust, "inferred");
+    assert!((conf - 0.8).abs() < 1e-9, "confidence was {conf}");
+
+    // commit has_artifact project (inferred, 0.9).
+    let project_key: String = conn
+        .query_row(
+            "SELECT e.canonical_key FROM graph_relationships r
+             JOIN graph_entities e ON e.id = r.dst_entity_id
+             WHERE r.reason_code = 'agent_command_git_commit'
+               AND r.relationship_type = 'has_artifact'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(project_key, "cortex");
+}
+
+#[test]
+fn non_git_command_creates_no_commit_entity() {
+    let _guard = GRAPH_TEST_LOCK.lock();
+    let dir = tempfile::tempdir().unwrap();
+    let pool = init_pool(&test_storage_config(dir.path().join("graph-nogit.db"))).unwrap();
+
+    // make_agent_command_entry's message is "cargo test" — not a git commit.
+    insert_logs_batch(
+        &pool,
+        &[make_agent_command_entry(
+            "2026-01-01T00:00:00Z",
+            "dookie",
+            "claude",
+            "sess-7",
+            "/home/jmagar/workspace/cortex",
+        )],
+    )
+    .unwrap();
+    refresh_graph_projection(&pool).unwrap();
+
+    let conn = pool.get().unwrap();
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*) FROM graph_entities WHERE entity_type = 'git_commit'"
+        ),
+        0
+    );
+}
+
+#[test]
+fn shell_history_git_commit_links_commit_to_host() {
+    let _guard = GRAPH_TEST_LOCK.lock();
+    let dir = tempfile::tempdir().unwrap();
+    let pool = init_pool(&test_storage_config(dir.path().join("graph-shellgit.db"))).unwrap();
+
+    let mut entry = make_entry(
+        "2026-01-01T00:00:00Z",
+        "dookie",
+        Some("zsh"),
+        "git commit -am wip",
+    );
+    entry.source_ip = "shell-history://dookie/jacob/zsh".to_string();
+    entry.metadata_json = Some(r#"{"source_kind":"shell-history"}"#.to_string());
+    insert_logs_batch(&pool, &[entry]).unwrap();
+    refresh_graph_projection(&pool).unwrap();
+
+    let conn = pool.get().unwrap();
+    let commit_key: String = conn
+        .query_row(
+            "SELECT canonical_key FROM graph_entities WHERE entity_type = 'git_commit'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(
+        commit_key.starts_with("dookie:"),
+        "shell commit keyed by host: {commit_key}"
+    );
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*) FROM graph_relationships WHERE reason_code = 'shell_history_git_commit' AND relationship_type = 'emitted_by'"
+        ),
+        1
+    );
+}
