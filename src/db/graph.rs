@@ -124,6 +124,12 @@ pub const REASON_REVERSE_PROXY_CONFIG: &str = "reverse_proxy_config";
 pub const REASON_DOCKER_NETWORK: &str = "docker_network";
 pub const REASON_STORAGE_PROBE: &str = "storage_probe";
 pub const REASON_CONFIG_ARTIFACT: &str = "config_artifact";
+/// Agent-command log row links its host context to the AI session that ran it.
+/// `session_id` is a hard FK on the spool record, so this edge is verified.
+pub const REASON_AGENT_COMMAND_SESSION: &str = "agent_command_session";
+/// Agent-command `cwd` infers the AI project worked on, used when the row
+/// carries no clean project name (only the raw working directory).
+pub const REASON_AGENT_COMMAND_CWD_INFER: &str = "agent_command_cwd_infer";
 
 pub const REASON_CODES: &[&str] = &[
     REASON_SYSLOG_CLAIMED_HOSTNAME,
@@ -140,6 +146,8 @@ pub const REASON_CODES: &[&str] = &[
     REASON_DOCKER_NETWORK,
     REASON_STORAGE_PROBE,
     REASON_CONFIG_ARTIFACT,
+    REASON_AGENT_COMMAND_SESSION,
+    REASON_AGENT_COMMAND_CWD_INFER,
 ];
 
 pub const PROJECTION_STATUS_NEVER_BUILT: &str = "never_built";
@@ -1347,12 +1355,25 @@ fn extract_log_row(conn: &rusqlite::Connection, row: &LogGraphRow) -> Result<()>
         }
     }
 
+    extract_agent_command_row(conn, row)?;
     extract_ai_log_row(conn, row)?;
     extract_docker_log_row(conn, row)?;
     Ok(())
 }
 
+/// Source-IP prefix stamped on agent-command log rows by
+/// `command_log::agent_record_to_entry`. These rows carry the raw `cwd` in the
+/// `ai_project` column, so they are handled by `extract_agent_command_row`
+/// rather than the generic AI extractor (which would key the session entity by
+/// the full working-directory path and fragment it from transcript sessions).
+const AGENT_COMMAND_SOURCE_PREFIX: &str = "agent-command://";
+
 fn extract_ai_log_row(conn: &rusqlite::Connection, row: &LogGraphRow) -> Result<()> {
+    // Agent-command rows are owned by extract_agent_command_row: their
+    // `ai_project` is the raw cwd, not a clean project key.
+    if row.source_ip.starts_with(AGENT_COMMAND_SOURCE_PREFIX) {
+        return Ok(());
+    }
     let Some(project) = row.ai_project.as_deref().and_then(normalized_value) else {
         return Ok(());
     };
@@ -1423,6 +1444,177 @@ fn extract_ai_log_row(conn: &rusqlite::Connection, row: &LogGraphRow) -> Result<
         },
     )?;
     Ok(())
+}
+
+/// Project the explicit agent-command → AI-session topology from a single
+/// agent-command log row.
+///
+/// Agent-command rows (`source_ip` starts with `agent-command://`) carry a hard
+/// `session_id` FK and the executing host, plus the raw `cwd` in `ai_project`.
+/// This builds two edges anchored on the session entity:
+///   * session `REL_WORKED_ON` host — verified (0.95), the session provably ran
+///     commands on this host (reason `agent_command_session`).
+///   * session `REL_WORKED_ON` ai_project — inferred (0.7) from the cwd basename
+///     (reason `agent_command_cwd_infer`), only when a project can be inferred.
+///
+/// The session entity key reuses `extract_ai_log_row`'s
+/// `{project}:{tool}:{session}` shape with the *inferred* project so
+/// agent-command sessions converge with transcript-derived session entities for
+/// the same session id, instead of fragmenting on the full cwd path.
+fn extract_agent_command_row(conn: &rusqlite::Connection, row: &LogGraphRow) -> Result<()> {
+    if !row.source_ip.starts_with(AGENT_COMMAND_SOURCE_PREFIX) {
+        return Ok(());
+    }
+    let Some(session) = row.ai_session_id.as_deref().and_then(normalized_value) else {
+        return Ok(());
+    };
+    let Some(host) = normalized(&row.hostname) else {
+        return Ok(());
+    };
+    let tool = row
+        .ai_tool
+        .as_deref()
+        .and_then(normalized_value)
+        .unwrap_or("unknown");
+    let source_id = row.id.to_string();
+
+    // The cwd is stored in `ai_project` for these rows; fall back to the
+    // structured metadata copy if the column is empty.
+    let meta = parse_metadata(row.metadata_json.as_deref());
+    let cwd = row
+        .ai_project
+        .as_deref()
+        .and_then(normalized_value)
+        .or_else(|| metadata_text(&meta, &["agent_command.cwd"]));
+    let inferred_project = cwd.and_then(infer_project_from_cwd);
+
+    let project_key_part = inferred_project
+        .as_deref()
+        .map(normalize_key)
+        .unwrap_or_else(|| "unknown".to_string());
+    let project_label_part = inferred_project.as_deref().unwrap_or("unknown");
+    let session_key = format!("{project_key_part}:{}:{session}", normalize_key(tool));
+    let session_label = format!("{project_label_part}/{tool}/{session}");
+
+    let session_entity = ensure_entity(
+        conn,
+        ENTITY_TYPE_AI_SESSION,
+        &session_key,
+        &session_label,
+        SOURCE_KIND_LOG,
+        &source_id,
+        TRUST_VERIFIED,
+        Some(&row.timestamp),
+        Some(&row.timestamp),
+    )?;
+
+    let host_entity = ensure_entity(
+        conn,
+        ENTITY_TYPE_HOST,
+        &host,
+        &row.hostname,
+        SOURCE_KIND_LOG,
+        &source_id,
+        TRUST_CLAIMED,
+        Some(&row.timestamp),
+        Some(&row.timestamp),
+    )?;
+
+    // Verified anchor: the session executed commands on this host.
+    ensure_relationship_with_evidence(
+        conn,
+        session_entity,
+        host_entity,
+        REL_WORKED_ON,
+        REASON_AGENT_COMMAND_SESSION,
+        TRUST_VERIFIED,
+        0.95,
+        EvidenceInput {
+            evidence_key: evidence_bucket_key(
+                "log",
+                row.id,
+                REASON_AGENT_COMMAND_SESSION,
+                &row.timestamp,
+            ),
+            source_kind: SOURCE_KIND_LOG,
+            source_id: &source_id,
+            source_log_id: Some(row.id),
+            source_heartbeat_id: None,
+            source_signature_hash: None,
+            observed_at: &row.timestamp,
+            reason_text: Some("agent command executed in this session on this host"),
+            confidence_delta: 0.95,
+            trust_level: TRUST_VERIFIED,
+            safe_excerpt: Some(&session_label),
+            metadata_path: Some("logs.ai_session_id/logs.hostname"),
+        },
+    )?;
+
+    // Inferred lane: the session worked on the project inferred from the cwd.
+    if let Some(project) = inferred_project.as_deref() {
+        let project_entity = ensure_entity(
+            conn,
+            ENTITY_TYPE_AI_PROJECT,
+            &normalize_key(project),
+            project,
+            SOURCE_KIND_LOG,
+            &source_id,
+            TRUST_INFERRED,
+            Some(&row.timestamp),
+            Some(&row.timestamp),
+        )?;
+        ensure_relationship_with_evidence(
+            conn,
+            session_entity,
+            project_entity,
+            REL_WORKED_ON,
+            REASON_AGENT_COMMAND_CWD_INFER,
+            TRUST_INFERRED,
+            0.7,
+            EvidenceInput {
+                evidence_key: evidence_bucket_key(
+                    "log",
+                    row.id,
+                    REASON_AGENT_COMMAND_CWD_INFER,
+                    &row.timestamp,
+                ),
+                source_kind: SOURCE_KIND_LOG,
+                source_id: &source_id,
+                source_log_id: Some(row.id),
+                source_heartbeat_id: None,
+                source_signature_hash: None,
+                observed_at: &row.timestamp,
+                reason_text: Some("project inferred from agent command working directory"),
+                confidence_delta: 0.7,
+                trust_level: TRUST_INFERRED,
+                safe_excerpt: Some(project),
+                metadata_path: Some("logs.ai_project (cwd)"),
+            },
+        )?;
+    }
+    Ok(())
+}
+
+/// Infer a clean project name from an agent command's working directory.
+///
+/// Prefers the segment immediately following a `workspace` path component (the
+/// homelab convention `~/workspace/<repo>`), so deep worktree paths like
+/// `~/workspace/cortex/.claude/worktrees/foo` still resolve to `cortex`. Falls
+/// back to the final path segment. Returns `None` for empty/`/`-only paths.
+fn infer_project_from_cwd(cwd: &str) -> Option<String> {
+    let segments: Vec<&str> = cwd
+        .split('/')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .collect();
+    if let Some(pos) = segments.iter().position(|s| *s == "workspace") {
+        if let Some(name) = segments.get(pos + 1) {
+            return normalized_value(name).map(str::to_string);
+        }
+    }
+    segments
+        .last()
+        .and_then(|s| normalized_value(s).map(str::to_string))
 }
 
 fn extract_docker_log_row(conn: &rusqlite::Connection, row: &LogGraphRow) -> Result<()> {

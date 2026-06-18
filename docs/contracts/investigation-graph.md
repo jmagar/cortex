@@ -199,7 +199,17 @@ reverse_proxy_config
 docker_network
 storage_probe
 config_artifact
+agent_command_session
+agent_command_cwd_infer
 ```
+
+`agent_command_session` links an AI session to a host it provably ran commands
+on (verified, `session_id` is a hard FK on the agent-command spool record).
+`agent_command_cwd_infer` links an AI session to the project inferred from the
+agent command's working directory (inferred). Both are emitted by
+`extract_agent_command_row` for `agent-command://` log rows; the session entity
+is keyed by the inferred project so it converges with transcript-derived
+sessions for the same `session_id`.
 
 `heartbeat_host_state` is reserved for heartbeat-derived relationship evidence.
 The current v1 implementation uses heartbeat rows for host identity/aliases.

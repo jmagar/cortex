@@ -530,3 +530,194 @@ fn incremental_projection_is_idempotent_without_new_logs() {
     assert_eq!(first.relationship_count, second.relationship_count);
     assert_eq!(first.evidence_count, second.evidence_count);
 }
+
+/// Build a log entry shaped like `command_log::agent_record_to_entry` output:
+/// `agent-command://` source_ip, agent in ai_tool/app_name, raw cwd in
+/// ai_project, session id in ai_session_id.
+fn make_agent_command_entry(
+    ts: &str,
+    host: &str,
+    agent: &str,
+    session: &str,
+    cwd: &str,
+) -> LogBatchEntry {
+    let mut entry = make_entry(ts, host, Some(agent), "cargo test");
+    entry.source_ip = format!("agent-command://{host}/{agent}/{session}");
+    entry.ai_tool = Some(agent.to_string());
+    entry.ai_project = Some(cwd.to_string());
+    entry.ai_session_id = Some(session.to_string());
+    entry.metadata_json = Some(format!(
+        r#"{{"source_kind":"agent-command","agent_command":{{"cwd":"{cwd}","session_id":"{session}"}}}}"#
+    ));
+    entry
+}
+
+#[test]
+fn infer_project_from_cwd_prefers_workspace_segment() {
+    assert_eq!(
+        infer_project_from_cwd("/home/jmagar/workspace/cortex"),
+        Some("cortex".to_string())
+    );
+    // Deep worktree path still resolves to the repo under workspace/.
+    assert_eq!(
+        infer_project_from_cwd("/home/jmagar/workspace/cortex/.claude/worktrees/foo"),
+        Some("cortex".to_string())
+    );
+    // No workspace component → final segment.
+    assert_eq!(
+        infer_project_from_cwd("/srv/projects/axon/"),
+        Some("axon".to_string())
+    );
+    assert_eq!(infer_project_from_cwd("/"), None);
+    assert_eq!(infer_project_from_cwd(""), None);
+}
+
+#[test]
+fn agent_command_row_creates_verified_session_host_and_inferred_project_edges() {
+    let _guard = GRAPH_TEST_LOCK.lock();
+    let dir = tempfile::tempdir().unwrap();
+    let pool = init_pool(&test_storage_config(dir.path().join("graph-agent-cmd.db"))).unwrap();
+
+    insert_logs_batch(
+        &pool,
+        &[make_agent_command_entry(
+            "2026-01-01T00:00:00Z",
+            "dookie",
+            "claude",
+            "sess-7",
+            "/home/jmagar/workspace/cortex",
+        )],
+    )
+    .unwrap();
+    refresh_graph_projection(&pool).unwrap();
+
+    let conn = pool.get().unwrap();
+
+    // Exactly one ai_session, keyed by the INFERRED project (not the raw cwd path).
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*) FROM graph_entities WHERE entity_type = 'ai_session'"
+        ),
+        1
+    );
+    let session_key: String = conn
+        .query_row(
+            "SELECT canonical_key FROM graph_entities WHERE entity_type = 'ai_session'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(session_key, "cortex:claude:sess-7");
+
+    // Verified session→host edge (agent_command_session, 0.95).
+    let (trust, conf): (String, f64) = conn
+        .query_row(
+            "SELECT trust_level, confidence FROM graph_relationships
+             WHERE relationship_type = 'worked_on' AND reason_code = 'agent_command_session'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(trust, "verified");
+    assert!((conf - 0.95).abs() < 1e-9, "confidence was {conf}");
+
+    // Inferred session→project edge (agent_command_cwd_infer, 0.7) to ai_project:cortex.
+    let project_key: String = conn
+        .query_row(
+            "SELECT e.canonical_key FROM graph_relationships r
+             JOIN graph_entities e ON e.id = r.dst_entity_id
+             WHERE r.reason_code = 'agent_command_cwd_infer'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(project_key, "cortex");
+}
+
+#[test]
+fn agent_command_session_converges_with_transcript_session_entity() {
+    let _guard = GRAPH_TEST_LOCK.lock();
+    let dir = tempfile::tempdir().unwrap();
+    let pool = init_pool(&test_storage_config(dir.path().join("graph-converge.db"))).unwrap();
+
+    // Transcript event: clean project "cortex", same tool + session id.
+    let mut transcript = make_entry("2026-01-01T00:00:00Z", "dookie", Some("claude"), "thinking");
+    transcript.ai_tool = Some("claude".to_string());
+    transcript.ai_project = Some("cortex".to_string());
+    transcript.ai_session_id = Some("sess-9".to_string());
+    transcript.source_ip = "agent://dookie".to_string();
+
+    // Agent-command row: raw cwd, same session id → must converge on one entity.
+    let cmd = make_agent_command_entry(
+        "2026-01-01T00:01:00Z",
+        "dookie",
+        "claude",
+        "sess-9",
+        "/home/jmagar/workspace/cortex",
+    );
+
+    insert_logs_batch(&pool, &[transcript, cmd]).unwrap();
+    refresh_graph_projection(&pool).unwrap();
+
+    let conn = pool.get().unwrap();
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*) FROM graph_entities WHERE entity_type = 'ai_session'"
+        ),
+        1,
+        "transcript and agent-command rows for the same session must share one ai_session entity"
+    );
+}
+
+#[test]
+fn agent_command_incremental_rebuild_adds_no_duplicate_edges() {
+    let _guard = GRAPH_TEST_LOCK.lock();
+    let dir = tempfile::tempdir().unwrap();
+    let pool = init_pool(&test_storage_config(dir.path().join("graph-agent-inc.db"))).unwrap();
+
+    insert_logs_batch(
+        &pool,
+        &[make_agent_command_entry(
+            "2026-01-01T00:00:00Z",
+            "dookie",
+            "claude",
+            "sess-3",
+            "/home/jmagar/workspace/cortex",
+        )],
+    )
+    .unwrap();
+    refresh_graph_projection(&pool).unwrap();
+    let before: i64 = count(
+        &pool.get().unwrap(),
+        "SELECT COUNT(*) FROM graph_relationships WHERE reason_code LIKE 'agent_command%'",
+    );
+
+    // Second command in the same session → incremental rebuild, no new edges.
+    insert_logs_batch(
+        &pool,
+        &[make_agent_command_entry(
+            "2026-01-01T00:02:00Z",
+            "dookie",
+            "claude",
+            "sess-3",
+            "/home/jmagar/workspace/cortex",
+        )],
+    )
+    .unwrap();
+    refresh_graph_projection_incremental(&pool).unwrap();
+    let after: i64 = count(
+        &pool.get().unwrap(),
+        "SELECT COUNT(*) FROM graph_relationships WHERE reason_code LIKE 'agent_command%'",
+    );
+
+    assert_eq!(
+        before, after,
+        "incremental rebuild must not duplicate agent-command edges"
+    );
+    assert_eq!(
+        before, 2,
+        "one verified host edge + one inferred project edge"
+    );
+}
