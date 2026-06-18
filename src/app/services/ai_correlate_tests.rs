@@ -151,6 +151,7 @@ fn plain_syslog(ts: &str, host: &str, app: &str) -> LogBatchEntry {
 }
 
 #[tokio::test]
+#[allow(clippy::await_holding_lock)]
 async fn ai_correlate_session_uses_graph_and_discovers_hosts() {
     let _guard = crate::db::graph::GRAPH_TEST_LOCK.lock();
     let (svc, pool, _dir) = test_service();

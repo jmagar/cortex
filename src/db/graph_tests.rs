@@ -906,3 +906,66 @@ fn docker_compose_label_projects_compose_project_defines_service() {
         1
     );
 }
+
+#[test]
+fn reason_code_namespace_maps_to_hierarchical_v2() {
+    assert_eq!(
+        reason_code_namespace(REASON_DOCKER_CONTAINER_ID),
+        "source:docker:container_id"
+    );
+    assert_eq!(
+        reason_code_namespace(REASON_AI_SESSION_PROJECT),
+        "derivation:ai:session_project"
+    );
+    assert_eq!(reason_code_family(REASON_DOCKER_CONTAINER_ID), "source");
+    assert_eq!(reason_code_family(REASON_AI_SESSION_PROJECT), "derivation");
+    // Every registered reason code has a namespace (no unknown fallthrough).
+    for code in REASON_CODES {
+        assert_ne!(
+            reason_code_namespace(code),
+            "unknown:unknown:unknown",
+            "reason code {code} lacks a v2 namespace"
+        );
+    }
+}
+
+#[test]
+fn graph_around_entity_excludes_refuted_edges() {
+    let _guard = GRAPH_TEST_LOCK.lock();
+    let dir = tempfile::tempdir().unwrap();
+    let pool = init_pool(&test_storage_config(dir.path().join("graph-refuted.db"))).unwrap();
+    let conn = pool.get().unwrap();
+
+    let insert_entity = |etype: &str, key: &str| -> i64 {
+        conn.execute(
+            "INSERT INTO graph_entities (entity_type, canonical_key, display_label, trust_level)
+             VALUES (?1, ?2, ?2, 'verified')",
+            rusqlite::params![etype, key],
+        )
+        .unwrap();
+        conn.last_insert_rowid()
+    };
+    let a = insert_entity(ENTITY_TYPE_HOST, "host-a");
+    let b = insert_entity(ENTITY_TYPE_APP, "app-b");
+    let insert_rel = |rel: &str, trust: &str| {
+        conn.execute(
+            "INSERT INTO graph_relationships
+                (relationship_key, src_entity_id, dst_entity_id, relationship_type,
+                 reason_code, trust_level, confidence, last_seen_at)
+             VALUES (?1, ?2, ?3, ?4, 'log_app_name', ?5, 0.5, '2026-01-01T00:00:00Z')",
+            rusqlite::params![format!("{a}:{rel}:{b}"), a, b, rel, trust],
+        )
+        .unwrap();
+    };
+    insert_rel("emitted_by", "verified");
+    insert_rel("runs_on", "refuted");
+    drop(conn);
+
+    let around = graph_around_entity(&pool, a, 50, 0).unwrap();
+    assert_eq!(
+        around.relationships.len(),
+        1,
+        "refuted edge must be excluded"
+    );
+    assert_eq!(around.relationships[0].relationship_type, "emitted_by");
+}

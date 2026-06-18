@@ -148,6 +148,7 @@ verified
 claimed
 inferred
 correlated
+refuted
 ```
 
 Meanings:
@@ -157,7 +158,8 @@ Meanings:
 | `verified` | Derived from a field Cortex treats as an identity source for this relationship. |
 | `claimed` | Derived from a sender-claimed field such as syslog hostname. |
 | `inferred` | Derived from metadata or summaries that imply a relationship but are not identity proof. |
-| `correlated` | Reserved for future query-time correlation. |
+| `correlated` | A derivation *method* (temporal co-occurrence), not an epistemic status. Reserved for future query-time correlation; effective confidence is capped at 0.5. |
+| `refuted` | The relationship was believed true but has been explicitly disproved or retracted (manual override only). Refuted edges are excluded from every traversal/query result and contribute zero effective confidence; they must not be resurrected by rebuild. |
 
 Trust levels MUST NOT be upgraded without stronger source evidence.
 
@@ -223,6 +225,15 @@ agent command's working directory (inferred). Both are emitted by
 `extract_agent_command_row` for `agent-command://` log rows; the session entity
 is keyed by the inferred project so it converges with transcript-derived
 sessions for the same `session_id`.
+
+**Reason code vocabulary (v1 → v2).** The flat strings above are the **stable v1
+vocabulary** — they are the values stored in the DB. A **v2 hierarchical
+vocabulary** (OTel-attribute style, e.g. `source:syslog:claimed_hostname`,
+`source:docker:container_id`, `derivation:ai:session_project`) is exposed as a
+read-only registry via `graph::reason_code_namespace()` / `reason_code_family()`,
+enabling prefix queries (`source:docker:*`) and family-level weighting without
+changing stored values. Migrating the **stored** values to v2 is future work and
+will be a full graph rebuild; until then v1 strings remain authoritative.
 
 `heartbeat_host_state` is reserved for heartbeat-derived relationship evidence.
 The current v1 implementation uses heartbeat rows for host identity/aliases.

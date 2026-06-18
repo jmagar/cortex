@@ -85,6 +85,7 @@ async fn seeded_service() -> (CortexService, Arc<crate::db::DbPool>, tempfile::T
 }
 
 #[tokio::test]
+#[allow(clippy::await_holding_lock)]
 async fn topic_resolves_project_and_builds_timeline() {
     let _guard = crate::db::graph::GRAPH_TEST_LOCK.lock();
     let (svc, _pool, _dir) = seeded_service().await;
@@ -121,6 +122,7 @@ async fn topic_resolves_project_and_builds_timeline() {
 }
 
 #[tokio::test]
+#[allow(clippy::await_holding_lock)]
 async fn topic_with_no_match_is_empty() {
     let _guard = crate::db::graph::GRAPH_TEST_LOCK.lock();
     let (svc, _pool, _dir) = seeded_service().await;
@@ -136,6 +138,7 @@ async fn topic_with_no_match_is_empty() {
 }
 
 #[tokio::test]
+#[allow(clippy::await_holding_lock)]
 async fn topic_multi_term_resolves_host_and_project() {
     let _guard = crate::db::graph::GRAPH_TEST_LOCK.lock();
     let (svc, _pool, _dir) = seeded_service().await;
@@ -155,6 +158,7 @@ async fn topic_multi_term_resolves_host_and_project() {
 }
 
 #[tokio::test]
+#[allow(clippy::await_holding_lock)]
 async fn topic_source_kind_filter_restricts_timeline() {
     let _guard = crate::db::graph::GRAPH_TEST_LOCK.lock();
     let (svc, _pool, _dir) = seeded_service().await;

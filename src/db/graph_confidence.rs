@@ -26,6 +26,23 @@ use super::graph::{
 /// ln(2), the half-life constant for an exponential `exp(-λt)` decay.
 const LN2: f64 = std::f64::consts::LN_2;
 
+/// Effective-confidence ceiling for `correlated`-trust edges. `correlated` marks
+/// a derivation *method* (temporal co-occurrence), not a verified fact, so its
+/// confidence is capped well below structural edges.
+pub(crate) const TRUST_CORRELATED_CEILING: f64 = 0.5;
+
+/// Cap a confidence by trust level: `refuted` edges contribute nothing,
+/// `correlated` edges are capped at `TRUST_CORRELATED_CEILING`, everything else
+/// passes through. Use after computing effective confidence.
+pub(crate) fn apply_trust_ceiling(confidence: f64, trust_level: &str) -> f64 {
+    use super::graph::{TRUST_CORRELATED, TRUST_REFUTED};
+    match trust_level {
+        TRUST_REFUTED => 0.0,
+        TRUST_CORRELATED => confidence.min(TRUST_CORRELATED_CEILING),
+        _ => confidence,
+    }
+}
+
 /// Combine independent confidences via noisy-OR: `1 - Π(1 - cᵢ)`.
 ///
 /// A single source is returned unchanged; corroborating sources push the result

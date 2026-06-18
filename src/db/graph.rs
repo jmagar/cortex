@@ -88,14 +88,60 @@ pub const RELATIONSHIP_TYPES: &[&str] = &[
 pub const TRUST_VERIFIED: &str = "verified";
 pub const TRUST_CLAIMED: &str = "claimed";
 pub const TRUST_INFERRED: &str = "inferred";
+/// `correlated` is a *derivation method* (temporal co-occurrence), not an
+/// epistemic status. Reserved for future query-time correlation edges; its
+/// effective confidence is capped (see `graph_confidence::TRUST_CORRELATED_CEILING`).
 pub const TRUST_CORRELATED: &str = "correlated";
+/// A relationship that was believed true but has been explicitly disproved or
+/// retracted. Refuted edges are excluded from every traversal/query result and
+/// must not be resurrected by rebuild. Set by manual override only.
+pub const TRUST_REFUTED: &str = "refuted";
 
 pub const TRUST_LEVELS: &[&str] = &[
     TRUST_VERIFIED,
     TRUST_CLAIMED,
     TRUST_INFERRED,
     TRUST_CORRELATED,
+    TRUST_REFUTED,
 ];
+
+/// Map a flat v1 reason code to its hierarchical v2 namespace
+/// (`<family>:<source>:<detail>`, OTel-attribute style). This registry gives
+/// the flat vocabulary a queryable hierarchy — prefix matching (`source:docker:*`)
+/// and family-level weighting — without changing the stored v1 string values.
+/// The v2 strings are the planned migration target (see the contract).
+pub fn reason_code_namespace(reason_code: &str) -> &'static str {
+    match reason_code {
+        REASON_SYSLOG_CLAIMED_HOSTNAME => "source:syslog:claimed_hostname",
+        REASON_LOG_APP_NAME => "source:log:app_name",
+        REASON_DOCKER_CONTAINER_ID => "source:docker:container_id",
+        REASON_DOCKER_SERVICE_LABEL => "source:docker:service_label",
+        REASON_DOCKER_NETWORK => "source:docker:network",
+        REASON_COMPOSE_CONFIG => "source:compose:config",
+        REASON_REVERSE_PROXY_CONFIG => "source:nginx:reverse_proxy_config",
+        REASON_INVENTORY_NODE => "source:inventory:node",
+        REASON_INVENTORY_SERVICE => "source:inventory:service",
+        REASON_STORAGE_PROBE => "source:storage:probe",
+        REASON_CONFIG_ARTIFACT => "source:compose:config_artifact",
+        REASON_HEARTBEAT_HOST_STATE => "source:heartbeat:host_state",
+        REASON_AGENT_COMMAND_SESSION => "source:agent:command_session",
+        REASON_AGENT_COMMAND_CWD_INFER => "source:agent:command_cwd_infer",
+        REASON_AGENT_COMMAND_GIT_COMMIT => "source:agent:git_commit",
+        REASON_SHELL_HISTORY_GIT_COMMIT => "source:shell:git_commit",
+        REASON_AI_SESSION_PROJECT => "derivation:ai:session_project",
+        REASON_ERROR_SIGNATURE_MATCH => "derivation:error:signature_match",
+        _ => "unknown:unknown:unknown",
+    }
+}
+
+/// The hierarchical family of a reason code (the leading `source` / `derivation`
+/// segment of its v2 namespace), for family-level weighting and filtering.
+pub fn reason_code_family(reason_code: &str) -> &'static str {
+    reason_code_namespace(reason_code)
+        .split(':')
+        .next()
+        .unwrap_or("unknown")
+}
 
 pub const SOURCE_KIND_LOG: &str = "log";
 pub const SOURCE_KIND_HEARTBEAT: &str = "heartbeat";
@@ -454,7 +500,8 @@ pub fn graph_around_entity(
                 reason_code, trust_level, confidence, evidence_count,
                 first_seen_at, last_seen_at
          FROM graph_relationships
-         WHERE src_entity_id = ?1 OR dst_entity_id = ?1
+         WHERE (src_entity_id = ?1 OR dst_entity_id = ?1)
+           AND trust_level != 'refuted'
          ORDER BY last_seen_at DESC, id DESC
          LIMIT ?2",
     )?;
@@ -531,7 +578,7 @@ pub fn graph_walk_n_hops(
              FROM graph_relationships r
              JOIN graph_walk gw
                ON r.src_entity_id = gw.entity_id OR r.dst_entity_id = gw.entity_id
-             WHERE gw.depth < ?
+             WHERE gw.depth < ? AND r.trust_level != 'refuted'
          )
          SELECT DISTINCT e.entity_type, e.canonical_key
          FROM graph_entities e

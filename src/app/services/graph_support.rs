@@ -106,11 +106,13 @@ pub(super) fn relationship_effective_confidence(
         .and_then(|ts| chrono::DateTime::parse_from_rfc3339(ts).ok())
         .map(|seen| (now - seen.with_timezone(&Utc)).num_seconds().max(0) as f64 / 3600.0)
         .unwrap_or(0.0);
-    db::graph_confidence::compute_effective_confidence(
+    let effective = db::graph_confidence::compute_effective_confidence(
         relationship.confidence,
         &relationship.reason_code,
         delta_hours,
-    )
+    );
+    // correlated edges are capped, refuted edges contribute nothing.
+    db::graph_confidence::apply_trust_ceiling(effective, &relationship.trust_level)
 }
 
 pub(super) fn narrative_chain_from_path(

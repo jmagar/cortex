@@ -90,3 +90,16 @@ fn point_in_time_signal_decays_to_zero_floor() {
     let eff = compute_effective_confidence(0.8, REASON_ERROR_SIGNATURE_MATCH, 10_000.0);
     assert!(eff < 0.01, "error signature decays toward 0: {eff}");
 }
+
+#[test]
+fn trust_ceiling_caps_correlated_and_zeroes_refuted() {
+    use crate::db::graph::{TRUST_CORRELATED, TRUST_REFUTED, TRUST_VERIFIED};
+    // Verified passes through unchanged.
+    assert!((apply_trust_ceiling(0.9, TRUST_VERIFIED) - 0.9).abs() < 1e-9);
+    // Correlated is capped at the ceiling.
+    assert!((apply_trust_ceiling(0.9, TRUST_CORRELATED) - TRUST_CORRELATED_CEILING).abs() < 1e-9);
+    // A correlated edge already below the ceiling is unchanged.
+    assert!((apply_trust_ceiling(0.3, TRUST_CORRELATED) - 0.3).abs() < 1e-9);
+    // Refuted contributes nothing.
+    assert_eq!(apply_trust_ceiling(0.99, TRUST_REFUTED), 0.0);
+}
