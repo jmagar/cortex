@@ -24,7 +24,10 @@ impl Parser for AdguardParser {
         // PascalCase (modern) with legacy camelCase fallback.
         let query = pick_str(obj, &["QH"]).or_else(|| nested_str(obj, "question", "host"));
         let qtype = pick_str(obj, &["QT"]).or_else(|| nested_str(obj, "question", "type"));
-        let client = pick_str(obj, &["Client", "client"]);
+        // Client identity: AdGuard Home's file query log (≥0.107) records the
+        // client address as `IP`; `Client`/`client` is the older API-poller
+        // field. `CID` carries the persistent client id when configured.
+        let client = pick_str(obj, &["Client", "client", "IP", "CID"]);
         let upstream = pick_str(obj, &["Upstream"]);
         let elapsed = pick_str(obj, &["Elapsed"]);
         let cached = obj.get("Cached").and_then(|v| v.as_bool());

@@ -43,6 +43,9 @@ pub struct HeartbeatAgentConfig {
     pub journald: bool,
     /// Tail a host syslog file and forward new lines to cortex syslog receiver.
     pub syslog_file: Option<PathBuf>,
+    /// App log files to tail, each forwarded raw under a fixed tag
+    /// (`CORTEX_AGENT_FILE_TAILS`, `PATH:TAG` comma-separated).
+    pub file_tails: Vec<crate::agent::syslog_file::FileTailSource>,
     /// Override TCP syslog target (`host:port`).  Derived from `target` when absent.
     pub syslog_target: Option<String>,
 }
@@ -70,6 +73,10 @@ impl HeartbeatAgentConfig {
             .ok()
             .filter(|v| !v.trim().is_empty())
             .map(PathBuf::from);
+        let file_tails = std::env::var("CORTEX_AGENT_FILE_TAILS")
+            .ok()
+            .map(|spec| crate::agent::syslog_file::parse_file_tails(&spec))
+            .unwrap_or_default();
         let syslog_target = std::env::var("CORTEX_SYSLOG_TARGET").ok();
         Self {
             target,
@@ -86,6 +93,7 @@ impl HeartbeatAgentConfig {
             docker_url,
             journald,
             syslog_file,
+            file_tails,
             syslog_target,
         }
     }
@@ -1196,8 +1204,12 @@ pub async fn run_agent(config: HeartbeatAgentConfig) -> Result<()> {
         .unwrap_or(true);
     let mut update_confirmed = false;
 
-    // Spawn Docker / journald forwarding streams as a background task.
-    if config.docker || config.journald || config.syslog_file.is_some() {
+    // Spawn Docker / journald / file-tail forwarding streams as a background task.
+    if config.docker
+        || config.journald
+        || config.syslog_file.is_some()
+        || !config.file_tails.is_empty()
+    {
         let syslog_target = config
             .syslog_target
             .clone()
@@ -1213,6 +1225,7 @@ pub async fn run_agent(config: HeartbeatAgentConfig) -> Result<()> {
             docker_url: config.docker_url.clone(),
             journald: config.journald,
             syslog_file: config.syslog_file.clone(),
+            file_tails: config.file_tails.clone(),
             syslog_target,
             hostname: hostname(),
         };

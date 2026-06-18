@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.30.0] - 2026-06-18
+
+### Added
+
+- **Agent multi-file tailing (`CORTEX_AGENT_FILE_TAILS`).** The host agent's
+  file forwarder now accepts a comma-separated list of `PATH:TAG` sources and
+  forwards each line **raw** under the configured tag (so the cortex parser is
+  selected by `app_name`). This lets the agent ship file-only log sources —
+  AdGuard's JSON `querylog.json`, SWAG `access.log`, fail2ban, Plex — that are
+  neither on container stdout nor in journald, **retiring the per-host rsyslog
+  imfile drop-ins**. The existing `CORTEX_AGENT_SYSLOG_FILE` (RFC 3164
+  syslog-format single file) is unchanged.
+
+### Fixed
+
+- **AdGuard client IP now parsed from the file query log.** AdGuard Home ≥0.107
+  records the client address in the `IP` field of `querylog.json`, but the
+  parser only read `Client`/`client`. It now also reads `IP`/`CID`, so DNS
+  queries produce `client` metadata and the graph can build `device --accessed-->
+  domain` edges.
+
 ## [1.29.0] - 2026-06-18
 
 ### Added
