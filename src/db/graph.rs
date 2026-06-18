@@ -38,6 +38,10 @@ pub const ENTITY_TYPE_STORAGE: &str = "storage";
 pub const ENTITY_TYPE_CONFIG_ARTIFACT: &str = "config_artifact";
 /// A git commit event observed in an agent-command or shell-history row.
 pub const ENTITY_TYPE_GIT_COMMIT: &str = "git_commit";
+/// A human/identity principal (operator, authenticated username).
+pub const ENTITY_TYPE_USER: &str = "user";
+/// A client endpoint (DNS client IP, MAC) distinct from a server `host`.
+pub const ENTITY_TYPE_DEVICE: &str = "device";
 
 pub const ENTITY_TYPES: &[&str] = &[
     ENTITY_TYPE_HOST,
@@ -55,6 +59,8 @@ pub const ENTITY_TYPES: &[&str] = &[
     ENTITY_TYPE_STORAGE,
     ENTITY_TYPE_CONFIG_ARTIFACT,
     ENTITY_TYPE_GIT_COMMIT,
+    ENTITY_TYPE_USER,
+    ENTITY_TYPE_DEVICE,
 ];
 
 pub const REL_OBSERVED_AS: &str = "observed_as";
@@ -69,6 +75,12 @@ pub const REL_ATTACHED_TO: &str = "attached_to";
 pub const REL_MOUNTS: &str = "mounts";
 pub const REL_BACKED_BY: &str = "backed_by";
 pub const REL_HAS_ARTIFACT: &str = "has_artifact";
+/// A user authenticated against a service/host (Authelia auth events).
+pub const REL_AUTHENTICATED_AS: &str = "authenticated_as";
+/// A user or device accessed a domain/service/host (AdGuard DNS, shell use).
+pub const REL_ACCESSED: &str = "accessed";
+/// A device communicates with a peer (UniFi flow data). Vocabulary-reserved.
+pub const REL_COMMUNICATES_WITH: &str = "communicates_with";
 
 pub const RELATIONSHIP_TYPES: &[&str] = &[
     REL_OBSERVED_AS,
@@ -83,6 +95,9 @@ pub const RELATIONSHIP_TYPES: &[&str] = &[
     REL_MOUNTS,
     REL_BACKED_BY,
     REL_HAS_ARTIFACT,
+    REL_AUTHENTICATED_AS,
+    REL_ACCESSED,
+    REL_COMMUNICATES_WITH,
 ];
 
 pub const TRUST_VERIFIED: &str = "verified";
@@ -128,6 +143,9 @@ pub fn reason_code_namespace(reason_code: &str) -> &'static str {
         REASON_AGENT_COMMAND_CWD_INFER => "source:agent:command_cwd_infer",
         REASON_AGENT_COMMAND_GIT_COMMIT => "source:agent:git_commit",
         REASON_SHELL_HISTORY_GIT_COMMIT => "source:shell:git_commit",
+        REASON_ADGUARD_CLIENT_QUERY => "source:adguard:client_query",
+        REASON_SHELL_HISTORY_USER => "source:shell:user",
+        REASON_AUTHELIA_AUTH => "source:authelia:auth",
         REASON_AI_SESSION_PROJECT => "derivation:ai:session_project",
         REASON_ERROR_SIGNATURE_MATCH => "derivation:error:signature_match",
         _ => "unknown:unknown:unknown",
@@ -185,6 +203,12 @@ pub const REASON_AGENT_COMMAND_GIT_COMMIT: &str = "agent_command_git_commit";
 /// A shell-history row whose command is a `git commit`/`git push` — links the
 /// host to a `git_commit` entity.
 pub const REASON_SHELL_HISTORY_GIT_COMMIT: &str = "shell_history_git_commit";
+/// AdGuard DNS query — links a client device to the queried domain.
+pub const REASON_ADGUARD_CLIENT_QUERY: &str = "adguard_client_query";
+/// Shell-history identity — links the operating user to the host.
+pub const REASON_SHELL_HISTORY_USER: &str = "shell_history_user";
+/// Authelia auth event — links a user to the service/host they authenticated to.
+pub const REASON_AUTHELIA_AUTH: &str = "authelia_auth";
 
 pub const REASON_CODES: &[&str] = &[
     REASON_SYSLOG_CLAIMED_HOSTNAME,
@@ -205,6 +229,9 @@ pub const REASON_CODES: &[&str] = &[
     REASON_AGENT_COMMAND_CWD_INFER,
     REASON_AGENT_COMMAND_GIT_COMMIT,
     REASON_SHELL_HISTORY_GIT_COMMIT,
+    REASON_ADGUARD_CLIENT_QUERY,
+    REASON_SHELL_HISTORY_USER,
+    REASON_AUTHELIA_AUTH,
 ];
 
 pub const PROJECTION_STATUS_NEVER_BUILT: &str = "never_built";
@@ -1489,9 +1516,216 @@ fn extract_log_row(conn: &rusqlite::Connection, row: &LogGraphRow) -> Result<()>
 
     extract_agent_command_row(conn, row)?;
     extract_git_commit_row(conn, row)?;
+    extract_user_device_row(conn, row)?;
     extract_ai_log_row(conn, row)?;
     extract_docker_log_row(conn, row)?;
     Ok(())
+}
+
+/// Project user/device identity topology from identity-bearing log rows:
+///
+/// * **AdGuard** DNS rows (`app_name` starts `adguard`): the `client` IP becomes
+///   a `device` entity that `accessed` the queried `domain`.
+/// * **Authelia** rows (`app_name == authelia`): the `username` becomes a `user`
+///   entity that `authenticated_as` the host.
+/// * **shell-history** rows (`shell-history://{host}/{user}/{shell}`): the user
+///   segment becomes a `user` entity that `accessed` the host.
+///
+/// These close "who/what did this" questions that previously dead-ended.
+fn extract_user_device_row(conn: &rusqlite::Connection, row: &LogGraphRow) -> Result<()> {
+    let source_id = row.id.to_string();
+    let app = row.app_name.as_deref().unwrap_or("");
+    let meta = parse_metadata(row.metadata_json.as_deref());
+
+    // shell-history → user accessed host.
+    if let Some(rest) = row.source_ip.strip_prefix("shell-history://") {
+        let mut parts = rest.split('/');
+        let host = parts.next().and_then(normalized_value);
+        let user = parts.next().and_then(normalized_value);
+        if let (Some(host), Some(user)) = (host, user) {
+            if user != "unknown" {
+                let user_key = format!("{}:{}", normalize_key(host), normalize_key(user));
+                let user_id = ensure_entity(
+                    conn,
+                    ENTITY_TYPE_USER,
+                    &user_key,
+                    &user_key,
+                    SOURCE_KIND_LOG,
+                    &source_id,
+                    TRUST_CLAIMED,
+                    Some(&row.timestamp),
+                    Some(&row.timestamp),
+                )?;
+                if let Some(host_id) = ensure_host_entity(conn, host, &source_id, &row.timestamp)? {
+                    ensure_relationship_with_evidence(
+                        conn,
+                        user_id,
+                        host_id,
+                        REL_ACCESSED,
+                        REASON_SHELL_HISTORY_USER,
+                        TRUST_CLAIMED,
+                        0.7,
+                        identity_evidence(
+                            row,
+                            &source_id,
+                            REASON_SHELL_HISTORY_USER,
+                            "shell history attributes commands to a user on this host",
+                            0.7,
+                            TRUST_CLAIMED,
+                            &user_key,
+                            "logs.source_ip (shell-history)",
+                        ),
+                    )?;
+                }
+            }
+        }
+        return Ok(());
+    }
+
+    // AdGuard → device accessed domain.
+    if app.starts_with("adguard") {
+        let client = metadata_text(&meta, &["client", "adguard.client"]).and_then(normalized_value);
+        let query = metadata_text(&meta, &["query", "adguard.query"]).and_then(normalized_value);
+        if let (Some(client), Some(query)) = (client, query) {
+            let device_id = ensure_entity(
+                conn,
+                ENTITY_TYPE_DEVICE,
+                &normalize_key(client),
+                client,
+                SOURCE_KIND_LOG,
+                &source_id,
+                TRUST_VERIFIED,
+                Some(&row.timestamp),
+                Some(&row.timestamp),
+            )?;
+            let domain_id = ensure_entity(
+                conn,
+                ENTITY_TYPE_DOMAIN,
+                &normalize_key(query),
+                query,
+                SOURCE_KIND_LOG,
+                &source_id,
+                TRUST_INFERRED,
+                Some(&row.timestamp),
+                Some(&row.timestamp),
+            )?;
+            ensure_relationship_with_evidence(
+                conn,
+                device_id,
+                domain_id,
+                REL_ACCESSED,
+                REASON_ADGUARD_CLIENT_QUERY,
+                TRUST_INFERRED,
+                0.9,
+                identity_evidence(
+                    row,
+                    &source_id,
+                    REASON_ADGUARD_CLIENT_QUERY,
+                    "adguard dns query links client device to domain",
+                    0.9,
+                    TRUST_INFERRED,
+                    query,
+                    "metadata_json.client/query",
+                ),
+            )?;
+        }
+        return Ok(());
+    }
+
+    // Authelia → user authenticated_as host.
+    if app == "authelia" {
+        if let Some(username) =
+            metadata_text(&meta, &["username", "authelia.username"]).and_then(normalized_value)
+        {
+            if let Some(host) = normalized_value(&row.hostname) {
+                let user_key = format!("{}:{}", normalize_key(host), normalize_key(username));
+                let user_id = ensure_entity(
+                    conn,
+                    ENTITY_TYPE_USER,
+                    &user_key,
+                    &user_key,
+                    SOURCE_KIND_LOG,
+                    &source_id,
+                    TRUST_CLAIMED,
+                    Some(&row.timestamp),
+                    Some(&row.timestamp),
+                )?;
+                if let Some(host_id) = ensure_host_entity(conn, host, &source_id, &row.timestamp)? {
+                    ensure_relationship_with_evidence(
+                        conn,
+                        user_id,
+                        host_id,
+                        REL_AUTHENTICATED_AS,
+                        REASON_AUTHELIA_AUTH,
+                        TRUST_CLAIMED,
+                        0.8,
+                        identity_evidence(
+                            row,
+                            &source_id,
+                            REASON_AUTHELIA_AUTH,
+                            "authelia auth event links a user to this host",
+                            0.8,
+                            TRUST_CLAIMED,
+                            &user_key,
+                            "metadata_json.username",
+                        ),
+                    )?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Ensure a `host` entity (claimed) for a hostname, returning its id.
+fn ensure_host_entity(
+    conn: &rusqlite::Connection,
+    hostname: &str,
+    source_id: &str,
+    timestamp: &str,
+) -> Result<Option<i64>> {
+    let Some(key) = normalized(hostname) else {
+        return Ok(None);
+    };
+    Ok(Some(ensure_entity(
+        conn,
+        ENTITY_TYPE_HOST,
+        &key,
+        hostname,
+        SOURCE_KIND_LOG,
+        source_id,
+        TRUST_CLAIMED,
+        Some(timestamp),
+        Some(timestamp),
+    )?))
+}
+
+/// Build an `EvidenceInput` for an identity-projection relationship.
+#[allow(clippy::too_many_arguments)]
+fn identity_evidence<'a>(
+    row: &'a LogGraphRow,
+    source_id: &'a str,
+    reason_code: &'a str,
+    reason_text: &'a str,
+    confidence_delta: f64,
+    trust_level: &'a str,
+    safe_excerpt: &'a str,
+    metadata_path: &'a str,
+) -> EvidenceInput<'a> {
+    EvidenceInput {
+        evidence_key: evidence_bucket_key("log", row.id, reason_code, &row.timestamp),
+        source_kind: SOURCE_KIND_LOG,
+        source_id,
+        source_log_id: Some(row.id),
+        source_heartbeat_id: None,
+        source_signature_hash: None,
+        observed_at: &row.timestamp,
+        reason_text: Some(reason_text),
+        confidence_delta,
+        trust_level,
+        safe_excerpt: Some(safe_excerpt),
+        metadata_path: Some(metadata_path),
+    }
 }
 
 /// Source-IP prefix stamped on agent-command log rows by

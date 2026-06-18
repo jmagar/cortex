@@ -969,3 +969,107 @@ fn graph_around_entity_excludes_refuted_edges() {
     );
     assert_eq!(around.relationships[0].relationship_type, "emitted_by");
 }
+
+#[test]
+fn shell_history_row_creates_user_accessed_host() {
+    let _guard = GRAPH_TEST_LOCK.lock();
+    let dir = tempfile::tempdir().unwrap();
+    let pool = init_pool(&test_storage_config(dir.path().join("graph-user-shell.db"))).unwrap();
+
+    let mut entry = make_entry("2026-01-01T00:00:00Z", "dookie", Some("zsh"), "ls -la");
+    entry.source_ip = "shell-history://dookie/jacob/zsh".to_string();
+    entry.metadata_json = Some(r#"{"source_kind":"shell-history"}"#.to_string());
+    insert_logs_batch(&pool, &[entry]).unwrap();
+    refresh_graph_projection(&pool).unwrap();
+
+    let conn = pool.get().unwrap();
+    let user_key: String = conn
+        .query_row(
+            "SELECT canonical_key FROM graph_entities WHERE entity_type = 'user'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(user_key, "dookie:jacob");
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*) FROM graph_relationships WHERE reason_code = 'shell_history_user' AND relationship_type = 'accessed'"
+        ),
+        1
+    );
+}
+
+#[test]
+fn adguard_row_creates_device_accessed_domain() {
+    let _guard = GRAPH_TEST_LOCK.lock();
+    let dir = tempfile::tempdir().unwrap();
+    let pool = init_pool(&test_storage_config(dir.path().join("graph-adguard.db"))).unwrap();
+
+    let mut entry = make_entry(
+        "2026-01-01T00:00:00Z",
+        "squirts",
+        Some("adguard-query"),
+        "dns",
+    );
+    entry.metadata_json = Some(
+        r#"{"source_kind":"adguard-api","client":"192.168.10.55","query":"doubleclick.net"}"#
+            .to_string(),
+    );
+    insert_logs_batch(&pool, &[entry]).unwrap();
+    refresh_graph_projection(&pool).unwrap();
+
+    let conn = pool.get().unwrap();
+    let device_key: String = conn
+        .query_row(
+            "SELECT canonical_key FROM graph_entities WHERE entity_type = 'device'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(device_key, "192.168.10.55");
+    let domain_key: String = conn
+        .query_row(
+            "SELECT e.canonical_key FROM graph_relationships r
+             JOIN graph_entities e ON e.id = r.dst_entity_id
+             WHERE r.reason_code = 'adguard_client_query' AND r.relationship_type = 'accessed'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(domain_key, "doubleclick.net");
+}
+
+#[test]
+fn authelia_row_creates_user_authenticated_as_host() {
+    let _guard = GRAPH_TEST_LOCK.lock();
+    let dir = tempfile::tempdir().unwrap();
+    let pool = init_pool(&test_storage_config(dir.path().join("graph-authelia.db"))).unwrap();
+
+    let mut entry = make_entry(
+        "2026-01-01T00:00:00Z",
+        "squirts",
+        Some("authelia"),
+        "auth ok",
+    );
+    entry.metadata_json = Some(r#"{"source_kind":"syslog-udp","username":"alice"}"#.to_string());
+    insert_logs_batch(&pool, &[entry]).unwrap();
+    refresh_graph_projection(&pool).unwrap();
+
+    let conn = pool.get().unwrap();
+    let user_key: String = conn
+        .query_row(
+            "SELECT canonical_key FROM graph_entities WHERE entity_type = 'user'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(user_key, "squirts:alice");
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*) FROM graph_relationships WHERE reason_code = 'authelia_auth' AND relationship_type = 'authenticated_as'"
+        ),
+        1
+    );
+}
