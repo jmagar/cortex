@@ -235,4 +235,47 @@ pub struct AiCorrelateResponse {
     /// on MCP responses, which use the service-layer clamp (200) only.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub events_per_anchor_clamped_to: Option<u32>,
+    /// Graph-anchored, session-scoped correlation. Populated only when the
+    /// request targets a specific `session_id`: the graph is traversed from the
+    /// session entity to discover related hosts, and logs are fanned out across
+    /// all source kinds within the session's time bounds. Additive — absent for
+    /// project/tool/query correlations, which keep the time-windowed anchor path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub graph_correlation: Option<GraphSessionCorrelation>,
+}
+
+/// One log row in a graph-anchored session correlation, annotated with how it
+/// was reached and which source lane it belongs to.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CorrelatedLogRow {
+    pub entry: LogEntry,
+    /// Source kind parsed from the row (`agent-command`, `shell-history`,
+    /// `syslog-udp`, `docker-stream`, …); `None` if not recorded on the row.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_kind: Option<String>,
+    /// How the graph traversal reached this row: `agent_command`,
+    /// `shell_history`, or `graph:host:<hostname>`.
+    pub discovery: String,
+}
+
+/// Graph-anchored, session-scoped correlation result for `ai_correlate`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GraphSessionCorrelation {
+    pub session_id: String,
+    pub session_start: String,
+    pub session_end: String,
+    /// `true` when the session's `ai_session` graph entity was found and used to
+    /// discover related hosts; `false` for the time-windowed fallback (session
+    /// not yet projected into the graph).
+    pub used_graph: bool,
+    pub discovered_hosts: Vec<String>,
+    pub discovered_entities: Vec<String>,
+    pub logs: Vec<CorrelatedLogRow>,
+    /// Count of agent-command rows (Claude's bash tool calls) in this session.
+    pub agent_command_count: usize,
+    /// Count of shell-history rows (the operator's own shell) in the window.
+    pub shell_history_count: usize,
+    /// Heartbeat pressure summaries for the discovered hosts over the window.
+    pub heartbeat_summaries: Vec<db::HeartbeatWindowSummary>,
+    pub truncated: bool,
 }

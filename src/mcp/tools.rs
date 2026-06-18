@@ -868,6 +868,8 @@ Related rows explicitly exclude AI transcript rows, so the result surfaces host,
 - `limit` (integer, optional) — max AI anchors (default 10, max 50)
 - `events_per_anchor` (integer, optional) — max related non-AI rows per anchor (default 25, max 200)
 
+When `session_id` is supplied, the response additionally carries a `graph_correlation` block: the session's time bounds, the hosts/entities discovered by traversing the investigation graph from the session entity, logs fanned out across all source kinds within the session window (annotated with a `discovery` lane — `agent_command`, `shell_history`, or `graph:host:<host>`), agent-command/shell-history lane counts, and heartbeat pressure summaries for the discovered hosts. `used_graph=false` indicates the time-windowed fallback (session not yet projected into the graph). Existing fields are unchanged.
+
 ---
 
 ## cortex usage_blocks

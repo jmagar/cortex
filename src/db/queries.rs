@@ -26,7 +26,7 @@ use super::models::{
     AiRelatedLogsForAnchor, AiRelatedLogsParams, AiSessionEntry, AiToolInventoryEntry, DbStats,
     ErrorSummaryEntry, HostEntry, IncidentEvidence, ListAiProjectsParams, ListAiProjectsResult,
     ListAiSessionsParams, ListAiToolsParams, ListAiToolsResult, LogEntry, SearchAiSessionsParams,
-    SearchAiSessionsResult, SearchParams, SearchedAiSessionEntry,
+    SearchAiSessionsResult, SearchParams, SearchedAiSessionEntry, SessionGraphInputs,
 };
 use super::pool::DbPool;
 
@@ -1379,9 +1379,6 @@ pub fn search_ai_related_logs(
 
 /// Push each value as a bound `Text` parameter and return a `?, ?, …`
 /// placeholder list of matching arity for an `IN (...)` clause.
-// Consumed alongside `search_logs_from_graph_related_entities` by the
-// graph-anchored correlation actions (axon_rust-o29l.4 / .5).
-#[allow(dead_code)]
 fn bind_in_list(bindings: &mut Vec<rusqlite::types::Value>, values: &[String]) -> String {
     let start = bindings.len();
     for v in values {
@@ -1408,9 +1405,6 @@ fn bind_in_list(bindings: &mut Vec<rusqlite::types::Value>, values: &[String]) -
 ///
 /// `max_depth` is clamped to `[1, GRAPH_WALK_MAX_DEPTH]` and `limit` to
 /// `[1, 1000]`. Returns raw `LogEntry` rows for the service layer to shape.
-// Wired into MCP/CLI actions by axon_rust-o29l.4 (ai_correlate) and .5
-// (topic_correlate); the `dead_code` allow drops out when those land.
-#[allow(dead_code)]
 #[allow(clippy::too_many_arguments)]
 pub fn search_logs_from_graph_related_entities(
     pool: &DbPool,
@@ -1522,6 +1516,125 @@ pub fn search_logs_from_graph_related_entities(
         .query_map(rusqlite::params_from_iter(bindings.iter()), map_row)?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(logs)
+}
+
+/// Graph-anchored, session-scoped correlation inputs for `ai_correlate`.
+///
+/// Resolves the session's time bounds from its log rows, finds the `ai_session`
+/// graph entity (key ends in `:{session_id}`), traverses the graph (depth 2) to
+/// discover related hosts/containers/services, then fans logs out across all
+/// source kinds within the session window via
+/// `search_logs_from_graph_related_entities`. The fan-out's `ai_session_id`
+/// filter pulls in the agent-command lane (Claude's bash calls) and the
+/// hostname filter pulls in the shell-history / syslog lanes on the discovered
+/// hosts.
+///
+/// Falls back to a plain `ai_session_id`-filtered query (`used_graph = false`)
+/// when the graph has no entity for the session yet. Returns empty bounds when
+/// the session has no rows at all.
+pub fn correlate_session_graph(
+    pool: &DbPool,
+    session_id: &str,
+    limit: usize,
+) -> Result<SessionGraphInputs> {
+    let limit = limit.clamp(1, 1000);
+    let conn = pool.get()?;
+
+    // Session window = [MIN, MAX] timestamp over the session's rows.
+    let bounds: Option<(String, String)> = conn
+        .query_row(
+            "SELECT MIN(timestamp), MAX(timestamp) FROM logs WHERE ai_session_id = ?1",
+            [session_id],
+            |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                ))
+            },
+        )
+        .optional()?
+        .and_then(|(min, max)| match (min, max) {
+            (Some(start), Some(end)) => Some((start, end)),
+            _ => None,
+        });
+
+    let Some((start, end)) = bounds else {
+        return Ok(SessionGraphInputs::default());
+    };
+
+    // Find the ai_session graph entity (canonical_key `project:tool:session`).
+    let session_keys: Vec<String> = {
+        let mut stmt = conn.prepare(
+            "SELECT canonical_key FROM graph_entities
+             WHERE entity_type = ?1 AND canonical_key LIKE '%:' || ?2",
+        )?;
+        stmt.query_map(
+            rusqlite::params![super::graph::ENTITY_TYPE_AI_SESSION, session_id],
+            |row| row.get::<_, String>(0),
+        )?
+        .collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    let used_graph = !session_keys.is_empty();
+
+    // Discover related entities/hosts by traversing from the session entity.
+    let mut discovered_entities: Vec<String> = Vec::new();
+    let mut discovered_hosts: Vec<String> = Vec::new();
+    if used_graph {
+        for entity in super::graph::graph_walk_n_hops(&conn, &session_keys, 2)? {
+            match entity.entity_type.as_str() {
+                super::graph::ENTITY_TYPE_HOST => {
+                    discovered_hosts.push(entity.canonical_key.clone())
+                }
+                super::graph::ENTITY_TYPE_CONTAINER | super::graph::ENTITY_TYPE_SERVICE => {
+                    if let Some(host) = entity.canonical_key.split(':').next() {
+                        if !host.is_empty() {
+                            discovered_hosts.push(host.to_string());
+                        }
+                    }
+                }
+                _ => {}
+            }
+            discovered_entities.push(entity.canonical_key);
+        }
+        discovered_hosts.sort();
+        discovered_hosts.dedup();
+        discovered_entities.sort();
+        discovered_entities.dedup();
+    }
+
+    // Fan logs out across all source kinds within the session window.
+    let logs = if used_graph {
+        drop(conn);
+        search_logs_from_graph_related_entities(
+            pool,
+            &session_keys,
+            2,
+            Some(&start),
+            Some(&end),
+            None,
+            limit,
+        )?
+    } else {
+        // Fallback: the graph hasn't projected this session yet — return its own
+        // rows (transcript + agent-command lanes) by exact session id.
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {FTS_SELECT_COLS}
+             FROM logs l
+             WHERE l.ai_session_id = ?1
+             ORDER BY l.timestamp DESC, l.id DESC
+             LIMIT ?2"
+        ))?;
+        stmt.query_map(rusqlite::params![session_id, limit as i64], map_row)?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+    };
+
+    Ok(SessionGraphInputs {
+        bounds: Some((start, end)),
+        discovered_hosts,
+        discovered_entities,
+        used_graph,
+        logs,
+    })
 }
 
 const DEFAULT_AI_ABUSE_TERMS: &[&str] = &[

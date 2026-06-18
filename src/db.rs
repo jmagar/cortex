@@ -58,7 +58,8 @@ pub use models::{
     IncidentContextParams, IncidentContextResult, IncidentEvidence, ListAiProjectsParams,
     ListAiProjectsResult, ListAiSessionsParams, ListAiToolsParams, ListAiToolsResult,
     LogBatchEntry, LogEntry, SearchAiSessionsParams, SearchAiSessionsResult, SearchParams,
-    SearchedAiSessionEntry, SeverityCount, SimilarIncidentsParams, SimilarIncidentsResult,
+    SearchedAiSessionEntry, SessionGraphInputs, SeverityCount, SimilarIncidentsParams,
+    SimilarIncidentsResult,
 };
 pub use models::{StorageBudgetState, StorageEnforcementOutcome, StorageMetrics, StorageRecovery};
 pub use pool::{
@@ -68,11 +69,12 @@ pub use pool::{
 };
 pub use queries::{
     AiSessionRollupStatus, RollupRefresh, SEVERITY_LEVELS, TimelineRollupStatus,
-    ai_session_rollup_status, ask_history_sessions, get_error_summary, get_stats,
-    get_stats_with_options, incident_context_summary, investigate_ai_incidents, list_ai_projects,
-    list_ai_sessions, list_ai_sessions_live, list_ai_tools, list_hosts, prune_timeline_rollup,
-    refresh_ai_session_rollup, refresh_ai_session_rollup_if_stale, refresh_timeline_rollup,
-    search_ai_abuse, search_ai_anchors, search_ai_incidents, search_ai_related_logs,
-    search_ai_sessions, search_logs, search_logs_from_graph_related_entities, severity_to_num,
-    similar_incidents_clusters, tail_logs, timeline_rollup_status, validate_fts_query,
+    ai_session_rollup_status, ask_history_sessions, correlate_session_graph, get_error_summary,
+    get_stats, get_stats_with_options, incident_context_summary, investigate_ai_incidents,
+    list_ai_projects, list_ai_sessions, list_ai_sessions_live, list_ai_tools, list_hosts,
+    prune_timeline_rollup, refresh_ai_session_rollup, refresh_ai_session_rollup_if_stale,
+    refresh_timeline_rollup, search_ai_abuse, search_ai_anchors, search_ai_incidents,
+    search_ai_related_logs, search_ai_sessions, search_logs,
+    search_logs_from_graph_related_entities, severity_to_num, similar_incidents_clusters,
+    tail_logs, timeline_rollup_status, validate_fts_query,
 };

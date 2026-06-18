@@ -1,5 +1,78 @@
 use super::*;
 
+/// Log fan-out cap for the graph-anchored session lane of `ai_correlate`.
+/// Clamped again to `[1, 1000]` inside `db::correlate_session_graph`.
+const GRAPH_SESSION_LOG_LIMIT: usize = 500;
+
+/// Parse the `source_kind` recorded in a log row's `metadata_json`, if present.
+fn row_source_kind(entry: &db::LogEntry) -> Option<String> {
+    let meta = entry.metadata_json.as_deref()?;
+    let value: serde_json::Value = serde_json::from_str(meta).ok()?;
+    value
+        .get("source_kind")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+}
+
+/// Shape the DB-layer `SessionGraphInputs` into the API response, classifying
+/// each row into a source lane (`agent_command` / `shell_history` /
+/// `graph:host:<host>`) and counting the agent-command and shell-history lanes.
+/// Heartbeat summaries are filtered to the discovered hosts. Returns `None` when
+/// the session has no rows at all (empty bounds).
+fn build_graph_session_correlation(
+    session_id: String,
+    inputs: db::SessionGraphInputs,
+    summaries: Vec<db::HeartbeatWindowSummary>,
+) -> Option<GraphSessionCorrelation> {
+    let (session_start, session_end) = inputs.bounds?;
+
+    let truncated = inputs.logs.len() >= GRAPH_SESSION_LOG_LIMIT;
+    let mut agent_command_count = 0usize;
+    let mut shell_history_count = 0usize;
+    let logs: Vec<CorrelatedLogRow> = inputs
+        .logs
+        .into_iter()
+        .map(|entry| {
+            let source_kind = row_source_kind(&entry);
+            let discovery = if entry.source_ip.starts_with("agent-command://") {
+                agent_command_count += 1;
+                "agent_command".to_string()
+            } else if source_kind.as_deref() == Some("shell-history") {
+                shell_history_count += 1;
+                "shell_history".to_string()
+            } else {
+                format!("graph:host:{}", entry.hostname)
+            };
+            CorrelatedLogRow {
+                entry: entry.into(),
+                source_kind,
+                discovery,
+            }
+        })
+        .collect();
+
+    let discovered: std::collections::HashSet<&str> =
+        inputs.discovered_hosts.iter().map(String::as_str).collect();
+    let heartbeat_summaries: Vec<db::HeartbeatWindowSummary> = summaries
+        .into_iter()
+        .filter(|s| discovered.contains(s.hostname.as_str()))
+        .collect();
+
+    Some(GraphSessionCorrelation {
+        session_id,
+        session_start,
+        session_end,
+        used_graph: inputs.used_graph,
+        discovered_hosts: inputs.discovered_hosts,
+        discovered_entities: inputs.discovered_entities,
+        logs,
+        agent_command_count,
+        shell_history_count,
+        heartbeat_summaries,
+        truncated,
+    })
+}
+
 impl CortexService {
     pub async fn list_sessions(
         &self,
@@ -224,6 +297,10 @@ impl CortexService {
         // boundary, eliminating the double cross-thread wakeup and the intermediate
         // allocation that was required to transfer anchor rows back to the async task
         // just to build window params and re-enter spawn_blocking.
+        // Session-anchored graph correlation runs when the caller targets a
+        // specific session; capture the id before `req` is consumed below.
+        let session_for_graph = req.session_id.clone();
+
         let anchor_params = db::AiCorrelateParams {
             ai_project: req.project,
             ai_tool: req.tool,
@@ -310,6 +387,37 @@ impl CortexService {
             });
         }
 
+        // Graph-anchored lane: traverse from the session entity, fan logs out
+        // across all source kinds within the session window, and attach
+        // heartbeat pressure for the discovered hosts. Additive — only when a
+        // concrete session id was supplied.
+        let graph_correlation = match session_for_graph {
+            Some(session_id) => {
+                let sid = session_id.clone();
+                let (inputs, summaries) = self
+                    .run_db(
+                        "correlate_session_graph",
+                        move |pool| -> anyhow::Result<(
+                            db::SessionGraphInputs,
+                            Vec<db::HeartbeatWindowSummary>,
+                        )> {
+                            let inputs =
+                                db::correlate_session_graph(pool, &sid, GRAPH_SESSION_LOG_LIMIT)?;
+                            let summaries = match &inputs.bounds {
+                                Some((start, end)) if !inputs.discovered_hosts.is_empty() => {
+                                    db::heartbeat_window_summaries(pool, start, end, None)?
+                                }
+                                _ => Vec::new(),
+                            };
+                            Ok((inputs, summaries))
+                        },
+                    )
+                    .await?;
+                build_graph_session_correlation(session_id, inputs, summaries)
+            }
+            None => None,
+        };
+
         Ok(AiCorrelateResponse {
             window_minutes: window,
             severity_min,
@@ -321,6 +429,7 @@ impl CortexService {
             total_related_events,
             anchors: correlated,
             events_per_anchor_clamped_to,
+            graph_correlation,
         })
     }
 
@@ -458,3 +567,7 @@ impl CortexService {
         })
     }
 }
+
+#[cfg(test)]
+#[path = "ai_correlate_tests.rs"]
+mod ai_correlate_tests;

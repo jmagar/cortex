@@ -209,6 +209,19 @@ pub struct AiRelatedWindow {
     pub window_to: String,
 }
 
+/// DB-layer carrier for graph-anchored session correlation: the session time
+/// bounds, the entities/hosts discovered by traversing the graph from the
+/// session entity, and the fanned-out logs. `used_graph` is false when no
+/// `ai_session` graph entity exists for the session (time-windowed fallback).
+#[derive(Debug, Clone, Default)]
+pub struct SessionGraphInputs {
+    pub bounds: Option<(String, String)>,
+    pub discovered_hosts: Vec<String>,
+    pub discovered_entities: Vec<String>,
+    pub used_graph: bool,
+    pub logs: Vec<LogEntry>,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AiRelatedLogsParams {
     pub windows: Vec<AiRelatedWindow>,
