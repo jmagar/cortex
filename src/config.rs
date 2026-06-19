@@ -185,6 +185,12 @@ pub struct ErrorDetectionConfig {
     /// Defaults cover Apprise's own delivery log lines. Set to an empty list to
     /// disable.
     pub exclude_patterns: Vec<String>,
+    /// Minimum severity that may fire a notification. Recurring signatures below
+    /// this floor are still recorded (searchable, ack-able) but never notify.
+    /// Default `err`: `warning`-level recurrences are extremely high volume on
+    /// busy dev/service hosts and not actionable as pages. One of
+    /// `emerg`/`alert`/`crit`/`err`/`warning`/`notice`/`info`/`debug`.
+    pub notify_min_severity: String,
 }
 
 impl Default for ErrorDetectionConfig {
@@ -199,6 +205,7 @@ impl Default for ErrorDetectionConfig {
                 "Sent Gotify notification".to_string(),
                 "POST /notify".to_string(),
             ],
+            notify_min_severity: "err".to_string(),
         }
     }
 }
@@ -900,6 +907,10 @@ impl Config {
             "CORTEX_ERROR_DETECTION_EXCLUDE_PATTERNS",
             &mut config.error_detection.exclude_patterns,
         );
+        env_override_str(
+            "CORTEX_ERROR_DETECTION_NOTIFY_MIN_SEVERITY",
+            &mut config.error_detection.notify_min_severity,
+        );
         env_override_bool(
             "CORTEX_NOTIFICATIONS_ENABLED",
             &mut config.notifications.enabled,
@@ -1492,6 +1503,13 @@ fn validate_storage_config(storage: &StorageConfig) -> anyhow::Result<()> {
 fn validate_error_detection_config(cfg: &ErrorDetectionConfig) -> anyhow::Result<()> {
     if cfg.scan_interval_secs == 0 {
         anyhow::bail!("[error_detection] scan_interval_secs must be > 0");
+    }
+    if crate::db::severity_to_num(&cfg.notify_min_severity).is_none() {
+        anyhow::bail!(
+            "[error_detection] notify_min_severity must be a syslog severity \
+             (emerg/alert/crit/err/warning/notice/info/debug), got {:?}",
+            cfg.notify_min_severity
+        );
     }
     Ok(())
 }

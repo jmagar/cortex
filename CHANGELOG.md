@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.31.0] - 2026-06-18
+
+### Changed
+
+- **Recurring-error notifications now have a severity floor (`err` by default).**
+  The error scanner records `warning`-level recurring signatures (still
+  searchable and ack-able) but no longer pages on them — only `err`/`crit`/
+  `alert`/`emerg` signatures fire notifications. Busy dev/service hosts emit
+  enormous volumes of recurring warnings that flooded the notification channel
+  with non-actionable alerts. Configurable via
+  `[error_detection].notify_min_severity` / `CORTEX_ERROR_DETECTION_NOTIFY_MIN_SEVERITY`.
+
 ## [1.30.0] - 2026-06-18
 
 ### Added

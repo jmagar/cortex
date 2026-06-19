@@ -69,6 +69,12 @@ pub(crate) async fn run_error_scan(
         let pool_chunk = Arc::clone(&pool);
         let frequency_threshold = cfg.frequency_threshold;
         let exclude_patterns = cfg.exclude_patterns.clone();
+        // Notifications fire only for signatures at/above this severity floor;
+        // resolve to a rank once (lower = more severe). Unknown values are
+        // rejected at config validation, so a parse failure here means "no
+        // floor" (notify everything) rather than silently dropping pages.
+        let notify_floor_rank =
+            crate::db::severity_to_num(&cfg.notify_min_severity).unwrap_or(u8::MAX);
         let result = tokio::task::spawn_blocking(move || {
             let _permit = permit;
             process_chunk(
@@ -77,6 +83,7 @@ pub(crate) async fn run_error_scan(
                 chunk_size,
                 frequency_threshold,
                 &exclude_patterns,
+                notify_floor_rank,
             )
         })
         .await??;
@@ -109,6 +116,7 @@ pub(crate) fn process_chunk(
     chunk_size: i64,
     frequency_threshold: u32,
     exclude_patterns: &[String],
+    notify_floor_rank: u8,
 ) -> Result<ChunkResult> {
     let mut conn = pool.get()?;
 
@@ -254,9 +262,17 @@ pub(crate) fn process_chunk(
             rusqlite::params![hash, NORMALIZER_VERSION],
             |row| Ok((row.get(0)?, row.get(1)?)),
         );
+        // Severity floor: warning-level recurrences are recorded but must not
+        // page (lower rank = more severe, so the signature must rank at/below
+        // the floor). Unknown severities (rank MAX) never meet a real floor.
+        let meets_severity_floor = crate::db::severity_to_num(&group.severity)
+            .map(|rank| rank <= notify_floor_rank)
+            .unwrap_or(false);
         let should_notify = match ack_check {
             Ok((count_last_1h, acknowledged_at)) => {
-                acknowledged_at.is_none() && count_last_1h >= frequency_threshold as i64
+                meets_severity_floor
+                    && acknowledged_at.is_none()
+                    && count_last_1h >= frequency_threshold as i64
             }
             Err(e) => {
                 tracing::warn!(
@@ -264,8 +280,9 @@ pub(crate) fn process_chunk(
                     error = %e,
                     "error_scan: ack-check query failed; treating as unacked (fail-open)"
                 );
-                // fail open: duplicate notification is recoverable, missed one is not
-                true
+                // fail open within the severity floor: a duplicate err+ page is
+                // recoverable, a missed one is not — but never page below floor.
+                meets_severity_floor
             }
         };
 
