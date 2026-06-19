@@ -46,7 +46,7 @@ Key modules in `src/` (most are directories with sidecar `*_tests.rs` files):
 | `runtime.rs` | `RuntimeCore`: wires all subsystems, starts syslog ingest, spawns maintenance tasks |
 | `app/` | Service layer: `SyslogService`, request/response models, business logic |
 | `db/` | SQLite pool, FTS5 queries, maintenance (retention, storage enforcement) |
-| `syslog/` | UDP + TCP listeners, RFC 3164/5424 parsing, mpsc batch writer |
+| `receiver/` | UDP + TCP listeners, RFC 3164/5424 parsing, mpsc batch writer |
 | `mcp/` | RMCP Streamable HTTP server, single `cortex` tool with action dispatch |
 | `api.rs` | Always-on non-MCP REST API (`/api/*`); requires `CORTEX_API_TOKEN` at startup |
 | `agent/`, `heartbeat_agent.rs` | Host-local cortex agent: heartbeat, syslog forwarding, and Docker log streaming from the local Docker socket |
@@ -227,7 +227,7 @@ RUST_LOG=info
 - **Data volume** — DB lives in `./data/` (bind mount); `*.db` is gitignored so the database files won't be committed
 - **Retention purge** — `retention_days` defaults to 90; logs older than 90 days are **permanently deleted hourly** with no recovery path, **except err/crit/alert/emerg rows, which are exempt from retention aging** (deletable only under disk pressure within the err+ floor bounds). Set `CORTEX_RETENTION_DAYS=0` to disable the global age purge (AdGuard 7-day and heartbeat 14-day caps still apply). See "Retention" above.
 - **Storage guardrail** — The logical DB-size guard is enabled by default (`1024/900 MB`): a breach deletes oldest logs by `received_at` until the recovery target, sparing the err+ floor. The free-disk guard is **disabled by default** (`0/0`); when enabled, a breach **blocks writes** (with hysteresis) instead of deleting data. If cleanup cannot recover enough space, the batch writer blocks new writes until storage becomes healthy again.
-- **CEF hostname vs source_ip** — For UniFi CEF messages, the stored `hostname` comes from the CEF `UNIFIdeviceName` extension field (message body), **not** the syslog header. Any LAN device can spoof this value. `source_ip` is the only network-verified identity. See `src/syslog/parser.rs` for the trust boundary.
+- **CEF hostname vs source_ip** — For UniFi CEF messages, the stored `hostname` comes from the CEF `UNIFIdeviceName` extension field (message body), **not** the syslog header. Any LAN device can spoof this value. `source_ip` is the only network-verified identity. See `src/receiver/parser.rs` for the trust boundary.
 - **Batch writer failure** — If `insert_logs_batch` fails, the batch is retained for the next flush (up to 1000 entries, then discarded). A 250ms pause prevents hammering a failing DB. Persistent write failures will eventually cause data loss via the 10K-entry channel cap. The mpsc channel is in-memory only — no durable write-ahead log.
 - **correlate action limit cap** — The `limit` parameter is silently capped at 999 (not 1000) because the implementation fetches `limit+1` rows to detect truncation, and `search` hard-caps at 1000.
 - **Auth / trust model** — MCP endpoint is unauthenticated by default; any client reaching port 3100 has full log read access. Set `CORTEX_TOKEN` to require Bearer auth. CORS is restricted to `localhost:3100` (browser-only; curl/mcporter unaffected). If exposing via SWAG/reverse proxy, add auth at the proxy layer or set the token. See README Security section for details.
