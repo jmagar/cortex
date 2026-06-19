@@ -5,8 +5,8 @@ use super::OutputArgs;
 /// Normalize a user-supplied time value to an RFC3339 string.
 ///
 /// Accepts relative forms (`1h`, `30m`, `2d`, `yesterday`, `now`), bare dates
-/// (`YYYY-MM-DD`, `YYYY-MM-DD HH:MM`), and RFC3339, delegating to
-/// [`super::timearg::parse_time_arg`]. Non-time input is rejected with a clear
+/// (`YYYY-MM-DD`, `YYYY-MM-DD HH:MM`), and RFC3339, delegating to the shared
+/// [`cortex::app::parse_time_arg`]. Non-time input is rejected with a clear
 /// error.
 ///
 /// Every CLI flag that ends up bound into a SQL timestamp comparison MUST route
@@ -15,7 +15,7 @@ use super::OutputArgs;
 /// '1h'` matches nothing and returns wrong results with no error (a silent
 /// failure).
 pub(crate) fn norm_time(raw: String) -> Result<String> {
-    super::timearg::parse_time_arg(&raw, chrono::Utc::now())
+    cortex::app::parse_time_arg(&raw, chrono::Utc::now()).map_err(|e| anyhow!("{e}"))
 }
 
 pub(crate) struct FlagCursor<'a> {

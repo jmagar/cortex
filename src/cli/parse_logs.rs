@@ -2,15 +2,15 @@ use anyhow::{Result, bail};
 
 use super::argdefaults::{effective_limit, effective_since, positional_value};
 use super::parse_common::{FlagCursor, parse_output_args, parse_u32_flag, value_after_equals};
-use super::timearg::parse_time_arg;
 use super::{
     CliCommand, CorrelateArgs, FilterArgs, IncidentArgs, IngestRateArgs, PatternsArgs, SearchArgs,
     SessionsArgs, SourceIpsArgs, TailArgs, TimeRangeArgs, TimelineArgs,
 };
+use cortex::app::parse_time_arg;
 
 /// Normalize a user time value (relative or absolute) to RFC3339 at parse time.
 fn norm_time(raw: String) -> Result<String> {
-    parse_time_arg(&raw, chrono::Utc::now())
+    parse_time_arg(&raw, chrono::Utc::now()).map_err(|e| anyhow::anyhow!("{e}"))
 }
 
 pub(crate) fn parse_search(args: &[String]) -> Result<CliCommand> {

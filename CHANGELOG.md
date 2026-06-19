@@ -7,6 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.32.0] - 2026-06-19
+
+### Fixed
+
+- **Relative time now works over MCP/REST, not just the CLI.** `topic_correlate`
+  (and ~10 other actions that bind `since`/`until`/`reference_time`:
+  `ai_correlate`, `incident_context`, `correlate_state`, the `ai *` family, …)
+  rejected relative/keyword forms like `30m`/`yesterday` over MCP with
+  `Invalid since '30m': premature end of input`, because the relative-time
+  normalizer was wired only into the CLI argument parser. The normalizer moved
+  into the library (`cortex::app::parse_time_arg`) and the service-layer
+  `parse_required_timestamp` now routes every value through it, so all entry
+  points (CLI, MCP, REST) accept `1h`/`30m`/`2d`/`90s`/`now`/`today`/`yesterday`/
+  bare dates/RFC3339 uniformly. RFC3339 input passes through unchanged
+  (normalization is idempotent). The CLI-only `cli::timearg` module was removed.
+
+### Changed
+
+- **`hosts` deduplicates case and FQDN variants of the same machine.** The host
+  list collapses `SHART`/`shart` (case) and folds an FQDN into its short name
+  **only when that short name independently exists** as a host
+  (`tootie.manatee-triceratops.ts.net` → `tootie`, but `host.docker.internal` is
+  left alone — no bare `host`). Merged rows sum `log_count` and span the widest
+  first/last-seen window. Ambiguous self-identifiers (`localhost`, empty
+  hostname) are left untouched pending `source_ip`-based resolution.
+- **`graph` `around` neighborhoods fair-share the payload budget across neighbor
+  types.** A host's neighborhood was sorted purely by recency, so high-churn
+  `error_signature` edges (re-touched every error scan) crowded out apps and
+  source_ips under the budget (a host with ~46 apps surfaced only ~32).
+  Selection is now a round-robin across neighbor entity types, so every type
+  gets representation; raise `payload_budget` for a fuller view.
+
+### Added
+
+- **`graph` resolves `compose_project` by bare project name.** Compose-project
+  canonical keys are host-scoped (`dookie:axon`), so
+  `entity_type=compose_project key=axon` previously returned nothing. It now
+  falls back to project-name resolution: a unique hit resolves, and a project
+  running on multiple hosts is returned as `candidates`.
+
+### Documentation
+
+- **cortex skill** gains Time-windows, Graph & correlation, and action-cost-tier
+  guidance, and the HTTP-fallback `curl` examples now send the required
+  `Accept: application/json, text/event-stream` header (the streamable-HTTP
+  transport returns `406 Not Acceptable` without it).
+
 ## [1.31.4] - 2026-06-19
 
 ### Changed

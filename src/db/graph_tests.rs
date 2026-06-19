@@ -1073,3 +1073,82 @@ fn authelia_row_creates_user_authenticated_as_host() {
         1
     );
 }
+
+fn rel_row(id: i64, last_seen: &str) -> GraphRelationshipRow {
+    GraphRelationshipRow {
+        id,
+        relationship_key: format!("k{id}"),
+        src_entity_id: 1,
+        dst_entity_id: id + 100,
+        relationship_type: "emitted_by".to_string(),
+        reason_code: "log:app_name".to_string(),
+        trust_level: "inferred".to_string(),
+        confidence: 0.5,
+        evidence_count: 1,
+        first_seen_at: Some(last_seen.to_string()),
+        last_seen_at: Some(last_seen.to_string()),
+    }
+}
+
+#[test]
+fn fair_share_gives_each_neighbor_type_a_slot() {
+    // 5 fresh error_signatures + 2 older apps; with a recency-only sort and a
+    // limit of 4, apps would be entirely crowded out. Fair-share must include
+    // both apps.
+    let candidates = vec![
+        (
+            "error_signature".to_string(),
+            rel_row(1, "2026-06-19T10:00:05Z"),
+        ),
+        (
+            "error_signature".to_string(),
+            rel_row(2, "2026-06-19T10:00:04Z"),
+        ),
+        (
+            "error_signature".to_string(),
+            rel_row(3, "2026-06-19T10:00:03Z"),
+        ),
+        (
+            "error_signature".to_string(),
+            rel_row(4, "2026-06-19T10:00:02Z"),
+        ),
+        (
+            "error_signature".to_string(),
+            rel_row(5, "2026-06-19T10:00:01Z"),
+        ),
+        ("app".to_string(), rel_row(6, "2026-06-19T09:00:00Z")),
+        ("app".to_string(), rel_row(7, "2026-06-19T08:00:00Z")),
+    ];
+    let (selected, truncated) = fair_share_relationships(candidates, 4, false);
+    assert_eq!(selected.len(), 4);
+    let ids: std::collections::HashSet<i64> = selected.iter().map(|r| r.id).collect();
+    // Both apps must survive (round-robin), not only error_signatures.
+    assert!(ids.contains(&6), "first app must be selected: {ids:?}");
+    assert!(ids.contains(&7), "second app must be selected: {ids:?}");
+    assert!(
+        truncated,
+        "5 error_signatures + 2 apps into limit 4 truncates"
+    );
+}
+
+#[test]
+fn fair_share_not_truncated_when_everything_fits() {
+    let candidates = vec![
+        ("app".to_string(), rel_row(1, "2026-06-19T10:00:00Z")),
+        ("source_ip".to_string(), rel_row(2, "2026-06-19T09:00:00Z")),
+    ];
+    let (selected, truncated) = fair_share_relationships(candidates, 10, false);
+    assert_eq!(selected.len(), 2);
+    assert!(!truncated);
+    // Returned in recency order.
+    assert_eq!(selected[0].id, 1);
+    assert_eq!(selected[1].id, 2);
+}
+
+#[test]
+fn fair_share_reports_truncated_when_candidate_pool_capped() {
+    let candidates = vec![("app".to_string(), rel_row(1, "2026-06-19T10:00:00Z"))];
+    let (selected, truncated) = fair_share_relationships(candidates, 10, true);
+    assert_eq!(selected.len(), 1);
+    assert!(truncated, "candidate-pool cap must propagate as truncated");
+}
