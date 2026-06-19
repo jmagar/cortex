@@ -809,7 +809,7 @@ fn mode_parse_rejects_http_flag_on_serve_mcp() {
     let err = Mode::parse(vec!["--http".into(), "serve".into(), "mcp".into()]).unwrap_err();
     let msg = err.to_string();
     assert!(
-        msg.contains("only apply to CLI query commands"),
+        msg.contains("HTTP flags") && msg.contains("query CLI"),
         "expected guard message, got: {msg}"
     );
 }
@@ -819,7 +819,7 @@ fn mode_parse_rejects_http_flag_on_deploy() {
     let err = Mode::parse(vec!["--http".into(), "deploy".into(), "local".into()]).unwrap_err();
     let msg = err.to_string();
     assert!(
-        msg.contains("compose, service, setup, inventory, and deploy are local-only"),
+        msg.contains("Local-only commands") && msg.contains("reject HTTP flags"),
         "expected local-only guard message, got: {msg}"
     );
 }
