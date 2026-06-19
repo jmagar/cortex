@@ -168,7 +168,7 @@ pub use models::{
 pub(crate) use crate::db::{PATTERN_SCAN_LIMIT_MAX, SEVERITY_LEVELS};
 pub use os_adapter::SystemOsAdapter;
 pub use services::{CortexService, run_compose_status, run_service_logs};
-pub use time::parse_optional_timestamp;
+pub use time::{parse_optional_timestamp, parse_time_arg};
 
 #[cfg(test)]
 #[path = "app/mod_tests.rs"]

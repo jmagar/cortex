@@ -511,6 +511,106 @@ pub fn find_graph_entities_by_alias(
     Ok(rows)
 }
 
+/// Fairly select up to `limit` relationships across neighbor entity types so a
+/// single high-churn type (e.g. `error_signature`, whose rows are re-touched on
+/// every error scan and therefore dominate a recency sort) can't crowd out the
+/// rest of a host's neighborhood (apps, source_ips, …).
+///
+/// `candidates` must already be ordered by recency (freshest first); each is
+/// paired with its neighbor entity type. Selection is a round-robin across types
+/// in first-appearance order, taking the freshest remaining item of each type
+/// per round, until `limit` is reached. Returns the chosen relationships in a
+/// stable recency-keyed order and whether anything was left out.
+fn fair_share_relationships(
+    candidates: Vec<(String, GraphRelationshipRow)>,
+    limit: usize,
+    candidates_capped: bool,
+) -> (Vec<GraphRelationshipRow>, bool) {
+    let total = candidates.len();
+    // Bucket by neighbor type, preserving the incoming recency order and the
+    // order in which each type first appears.
+    let mut type_order: Vec<String> = Vec::new();
+    let mut buckets: std::collections::HashMap<
+        String,
+        std::collections::VecDeque<GraphRelationshipRow>,
+    > = std::collections::HashMap::new();
+    for (neighbor_type, rel) in candidates {
+        if !buckets.contains_key(&neighbor_type) {
+            type_order.push(neighbor_type.clone());
+        }
+        buckets.entry(neighbor_type).or_default().push_back(rel);
+    }
+
+    let mut selected: Vec<GraphRelationshipRow> = Vec::with_capacity(limit.min(total));
+    while selected.len() < limit {
+        let mut progressed = false;
+        for ty in &type_order {
+            if selected.len() >= limit {
+                break;
+            }
+            if let Some(rel) = buckets.get_mut(ty).and_then(|b| b.pop_front()) {
+                selected.push(rel);
+                progressed = true;
+            }
+        }
+        if !progressed {
+            break; // every bucket drained
+        }
+    }
+
+    let truncated = candidates_capped || selected.len() < total;
+    // Re-sort the fair selection back into recency order for a stable response.
+    selected.sort_by(|a, b| b.last_seen_at.cmp(&a.last_seen_at).then(b.id.cmp(&a.id)));
+    (selected, truncated)
+}
+
+/// Resolve `compose_project` entities by a bare project name. Compose-project
+/// canonical keys are host-scoped (`<host>:<project>`, e.g. `dookie:axon`), so a
+/// plain `key="axon"` never matches via [`find_graph_entity_by_key`]. This
+/// matches the project portion (the segment after the last `:`) — or the full
+/// key — and returns every host that runs that project as candidates, so the
+/// caller can resolve a unique hit or surface the ambiguity.
+pub fn find_compose_projects_by_project_name(
+    pool: &DbPool,
+    project_key: &str,
+    limit: u32,
+) -> Result<Vec<GraphEntityCandidateRow>> {
+    let conn = pool.get()?;
+    let key = canonical_graph_key(project_key).unwrap_or_else(|| project_key.to_string());
+    let limit = limit.clamp(1, 500) as usize;
+    let mut stmt = conn.prepare(
+        "SELECT id, entity_type, canonical_key, display_label, source_kind,
+                source_id, trust_level, first_seen_at, last_seen_at
+         FROM graph_entities
+         WHERE entity_type = ?1
+         ORDER BY last_seen_at DESC, id ASC",
+    )?;
+    let rows = stmt
+        .query_map(params![ENTITY_TYPE_COMPOSE_PROJECT], graph_entity_from_row)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let mut out = Vec::new();
+    for entity in rows {
+        let matches = entity.canonical_key == key
+            || entity
+                .canonical_key
+                .rsplit_once(':')
+                .map(|(_, project)| project == key)
+                .unwrap_or(false);
+        if matches {
+            out.push(GraphEntityCandidateRow {
+                entity,
+                match_reason: "compose_project_name".to_string(),
+                alias_type: Some(ENTITY_TYPE_COMPOSE_PROJECT.to_string()),
+                alias_key: Some(key.clone()),
+            });
+            if out.len() >= limit {
+                break;
+            }
+        }
+    }
+    Ok(out)
+}
+
 pub fn graph_around_entity(
     pool: &DbPool,
     entity_id: i64,
@@ -520,23 +620,35 @@ pub fn graph_around_entity(
     let conn = pool.get()?;
     let limit = limit.clamp(1, 500);
     let evidence_sample_limit = evidence_sample_limit.clamp(0, 10);
-    let fetch_limit = limit.saturating_add(1);
+    // Pull a generous recency-ordered candidate pool (joined to the neighbor's
+    // entity type), then fair-share across types so apps/source_ips aren't
+    // buried under high-churn error_signature edges. Fetch one past the cap to
+    // detect whether even the candidate pool was truncated.
+    let candidate_cap = ((limit as usize).saturating_mul(8)).clamp(64, 4000);
+    let fetch_limit = (candidate_cap as u32).saturating_add(1);
 
     let mut stmt = conn.prepare(
-        "SELECT id, relationship_key, src_entity_id, dst_entity_id, relationship_type,
-                reason_code, trust_level, confidence, evidence_count,
-                first_seen_at, last_seen_at
-         FROM graph_relationships
-         WHERE (src_entity_id = ?1 OR dst_entity_id = ?1)
-           AND trust_level != 'refuted'
-         ORDER BY last_seen_at DESC, id DESC
+        "SELECT r.id, r.relationship_key, r.src_entity_id, r.dst_entity_id, r.relationship_type,
+                r.reason_code, r.trust_level, r.confidence, r.evidence_count,
+                r.first_seen_at, r.last_seen_at, ne.entity_type AS neighbor_type
+         FROM graph_relationships r
+         JOIN graph_entities ne
+           ON ne.id = CASE WHEN r.src_entity_id = ?1 THEN r.dst_entity_id ELSE r.src_entity_id END
+         WHERE (r.src_entity_id = ?1 OR r.dst_entity_id = ?1)
+           AND r.trust_level != 'refuted'
+         ORDER BY r.last_seen_at DESC, r.id DESC
          LIMIT ?2",
     )?;
-    let mut relationships = stmt
-        .query_map(params![entity_id, fetch_limit], graph_relationship_from_row)?
+    let candidates = stmt
+        .query_map(params![entity_id, fetch_limit], |row| {
+            Ok((row.get::<_, String>(11)?, graph_relationship_from_row(row)?))
+        })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    let truncated = relationships.len() > limit as usize;
-    relationships.truncate(limit as usize);
+    let candidates_capped = candidates.len() > candidate_cap;
+    let mut candidates = candidates;
+    candidates.truncate(candidate_cap);
+    let (relationships, truncated) =
+        fair_share_relationships(candidates, limit as usize, candidates_capped);
 
     let mut entity_ids = Vec::with_capacity(relationships.len() * 2 + 1);
     entity_ids.push(entity_id);

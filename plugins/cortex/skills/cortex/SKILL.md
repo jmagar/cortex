@@ -82,6 +82,43 @@ FTS5 reminders for `search` and other query-bearing actions:
 - Quote phrases and hyphenated terms, for example `"smoke-test"`.
 - Invalid FTS5 syntax returns a database error.
 
+### Time windows
+
+`since`/`until`/`reference_time` accept **relative** forms (`30m`, `1h`, `2d`, `90s`),
+**keywords** (`now`, `today`, `yesterday`), bare dates (`2026-06-01`,
+`2026-06-01 08:30`), and full RFC3339 (`2026-06-19T09:30:00Z`) — over MCP and the
+CLI alike. Omit the window to use each action's default (often the last hour).
+
+### Graph & correlation (investigation graph)
+
+The graph connects entities (hosts, apps, source_ips, error_signatures,
+sessions, git_commits, users, devices, compose_projects) projected from logs.
+
+- `graph` resolves entities and neighborhoods. Pick a `mode`:
+  - `entity` — resolve one entity: `action="graph", mode="entity", entity_type="host", key="tootie"`
+  - `around` (default) — one-hop neighborhood: `mode="around", entity_type="host", key="tootie"`.
+    Neighbors are fair-shared across types, so apps/source_ips aren't buried under
+    high-churn `error_signature` edges; raise `payload_budget` for a fuller view.
+  - `explain` — deterministic evidence-backed chains (`depth` up to 3).
+  - `evidence` — inspect one evidence row: `mode="evidence", evidence_id=123`.
+  - `compose_project` keys are host-scoped (`dookie:axon`), but you can resolve by the
+    bare project name (`entity_type="compose_project", key="axon"`) — multiple hosts come
+    back as `candidates`.
+- `topic_correlate` is the one-shot "everything related to X" — it resolves a free-text
+  topic to graph entities, traverses N hops, and returns a unified timeline across all
+  source kinds (syslog, docker, agent-command, AI sessions), each row tagged with its
+  discovery lane: `action="topic_correlate", topic="axon dns", since="2h", depth=2`.
+- `ai_correlate` with a `session_id` adds a graph-anchored correlation block.
+
+### Action cost tiers (token planning)
+
+Start with **cheap** bounded calls, narrow scope with **moderate** actions, and reserve
+**expensive** ones for a specific question:
+- cheap: `search`, `filter`, `tail`, `errors`, `hosts`, `status`, `apps`, `sessions`, `timeline`, `context`, `get`, `help`, …
+- moderate: `map`, `correlate`, `topic_correlate`, `ai_correlate`, `host_state`, `silent_hosts`, `unaddressed_errors`, `incident_context`, …
+- expensive: `fleet_state`, `correlate_state`, `stats`, `patterns`, `anomalies`, `compare`, `compose_doctor`, `graph`.
+- write (admin scope): `ack_error`, `unack_error`, `file_tails`, `notifications_test`.
+
 ---
 
 ## HTTP Fallback Mode
@@ -92,6 +129,8 @@ Use only when the MCP tool is unavailable. The plugin exports connection setting
 - `CLAUDE_PLUGIN_OPTION_API_TOKEN` — bearer token
 
 **Sensitive value handling:** `api_token` is declared `sensitive: true` in the plugin manifest. It is **never** substituted into skill content as `${user_config.api_token}` — only the env var path above is valid. Do not inline the token in this document or any skill text.
+
+**Required headers for `POST /mcp`:** the streamable-HTTP transport rejects a request with `406 Not Acceptable` unless it advertises **both** JSON and SSE. Always send `-H "Accept: application/json, text/event-stream"` alongside `Content-Type: application/json` (the examples below do).
 
 ### Health check (no auth required)
 
@@ -105,6 +144,7 @@ curl -s "$CLAUDE_PLUGIN_OPTION_SERVER_URL/health"
 ```bash
 curl -s -X POST "$CLAUDE_PLUGIN_OPTION_SERVER_URL/mcp" \
   -H "Authorization: Bearer $CLAUDE_PLUGIN_OPTION_API_TOKEN" \
+  -H "Accept: application/json, text/event-stream" \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"cortex","arguments":{"action":"tail","n":20}}}'
 ```
@@ -114,6 +154,7 @@ curl -s -X POST "$CLAUDE_PLUGIN_OPTION_SERVER_URL/mcp" \
 ```bash
 curl -s -X POST "$CLAUDE_PLUGIN_OPTION_SERVER_URL/mcp" \
   -H "Authorization: Bearer $CLAUDE_PLUGIN_OPTION_API_TOKEN" \
+  -H "Accept: application/json, text/event-stream" \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"cortex","arguments":{"action":"search","query":"error","limit":20}}}'
 ```
@@ -123,6 +164,7 @@ curl -s -X POST "$CLAUDE_PLUGIN_OPTION_SERVER_URL/mcp" \
 ```bash
 curl -s -X POST "$CLAUDE_PLUGIN_OPTION_SERVER_URL/mcp" \
   -H "Authorization: Bearer $CLAUDE_PLUGIN_OPTION_API_TOKEN" \
+  -H "Accept: application/json, text/event-stream" \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"cortex","arguments":{"action":"stats"}}}'
 ```

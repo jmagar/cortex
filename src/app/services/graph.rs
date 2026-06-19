@@ -464,13 +464,43 @@ impl CortexService {
             }
             GraphTarget::CanonicalKey { entity_type, key } => {
                 validate_graph_entity_type(&entity_type)?;
+                let lookup_type = entity_type.clone();
+                let lookup_key = key.clone();
                 let entity = self
                     .run_db("graph.entity_key", move |pool| {
-                        db::graph::find_graph_entity_by_key(pool, &entity_type, &key)
+                        db::graph::find_graph_entity_by_key(pool, &lookup_type, &lookup_key)
                     })
-                    .await?
-                    .ok_or_else(|| ServiceError::NotFound("graph entity not found".into()))?;
-                Ok((Some(entity.into()), Vec::new()))
+                    .await?;
+                if let Some(entity) = entity {
+                    return Ok((Some(entity.into()), Vec::new()));
+                }
+                // compose_project canonical keys are host-scoped (`host:project`),
+                // so a bare `key="axon"` won't match. Fall back to project-name
+                // resolution: a unique hit resolves, multiple hosts surface as
+                // candidates.
+                if entity_type == db::graph::ENTITY_TYPE_COMPOSE_PROJECT {
+                    let project_key = key.clone();
+                    let candidates = self
+                        .run_db("graph.compose_project_name", move |pool| {
+                            db::graph::find_compose_projects_by_project_name(
+                                pool,
+                                &project_key,
+                                candidate_limit,
+                            )
+                        })
+                        .await?;
+                    if !candidates.is_empty() {
+                        let candidates: Vec<GraphEntityCandidate> =
+                            candidates.into_iter().map(Into::into).collect();
+                        let resolved_entity = if candidates.len() == 1 {
+                            candidates.first().map(|candidate| candidate.entity.clone())
+                        } else {
+                            None
+                        };
+                        return Ok((resolved_entity, candidates));
+                    }
+                }
+                Err(ServiceError::NotFound("graph entity not found".into()))
             }
             GraphTarget::Alias {
                 alias_type,

@@ -447,7 +447,81 @@ fn get_error_summary_sql(
     (sql, bindings)
 }
 
-/// List all known hosts with stats
+/// Lowercase, trim, and strip trailing dots from a hostname so case and a
+/// trailing FQDN dot don't split one machine into several host rows. Does not
+/// fold FQDNs to short names — that's [`dedupe_hosts`]'s data-driven step.
+fn case_fold_host(raw: &str) -> String {
+    raw.trim().trim_end_matches('.').to_ascii_lowercase()
+}
+
+/// Merge host rows that refer to the same machine. Two folds are applied:
+/// 1. **Case / trailing-dot** — `SHART` and `shart` collapse, `STEAMY`→`steamy`.
+/// 2. **FQDN → short name, only when the short name independently exists** as
+///    its own host. So `tootie.manatee-triceratops.ts.net` folds into `tootie`
+///    (a real host), but `host.docker.internal` is left alone because no bare
+///    `host` row exists — we never invent a merge that could mask a distinct
+///    machine.
+///
+/// Ambiguous self-identifiers (`localhost`, the empty hostname, `host:user`
+/// forms with no dot) are left untouched: resolving those to a real machine
+/// needs the network-verified `source_ip`, which is a deferred follow-up.
+/// Merged rows sum `log_count`, take the earliest `first_seen` and latest
+/// `last_seen`, and display the canonical (lowercased) name.
+fn dedupe_hosts(rows: Vec<HostEntry>) -> Vec<HostEntry> {
+    // Pass 1: case-fold every hostname alongside its row.
+    let folded: Vec<(String, HostEntry)> = rows
+        .into_iter()
+        .map(|h| (case_fold_host(&h.hostname), h))
+        .collect();
+    // Standalone short names (no dot, non-empty) are the only valid fold targets.
+    let shorts: std::collections::HashSet<&str> = folded
+        .iter()
+        .filter(|(k, _)| !k.is_empty() && !k.contains('.'))
+        .map(|(k, _)| k.as_str())
+        .collect();
+    // Pass 2: group by canonical key, preserving first-seen insertion order.
+    let mut merged: std::collections::HashMap<String, HostEntry> = std::collections::HashMap::new();
+    let mut order: Vec<String> = Vec::new();
+    for (cased, entry) in &folded {
+        let canonical = match cased.split_once('.') {
+            Some((head, _)) if shorts.contains(head) => head.to_string(),
+            _ => cased.clone(),
+        };
+        match merged.get_mut(&canonical) {
+            Some(acc) => {
+                acc.log_count += entry.log_count;
+                if entry.first_seen < acc.first_seen {
+                    acc.first_seen = entry.first_seen.clone();
+                }
+                if entry.last_seen > acc.last_seen {
+                    acc.last_seen = entry.last_seen.clone();
+                }
+            }
+            None => {
+                order.push(canonical.clone());
+                merged.insert(
+                    canonical.clone(),
+                    HostEntry {
+                        hostname: canonical.clone(),
+                        first_seen: entry.first_seen.clone(),
+                        last_seen: entry.last_seen.clone(),
+                        log_count: entry.log_count,
+                    },
+                );
+            }
+        }
+    }
+    let mut out: Vec<HostEntry> = order
+        .into_iter()
+        .map(|k| merged.remove(&k).expect("key inserted above"))
+        .collect();
+    // Preserve list_hosts' ORDER BY last_seen DESC contract after merging.
+    out.sort_by(|a, b| b.last_seen.cmp(&a.last_seen));
+    out
+}
+
+/// List all known hosts with stats, deduplicated across case and FQDN variants
+/// (see [`dedupe_hosts`]).
 pub fn list_hosts(pool: &DbPool) -> Result<Vec<HostEntry>> {
     let conn = pool.get()?;
     let mut stmt = conn.prepare(
@@ -463,7 +537,8 @@ pub fn list_hosts(pool: &DbPool) -> Result<Vec<HostEntry>> {
         })
     })?;
 
-    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    let rows = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(dedupe_hosts(rows))
 }
 
 /// List AI transcript sessions ordered by recency.

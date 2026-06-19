@@ -51,10 +51,10 @@ pub(crate) fn effective_since(action: &str, user: Option<String>) -> Result<Opti
         return Ok(Some(v));
     }
     match crate::cli::registry_defaults(action).since {
-        Some(rel) => Ok(Some(crate::cli::timearg::parse_time_arg(
-            rel,
-            chrono::Utc::now(),
-        )?)),
+        Some(rel) => Ok(Some(
+            cortex::app::parse_time_arg(rel, chrono::Utc::now())
+                .map_err(|e| anyhow::anyhow!("{e}"))?,
+        )),
         None => Ok(None),
     }
 }
