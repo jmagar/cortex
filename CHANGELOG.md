@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.32.2] - 2026-06-19
+
+### Fixed
+
+- **Stale test assertions for the HTTP-flag guard (regression from 1.32.1).**
+  1.32.1 reworded the "global HTTP flags only apply to query commands" error, but
+  two existing `Mode::parse` tests (`mode_parse_rejects_http_flag_on_serve_mcp`,
+  `..._on_deploy`) still asserted the old text and failed. The guard behavior is
+  unchanged (HTTP flags are still rejected for `serve mcp`/`deploy`); only the
+  assertions are updated to match the new message. No runtime change.
+
 ## [1.32.1] - 2026-06-19
 
 ### Fixed
