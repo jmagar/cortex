@@ -1253,36 +1253,31 @@ pub struct SilentHostEntry {
 }
 
 pub fn silent_hosts(pool: &DbPool, cutoff: &str, now_unix: i64) -> Result<Vec<SilentHostEntry>> {
-    let conn = pool.get()?;
-    let mut stmt = conn.prepare(
-        "SELECT hostname, first_seen, last_seen, log_count
-         FROM hosts
-         WHERE last_seen < ?1
-         ORDER BY last_seen ASC",
-    )?;
-    let rows = stmt.query_map(params![cutoff], |r| {
-        let hostname: String = r.get(0)?;
-        let first_seen: String = r.get(1)?;
-        let last_seen: String = r.get(2)?;
-        let log_count: i64 = r.get(3)?;
-        Ok((hostname, first_seen, last_seen, log_count))
-    })?;
-    let mut out = Vec::new();
-    for row in rows {
-        let (hostname, first_seen, last_seen, log_count) = row?;
-        let typical_interval_secs = compute_interval(&first_seen, &last_seen, log_count);
-        let silent_for_secs = chrono::DateTime::parse_from_rfc3339(&last_seen)
-            .map(|dt| now_unix - dt.timestamp())
-            .unwrap_or(0);
-        out.push(SilentHostEntry {
-            hostname,
-            first_seen,
-            last_seen,
-            log_count,
-            typical_interval_secs,
-            silent_for_secs,
-        });
-    }
+    // Route through list_hosts so case/FQDN variants of one machine are merged
+    // (taking the latest last_seen) BEFORE applying the silence cutoff. Reading
+    // the raw `hosts` table here would flag a dormant `shart` identity as silent
+    // while the live `SHART` keeps forwarding — the merged host is correctly
+    // considered alive.
+    let mut out: Vec<SilentHostEntry> = super::queries::list_hosts(pool)?
+        .into_iter()
+        .filter(|h| h.last_seen.as_str() < cutoff)
+        .map(|h| {
+            let typical_interval_secs = compute_interval(&h.first_seen, &h.last_seen, h.log_count);
+            let silent_for_secs = chrono::DateTime::parse_from_rfc3339(&h.last_seen)
+                .map(|dt| now_unix - dt.timestamp())
+                .unwrap_or(0);
+            SilentHostEntry {
+                hostname: h.hostname,
+                first_seen: h.first_seen,
+                last_seen: h.last_seen,
+                log_count: h.log_count,
+                typical_interval_secs,
+                silent_for_secs,
+            }
+        })
+        .collect();
+    // Longest-silent first (oldest last_seen), preserving the prior ORDER BY ASC.
+    out.sort_by(|a, b| a.last_seen.cmp(&b.last_seen));
     Ok(out)
 }
 

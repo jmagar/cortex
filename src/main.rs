@@ -653,6 +653,7 @@ impl Mode {
                         | "host-state"
                         | "fleet-state"
                         | "correlate-state"
+                        | "topic-correlate"
                         | "file-tail"
                         | "__complete"
                         | "completions"

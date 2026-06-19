@@ -51,6 +51,28 @@ fn mode_parse_accepts_heartbeat_state_commands() {
 }
 
 #[test]
+fn mode_parse_accepts_topic_correlate() {
+    // Regression: topic-correlate is in TOP_LEVEL_COMMANDS + parse_command but was
+    // missing from Mode::parse's top-level command gate, so `cortex topic-correlate
+    // <topic>` parsed successfully and then hit the `unreachable!()` fallthrough →
+    // panic. Both the single-term and the multi-term (screenshot) forms must route
+    // cleanly to a CLI invocation.
+    assert!(matches!(
+        Mode::parse(vec!["topic-correlate".into(), "axon".into()]).unwrap(),
+        Mode::Cli(_)
+    ));
+    assert!(matches!(
+        Mode::parse(vec![
+            "topic-correlate".into(),
+            "squirts".into(),
+            "dockersocket".into(),
+        ])
+        .unwrap(),
+        Mode::Cli(_)
+    ));
+}
+
+#[test]
 fn mode_parse_rejects_unknown_commands() {
     let err = Mode::parse(vec!["serve".into(), "http".into()]).unwrap_err();
     assert!(err.to_string().contains("unknown CLI command"));

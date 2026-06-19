@@ -547,6 +547,22 @@ fn parse_correlate_state_rejects_unknown_flag() {
     assert!(err.contains("unknown correlate-state option"), "got: {err}");
 }
 
+#[test]
+fn parse_correlate_nontime_positional_points_to_topic_correlate() {
+    // `correlate squirts dockersocket` fed `squirts` into the time parser and
+    // produced a cryptic "unrecognized time value". The error must now explain
+    // that the positional is a reference time and point at topic-correlate.
+    let err = parse_command(vec![
+        "correlate".to_string(),
+        "squirts".to_string(),
+        "dockersocket".to_string(),
+    ])
+    .unwrap_err()
+    .to_string();
+    assert!(err.contains("reference time"), "got: {err}");
+    assert!(err.contains("topic-correlate squirts"), "got: {err}");
+}
+
 // Regression: every CLI flag whose value is bound into a SQL timestamp
 // comparison must route through the shared time parser, so relative/keyword
 // input is normalized to RFC3339 (and non-time input is rejected) rather than

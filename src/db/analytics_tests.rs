@@ -1308,3 +1308,50 @@ fn timeline_rollup_status_reports_watermark() {
     assert!(after.source_max_id > 0);
     assert!(after.refreshed_at.is_some());
 }
+
+#[test]
+fn silent_hosts_merges_case_variants_before_cutoff() {
+    // Regression: silent_hosts read the raw, case-sensitive `hosts` table, so a
+    // dormant `shart` identity was flagged as silent even though the live `SHART`
+    // kept forwarding. Routing through list_hosts() merges case/FQDN variants
+    // (latest last_seen wins) first, so the machine is correctly considered alive.
+    let (pool, _d) = test_pool();
+    insert_logs_batch(
+        &pool,
+        &[
+            entry("2026-06-19T20:00:00Z", "SHART", "info", None, "live"),
+            entry("2026-06-11T06:00:00Z", "shart", "info", None, "old"),
+            entry("2026-06-11T06:00:00Z", "STEAMY", "info", None, "old"),
+        ],
+    )
+    .unwrap();
+    // hosts.last_seen is stamped with insert-time `now`; pin it explicitly.
+    let conn = pool.get().unwrap();
+    for (host, last_seen) in [
+        ("SHART", "2026-06-19T20:00:00.000Z"),
+        ("shart", "2026-06-11T06:00:00.000Z"),
+        ("STEAMY", "2026-06-11T06:00:00.000Z"),
+    ] {
+        conn.execute(
+            "UPDATE hosts SET last_seen = ?1 WHERE hostname = ?2",
+            rusqlite::params![last_seen, host],
+        )
+        .unwrap();
+    }
+    drop(conn);
+
+    let now_unix = chrono::DateTime::parse_from_rfc3339("2026-06-19T21:00:00Z")
+        .unwrap()
+        .timestamp();
+    let silent = silent_hosts(&pool, "2026-06-15T00:00:00.000Z", now_unix).unwrap();
+    let names: Vec<String> = silent.iter().map(|h| h.hostname.clone()).collect();
+
+    assert!(
+        !names.iter().any(|n| n == "shart"),
+        "merged shart is live (SHART forwarding) and must not be flagged silent: {names:?}"
+    );
+    assert!(
+        names.iter().any(|n| n == "steamy"),
+        "genuinely-dormant STEAMY (lowercased) must still be flagged: {names:?}"
+    );
+}

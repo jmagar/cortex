@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.32.1] - 2026-06-19
+
+### Fixed
+
+- **`cortex topic-correlate` panicked from the CLI.** `topic-correlate` is in
+  `TOP_LEVEL_COMMANDS` and `parse_command`, but was missing from `Mode::parse`'s
+  top-level command gate in `main.rs`, so it parsed successfully and then hit the
+  `unreachable!()` fallthrough — `cortex topic-correlate <topic>` panicked with
+  `internal error: entered unreachable code`. Added it to the allowlist (it now
+  also accepts the global `--http`/`--token` flags like its siblings) with a
+  `Mode::parse` regression test covering both the single-term and multi-term
+  (`squirts dockersocket`) forms.
+- **`cortex correlate <non-time>` gave a cryptic error.** `correlate`'s sole
+  positional is a reference *time*, so `cortex correlate squirts dockersocket`
+  fed `squirts` into the time parser and surfaced
+  `unrecognized time value 'squirts'`. The error is now actionable: it explains
+  the positional is a reference time and points at
+  `cortex topic-correlate squirts …` (entity correlation) or
+  `--reference-time <time> --host squirts`.
+- **`silent_hosts` flagged dormant case/FQDN host variants as silent.** It read
+  the raw, case-sensitive `hosts` table, so a quiet `shart` identity was reported
+  silent even while the live `SHART` kept forwarding. It now routes through
+  `list_hosts()` (the same case/FQDN dedupe added in 1.32.0, taking the latest
+  `last_seen`), so the merged machine is correctly considered alive; genuinely
+  dormant hosts are still flagged.
+
 ## [1.32.0] - 2026-06-19
 
 ### Fixed
