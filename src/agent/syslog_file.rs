@@ -30,23 +30,27 @@ pub struct FileTailSource {
 /// entries (e.g. `/data/querylog.json:adguard-query,/log/access.log:swag-access`).
 /// The tag is the segment after the final colon, so absolute Linux paths (no
 /// colon) round-trip cleanly. Entries without a usable `:TAG` suffix are
-/// skipped.
+/// skipped with a `warn` — a silent drop would leave an operator's typo'd
+/// source tailing nothing with no diagnostic.
 pub fn parse_file_tails(spec: &str) -> Vec<FileTailSource> {
-    spec.split(',')
-        .map(str::trim)
-        .filter(|entry| !entry.is_empty())
-        .filter_map(|entry| {
-            let (path, tag) = entry.rsplit_once(':')?;
+    let mut sources = Vec::new();
+    for entry in spec.split(',').map(str::trim).filter(|e| !e.is_empty()) {
+        let parsed = entry.rsplit_once(':').and_then(|(path, tag)| {
             let (path, tag) = (path.trim(), tag.trim());
-            if path.is_empty() || tag.is_empty() {
-                return None;
-            }
-            Some(FileTailSource {
+            (!path.is_empty() && !tag.is_empty()).then(|| FileTailSource {
                 path: PathBuf::from(path),
                 tag: Some(tag.to_string()),
             })
-        })
-        .collect()
+        });
+        match parsed {
+            Some(source) => sources.push(source),
+            None => tracing::warn!(
+                entry = %entry,
+                "CORTEX_AGENT_FILE_TAILS: skipping malformed entry (expected non-empty PATH:TAG)"
+            ),
+        }
+    }
+    sources
 }
 
 struct ParsedSyslogLine<'a> {

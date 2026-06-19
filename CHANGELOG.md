@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.31.3] - 2026-06-19
+
+### Fixed
+
+- **`CORTEX_AGENT_FILE_TAILS` no longer drops malformed entries silently.**
+  `parse_file_tails` now emits a `warn` for any entry missing a usable `:TAG`
+  suffix (colon-less path, empty path/tag) instead of skipping it silently — a
+  typo'd source previously tailed nothing with no diagnostic.
+
+### Tests
+
+- Added coverage surfaced by PR review: `notify_min_severity` config validation
+  (rejects unparseable severities — the guardrail the scanner fail-open relies
+  on), AdGuard `CID` client field + `IP`>`CID` precedence, and severity-floor
+  direction (a signature more severe than the floor still pages; a `warning`
+  floor admits warnings).
+
 ## [1.31.2] - 2026-06-19
 
 ### Changed

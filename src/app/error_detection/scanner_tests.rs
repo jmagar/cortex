@@ -167,6 +167,61 @@ fn test_severity_floor_suppresses_warning_but_keeps_err() {
 }
 
 #[test]
+fn test_severity_floor_admits_signature_more_severe_than_floor() {
+    let (pool, _dir) = test_pool();
+    {
+        let conn = pool.get().unwrap();
+        // crit is *more* severe than the err floor — the `rank <= floor` gate
+        // must let it page (guards against inverting the comparison).
+        for _ in 0..6 {
+            insert_log(&conn, "kernel panic on cpu 3", "crit", "host1");
+        }
+    }
+    let err_floor = crate::db::severity_to_num("err").unwrap();
+    process_chunk(&pool, 0, 200, 5, &[], err_floor).unwrap();
+
+    let conn = pool.get().unwrap();
+    let notifs: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM notifications_outbox WHERE rule_id = 'unaddressed_error_signature'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(notifs, 1, "crit is above the err floor and must page");
+}
+
+#[test]
+fn test_severity_floor_at_warning_pages_warnings() {
+    let (pool, _dir) = test_pool();
+    {
+        let conn = pool.get().unwrap();
+        for _ in 0..6 {
+            insert_log(
+                &conn,
+                "slow query took 900ms on widgets",
+                "warning",
+                "host1",
+            );
+        }
+    }
+    // A warning floor (the least-severe selectable level) admits warning-level
+    // signatures — the floor is configurable downward, not hard-wired to err.
+    let warn_floor = crate::db::severity_to_num("warning").unwrap();
+    process_chunk(&pool, 0, 200, 5, &[], warn_floor).unwrap();
+
+    let conn = pool.get().unwrap();
+    let notifs: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM notifications_outbox WHERE rule_id = 'unaddressed_error_signature'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(notifs, 1, "a warning floor lets warning signatures page");
+}
+
+#[test]
 fn test_process_chunk_skips_excluded_patterns() {
     let (pool, _dir) = test_pool();
     {

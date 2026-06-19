@@ -104,3 +104,21 @@ fn file_querylog_ip_field_is_used_as_client() {
     );
     assert_eq!(out.metadata["client"], serde_json::json!("100.88.16.79"));
 }
+
+#[test]
+fn cid_field_is_used_as_client_when_no_ip() {
+    // `CID` (persistent client id) is the last fallback in the client-field
+    // priority; a record carrying only `CID` must still resolve a client.
+    let line = r#"{"QH":"example.org","QT":"A","CID":"living-room-tv","Result":{},"Cached":false}"#;
+    let out = parse(line, SourceKind::FileTail).unwrap();
+    assert_eq!(out.metadata["client"], serde_json::json!("living-room-tv"));
+}
+
+#[test]
+fn client_field_precedence_prefers_ip_over_cid() {
+    // Priority order is Client, client, IP, CID — so a record with both `IP`
+    // and `CID` must surface the network address, not the persistent id.
+    let line = r#"{"QH":"example.org","QT":"A","IP":"10.0.0.5","CID":"living-room-tv","Result":{},"Cached":false}"#;
+    let out = parse(line, SourceKind::FileTail).unwrap();
+    assert_eq!(out.metadata["client"], serde_json::json!("10.0.0.5"));
+}
