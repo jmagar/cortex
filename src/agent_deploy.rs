@@ -357,10 +357,12 @@ fn run_deploy(host: &str, local_binary: &Path, config: &AgentDeployConfig) -> io
 // use `docker run --restart unless-stopped` so Docker itself persists the
 // container definition across reboots without any file on disk.
 const UNRAID_APPDATA: &str = "/mnt/user/appdata/cortex";
-const UNRAID_BIN: &str = "/mnt/user/appdata/cortex/bin/cortex";
-const UNRAID_BIN_DIR: &str = "/mnt/user/appdata/cortex/bin";
-const UNRAID_BIN_TMP: &str = "/mnt/user/appdata/cortex/bin/cortex.new";
 const UNRAID_ENV: &str = "/mnt/user/appdata/cortex/heartbeat-agent.env";
+/// Published agent image. The agent runs the same baked binary as the server
+/// (no bind-mounted host binary), pinned to this deploying binary's version so
+/// server and agents stay in lockstep. Requires the matching tag to be present
+/// on the registry before deploy.
+const CORTEX_IMAGE_REPO: &str = "ghcr.io/jmagar/cortex";
 const UNRAID_HOST_ID: &str = "/mnt/user/appdata/cortex/heartbeat-host-id";
 const UNRAID_CONTAINER: &str = "cortex-heartbeat-agent";
 const UNRAID_HOST_SYSLOG: &str = "/var/log/syslog";
@@ -368,15 +370,16 @@ const UNRAID_CONTAINER_SYSLOG: &str = "/host/var/log/syslog";
 
 fn run_deploy_unraid(
     host: &str,
-    local_binary: &Path,
+    _local_binary: &Path,
     config: &AgentDeployConfig,
 ) -> io::Result<()> {
-    ssh_run(host, &format!("mkdir -p {UNRAID_APPDATA}/bin"))?;
-    scp_file(local_binary, host, UNRAID_BIN_TMP)?;
-    ssh_run(
-        host,
-        &format!("chmod +x {UNRAID_BIN_TMP} && mv -f {UNRAID_BIN_TMP} {UNRAID_BIN}"),
-    )?;
+    // Containerized agents run the published image with the binary baked in —
+    // no host binary is staged or bind-mounted. Pin to this deploying binary's
+    // version so server and agents stay in lockstep (the agent can still self-
+    // update between republishes, but the image is the source of truth).
+    let image = format!("{CORTEX_IMAGE_REPO}:{}", env!("CARGO_PKG_VERSION"));
+    ssh_run(host, &format!("mkdir -p {UNRAID_APPDATA}"))?;
+    ssh_run(host, &format!("docker pull {image}"))?;
 
     // Build env key=value pairs for both the persistent env file and the -e flags
     // passed directly to docker run. We use -e flags (not --env-file) to avoid
@@ -434,14 +437,13 @@ fn run_deploy_unraid(
     // Remove any previous container then start fresh with docker run.
     // --restart unless-stopped is stored in Docker's state (not a file),
     // so it survives the Unraid RAM-disk wipe on reboot.
-    // Mount host CA certs so TLS works without installing ca-certificates.
     //
-    // The binary is mounted by *directory* (writable) rather than as a single
-    // file. Agent self-update stages the new binary in the same dir and atomic-
-    // renames it onto the running path; a single-file bind mount makes that
-    // target a mount point, so the rename fails (EBUSY/EXDEV) and the agent is
-    // stranded on its build version. A writable dir mount lets the swap land on
-    // the host, so updates persist across restarts.
+    // The image bakes in the binary and ca-certificates, so the only mounts are
+    // host *data* the agent reads/writes: the Docker socket, the host syslog
+    // file, and the appdata dir (host-id + reference env file). --user 0:0
+    // overrides the image's unprivileged server user because the agent must read
+    // root-owned host files (docker.sock, /var/log/syslog). --no-healthcheck
+    // disables the image's server health probe (the agent runs no HTTP server).
     ssh_run(
         host,
         &format!(
@@ -450,14 +452,14 @@ fn run_deploy_unraid(
                --name {UNRAID_CONTAINER} \
                --restart unless-stopped \
                --network host \
+               --user 0:0 \
+               --no-healthcheck \
                {e_flags}\
-               -v {UNRAID_BIN_DIR}:/opt/cortex/bin:rw \
                -v {UNRAID_APPDATA}:{UNRAID_APPDATA} \
                -v /var/run/docker.sock:/var/run/docker.sock \
                -v {UNRAID_HOST_SYSLOG}:{UNRAID_CONTAINER_SYSLOG}:ro \
-               -v /etc/ssl/certs:/etc/ssl/certs:ro \
-               ubuntu:24.04 \
-               /opt/cortex/bin/cortex heartbeat agent \
+               {image} \
+               cortex heartbeat agent \
                  --host-id-path {UNRAID_HOST_ID}"
         ),
     )

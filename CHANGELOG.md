@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.31.2] - 2026-06-19
+
+### Changed
+
+- **Containerized host agents now run the published image with the binary baked
+  in, instead of a generic `ubuntu:24.04` container with the binary bind-mounted
+  from the host.** Both deployment generators — `cortex agent deploy` (Unraid
+  `docker run`) and `cortex setup` (compose) — now `docker pull
+  ghcr.io/jmagar/cortex:<version>` and run `cortex heartbeat agent` directly from
+  the image, pinned to the deploying binary's version for server/agent lockstep.
+  The agent container runs `--user 0:0` (it reads root-owned host files —
+  `docker.sock`, `/var/log/syslog`) with the image's server healthcheck disabled
+  (the agent runs no HTTP server). Only host *data* is mounted now (Docker
+  socket, host syslog, appdata for host-id); the binary, the `/opt/cortex/bin`
+  dir mount from 1.31.1, the `ubuntu:24.04` base, and the `/etc/ssl/certs` mount
+  are all gone. This supersedes the 1.31.1 self-update mount fix: there is no
+  host binary to swap, so the failure mode it fixed no longer exists. **Deploy
+  now requires the matching image tag to be published to the registry first.**
+
 ## [1.31.1] - 2026-06-18
 
 ### Fixed

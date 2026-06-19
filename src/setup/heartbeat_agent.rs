@@ -292,27 +292,23 @@ fn docker_compose_up_phase(compose_dir: &Path) -> SetupPhase {
 }
 
 fn heartbeat_agent_compose(
-    cortex_bin: &Path,
+    _cortex_bin: &Path,
     env_path: &Path,
     host_id_path: &Path,
 ) -> io::Result<String> {
     let data_dir = host_id_path
         .parent()
         .unwrap_or_else(|| std::path::Path::new("/"));
-    // Mount the binary's *directory* (writable), not the binary file itself.
-    // Agent self-update stages the new binary alongside the running one and
-    // atomic-renames it into place; a single-file bind mount makes that target
-    // a mount point, so the rename fails and the agent is stranded on its build
-    // version. A writable dir mount lets the swap persist to the host.
-    let cortex_bin_dir = cortex_bin
-        .parent()
-        .unwrap_or_else(|| std::path::Path::new("/"));
-    let cortex_bin_dir = setup_path_value(cortex_bin_dir)?;
+    // The agent runs the published image with the binary baked in — no host
+    // binary is staged or bind-mounted. `user: "0:0"` overrides the image's
+    // unprivileged server user (the agent reads root-owned host files), and the
+    // image's server health probe is disabled (the agent runs no HTTP server).
+    let image = format!("ghcr.io/jmagar/cortex:{}", env!("CARGO_PKG_VERSION"));
     let env_path = setup_path_value(env_path)?;
     let host_id_path = setup_path_value(host_id_path)?;
     let data_dir = setup_path_value(data_dir)?;
     Ok(format!(
-        "services:\n  cortex-heartbeat-agent:\n    image: ubuntu:24.04\n    restart: unless-stopped\n    network_mode: host\n    env_file: {env_path}\n    volumes:\n      - {cortex_bin_dir}:/opt/cortex/bin:rw\n      - {data_dir}:{data_dir}\n    command:\n      - /opt/cortex/bin/cortex\n      - heartbeat\n      - agent\n      - --host-id-path\n      - {host_id_path}\n"
+        "services:\n  cortex-heartbeat-agent:\n    image: {image}\n    restart: unless-stopped\n    network_mode: host\n    user: \"0:0\"\n    healthcheck:\n      disable: true\n    env_file: {env_path}\n    volumes:\n      - {data_dir}:{data_dir}\n    command:\n      - cortex\n      - heartbeat\n      - agent\n      - --host-id-path\n      - {host_id_path}\n"
     ))
 }
 
@@ -414,7 +410,7 @@ mod tests {
     }
 
     #[test]
-    fn compose_runs_host_binary_with_host_network_and_private_id_path() {
+    fn compose_runs_baked_image_with_host_network_and_private_id_path() {
         let compose = heartbeat_agent_compose(
             Path::new("/home/me/.local/bin/cortex"),
             Path::new("/home/me/.cortex/heartbeat-agent.env"),
@@ -424,10 +420,17 @@ mod tests {
 
         assert!(compose.contains("network_mode: host"));
         assert!(compose.contains("env_file: /home/me/.cortex/heartbeat-agent.env"));
-        // Binary mounted by writable directory (not single file) so agent
-        // self-update can atomic-rename the new binary onto the host.
-        assert!(compose.contains("- /home/me/.local/bin:/opt/cortex/bin:rw"));
-        assert!(compose.contains("/opt/cortex/bin/cortex\n      - heartbeat"));
+        // Runs the published image with the binary baked in — no host binary is
+        // staged or bind-mounted. Only the host-id data dir is mounted.
+        assert!(compose.contains(&format!(
+            "image: ghcr.io/jmagar/cortex:{}",
+            env!("CARGO_PKG_VERSION")
+        )));
+        assert!(compose.contains("user: \"0:0\""));
+        assert!(compose.contains("disable: true"));
+        assert!(!compose.contains(":/opt/cortex/bin"));
+        assert!(!compose.contains("/usr/local/bin/cortex"));
+        assert!(compose.contains("- cortex\n      - heartbeat"));
         assert!(compose.contains("- /home/me/.cortex:/home/me/.cortex"));
         assert!(compose.contains("- --host-id-path\n      - /home/me/.cortex/heartbeat-host-id"));
     }
