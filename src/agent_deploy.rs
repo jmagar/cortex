@@ -358,6 +358,7 @@ fn run_deploy(host: &str, local_binary: &Path, config: &AgentDeployConfig) -> io
 // container definition across reboots without any file on disk.
 const UNRAID_APPDATA: &str = "/mnt/user/appdata/cortex";
 const UNRAID_BIN: &str = "/mnt/user/appdata/cortex/bin/cortex";
+const UNRAID_BIN_DIR: &str = "/mnt/user/appdata/cortex/bin";
 const UNRAID_BIN_TMP: &str = "/mnt/user/appdata/cortex/bin/cortex.new";
 const UNRAID_ENV: &str = "/mnt/user/appdata/cortex/heartbeat-agent.env";
 const UNRAID_HOST_ID: &str = "/mnt/user/appdata/cortex/heartbeat-host-id";
@@ -434,6 +435,13 @@ fn run_deploy_unraid(
     // --restart unless-stopped is stored in Docker's state (not a file),
     // so it survives the Unraid RAM-disk wipe on reboot.
     // Mount host CA certs so TLS works without installing ca-certificates.
+    //
+    // The binary is mounted by *directory* (writable) rather than as a single
+    // file. Agent self-update stages the new binary in the same dir and atomic-
+    // renames it onto the running path; a single-file bind mount makes that
+    // target a mount point, so the rename fails (EBUSY/EXDEV) and the agent is
+    // stranded on its build version. A writable dir mount lets the swap land on
+    // the host, so updates persist across restarts.
     ssh_run(
         host,
         &format!(
@@ -443,13 +451,13 @@ fn run_deploy_unraid(
                --restart unless-stopped \
                --network host \
                {e_flags}\
-               -v {UNRAID_BIN}:/usr/local/bin/cortex:ro \
+               -v {UNRAID_BIN_DIR}:/opt/cortex/bin:rw \
                -v {UNRAID_APPDATA}:{UNRAID_APPDATA} \
                -v /var/run/docker.sock:/var/run/docker.sock \
                -v {UNRAID_HOST_SYSLOG}:{UNRAID_CONTAINER_SYSLOG}:ro \
                -v /etc/ssl/certs:/etc/ssl/certs:ro \
                ubuntu:24.04 \
-               /usr/local/bin/cortex heartbeat agent \
+               /opt/cortex/bin/cortex heartbeat agent \
                  --host-id-path {UNRAID_HOST_ID}"
         ),
     )

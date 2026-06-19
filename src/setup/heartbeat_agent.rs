@@ -299,12 +299,20 @@ fn heartbeat_agent_compose(
     let data_dir = host_id_path
         .parent()
         .unwrap_or_else(|| std::path::Path::new("/"));
-    let cortex_bin = setup_path_value(cortex_bin)?;
+    // Mount the binary's *directory* (writable), not the binary file itself.
+    // Agent self-update stages the new binary alongside the running one and
+    // atomic-renames it into place; a single-file bind mount makes that target
+    // a mount point, so the rename fails and the agent is stranded on its build
+    // version. A writable dir mount lets the swap persist to the host.
+    let cortex_bin_dir = cortex_bin
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("/"));
+    let cortex_bin_dir = setup_path_value(cortex_bin_dir)?;
     let env_path = setup_path_value(env_path)?;
     let host_id_path = setup_path_value(host_id_path)?;
     let data_dir = setup_path_value(data_dir)?;
     Ok(format!(
-        "services:\n  cortex-heartbeat-agent:\n    image: ubuntu:24.04\n    restart: unless-stopped\n    network_mode: host\n    env_file: {env_path}\n    volumes:\n      - {cortex_bin}:/usr/local/bin/cortex:ro\n      - {data_dir}:{data_dir}\n    command:\n      - /usr/local/bin/cortex\n      - heartbeat\n      - agent\n      - --host-id-path\n      - {host_id_path}\n"
+        "services:\n  cortex-heartbeat-agent:\n    image: ubuntu:24.04\n    restart: unless-stopped\n    network_mode: host\n    env_file: {env_path}\n    volumes:\n      - {cortex_bin_dir}:/opt/cortex/bin:rw\n      - {data_dir}:{data_dir}\n    command:\n      - /opt/cortex/bin/cortex\n      - heartbeat\n      - agent\n      - --host-id-path\n      - {host_id_path}\n"
     ))
 }
 
@@ -416,7 +424,10 @@ mod tests {
 
         assert!(compose.contains("network_mode: host"));
         assert!(compose.contains("env_file: /home/me/.cortex/heartbeat-agent.env"));
-        assert!(compose.contains("- /home/me/.local/bin/cortex:/usr/local/bin/cortex:ro"));
+        // Binary mounted by writable directory (not single file) so agent
+        // self-update can atomic-rename the new binary onto the host.
+        assert!(compose.contains("- /home/me/.local/bin:/opt/cortex/bin:rw"));
+        assert!(compose.contains("/opt/cortex/bin/cortex\n      - heartbeat"));
         assert!(compose.contains("- /home/me/.cortex:/home/me/.cortex"));
         assert!(compose.contains("- --host-id-path\n      - /home/me/.cortex/heartbeat-host-id"));
     }

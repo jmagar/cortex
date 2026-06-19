@@ -341,5 +341,9 @@ exit 0
     assert!(log.contains("docker rm -f cortex-heartbeat-agent"));
     assert!(log.contains("--restart unless-stopped"));
     assert!(log.contains("-v /var/run/docker.sock:/var/run/docker.sock"));
+    // Binary mounted by writable directory (not single file) so the agent can
+    // atomic-rename a self-update onto the host instead of being stranded.
+    assert!(log.contains("-v /mnt/user/appdata/cortex/bin:/opt/cortex/bin:rw"));
+    assert!(log.contains("/opt/cortex/bin/cortex heartbeat agent"));
     assert!(log.contains("--host-id-path /mnt/user/appdata/cortex/heartbeat-host-id"));
 }

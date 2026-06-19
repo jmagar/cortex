@@ -120,8 +120,18 @@ fn test_severity_floor_suppresses_warning_but_keeps_err() {
         // Two distinct recurring signatures, both above the frequency threshold:
         // one warning-level, one err-level.
         for _ in 0..6 {
-            insert_log(&conn, "slow query took 900ms on widgets", "warning", "host1");
-            insert_log(&conn, "connection refused to 127.0.0.1:5432", "err", "host1");
+            insert_log(
+                &conn,
+                "slow query took 900ms on widgets",
+                "warning",
+                "host1",
+            );
+            insert_log(
+                &conn,
+                "connection refused to 127.0.0.1:5432",
+                "err",
+                "host1",
+            );
         }
     }
 

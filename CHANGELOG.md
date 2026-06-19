@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.31.1] - 2026-06-18
+
+### Fixed
+
+- **Host agent can now self-update inside its container.** The generated
+  heartbeat-agent deployments (`cortex setup` compose + `cortex agent deploy`
+  Unraid `docker run`) mounted the binary as a single read-only file at
+  `/usr/local/bin/cortex`. Agent self-update stages the new binary alongside the
+  running one and atomic-renames it into place, but a single-file bind mount
+  makes that target a mount point, so the rename failed (`EBUSY`/`EXDEV`) and
+  every containerized agent was stranded on its build version (observed: tootie
+  and shart stuck on 1.30.0 while the server ran 1.31.0). Both generators now
+  bind-mount the binary's *directory* writable at `/opt/cortex/bin` and run
+  `/opt/cortex/bin/cortex`, so the swap lands on the host and persists across
+  restarts.
+
 ## [1.31.0] - 2026-06-18
 
 ### Changed
