@@ -197,3 +197,7 @@ pub(crate) async fn run_apps(mode: &CliMode, args: AppsArgs) -> Result<()> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "dispatch_surface_analytics_tests.rs"]
+mod tests;

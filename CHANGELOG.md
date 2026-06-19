@@ -12,10 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Split the analytics CLI dispatch commands (silent-hosts, clock-skew,
-  anomalies, compare, apps) out of `src/cli/dispatch_surface_gap.rs` into a new
-  `dispatch_surface_analytics.rs` sibling, bringing both modules back under the
-  500-line production module-size budget (the file had crossed the limit when
-  the graph-correlation epic landed). No behavior change.
+  anomalies, compare, apps) — and their unit tests — out of
+  `src/cli/dispatch_surface_gap.rs` into a new `dispatch_surface_analytics.rs`
+  sibling (with its own sidecar test file), bringing both modules back under
+  the 500-line production module-size budget (the file had crossed the limit
+  when the graph-correlation epic landed). No behavior change.
 
 ## [1.31.3] - 2026-06-19
 
