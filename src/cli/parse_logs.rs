@@ -410,7 +410,19 @@ pub(crate) fn parse_correlate(args: &[String]) -> Result<CliCommand> {
                 )?)
             }
             _ if arg.starts_with('-') => bail!("unknown correlate option: {arg}"),
-            _ if parsed.reference_time.is_empty() => parsed.reference_time = norm_time(arg)?,
+            _ if parsed.reference_time.is_empty() => {
+                // correlate's sole positional is the reference *time*. A non-time
+                // value (a hostname, app, …) otherwise hits norm_time and yields
+                // a cryptic "unrecognized time value" — redirect to the command
+                // that actually correlates by entity.
+                parsed.reference_time = norm_time(arg.clone()).map_err(|_| {
+                    anyhow::anyhow!(
+                        "correlate's positional argument is a reference time (e.g. `1h`, `2026-06-01`, or an RFC3339 timestamp), but got `{arg}`. \
+To correlate everything related to a host, app, or topic, use `cortex topic-correlate {arg}`; \
+to anchor correlate on a time and filter by host, pass `--reference-time <time> --host {arg}`."
+                    )
+                })?;
+            }
             _ => bail!("unexpected correlate argument: {arg}"),
         }
     }

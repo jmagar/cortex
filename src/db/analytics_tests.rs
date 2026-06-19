@@ -823,7 +823,7 @@ fn clock_skew_plan_uses_received_at_range_index() {
     let sql = format!("EXPLAIN QUERY PLAN {CLOCK_SKEW_SQL}");
     let mut stmt = conn.prepare(&sql).unwrap();
     let rows = stmt
-        .query_map(rusqlite::params!["2026-01-01T00:00:00Z", 100_i64], |row| {
+        .query_map(rusqlite::params!["2026-01-01T00:00:00Z"], |row| {
             row.get::<_, String>(3)
         })
         .unwrap()
@@ -1307,4 +1307,94 @@ fn timeline_rollup_status_reports_watermark() {
     let after = timeline_rollup_status(&pool).unwrap();
     assert!(after.source_max_id > 0);
     assert!(after.refreshed_at.is_some());
+}
+
+#[test]
+fn silent_hosts_merges_case_variants_before_cutoff() {
+    // Regression: silent_hosts read the raw, case-sensitive `hosts` table, so a
+    // dormant `shart` identity was flagged as silent even though the live `SHART`
+    // kept forwarding. Routing through list_hosts() merges case/FQDN variants
+    // (latest last_seen wins) first, so the machine is correctly considered alive.
+    let (pool, _d) = test_pool();
+    insert_logs_batch(
+        &pool,
+        &[
+            entry("2026-06-19T20:00:00Z", "SHART", "info", None, "live"),
+            entry("2026-06-11T06:00:00Z", "shart", "info", None, "old"),
+            entry("2026-06-11T06:00:00Z", "STEAMY", "info", None, "old"),
+        ],
+    )
+    .unwrap();
+    // hosts.last_seen is stamped with insert-time `now`; pin it explicitly.
+    let conn = pool.get().unwrap();
+    for (host, last_seen) in [
+        ("SHART", "2026-06-19T20:00:00.000Z"),
+        ("shart", "2026-06-11T06:00:00.000Z"),
+        ("STEAMY", "2026-06-11T06:00:00.000Z"),
+    ] {
+        conn.execute(
+            "UPDATE hosts SET last_seen = ?1 WHERE hostname = ?2",
+            rusqlite::params![last_seen, host],
+        )
+        .unwrap();
+    }
+    drop(conn);
+
+    let now_unix = chrono::DateTime::parse_from_rfc3339("2026-06-19T21:00:00Z")
+        .unwrap()
+        .timestamp();
+    let silent = silent_hosts(&pool, "2026-06-15T00:00:00.000Z", now_unix).unwrap();
+    let names: Vec<String> = silent.iter().map(|h| h.hostname.clone()).collect();
+
+    assert!(
+        !names.iter().any(|n| n == "shart"),
+        "merged shart is live (SHART forwarding) and must not be flagged silent: {names:?}"
+    );
+    assert!(
+        names.iter().any(|n| n == "steamy"),
+        "genuinely-dormant STEAMY (lowercased) must still be flagged: {names:?}"
+    );
+}
+
+#[test]
+fn clock_skew_merges_case_variants() {
+    // Regression: clock_skew GROUP BY hostname was case-sensitive, so `SHART` and
+    // `shart` reported as two separate skew rows. They must merge into one host
+    // with summed samples and a sample-weighted average skew.
+    let (pool, _d) = test_pool();
+    insert_logs_batch(
+        &pool,
+        &[
+            entry("2026-01-01T00:00:00Z", "SHART", "info", None, "a"),
+            entry("2026-01-01T00:00:00Z", "SHART", "info", None, "b"),
+            entry("2026-01-01T00:00:00Z", "shart", "info", None, "c"),
+        ],
+    )
+    .unwrap();
+    let conn = pool.get().unwrap();
+    // SHART rows skew +10s, the shart row skews +40s.
+    for (msg, received_at) in [
+        ("a", "2026-01-01T00:00:10Z"),
+        ("b", "2026-01-01T00:00:10Z"),
+        ("c", "2026-01-01T00:00:40Z"),
+    ] {
+        conn.execute(
+            "UPDATE logs SET received_at = ?1 WHERE message = ?2",
+            rusqlite::params![received_at, msg],
+        )
+        .unwrap();
+    }
+    drop(conn);
+
+    let result = clock_skew(&pool, "2026-01-01T00:00:00Z", None).unwrap();
+    assert_eq!(result.len(), 1, "SHART/shart must collapse to one host");
+    assert_eq!(result[0].hostname, "shart");
+    assert_eq!(result[0].samples, 3);
+    // Sample-weighted: (10 + 10 + 40) / 3 = 20.
+    assert!(
+        (result[0].avg_skew_secs - 20.0).abs() < 0.5,
+        "weighted avg skew should be ~20s, got {}",
+        result[0].avg_skew_secs
+    );
+    assert!((result[0].max_skew_secs - 40.0).abs() < 0.5);
 }

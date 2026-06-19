@@ -653,6 +653,7 @@ impl Mode {
                         | "host-state"
                         | "fleet-state"
                         | "correlate-state"
+                        | "topic-correlate"
                         | "file-tail"
                         | "__complete"
                         | "completions"
@@ -668,15 +669,18 @@ impl Mode {
                 })))
             }
             _ if global != cli::GlobalFlags::default() => {
-                // Global HTTP flags only apply to CLI query commands. Surface
-                // a precise error rather than letting them be silently
-                // ignored for `serve mcp`, `setup`, etc.
+                // Global HTTP flags were given but what's left isn't a recognized
+                // query command. Rather than enumerate commands (a list that
+                // silently drifts — it once omitted topic-correlate and a dozen
+                // others), name the offending args and point at the most common
+                // mistake: a bare `--http` followed by a URL that should be
+                // `--server <url>` (or `--http=<url>`).
+                let leftover = remaining.join(" ");
                 anyhow::bail!(
-                    "--http / --server / --token only apply to CLI query commands \
-                     (search, tail, errors, hosts, sessions, incident, entity, graph, ai, shell, agent-command, heartbeat, correlate, stats, db, file-tail); \
-                     compose, service, setup, inventory, and deploy are local-only and reject HTTP flags; \
-                     got: {}",
-                    args.join(" ")
+                    "global HTTP flags (--http, --server <url>, --token <token>) apply only to the query CLI, \
+                     but `{leftover}` is not a recognized query command. \
+                     To point at a server use `--server <url>` or `--http=<url>` (bare `--http` takes no value). \
+                     Local-only commands (compose, service, setup, deploy, inventory) reject HTTP flags."
                 );
             }
             _ => match cli::CliCommand::parse(args.clone()) {

@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.32.1] - 2026-06-19
+
+### Fixed
+
+- **`cortex topic-correlate` panicked from the CLI.** `topic-correlate` is in
+  `TOP_LEVEL_COMMANDS` and `parse_command`, but was missing from `Mode::parse`'s
+  top-level command gate in `main.rs`, so it parsed successfully and then hit the
+  `unreachable!()` fallthrough — `cortex topic-correlate <topic>` panicked with
+  `internal error: entered unreachable code`. Added it to the allowlist (it now
+  also accepts the global `--http`/`--token` flags like its siblings) with a
+  `Mode::parse` regression test covering both the single-term and multi-term
+  (`squirts dockersocket`) forms.
+- **`cortex correlate <non-time>` gave a cryptic error.** `correlate`'s sole
+  positional is a reference *time*, so `cortex correlate squirts dockersocket`
+  fed `squirts` into the time parser and surfaced
+  `unrecognized time value 'squirts'`. The error is now actionable: it explains
+  the positional is a reference time and points at
+  `cortex topic-correlate squirts …` (entity correlation) or
+  `--reference-time <time> --host squirts`.
+- **`silent_hosts` flagged dormant case/FQDN host variants as silent.** It read
+  the raw, case-sensitive `hosts` table, so a quiet `shart` identity was reported
+  silent even while the live `SHART` kept forwarding. It now routes through
+  `list_hosts()` (the same case/FQDN dedupe added in 1.32.0, taking the latest
+  `last_seen`), so the merged machine is correctly considered alive; genuinely
+  dormant hosts are still flagged.
+- **`clock_skew` reported one machine once per casing.** Its `GROUP BY hostname`
+  was case-sensitive, so `SHART`/`shart` showed as two skew rows. The case/FQDN
+  canonicalization is now factored into a shared `canonical_host_keys` helper
+  (reused by `hosts`) and applied to `clock_skew`, merging variants into one row
+  with summed samples, a sample-weighted average skew, and widened min/max.
+- **The "HTTP flags only apply to query commands" error listed a stale command
+  set.** Its hardcoded enumeration had drifted (it omitted `topic-correlate`,
+  `correlate-state`, `silent-hosts`, `clock-skew`, `map`, … — implying those
+  reject `--http`). It no longer enumerates: it names the offending argument and
+  points at `--server <url>` / `--http=<url>`, so it can't drift again.
+
+### Added
+
+- **`--http=<url>` shortcut.** Enables HTTP transport and sets the server in one
+  curl-style flag (e.g. `cortex --http=http://host:3100 search foo`). Bare
+  `--http` is unchanged (a value-less flag, so `cortex --http search foo` still
+  treats `search` as the command); a server URL after bare `--http` was silently
+  left as a stray positional before.
+
 ## [1.32.0] - 2026-06-19
 
 ### Fixed
