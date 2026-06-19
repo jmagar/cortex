@@ -265,6 +265,7 @@ mod dispatch;
 mod dispatch_ai;
 mod dispatch_db;
 mod dispatch_surface;
+mod dispatch_surface_analytics;
 mod dispatch_surface_gap;
 #[allow(dead_code)]
 mod http_client;

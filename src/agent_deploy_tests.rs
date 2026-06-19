@@ -331,8 +331,6 @@ exit 0
 
     assert!(result.ok, "{result:?}");
     let log = std::fs::read_to_string(log).unwrap();
-    assert!(log.contains("mkdir -p /mnt/user/appdata/cortex/bin"));
-    assert!(log.contains("unraid-host:/mnt/user/appdata/cortex/bin/cortex.new"));
     assert!(log.contains("heartbeat-agent.env"));
     assert!(log.contains("CORTEX_HEARTBEAT_TARGET='https://cortex.example.test'"));
     assert!(log.contains("CORTEX_HEARTBEAT_TOKEN='secret'"));
@@ -341,5 +339,22 @@ exit 0
     assert!(log.contains("docker rm -f cortex-heartbeat-agent"));
     assert!(log.contains("--restart unless-stopped"));
     assert!(log.contains("-v /var/run/docker.sock:/var/run/docker.sock"));
+    // Containerized agents run the published image with the binary baked in:
+    // no host binary is scp'd or bind-mounted; the image is pulled and pinned to
+    // this build's version, run as root with the server health probe disabled.
+    assert!(!log.contains("cortex.new"));
+    assert!(!log.contains(":/opt/cortex/bin"));
+    assert!(!log.contains("ubuntu:24.04"));
+    assert!(log.contains(&format!(
+        "docker pull ghcr.io/jmagar/cortex:{}",
+        env!("CARGO_PKG_VERSION")
+    )));
+    assert!(log.contains(&format!(
+        "ghcr.io/jmagar/cortex:{}",
+        env!("CARGO_PKG_VERSION")
+    )));
+    assert!(log.contains("--user 0:0"));
+    assert!(log.contains("--no-healthcheck"));
+    assert!(log.contains("cortex heartbeat agent"));
     assert!(log.contains("--host-id-path /mnt/user/appdata/cortex/heartbeat-host-id"));
 }

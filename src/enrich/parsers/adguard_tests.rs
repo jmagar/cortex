@@ -90,3 +90,35 @@ fn truncated_invalid_returns_json_error() {
     .unwrap_err();
     assert!(matches!(err, crate::enrich::ParserError::Json(_)));
 }
+
+#[test]
+fn file_querylog_ip_field_is_used_as_client() {
+    // AdGuard Home ≥0.107 file query log records the client as `IP` (not
+    // `Client`), with a `Question` map for the domain. The parser must still
+    // surface the client + query for graph device/domain extraction.
+    let line = r#"{"T":"2026-06-18T16:01:45Z","QH":"www.microsoft.com","QT":"A","IP":"100.88.16.79","Result":{},"Cached":false}"#;
+    let out = parse(line, SourceKind::FileTail).unwrap();
+    assert_eq!(
+        out.metadata["query"],
+        serde_json::json!("www.microsoft.com")
+    );
+    assert_eq!(out.metadata["client"], serde_json::json!("100.88.16.79"));
+}
+
+#[test]
+fn cid_field_is_used_as_client_when_no_ip() {
+    // `CID` (persistent client id) is the last fallback in the client-field
+    // priority; a record carrying only `CID` must still resolve a client.
+    let line = r#"{"QH":"example.org","QT":"A","CID":"living-room-tv","Result":{},"Cached":false}"#;
+    let out = parse(line, SourceKind::FileTail).unwrap();
+    assert_eq!(out.metadata["client"], serde_json::json!("living-room-tv"));
+}
+
+#[test]
+fn client_field_precedence_prefers_ip_over_cid() {
+    // Priority order is Client, client, IP, CID — so a record with both `IP`
+    // and `CID` must surface the network address, not the persistent id.
+    let line = r#"{"QH":"example.org","QT":"A","IP":"10.0.0.5","CID":"living-room-tv","Result":{},"Cached":false}"#;
+    let out = parse(line, SourceKind::FileTail).unwrap();
+    assert_eq!(out.metadata["client"], serde_json::json!("10.0.0.5"));
+}

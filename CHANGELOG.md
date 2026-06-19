@@ -7,6 +7,102 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.31.4] - 2026-06-19
+
+### Changed
+
+- Split the analytics CLI dispatch commands (silent-hosts, clock-skew,
+  anomalies, compare, apps) — and their unit tests — out of
+  `src/cli/dispatch_surface_gap.rs` into a new `dispatch_surface_analytics.rs`
+  sibling (with its own sidecar test file), bringing both modules back under
+  the 500-line production module-size budget (the file had crossed the limit
+  when the graph-correlation epic landed). No behavior change.
+
+## [1.31.3] - 2026-06-19
+
+### Fixed
+
+- **`CORTEX_AGENT_FILE_TAILS` no longer drops malformed entries silently.**
+  `parse_file_tails` now emits a `warn` for any entry missing a usable `:TAG`
+  suffix (colon-less path, empty path/tag) instead of skipping it silently — a
+  typo'd source previously tailed nothing with no diagnostic.
+
+### Tests
+
+- Added coverage surfaced by PR review: `notify_min_severity` config validation
+  (rejects unparseable severities — the guardrail the scanner fail-open relies
+  on), AdGuard `CID` client field + `IP`>`CID` precedence, and severity-floor
+  direction (a signature more severe than the floor still pages; a `warning`
+  floor admits warnings).
+
+## [1.31.2] - 2026-06-19
+
+### Changed
+
+- **Containerized host agents now run the published image with the binary baked
+  in, instead of a generic `ubuntu:24.04` container with the binary bind-mounted
+  from the host.** Both deployment generators — `cortex agent deploy` (Unraid
+  `docker run`) and `cortex setup` (compose) — now `docker pull
+  ghcr.io/jmagar/cortex:<version>` and run `cortex heartbeat agent` directly from
+  the image, pinned to the deploying binary's version for server/agent lockstep.
+  The agent container runs `--user 0:0` (it reads root-owned host files —
+  `docker.sock`, `/var/log/syslog`) with the image's server healthcheck disabled
+  (the agent runs no HTTP server). Only host *data* is mounted now (Docker
+  socket, host syslog, appdata for host-id); the binary, the `/opt/cortex/bin`
+  dir mount from 1.31.1, the `ubuntu:24.04` base, and the `/etc/ssl/certs` mount
+  are all gone. This supersedes the 1.31.1 self-update mount fix: there is no
+  host binary to swap, so the failure mode it fixed no longer exists. **Deploy
+  now requires the matching image tag to be published to the registry first.**
+
+## [1.31.1] - 2026-06-18
+
+### Fixed
+
+- **Host agent can now self-update inside its container.** The generated
+  heartbeat-agent deployments (`cortex setup` compose + `cortex agent deploy`
+  Unraid `docker run`) mounted the binary as a single read-only file at
+  `/usr/local/bin/cortex`. Agent self-update stages the new binary alongside the
+  running one and atomic-renames it into place, but a single-file bind mount
+  makes that target a mount point, so the rename failed (`EBUSY`/`EXDEV`) and
+  every containerized agent was stranded on its build version (observed: tootie
+  and shart stuck on 1.30.0 while the server ran 1.31.0). Both generators now
+  bind-mount the binary's *directory* writable at `/opt/cortex/bin` and run
+  `/opt/cortex/bin/cortex`, so the swap lands on the host and persists across
+  restarts.
+
+## [1.31.0] - 2026-06-18
+
+### Changed
+
+- **Recurring-error notifications now have a severity floor (`err` by default).**
+  The error scanner records `warning`-level recurring signatures (still
+  searchable and ack-able) but no longer pages on them — only `err`/`crit`/
+  `alert`/`emerg` signatures fire notifications. Busy dev/service hosts emit
+  enormous volumes of recurring warnings that flooded the notification channel
+  with non-actionable alerts. Configurable via
+  `[error_detection].notify_min_severity` / `CORTEX_ERROR_DETECTION_NOTIFY_MIN_SEVERITY`.
+
+## [1.30.0] - 2026-06-18
+
+### Added
+
+- **Agent multi-file tailing (`CORTEX_AGENT_FILE_TAILS`).** The host agent's
+  file forwarder now accepts a comma-separated list of `PATH:TAG` sources and
+  forwards each line **raw** under the configured tag (so the cortex parser is
+  selected by `app_name`). This lets the agent ship file-only log sources —
+  AdGuard's JSON `querylog.json`, SWAG `access.log`, fail2ban, Plex — that are
+  neither on container stdout nor in journald, **retiring the per-host rsyslog
+  imfile drop-ins**. The existing `CORTEX_AGENT_SYSLOG_FILE` (RFC 3164
+  syslog-format single file) is unchanged.
+
+### Fixed
+
+- **AdGuard client IP now parsed from the file query log.** AdGuard Home ≥0.107
+  records the client address in the `IP` field of `querylog.json`, but the
+  parser only read `Client`/`client`. It now also reads `IP`/`CID`, so DNS
+  queries produce `client` metadata and the graph can build `device --accessed-->
+  domain` edges.
+
 ## [1.29.0] - 2026-06-18
 
 ### Added

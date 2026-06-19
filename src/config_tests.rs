@@ -453,6 +453,32 @@ fn rejects_invalid_storage_budget_relationships() {
 }
 
 #[test]
+fn error_detection_validation_rejects_invalid_notify_min_severity() {
+    // This validation is the guardrail the error scanner's notify-floor
+    // `unwrap_or(u8::MAX)` fail-open relies on: an unparseable severity must be
+    // rejected at load so a parse failure at use is genuinely unreachable.
+    let mut cfg = ErrorDetectionConfig::default();
+    assert!(
+        validate_error_detection_config(&cfg).is_ok(),
+        "default notify_min_severity must be valid"
+    );
+
+    cfg.notify_min_severity = "warn".to_string();
+    assert!(
+        validate_error_detection_config(&cfg).is_ok(),
+        "a real syslog severity (alias) must be accepted"
+    );
+
+    cfg.notify_min_severity = "bogus".to_string();
+    let err = validate_error_detection_config(&cfg)
+        .expect_err("an invalid notify_min_severity must be rejected at load");
+    assert!(
+        err.to_string().contains("notify_min_severity"),
+        "rejection message should name the offending field: {err}"
+    );
+}
+
+#[test]
 #[serial]
 fn rejects_cleanup_chunk_size_zero() {
     // TODO: Audit that the environment access only happens in single-threaded code.

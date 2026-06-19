@@ -42,7 +42,7 @@ fn test_process_chunk_skips_below_cursor() {
     }
 
     // Set cursor to 2: only row with id > 2 should be processed
-    let result = process_chunk(&pool, 2, 200, 1, &[]).unwrap();
+    let result = process_chunk(&pool, 2, 200, 1, &[], u8::MAX).unwrap();
 
     // Only 1 row (id=3) should be returned
     assert_eq!(
@@ -64,7 +64,7 @@ fn test_process_chunk_does_not_notify_below_threshold() {
     }
 
     // frequency_threshold=5; only 3 rows inserted
-    let result = process_chunk(&pool, 0, 200, 5, &[]).unwrap();
+    let result = process_chunk(&pool, 0, 200, 5, &[], u8::MAX).unwrap();
     assert_eq!(result.rows_in_chunk, 3);
 
     // No outbox row should have been inserted
@@ -95,7 +95,7 @@ fn test_process_chunk_notifies_above_threshold() {
     }
 
     // threshold=5; 6 rows inserted → should notify
-    let result = process_chunk(&pool, 0, 200, 5, &[]).unwrap();
+    let result = process_chunk(&pool, 0, 200, 5, &[], u8::MAX).unwrap();
     assert_eq!(result.rows_in_chunk, 6);
 
     let conn = pool.get().unwrap();
@@ -110,6 +110,115 @@ fn test_process_chunk_notifies_above_threshold() {
         count, 1,
         "one outbox notification above frequency_threshold"
     );
+}
+
+#[test]
+fn test_severity_floor_suppresses_warning_but_keeps_err() {
+    let (pool, _dir) = test_pool();
+    {
+        let conn = pool.get().unwrap();
+        // Two distinct recurring signatures, both above the frequency threshold:
+        // one warning-level, one err-level.
+        for _ in 0..6 {
+            insert_log(
+                &conn,
+                "slow query took 900ms on widgets",
+                "warning",
+                "host1",
+            );
+            insert_log(
+                &conn,
+                "connection refused to 127.0.0.1:5432",
+                "err",
+                "host1",
+            );
+        }
+    }
+
+    // Floor = err (rank 3): the warning signature must NOT page, the err one must.
+    let err_floor = crate::db::severity_to_num("err").unwrap();
+    let result = process_chunk(&pool, 0, 400, 5, &[], err_floor).unwrap();
+    assert_eq!(result.rows_in_chunk, 12);
+
+    let conn = pool.get().unwrap();
+    // Both signatures are recorded (searchable), regardless of the notify floor.
+    let sigs: i64 = conn
+        .query_row("SELECT COUNT(*) FROM error_signatures", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(sigs, 2, "both warning and err signatures are recorded");
+
+    // But only the err-level signature fired a notification.
+    let notifs: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM notifications_outbox WHERE rule_id = 'unaddressed_error_signature'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(notifs, 1, "only the err+ signature pages under the floor");
+    let notif_sev: String = conn
+        .query_row(
+            "SELECT severity FROM notifications_outbox WHERE rule_id = 'unaddressed_error_signature'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(notif_sev, "err");
+}
+
+#[test]
+fn test_severity_floor_admits_signature_more_severe_than_floor() {
+    let (pool, _dir) = test_pool();
+    {
+        let conn = pool.get().unwrap();
+        // crit is *more* severe than the err floor — the `rank <= floor` gate
+        // must let it page (guards against inverting the comparison).
+        for _ in 0..6 {
+            insert_log(&conn, "kernel panic on cpu 3", "crit", "host1");
+        }
+    }
+    let err_floor = crate::db::severity_to_num("err").unwrap();
+    process_chunk(&pool, 0, 200, 5, &[], err_floor).unwrap();
+
+    let conn = pool.get().unwrap();
+    let notifs: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM notifications_outbox WHERE rule_id = 'unaddressed_error_signature'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(notifs, 1, "crit is above the err floor and must page");
+}
+
+#[test]
+fn test_severity_floor_at_warning_pages_warnings() {
+    let (pool, _dir) = test_pool();
+    {
+        let conn = pool.get().unwrap();
+        for _ in 0..6 {
+            insert_log(
+                &conn,
+                "slow query took 900ms on widgets",
+                "warning",
+                "host1",
+            );
+        }
+    }
+    // A warning floor (the least-severe selectable level) admits warning-level
+    // signatures — the floor is configurable downward, not hard-wired to err.
+    let warn_floor = crate::db::severity_to_num("warning").unwrap();
+    process_chunk(&pool, 0, 200, 5, &[], warn_floor).unwrap();
+
+    let conn = pool.get().unwrap();
+    let notifs: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM notifications_outbox WHERE rule_id = 'unaddressed_error_signature'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(notifs, 1, "a warning floor lets warning signatures page");
 }
 
 #[test]
@@ -134,7 +243,7 @@ fn test_process_chunk_skips_excluded_patterns() {
     }
 
     let exclude = vec!["Sent Gotify notification".to_string()];
-    let result = process_chunk(&pool, 0, 200, 5, &exclude).unwrap();
+    let result = process_chunk(&pool, 0, 200, 5, &exclude, u8::MAX).unwrap();
     // All 16 rows advance the cursor (skipped rows are not reprocessed).
     assert_eq!(result.rows_in_chunk, 16);
 
@@ -172,7 +281,7 @@ fn test_process_chunk_suppressed_when_acked() {
     }
 
     // First pass: process the chunk so the signature is written
-    let result = process_chunk(&pool, 0, 200, 5, &[]).unwrap();
+    let result = process_chunk(&pool, 0, 200, 5, &[], u8::MAX).unwrap();
     assert_eq!(result.rows_in_chunk, 6);
 
     // Manually acknowledge the signature
@@ -211,7 +320,7 @@ fn test_process_chunk_suppressed_when_acked() {
 
     // Second pass: with cursor advanced past original rows
     let cursor = result.new_cursor;
-    let result2 = process_chunk(&pool, cursor, 200, 5, &[]).unwrap();
+    let result2 = process_chunk(&pool, cursor, 200, 5, &[], u8::MAX).unwrap();
     assert_eq!(result2.rows_in_chunk, 3);
 
     // Outbox should still be empty because the signature is acked
