@@ -449,9 +449,42 @@ fn get_error_summary_sql(
 
 /// Lowercase, trim, and strip trailing dots from a hostname so case and a
 /// trailing FQDN dot don't split one machine into several host rows. Does not
-/// fold FQDNs to short names — that's [`dedupe_hosts`]'s data-driven step.
-fn case_fold_host(raw: &str) -> String {
+/// fold FQDNs to short names — that's [`canonical_host_keys`]'s data-driven step.
+pub(crate) fn case_fold_host(raw: &str) -> String {
     raw.trim().trim_end_matches('.').to_ascii_lowercase()
+}
+
+/// Map each input hostname to its canonical identity, applying two folds:
+/// 1. **Case / trailing-dot** via [`case_fold_host`] (`SHART` → `shart`).
+/// 2. **FQDN → short name, only when the short name independently exists** among
+///    the inputs (`tootie.<tailnet>` → `tootie` when a bare `tootie` is present,
+///    but `host.docker.internal` is left alone). This never invents a merge that
+///    could mask a distinct machine.
+///
+/// Shared by `dedupe_hosts` (the `hosts` action) and `clock_skew` so every
+/// host-keyed view collapses the same case/FQDN variants.
+pub(crate) fn canonical_host_keys(
+    hostnames: &[String],
+) -> std::collections::HashMap<String, String> {
+    let cased: Vec<(String, String)> = hostnames
+        .iter()
+        .map(|h| (h.clone(), case_fold_host(h)))
+        .collect();
+    let shorts: std::collections::HashSet<&str> = cased
+        .iter()
+        .filter(|(_, c)| !c.is_empty() && !c.contains('.'))
+        .map(|(_, c)| c.as_str())
+        .collect();
+    cased
+        .iter()
+        .map(|(raw, c)| {
+            let canonical = match c.split_once('.') {
+                Some((head, _)) if shorts.contains(head) => head.to_string(),
+                _ => c.clone(),
+            };
+            (raw.clone(), canonical)
+        })
+        .collect()
 }
 
 /// Merge host rows that refer to the same machine. Two folds are applied:
@@ -468,25 +501,16 @@ fn case_fold_host(raw: &str) -> String {
 /// Merged rows sum `log_count`, take the earliest `first_seen` and latest
 /// `last_seen`, and display the canonical (lowercased) name.
 fn dedupe_hosts(rows: Vec<HostEntry>) -> Vec<HostEntry> {
-    // Pass 1: case-fold every hostname alongside its row.
-    let folded: Vec<(String, HostEntry)> = rows
-        .into_iter()
-        .map(|h| (case_fold_host(&h.hostname), h))
-        .collect();
-    // Standalone short names (no dot, non-empty) are the only valid fold targets.
-    let shorts: std::collections::HashSet<&str> = folded
-        .iter()
-        .filter(|(k, _)| !k.is_empty() && !k.contains('.'))
-        .map(|(k, _)| k.as_str())
-        .collect();
-    // Pass 2: group by canonical key, preserving first-seen insertion order.
+    let names: Vec<String> = rows.iter().map(|h| h.hostname.clone()).collect();
+    let canon = canonical_host_keys(&names);
+    // Group by canonical key, preserving first-seen insertion order.
     let mut merged: std::collections::HashMap<String, HostEntry> = std::collections::HashMap::new();
     let mut order: Vec<String> = Vec::new();
-    for (cased, entry) in &folded {
-        let canonical = match cased.split_once('.') {
-            Some((head, _)) if shorts.contains(head) => head.to_string(),
-            _ => cased.clone(),
-        };
+    for entry in rows {
+        let canonical = canon
+            .get(&entry.hostname)
+            .cloned()
+            .unwrap_or_else(|| case_fold_host(&entry.hostname));
         match merged.get_mut(&canonical) {
             Some(acc) => {
                 acc.log_count += entry.log_count;

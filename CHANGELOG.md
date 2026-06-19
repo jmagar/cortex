@@ -32,6 +32,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `list_hosts()` (the same case/FQDN dedupe added in 1.32.0, taking the latest
   `last_seen`), so the merged machine is correctly considered alive; genuinely
   dormant hosts are still flagged.
+- **`clock_skew` reported one machine once per casing.** Its `GROUP BY hostname`
+  was case-sensitive, so `SHART`/`shart` showed as two skew rows. The case/FQDN
+  canonicalization is now factored into a shared `canonical_host_keys` helper
+  (reused by `hosts`) and applied to `clock_skew`, merging variants into one row
+  with summed samples, a sample-weighted average skew, and widened min/max.
+- **The "HTTP flags only apply to query commands" error listed a stale command
+  set.** Its hardcoded enumeration had drifted (it omitted `topic-correlate`,
+  `correlate-state`, `silent-hosts`, `clock-skew`, `map`, … — implying those
+  reject `--http`). It no longer enumerates: it names the offending argument and
+  points at `--server <url>` / `--http=<url>`, so it can't drift again.
+
+### Added
+
+- **`--http=<url>` shortcut.** Enables HTTP transport and sets the server in one
+  curl-style flag (e.g. `cortex --http=http://host:3100 search foo`). Bare
+  `--http` is unchanged (a value-less flag, so `cortex --http search foo` still
+  treats `search` as the command); a server URL after bare `--http` was silently
+  left as a stray positional before.
 
 ## [1.32.0] - 2026-06-19
 

@@ -823,7 +823,7 @@ fn clock_skew_plan_uses_received_at_range_index() {
     let sql = format!("EXPLAIN QUERY PLAN {CLOCK_SKEW_SQL}");
     let mut stmt = conn.prepare(&sql).unwrap();
     let rows = stmt
-        .query_map(rusqlite::params!["2026-01-01T00:00:00Z", 100_i64], |row| {
+        .query_map(rusqlite::params!["2026-01-01T00:00:00Z"], |row| {
             row.get::<_, String>(3)
         })
         .unwrap()
@@ -1354,4 +1354,47 @@ fn silent_hosts_merges_case_variants_before_cutoff() {
         names.iter().any(|n| n == "steamy"),
         "genuinely-dormant STEAMY (lowercased) must still be flagged: {names:?}"
     );
+}
+
+#[test]
+fn clock_skew_merges_case_variants() {
+    // Regression: clock_skew GROUP BY hostname was case-sensitive, so `SHART` and
+    // `shart` reported as two separate skew rows. They must merge into one host
+    // with summed samples and a sample-weighted average skew.
+    let (pool, _d) = test_pool();
+    insert_logs_batch(
+        &pool,
+        &[
+            entry("2026-01-01T00:00:00Z", "SHART", "info", None, "a"),
+            entry("2026-01-01T00:00:00Z", "SHART", "info", None, "b"),
+            entry("2026-01-01T00:00:00Z", "shart", "info", None, "c"),
+        ],
+    )
+    .unwrap();
+    let conn = pool.get().unwrap();
+    // SHART rows skew +10s, the shart row skews +40s.
+    for (msg, received_at) in [
+        ("a", "2026-01-01T00:00:10Z"),
+        ("b", "2026-01-01T00:00:10Z"),
+        ("c", "2026-01-01T00:00:40Z"),
+    ] {
+        conn.execute(
+            "UPDATE logs SET received_at = ?1 WHERE message = ?2",
+            rusqlite::params![received_at, msg],
+        )
+        .unwrap();
+    }
+    drop(conn);
+
+    let result = clock_skew(&pool, "2026-01-01T00:00:00Z", None).unwrap();
+    assert_eq!(result.len(), 1, "SHART/shart must collapse to one host");
+    assert_eq!(result[0].hostname, "shart");
+    assert_eq!(result[0].samples, 3);
+    // Sample-weighted: (10 + 10 + 40) / 3 = 20.
+    assert!(
+        (result[0].avg_skew_secs - 20.0).abs() < 0.5,
+        "weighted avg skew should be ~20s, got {}",
+        result[0].avg_skew_secs
+    );
+    assert!((result[0].max_skew_secs - 40.0).abs() < 0.5);
 }

@@ -217,6 +217,21 @@ impl GlobalFlags {
             // Two flag families: bare "--http", and value-bearing
             // "--server"/"--token" which accept "--flag VALUE" or "--flag=VALUE".
             let arg = args[i].as_str();
+            // `--http=<url>` is a convenience shortcut: enable HTTP transport AND
+            // set the server in one flag (curl-style). Bare `--http` stays a flag
+            // with no value so `cortex --http search foo` keeps `search` as the
+            // command rather than swallowing it as a URL.
+            if let Some(value) = strip_eq_prefix(arg, "--http") {
+                if value.is_empty() {
+                    bail!(
+                        "--http=<url> requires a value; use bare --http with --server <url>, or --http=<url>"
+                    );
+                }
+                out.force_http = true;
+                out.server = Some(value.to_string());
+                args.remove(i);
+                continue;
+            }
             if arg == "--http" {
                 out.force_http = true;
                 args.remove(i);
@@ -402,6 +417,30 @@ mod tests {
         );
         assert_eq!(args, strings(&["search", "disk", "--json"]));
         assert_eq!(flags.http_flag_trigger(), Some("--http"));
+    }
+
+    #[test]
+    fn global_flags_http_equals_url_sets_server_and_transport() {
+        // `--http=<url>` is the curl-style shortcut: enables HTTP transport AND
+        // sets the server, so a URL no longer has to go through `--server`.
+        let mut args = strings(&["--http=http://localhost:40110", "topic-correlate", "axon"]);
+        let flags = GlobalFlags::extract(&mut args).unwrap();
+        assert_eq!(
+            flags,
+            GlobalFlags {
+                force_http: true,
+                server: Some("http://localhost:40110".into()),
+                token: None,
+            }
+        );
+        assert_eq!(args, strings(&["topic-correlate", "axon"]));
+    }
+
+    #[test]
+    fn global_flags_http_equals_empty_is_rejected() {
+        let mut args = strings(&["--http=", "stats"]);
+        let err = GlobalFlags::extract(&mut args).unwrap_err().to_string();
+        assert!(err.contains("--http=<url> requires a value"), "got: {err}");
     }
 
     #[test]

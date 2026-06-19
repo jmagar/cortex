@@ -1307,6 +1307,9 @@ pub struct ClockSkewEntry {
     pub max_skew_secs: f64,
 }
 
+// Per-raw-hostname skew stats. Ordering/limit and the case/FQDN variant merge
+// happen in Rust (see `clock_skew`) so we must fetch every host here, not a
+// SQL-LIMIT-ed prefix that could split a machine's variants across the cutoff.
 const CLOCK_SKEW_SQL: &str = "
     SELECT hostname,
            COUNT(*),
@@ -1315,24 +1318,75 @@ const CLOCK_SKEW_SQL: &str = "
            MAX((julianday(received_at) - julianday(timestamp)) * 86400)
       FROM logs INDEXED BY idx_logs_received_at
      WHERE received_at >= ?1
-     GROUP BY hostname
-     ORDER BY ABS(AVG((julianday(received_at) - julianday(timestamp)) * 86400)) DESC
-     LIMIT ?2";
+     GROUP BY hostname";
 
 pub fn clock_skew(pool: &DbPool, since: &str, limit: Option<u32>) -> Result<Vec<ClockSkewEntry>> {
     let conn = pool.get()?;
-    let limit = limit.map(i64::from).unwrap_or(i64::MAX);
     let mut stmt = conn.prepare(CLOCK_SKEW_SQL)?;
-    let rows = stmt.query_map(params![since, limit], |r| {
-        Ok(ClockSkewEntry {
-            hostname: r.get(0)?,
-            samples: r.get(1)?,
-            avg_skew_secs: r.get::<_, Option<f64>>(2)?.unwrap_or(0.0),
-            min_skew_secs: r.get::<_, Option<f64>>(3)?.unwrap_or(0.0),
-            max_skew_secs: r.get::<_, Option<f64>>(4)?.unwrap_or(0.0),
-        })
-    })?;
-    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    let rows: Vec<ClockSkewEntry> = stmt
+        .query_map(params![since], |r| {
+            Ok(ClockSkewEntry {
+                hostname: r.get(0)?,
+                samples: r.get(1)?,
+                avg_skew_secs: r.get::<_, Option<f64>>(2)?.unwrap_or(0.0),
+                min_skew_secs: r.get::<_, Option<f64>>(3)?.unwrap_or(0.0),
+                max_skew_secs: r.get::<_, Option<f64>>(4)?.unwrap_or(0.0),
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+
+    // Merge case/FQDN variants of one machine (e.g. `SHART`/`shart`) into a single
+    // skew row: sum samples, recombine the mean as a sample-weighted average, and
+    // widen min/max. Without this a host's clock skew is reported once per casing.
+    let names: Vec<String> = rows.iter().map(|r| r.hostname.clone()).collect();
+    let canon = super::queries::canonical_host_keys(&names);
+    let mut merged: std::collections::HashMap<String, ClockSkewEntry> =
+        std::collections::HashMap::new();
+    let mut order: Vec<String> = Vec::new();
+    for row in rows {
+        let key = canon
+            .get(&row.hostname)
+            .cloned()
+            .unwrap_or_else(|| row.hostname.clone());
+        match merged.get_mut(&key) {
+            Some(acc) => {
+                let total = acc.samples + row.samples;
+                if total > 0 {
+                    acc.avg_skew_secs = (acc.avg_skew_secs * acc.samples as f64
+                        + row.avg_skew_secs * row.samples as f64)
+                        / total as f64;
+                }
+                acc.min_skew_secs = acc.min_skew_secs.min(row.min_skew_secs);
+                acc.max_skew_secs = acc.max_skew_secs.max(row.max_skew_secs);
+                acc.samples = total;
+            }
+            None => {
+                order.push(key.clone());
+                merged.insert(
+                    key.clone(),
+                    ClockSkewEntry {
+                        hostname: key,
+                        ..row
+                    },
+                );
+            }
+        }
+    }
+    let mut out: Vec<ClockSkewEntry> = order
+        .into_iter()
+        .map(|k| merged.remove(&k).expect("key inserted above"))
+        .collect();
+    // Largest absolute skew first (preserving the prior ORDER BY).
+    out.sort_by(|a, b| {
+        b.avg_skew_secs
+            .abs()
+            .partial_cmp(&a.avg_skew_secs.abs())
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    if let Some(limit) = limit {
+        out.truncate(limit as usize);
+    }
+    Ok(out)
 }
 
 // -----------------------------------------------------------------------------
