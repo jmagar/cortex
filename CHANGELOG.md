@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.32.4] - 2026-06-19
+
+### Fixed
+
+- **`cortex deploy agent` upgrades are now fully config-preserving.** 1.32.3 began
+  carrying forward custom env (file-tails) and mounts, but the heartbeat **token**,
+  **target**, and the **docker/journald** booleans were still rebuilt from flags —
+  so a flag-less redeploy would drop the token (breaking heartbeat auth) and reset
+  docker ingest to off. The Unraid deploy now resolves every managed key with
+  **flag > persisted > default** precedence: an explicit flag wins, otherwise the
+  value from the host's `heartbeat-agent.env` is kept, otherwise a built-in default
+  fills first-time deploys. `--docker`/`--journald` became `Option<bool>` so "not
+  passed" is distinct from "false" (and thus preserves the existing setting);
+  journald stays forced-false inside the container. Custom keys (file-tails) and
+  non-standard mounts continue to carry through. New pure helpers
+  (`parse_env_file`, `resolve_agent_env`) with unit tests covering flag-less
+  preservation, flag override, and first-deploy defaults.
+
 ## [1.32.3] - 2026-06-19
 
 ### Fixed

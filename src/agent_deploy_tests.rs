@@ -246,8 +246,8 @@ exit 0
         &AgentDeployConfig {
             target: Some("https://cortex.example.test:3100".to_string()),
             token: Some("heartbeat token".to_string()),
-            docker: true,
-            journald: true,
+            docker: Some(true),
+            journald: Some(true),
         },
     );
 
@@ -324,8 +324,8 @@ exit 0
         &AgentDeployConfig {
             target: Some("https://cortex.example.test".to_string()),
             token: Some("secret".to_string()),
-            docker: false,
-            journald: true,
+            docker: Some(false),
+            journald: Some(true),
         },
     );
 
@@ -359,31 +359,90 @@ exit 0
     assert!(log.contains("--host-id-path /mnt/user/appdata/cortex/heartbeat-host-id"));
 }
 
+fn env_get<'a>(env: &'a [(String, String)], key: &str) -> Option<&'a str> {
+    env.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str())
+}
+
 #[test]
-fn preserved_custom_env_keeps_custom_keys_and_drops_managed() {
-    let existing = "\
-CORTEX_HEARTBEAT_TARGET=https://cortex.tootie.tv
-RUST_LOG=warn
-CORTEX_HEARTBEAT_TOKEN=secret
-CORTEX_AGENT_FILE_TAILS=/host/plex-logs/Plex Media Server.log:plex
-CUSTOM_THING=foo=bar baz
-";
-    let kept = preserved_custom_env(existing);
-    // Managed keys (target, RUST_LOG, token) are dropped — the deploy sets those.
-    assert!(
-        !kept
-            .iter()
-            .any(|(k, _)| MANAGED_ENV_KEYS.contains(&k.as_str()))
+fn resolve_agent_env_flagless_upgrade_preserves_everything() {
+    // The whole point: `cortex deploy agent` with NO flags keeps the host's
+    // existing token, target, docker setting, and custom Plex file-tail.
+    let persisted = vec![
+        (
+            "CORTEX_HEARTBEAT_TARGET".into(),
+            "https://cortex.tootie.tv".into(),
+        ),
+        ("CORTEX_SYSLOG_TARGET".into(), "100.88.16.79:1514".into()),
+        ("CORTEX_AGENT_DOCKER".into(), "true".into()),
+        ("CORTEX_HEARTBEAT_TOKEN".into(), "the-secret".into()),
+        (
+            "CORTEX_AGENT_FILE_TAILS".into(),
+            "/host/plex-logs/Plex Media Server.log:plex".into(),
+        ),
+    ];
+    let env = resolve_agent_env(&persisted, &AgentDeployConfig::default());
+    assert_eq!(env_get(&env, "CORTEX_HEARTBEAT_TOKEN"), Some("the-secret"));
+    assert_eq!(
+        env_get(&env, "CORTEX_HEARTBEAT_TARGET"),
+        Some("https://cortex.tootie.tv")
     );
-    // The Plex file-tail (value has a space AND a colon) round-trips intact.
-    let ft = kept
-        .iter()
-        .find(|(k, _)| k == "CORTEX_AGENT_FILE_TAILS")
-        .expect("file-tail preserved");
-    assert_eq!(ft.1, "/host/plex-logs/Plex Media Server.log:plex");
-    // A value containing '=' splits only on the first '='.
-    let custom = kept.iter().find(|(k, _)| k == "CUSTOM_THING").unwrap();
-    assert_eq!(custom.1, "foo=bar baz");
+    assert_eq!(
+        env_get(&env, "CORTEX_SYSLOG_TARGET"),
+        Some("100.88.16.79:1514")
+    );
+    // Preserved as true — NOT reset to the false default.
+    assert_eq!(env_get(&env, "CORTEX_AGENT_DOCKER"), Some("true"));
+    // The file-tail (value has a space AND a colon) round-trips intact.
+    assert_eq!(
+        env_get(&env, "CORTEX_AGENT_FILE_TAILS"),
+        Some("/host/plex-logs/Plex Media Server.log:plex")
+    );
+}
+
+#[test]
+fn resolve_agent_env_flags_override_persisted() {
+    let persisted = vec![
+        (
+            "CORTEX_HEARTBEAT_TARGET".into(),
+            "https://old.example".into(),
+        ),
+        ("CORTEX_HEARTBEAT_TOKEN".into(), "old-token".into()),
+        ("CORTEX_AGENT_DOCKER".into(), "true".into()),
+    ];
+    let cfg = AgentDeployConfig {
+        target: Some("https://new.example".into()),
+        token: Some("new-token".into()),
+        docker: Some(false),
+        journald: None,
+    };
+    let env = resolve_agent_env(&persisted, &cfg);
+    assert_eq!(
+        env_get(&env, "CORTEX_HEARTBEAT_TARGET"),
+        Some("https://new.example")
+    );
+    assert_eq!(env_get(&env, "CORTEX_HEARTBEAT_TOKEN"), Some("new-token"));
+    assert_eq!(env_get(&env, "CORTEX_AGENT_DOCKER"), Some("false"));
+}
+
+#[test]
+fn resolve_agent_env_first_deploy_defaults_and_omits_absent_token() {
+    let env = resolve_agent_env(&[], &AgentDeployConfig::default());
+    // No token anywhere → omitted entirely (no empty/garbage token written).
+    assert_eq!(env_get(&env, "CORTEX_HEARTBEAT_TOKEN"), None);
+    assert_eq!(env_get(&env, "CORTEX_AGENT_DOCKER"), Some("false"));
+    assert_eq!(env_get(&env, "RUST_LOG"), Some("warn"));
+}
+
+#[test]
+fn parse_env_file_splits_on_first_equals_and_skips_blanks_and_comments() {
+    let parsed = parse_env_file("A=1\n\n# comment\nB=x=y z\n");
+    assert_eq!(
+        parsed,
+        vec![
+            ("A".to_string(), "1".to_string()),
+            ("B".to_string(), "x=y z".to_string()),
+        ]
+    );
 }
 
 #[test]
@@ -405,5 +464,5 @@ fn preserved_custom_mount_flags_keeps_only_nonstandard_mounts() {
 #[test]
 fn preserved_custom_mount_flags_empty_on_first_deploy() {
     assert!(preserved_custom_mount_flags("").is_empty());
-    assert!(preserved_custom_env("").is_empty());
+    assert!(parse_env_file("").is_empty());
 }

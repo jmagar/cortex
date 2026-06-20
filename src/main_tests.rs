@@ -458,8 +458,8 @@ fn parse_deploy_agent_preserves_all_options() {
     assert_eq!(hosts, vec!["tootie".to_string(), "dookie".to_string()]);
     assert_eq!(target.as_deref(), Some("https://cortex.example.test"));
     assert_eq!(token.as_deref(), Some("secret"));
-    assert!(docker);
-    assert!(journald);
+    assert_eq!(docker, Some(true));
+    assert_eq!(journald, Some(true));
     assert_eq!(binary.as_deref(), Some("/tmp/cortex"));
 }
 
