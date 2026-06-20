@@ -76,3 +76,6 @@ logs/
 backups/
 /bin/
 .claude/scheduled_tasks.lock
+
+# Local binary artifacts
+plugins/cortex/bin/

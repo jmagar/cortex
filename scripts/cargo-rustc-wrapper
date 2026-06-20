@@ -64,59 +64,83 @@ while [ "$i" -lt "${#args[@]}" ]; do
   i=$((i + 1))
 done
 
-if [ -n "${CORTEX_RUSTC_WRAPPER_DELEGATE:-}" ]; then
-  delegate=("$CORTEX_RUSTC_WRAPPER_DELEGATE" "$rustc")
-elif [ "${CORTEX_RUSTC_WRAPPER_NO_SCCACHE:-0}" != "1" ] && command -v sccache >/dev/null 2>&1; then
-  if sccache --version >/dev/null 2>&1; then
-    delegate=(sccache "$rustc")
-  else
-    echo "cargo-rustc-wrapper: warning: sccache found but --version check failed; falling back to plain rustc (cache disabled)" >&2
-    delegate=("$rustc")
-  fi
+if [ -n "${CARGO_BIN_ARTIFACT_WRAPPER_DELEGATE:-}" ]; then
+  delegate=("$CARGO_BIN_ARTIFACT_WRAPPER_DELEGATE" "$rustc")
+elif [ "${CARGO_BIN_ARTIFACT_WRAPPER_NO_SCCACHE:-0}" != "1" ] \
+  && command -v sccache >/dev/null 2>&1 \
+  && sccache --version >/dev/null 2>&1; then
+  delegate=(sccache "$rustc")
 else
   delegate=("$rustc")
 fi
+
 "${delegate[@]}" "${args[@]}"
 
 if [ -z "$out" ] && [ -n "$out_dir" ] && [ -n "$extra_filename" ]; then
   out="$out_dir/$crate_name$extra_filename"
 fi
 
-# Deploy side effect: keep ~/.local/bin/cortex fresh after RELEASE builds only.
-# - Debug and test builds never deploy: `cargo test` enables the test-support
-#   feature via unification, and that binary must never land on PATH.
-# - The install is atomic (mktemp + mv). mv replaces any existing binary or
-#   symlink rather than writing through it into Cargo's release artifact.
-# - A failed install warns but never fails the compilation.
-if [ "$crate_name" != "cortex" ] || [ "$crate_type" != "bin" ] || [ "$is_test" -eq 1 ] || [ -z "$out" ] || [ ! -x "$out" ]; then
+if [ "$crate_type" != "bin" ] || [ "$is_test" -eq 1 ] || [ -z "$out" ] || [ ! -x "$out" ]; then
   exit 0
 fi
 
 case "$out" in
-  target/release/deps/cortex-*|*/target/release/deps/cortex-*|.cache/cargo/release/deps/cortex-*|*/.cache/cargo/release/deps/cortex-*)
-    ;; # release build — proceed to install
-  */debug/*)
-    exit 0 ;; # debug/test build — never install, expected
-  *)
-    echo "cargo-rustc-wrapper: warning: cortex bin built at unexpected path '$out'; skipping local install" >&2
-    exit 0
-    ;;
+  */deps/"$crate_name"*|*/deps/"${crate_name//-/_}"*) ;;
+  *) exit 0 ;;
 esac
 
-local_bin="${CORTEX_RUSTC_WRAPPER_LOCAL_BIN:-$HOME/.local/bin/cortex}"
-
-deploy_local_bin() {
-  local bin_dir tmp_bin
-  bin_dir="$(dirname "$local_bin")" || return 1
-  mkdir -p "$bin_dir" || return 1
-  tmp_bin="$(mktemp "$bin_dir/.cortex-install.XXXXXX")" || return 1
-  if cp "$out" "$tmp_bin" && chmod 755 "$tmp_bin" && mv -f "$tmp_bin" "$local_bin"; then
-    return 0
+after_target="${out##*target/}"
+profile="unknown"
+target_triple=""
+IFS=/ read -r first second third _rest <<<"$after_target"
+if [ "${second:-}" = "deps" ]; then
+  profile="$first"
+elif [ "${third:-}" = "deps" ]; then
+  target_triple="$first"
+  profile="$second"
+else
+  cache_suffix="${out##*.cache/cargo/}"
+  IFS=/ read -r first second third _rest <<<"$cache_suffix"
+  if [ "${second:-}" = "deps" ]; then
+    profile="$first"
+  elif [ "${third:-}" = "deps" ]; then
+    target_triple="$first"
+    profile="$second"
   fi
-  rm -f "$tmp_bin"
-  return 1
-}
+fi
 
-deploy_local_bin \
-  || echo "cargo-rustc-wrapper: warning: failed to install $out to $local_bin (build unaffected)" >&2
-exit 0
+case "$profile" in
+  release-fast) variant="fast-release" ;;
+  *) variant="$profile" ;;
+esac
+
+ext=""
+case "$out" in
+  *.exe) ext=".exe" ;;
+esac
+
+artifact_base="${crate_name//_/-}"
+if [ -n "$target_triple" ]; then
+  artifact_name="${artifact_base}-${target_triple}-${variant}${ext}"
+else
+  artifact_name="${artifact_base}-${variant}${ext}"
+fi
+
+bin_dir="${CARGO_BIN_ARTIFACT_DIR:-$repo/bin}"
+mkdir -p "$bin_dir"
+install -m 755 "$out" "$bin_dir/$artifact_name"
+install -m 755 "$out" "$bin_dir/${artifact_base}${ext}"
+
+
+if [ "$crate_name" = "cortex" ] && [ "$profile" = "release" ]; then
+  local_bin="${CORTEX_RUSTC_WRAPPER_LOCAL_BIN:-$HOME/.local/bin/cortex}"
+  bin_parent="$(dirname "$local_bin")"
+  mkdir -p "$bin_parent"
+  tmp_bin="$(mktemp "$bin_parent/.cortex-install.XXXXXX")"
+  if install -m 755 "$out" "$tmp_bin" && mv -f "$tmp_bin" "$local_bin"; then
+    :
+  else
+    rm -f "$tmp_bin"
+    echo "cargo-rustc-wrapper: warning: failed to install $out to $local_bin (build unaffected)" >&2
+  fi
+fi

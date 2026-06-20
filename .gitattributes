@@ -1,2 +1,1 @@
-# Binary plugin distributions — tracked via Git LFS
-plugins/*/bin/* filter=lfs diff=lfs merge=lfs -text
+# Git attributes for cortex. Binary artifacts are local build outputs and are ignored.
