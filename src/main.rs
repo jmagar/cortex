@@ -253,8 +253,8 @@ fn run_deploy_agent(
     explicit_hosts: Vec<String>,
     target: Option<String>,
     token: Option<String>,
-    docker: bool,
-    journald: bool,
+    docker: Option<bool>,
+    journald: Option<bool>,
     binary: Option<String>,
 ) -> Result<()> {
     use cortex::agent_deploy::{
@@ -537,8 +537,9 @@ enum DeployCommandKind {
         hosts: Vec<String>,
         target: Option<String>,
         token: Option<String>,
-        docker: bool,
-        journald: bool,
+        /// `None` = flag not passed → preserve the host's existing value.
+        docker: Option<bool>,
+        journald: Option<bool>,
         binary: Option<String>,
     },
 }
@@ -850,8 +851,9 @@ fn parse_deploy_command(args: &[String]) -> Result<DeployCommand> {
     let mut agent_hosts: Vec<String> = Vec::new();
     let mut agent_target: Option<String> = None;
     let mut agent_token: Option<String> = None;
-    let mut agent_docker = false;
-    let mut agent_journald = false;
+    // `None` = flag not passed → preserve the host's existing setting on upgrade.
+    let mut agent_docker: Option<bool> = None;
+    let mut agent_journald: Option<bool> = None;
     let mut agent_binary: Option<String> = None;
     let mut i = 0usize;
     while i < rest.len() {
@@ -898,8 +900,8 @@ fn parse_deploy_command(args: &[String]) -> Result<DeployCommand> {
                         .clone(),
                 );
             }
-            "--docker" if subcommand == "agent" => agent_docker = true,
-            "--journald" if subcommand == "agent" => agent_journald = true,
+            "--docker" if subcommand == "agent" => agent_docker = Some(true),
+            "--journald" if subcommand == "agent" => agent_journald = Some(true),
             other if subcommand == "remote" && !other.starts_with('-') => {
                 if host.replace(other.to_string()).is_some() {
                     anyhow::bail!("deploy remote accepts exactly one host");

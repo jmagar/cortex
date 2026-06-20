@@ -41,8 +41,10 @@ impl HostProbe {
 pub struct AgentDeployConfig {
     pub target: Option<String>,
     pub token: Option<String>,
-    pub docker: bool,
-    pub journald: bool,
+    /// `None` = not specified on the CLI → preserve the host's existing value on
+    /// an upgrade (rather than reset to the default).
+    pub docker: Option<bool>,
+    pub journald: Option<bool>,
 }
 
 #[derive(Debug, Clone)]
@@ -329,10 +331,10 @@ fn run_deploy(host: &str, local_binary: &Path, config: &AgentDeployConfig) -> io
     if let Some(t) = &config.token {
         env_pairs.push(format!("CORTEX_HEARTBEAT_TOKEN={}", shell_quote(t)));
     }
-    if config.docker {
+    if config.docker == Some(true) {
         env_pairs.push("CORTEX_AGENT_DOCKER=true".to_string());
     }
-    if config.journald {
+    if config.journald == Some(true) {
         env_pairs.push("CORTEX_AGENT_JOURNALD=true".to_string());
     }
     if let Some(syslog_target) = deploy_syslog_target(config.target.as_deref()) {
@@ -381,13 +383,18 @@ fn run_deploy_unraid(
     ssh_run(host, &format!("mkdir -p {UNRAID_APPDATA}"))?;
     ssh_run(host, &format!("docker pull {image}"))?;
 
-    // Config-preserving upgrade: carry forward any custom env (e.g. a Plex
-    // CORTEX_AGENT_FILE_TAILS) from the persisted env file, and any custom mounts
-    // (e.g. the host log dir that file-tail reads) from the running container, so
-    // a redeploy doesn't reset the agent to flag defaults. Both reads are
-    // best-effort (`|| true`): a first-time deploy has neither.
-    let preserved_env = preserved_custom_env(
-        &ssh_capture(host, &format!("cat {UNRAID_ENV} 2>/dev/null || true")).unwrap_or_default(),
+    // Config-preserving upgrade: resolve the container env from the host's
+    // persisted heartbeat-agent.env (flag > persisted > default per key, custom
+    // keys like CORTEX_AGENT_FILE_TAILS carried through), and carry forward any
+    // non-standard mounts (e.g. the host log dir a file-tail reads) from the
+    // running container. Both reads are best-effort (`|| true`): a first-time
+    // deploy has neither, and resolve_agent_env falls back to flag defaults.
+    let env_pairs = resolve_agent_env(
+        &parse_env_file(
+            &ssh_capture(host, &format!("cat {UNRAID_ENV} 2>/dev/null || true"))
+                .unwrap_or_default(),
+        ),
+        config,
     );
     let custom_mounts: String = preserved_custom_mount_flags(
         &ssh_capture(
@@ -398,44 +405,8 @@ fn run_deploy_unraid(
     )
     .concat();
 
-    // Build env key=value pairs for both the persistent env file and the -e flags
-    // passed directly to docker run. We use -e flags (not --env-file) to avoid
-    // any shell-quoting or whitespace ambiguity that arises when writing values
-    // via `echo` over SSH and then reading them back with Docker's env-file parser.
-    let target = config
-        .target
-        .as_deref()
-        .unwrap_or(crate::heartbeat_agent::DEFAULT_TARGET);
-    let mut env_pairs: Vec<(String, String)> = vec![
-        ("CORTEX_HEARTBEAT_TARGET".into(), target.to_string()),
-        ("RUST_LOG".into(), "warn".into()),
-        (
-            "CORTEX_SYSLOG_TARGET".into(),
-            deploy_syslog_target(Some(target)).unwrap_or_else(|| "127.0.0.1:1514".into()),
-        ),
-        (
-            "CORTEX_AGENT_DOCKER".into(),
-            if config.docker { "true" } else { "false" }.into(),
-        ),
-        (
-            "CORTEX_AGENT_DOCKER_URL".into(),
-            crate::heartbeat_agent::DEFAULT_DOCKER_URL.into(),
-        ),
-        // journald has no meaning inside a container — suppress it for Unraid.
-        ("CORTEX_AGENT_JOURNALD".into(), "false".into()),
-        (
-            "CORTEX_AGENT_SYSLOG_FILE".into(),
-            UNRAID_CONTAINER_SYSLOG.into(),
-        ),
-    ];
-    if let Some(t) = &config.token {
-        env_pairs.push(("CORTEX_HEARTBEAT_TOKEN".into(), t.clone()));
-    }
-    // Append any preserved custom env so it lands in both the env file and the
-    // -e flags below (managed keys already set above win over any stale copy).
-    env_pairs.extend(preserved_env);
-
-    // Write a persistent env file for reference / manual restarts, then chmod 600.
+    // Persist the resolved env (reference / manual restarts), then chmod 600. The
+    // -e flags below pass values verbatim to docker run (no env-file parsing).
     let mut write_cmd = format!("rm -f {UNRAID_ENV}");
     for (k, v) in &env_pairs {
         write_cmd.push_str(&format!(
@@ -496,20 +467,109 @@ fn deploy_syslog_target(heartbeat_target: Option<&str>) -> Option<String> {
         })
 }
 
-/// Env keys the deploy sets from its CLI flags. Anything else found in an
-/// existing agent env file (e.g. `CORTEX_AGENT_FILE_TAILS`) is custom config a
-/// prior deploy or manual edit added, and an upgrade must carry it forward
-/// rather than reset the agent to flag defaults.
-const MANAGED_ENV_KEYS: &[&str] = &[
-    "CORTEX_HEARTBEAT_TARGET",
-    "RUST_LOG",
-    "CORTEX_SYSLOG_TARGET",
-    "CORTEX_AGENT_DOCKER",
-    "CORTEX_AGENT_DOCKER_URL",
-    "CORTEX_AGENT_JOURNALD",
-    "CORTEX_AGENT_SYSLOG_FILE",
-    "CORTEX_HEARTBEAT_TOKEN",
-];
+/// Parse an existing `heartbeat-agent.env` into ordered `(key, value)` pairs.
+/// Splits on the first `=` so values containing `=`/spaces/`:` (file-tail specs)
+/// round-trip intact; blank lines and comments are skipped.
+fn parse_env_file(contents: &str) -> Vec<(String, String)> {
+    contents
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .filter_map(|line| line.split_once('='))
+        .map(|(k, v)| (k.trim().to_string(), v.to_string()))
+        .filter(|(k, _)| !k.is_empty())
+        .collect()
+}
+
+/// Resolve the agent container env for a (re)deploy using precedence
+/// **flag > persisted > default** for each managed key, then carry every other
+/// key from the persisted env through unchanged (e.g. `CORTEX_AGENT_FILE_TAILS`).
+///
+/// This makes an upgrade config-preserving: running `cortex deploy agent` with no
+/// flags keeps the host's existing target, token, docker/journald settings, and
+/// custom additions, instead of resetting them to defaults. Output order is
+/// deterministic (managed block in a fixed order, then custom keys sorted).
+fn resolve_agent_env(
+    persisted: &[(String, String)],
+    config: &AgentDeployConfig,
+) -> Vec<(String, String)> {
+    use std::collections::{HashMap, HashSet};
+    let prev: HashMap<&str, &str> = persisted
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.as_str()))
+        .collect();
+    let prev_get = |k: &str| prev.get(k).map(|s| s.to_string());
+
+    // Effective heartbeat target (flag > persisted > default) drives syslog derivation.
+    let target = config
+        .target
+        .clone()
+        .or_else(|| prev_get("CORTEX_HEARTBEAT_TARGET"))
+        .unwrap_or_else(|| crate::heartbeat_agent::DEFAULT_TARGET.to_string());
+
+    // A new --target re-derives the syslog target; otherwise keep the persisted
+    // value (falling back to a derivation for first-time deploys).
+    let syslog_target = if config.target.is_some() {
+        deploy_syslog_target(Some(&target)).unwrap_or_else(|| "127.0.0.1:1514".into())
+    } else {
+        prev_get("CORTEX_SYSLOG_TARGET")
+            .or_else(|| deploy_syslog_target(Some(&target)))
+            .unwrap_or_else(|| "127.0.0.1:1514".into())
+    };
+
+    let bool_key = |flag: Option<bool>, key: &str| -> String {
+        match flag {
+            Some(b) => b.to_string(),
+            None => prev_get(key).unwrap_or_else(|| "false".into()),
+        }
+    };
+
+    let mut out: Vec<(String, String)> = vec![
+        ("CORTEX_HEARTBEAT_TARGET".into(), target),
+        (
+            "RUST_LOG".into(),
+            prev_get("RUST_LOG").unwrap_or_else(|| "warn".into()),
+        ),
+        ("CORTEX_SYSLOG_TARGET".into(), syslog_target),
+        (
+            "CORTEX_AGENT_DOCKER".into(),
+            bool_key(config.docker, "CORTEX_AGENT_DOCKER"),
+        ),
+        (
+            "CORTEX_AGENT_DOCKER_URL".into(),
+            prev_get("CORTEX_AGENT_DOCKER_URL")
+                .unwrap_or_else(|| crate::heartbeat_agent::DEFAULT_DOCKER_URL.to_string()),
+        ),
+        // journald is meaningless inside a container — always false on Unraid,
+        // regardless of any flag or persisted value.
+        ("CORTEX_AGENT_JOURNALD".into(), "false".into()),
+        (
+            "CORTEX_AGENT_SYSLOG_FILE".into(),
+            prev_get("CORTEX_AGENT_SYSLOG_FILE")
+                .unwrap_or_else(|| UNRAID_CONTAINER_SYSLOG.to_string()),
+        ),
+    ];
+    // Token: flag wins, else preserve the persisted token. Omitted if neither
+    // exists (no auth configured).
+    if let Some(token) = config
+        .token
+        .clone()
+        .or_else(|| prev_get("CORTEX_HEARTBEAT_TOKEN"))
+    {
+        out.push(("CORTEX_HEARTBEAT_TOKEN".into(), token));
+    }
+
+    // Carry remaining custom keys (file-tails, etc.) in stable sorted order.
+    let managed: HashSet<&str> = out.iter().map(|(k, _)| k.as_str()).collect();
+    let mut custom: Vec<(String, String)> = persisted
+        .iter()
+        .filter(|(k, _)| !managed.contains(k.as_str()))
+        .cloned()
+        .collect();
+    custom.sort_by(|a, b| a.0.cmp(&b.0));
+    out.extend(custom);
+    out
+}
 
 /// Container mount destinations the deploy always provides itself. A mount with
 /// any other destination (e.g. host log dirs a file-tail reads) is custom and
@@ -524,19 +584,6 @@ const STANDARD_MOUNT_DESTS: &[&str] = &[
 /// mount. Uses `{{"\t"}}`/`{{"\n"}}` (Go interprets those) so the separators are
 /// real control chars, not literal backslash sequences.
 const MOUNT_INSPECT_TMPL: &str = r#"{{range .Mounts}}{{.Source}}{{"\t"}}{{.Destination}}{{"\t"}}{{if .RW}}rw{{else}}ro{{end}}{{"\n"}}{{end}}"#;
-
-/// Parse an existing agent env file into the (key, value) pairs whose keys are
-/// NOT managed by deploy flags — the custom additions an upgrade preserves.
-/// Splits on the first `=` so values containing `=`/spaces/`:` (file-tail specs)
-/// round-trip intact.
-fn preserved_custom_env(existing_env_file: &str) -> Vec<(String, String)> {
-    existing_env_file
-        .lines()
-        .filter_map(|line| line.split_once('='))
-        .map(|(k, v)| (k.trim().to_string(), v.to_string()))
-        .filter(|(k, _)| !k.is_empty() && !MANAGED_ENV_KEYS.contains(&k.as_str()))
-        .collect()
-}
 
 /// From `MOUNT_INSPECT_TMPL` output, return `-v source:dest[:ro]` flags for any
 /// mount whose destination the deploy doesn't already provide, so a custom mount
