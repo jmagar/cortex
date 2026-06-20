@@ -187,6 +187,7 @@ fn ai_doctor_report(
         schema_current: true,
         claude_root,
         codex_root,
+        gemini_root: root_status(false, false),
         checkpoint_count: 0,
         checkpoint_error_count: 0,
         missing_checkpoint_count: 0,

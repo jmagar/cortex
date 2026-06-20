@@ -494,7 +494,7 @@ Each stored log entry has these fields:
 | `message` | text | Log message body (FTS5-indexed) |
 | `received_at` | text | Server-side receipt timestamp (RFC 3339, UTC). Used for retention. |
 | `source_ip` | text | Source identifier. Syslog entries use the exact network sender address (`IP:port`) captured from the packet/connection peer. OTLP rows use the peer IP without the ephemeral source port. Docker ingest stream rows use `docker://host/container/stream`; Docker lifecycle event rows use `docker-event://host/container/action`. |
-| `ai_tool` | text\|null | AI tool name (e.g. `claude`, `codex`) |
+| `ai_tool` | text\|null | AI tool name (e.g. `claude`, `codex`, `gemini`) |
 | `ai_project` | text\|null | AI project path |
 | `ai_session_id` | text\|null | AI session unique identifier |
 | `ai_transcript_path` | text\|null | Full path to the source transcript file |
@@ -503,19 +503,22 @@ Each stored log entry has these fields:
 ### AI transcript indexing
 
 `cortex ai index` scans the default local transcript roots
-`~/.claude/projects` and `~/.codex/sessions`; `cortex ai index --path PATH`
-can scan a known transcript directory or one explicit `.jsonl` file, and
+`~/.claude/projects`, `~/.codex/sessions`, and `~/.gemini/tmp`; `cortex ai index --path PATH`
+can scan a known transcript directory or one explicit supported transcript file, and
 `cortex ai add --file FILE` imports one file. Recursive scans are limited to
-`~/.claude/projects`, `~/.codex/sessions`, or their children; broad roots such
+`~/.claude/projects`, `~/.codex/sessions`, `~/.gemini/tmp`, or their children; broad roots such
 as `/`, `$HOME`, and the current repo root are rejected before walking. The
-scanner skips symlinks, counts unsupported non-`.jsonl` files without parsing
-them, and streams transcript files line-by-line in bounded SQLite chunks. Use
+scanner skips symlinks, counts unsupported files without parsing them, and
+streams JSONL transcript files line-by-line in bounded SQLite chunks. Gemini
+chat files are imported from `~/.gemini/tmp/*/chats/session-*.json`; when a
+Gemini file has only `projectHash`, Cortex stores the project as
+`gemini://project/<hash>` so session inventory remains queryable. Use
 `--force` to reimport a transcript path from scratch after parser changes,
 `--since RFC3339` to scan only recently modified files, and
 `cortex ai checkpoints --errors` plus `cortex ai errors` to inspect structured
 scanner failures.
 
-For real-time local Claude/Codex transcript ingestion, install the host-local
+For real-time local Claude/Codex/Gemini transcript ingestion, install the host-local
 watch service:
 
 ```bash
@@ -525,10 +528,11 @@ cortex setup ai-watch-service remove
 ```
 
 The watcher runs outside Docker because it needs host access to
-`~/.claude/projects` and `~/.codex/sessions`. It writes to the configured live
-SQLite DB and delegates every stable changed `.jsonl` file to the same scanner
-path used by `cortex ai add --file FILE`. Installing the watcher disables the
-older polling timer so both helpers do not scan the same files.
+`~/.claude/projects`, `~/.codex/sessions`, and `~/.gemini/tmp`. It writes to the configured live
+SQLite DB and delegates every stable changed supported transcript file to the
+same scanner path used by `cortex ai add --file FILE`; Gemini `session-*.json`
+chat files use the same checkpoint and duplicate-suppression path. Installing the watcher
+disables the older polling timer so both helpers do not scan the same files.
 
 The optional polling fallback is still available:
 

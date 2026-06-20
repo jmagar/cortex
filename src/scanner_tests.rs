@@ -1,7 +1,8 @@
 use super::*;
 use crate::config::StorageConfig;
 use crate::db::{
-    SearchAiSessionsParams, SearchParams, init_pool, search_ai_sessions, search_logs, tail_logs,
+    SearchAiSessionsParams, SearchParams, init_pool, list_ai_sessions, search_ai_sessions,
+    search_logs, tail_logs,
 };
 use serial_test::serial;
 
@@ -621,11 +622,15 @@ fn scanner_exposes_default_roots_and_supported_file_policy() {
     let roots = default_transcript_roots();
     assert!(roots.iter().any(|path| path.ends_with(".claude/projects")));
     assert!(roots.iter().any(|path| path.ends_with(".codex/sessions")));
+    assert!(roots.iter().any(|path| path.ends_with(".gemini/tmp")));
     assert!(is_supported_transcript_file(std::path::Path::new(
         "session.jsonl"
     )));
+    assert!(is_supported_transcript_file(std::path::Path::new(
+        ".gemini/tmp/hash/chats/session-2026-04-02T22-02-da13.json"
+    )));
     assert!(!is_supported_transcript_file(std::path::Path::new(
-        "session.json"
+        ".gemini/tmp/hash/chats/notes.json"
     )));
 }
 
@@ -703,7 +708,7 @@ fn rewritten_file_falls_back_to_duplicate_safe_full_scan() {
 
 #[test]
 #[serial]
-fn index_roots_default_scans_claude_and_codex_roots() {
+fn index_roots_default_scans_claude_codex_and_gemini_roots() {
     let (pool, dir) = test_pool();
     let _home = HomeOverride::set(dir.path());
 
@@ -731,10 +736,30 @@ fn index_roots_default_scans_claude_and_codex_roots() {
     )
     .unwrap();
 
+    let gemini_root = dir.path().join(".gemini/tmp/hash/chats");
+    std::fs::create_dir_all(&gemini_root).unwrap();
+    std::fs::write(
+        gemini_root.join("session-2026-04-02T22-02-da13.json"),
+        r#"{
+          "sessionId": "gemini-default",
+          "projectHash": "hash",
+          "startTime": "2026-04-02T22:02:55.537Z",
+          "messages": [
+            {
+              "id": "gemini-message",
+              "timestamp": "2026-04-02T22:03:29.818Z",
+              "type": "gemini",
+              "content": "default gemini root"
+            }
+          ]
+        }"#,
+    )
+    .unwrap();
+
     let result = index_roots(&pool, None).unwrap();
 
-    assert_eq!(result.discovered_files, 2);
-    assert_eq!(result.ingested, 2);
+    assert_eq!(result.discovered_files, 3);
+    assert_eq!(result.ingested, 3);
     let claude = search_ai_sessions(
         &pool,
         &SearchAiSessionsParams {
@@ -759,6 +784,30 @@ fn index_roots_default_scans_claude_and_codex_roots() {
     assert_eq!(codex.sessions[0].ai_tool, "codex");
     assert_eq!(codex.sessions[0].ai_project, "/tmp/default-codex");
     assert_eq!(codex.sessions[0].ai_session_id, "codex-default");
+
+    let (gemini_tool, gemini_session): (String, String) = pool
+        .get()
+        .unwrap()
+        .query_row(
+            "SELECT ai_tool, ai_session_id FROM logs WHERE ai_tool = 'gemini'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(gemini_tool, "gemini");
+    assert_eq!(gemini_session, "gemini-default");
+    let gemini_sessions = list_ai_sessions(
+        &pool,
+        &crate::db::ListAiSessionsParams {
+            ai_project: Some("gemini://project/hash".into()),
+            ai_tool: Some("gemini".into()),
+            limit: Some(10),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(gemini_sessions.len(), 1);
+    assert_eq!(gemini_sessions[0].ai_session_id, "gemini-default");
 }
 
 #[test]

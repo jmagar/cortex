@@ -311,22 +311,26 @@ are returned.
 
 ### `cortex ai index`
 
-Explicitly scan local transcript roots (`~/.claude/projects`, `~/.codex/sessions`) or one `--path`.
+Explicitly scan local transcript roots (`~/.claude/projects`, `~/.codex/sessions`, `~/.gemini/tmp`) or one `--path`.
 
 ```bash
 cortex ai index
 cortex ai index --path ~/.claude/projects
 cortex ai index --since 2026-05-14T00:00:00Z
 cortex ai index --path ~/.codex/sessions --force
+cortex ai index --path ~/.gemini/tmp
 ```
 
 Path policy is intentionally narrow. Recursive `--path` scans are accepted only
 for known transcript roots (`~/.claude/projects`, `~/.codex/sessions`) or their
-children; one explicit `.jsonl` file can be imported outside those roots.
+children, plus `~/.gemini/tmp` for Gemini chat files; one explicit `.jsonl` file
+can be imported outside those roots.
 `--path /`, `--path $HOME`, and the repo root are rejected before walking, and
-symlinks are skipped. Directories are scanned only for `.jsonl` transcript
-files, unsupported files are counted but not parsed, and each file is streamed
-line-by-line with chunked SQLite transactions. If storage guardrails cannot
+symlinks are skipped. Directories are scanned only for supported transcript
+files, unsupported files are counted but not parsed, and JSONL files are streamed
+line-by-line with chunked SQLite transactions. Gemini chat files are imported
+from `~/.gemini/tmp/*/chats/session-*.json`; when only `projectHash` is present,
+the indexed project is `gemini://project/<hash>`. If storage guardrails cannot
 recover enough space, indexing fails before committing additional chunks.
 
 `--since TIME` skips files whose filesystem modification time is older than the
@@ -348,12 +352,13 @@ log rows.
 
 ### `cortex ai watch`
 
-Watch local Claude/Codex transcript roots and index stable changed `.jsonl`
-files as they are written.
+Watch local Claude/Codex/Gemini transcript roots and index stable changed
+transcript files as they are written.
 
 ```bash
 cortex ai watch
 cortex ai watch --path ~/.claude/projects --no-initial-scan
+cortex ai watch --path ~/.gemini/tmp --no-initial-scan
 cortex ai watch --debounce-ms 750 --settle-ms 500 --max-retries 5 --json
 ```
 
@@ -519,7 +524,7 @@ writes a private environment file under `~/.config/cortex/`, runs one
 initial `cortex ai index --json` phase, disables the older polling timer, and
 starts `syslog-ai-watch.service` with `cortex ai watch --no-initial-scan
 --json`. The helper is intentionally outside the container because it must read
-host-local Claude/Codex transcript files; Docker Compose remains the
+host-local Claude/Codex/Gemini transcript files; Docker Compose remains the
 server/query deployment. Remove events from watched transcript files trigger a
 bounded missing-checkpoint prune pass, which keeps scanner/checkpoint metadata
 from accumulating entries for deleted local session files without deleting
@@ -630,7 +635,8 @@ cortex setup ai-index-timer remove
 ```
 
 This helper is intentionally not part of the Docker container. It scans
-host-local transcript roots (`~/.claude/projects`, `~/.codex/sessions`) using a
+host-local transcript roots (`~/.claude/projects`, `~/.codex/sessions`,
+`~/.gemini/tmp`) using a
 host `cortex` binary, then writes to the configured SQLite DB. Prefer
 `cortex setup ai-watch-service install` for normal use; the watcher install
 disables this timer to avoid duplicate background ingestion loops.

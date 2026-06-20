@@ -14,6 +14,7 @@ use crate::receiver::enrichment::{project_from_transcript_path, scrub_ai_message
 mod checkpoint;
 mod claude;
 mod codex;
+mod gemini;
 
 pub use checkpoint::CheckpointStore;
 
@@ -125,6 +126,7 @@ pub struct AiDoctorReport {
     pub schema_current: bool,
     pub claude_root: TranscriptRootStatus,
     pub codex_root: TranscriptRootStatus,
+    pub gemini_root: TranscriptRootStatus,
     pub checkpoint_count: i64,
     pub checkpoint_error_count: i64,
     pub missing_checkpoint_count: i64,
@@ -173,6 +175,7 @@ pub struct TranscriptRootStatus {
 enum SourceKind {
     ClaudeProject,
     CodexSession,
+    GeminiSession,
     ExplicitFile,
 }
 
@@ -181,6 +184,7 @@ impl SourceKind {
         match self {
             Self::ClaudeProject => "claude_project",
             Self::CodexSession => "codex_session",
+            Self::GeminiSession => "gemini_session",
             Self::ExplicitFile => "explicit_file",
         }
     }
@@ -263,7 +267,7 @@ impl std::fmt::Display for PathScanError {
             }
             Self::UnsafePath(path) => write!(
                 f,
-                "unsafe transcript scan path: {}; pass a known transcript root or one .jsonl file",
+                "unsafe transcript scan path: {}; pass a known transcript root or one supported transcript file",
                 path.display()
             ),
             Self::FileTooLarge(path) => write!(f, "file exceeds max size: {}", path.display()),
@@ -278,7 +282,11 @@ fn is_known_transcript_root(path: &Path) -> bool {
     let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
         return false;
     };
-    let allowed = [home.join(".claude/projects"), home.join(".codex/sessions")];
+    let allowed = [
+        home.join(".claude/projects"),
+        home.join(".codex/sessions"),
+        home.join(".gemini/tmp"),
+    ];
     allowed
         .iter()
         .any(|root| path == root || path.starts_with(root))
@@ -451,6 +459,16 @@ pub fn index_file_with_options(
             discovered_files: 1,
             ..Default::default()
         });
+    }
+    if source_kind == SourceKind::GeminiSession {
+        return index_gemini_file(
+            pool,
+            storage,
+            source_id,
+            &canonical_path,
+            &canonical,
+            &current_metadata,
+        );
     }
     let append_start = if !options.force {
         match stored_metadata.as_ref() {
@@ -850,9 +868,13 @@ fn collect_supported_files(path: &Path, files: &mut Vec<PathBuf>, result: &mut I
 
 fn supported_discovered_file(path: &Path) -> bool {
     matches!(path.extension().and_then(|ext| ext.to_str()), Some("jsonl"))
+        || gemini::is_chat_file(path)
 }
 
 fn detect_explicit_file_source_kind(path: &Path) -> Result<SourceKind> {
+    if gemini::is_chat_file(path) {
+        return Ok(SourceKind::GeminiSession);
+    }
     let file = fs::File::open(path)?;
     let mut reader = BufReader::new(file);
     let mut hasher = Sha256::new();
@@ -900,6 +922,8 @@ fn detect_source_kind(path: &Path) -> SourceKind {
     let display = path.to_string_lossy();
     if display.contains(".codex/sessions") {
         SourceKind::CodexSession
+    } else if display.contains(".gemini/tmp") {
+        SourceKind::GeminiSession
     } else if display.contains(".claude/projects") {
         SourceKind::ClaudeProject
     } else {
@@ -912,6 +936,7 @@ impl SourceKind {
         match source_kind {
             "codex_session" => Self::CodexSession,
             "claude_project" => Self::ClaudeProject,
+            "gemini_session" => Self::GeminiSession,
             _ => detect_source_kind(path),
         }
     }
@@ -919,6 +944,7 @@ impl SourceKind {
     fn tool_name(self) -> &'static str {
         match self {
             Self::CodexSession => "codex",
+            Self::GeminiSession => "gemini",
             Self::ClaudeProject | Self::ExplicitFile => "claude",
         }
     }
@@ -932,6 +958,7 @@ fn parse_line_for_source(
 ) -> Result<Option<ParsedTranscriptRecord>> {
     match source_kind {
         SourceKind::CodexSession => codex::parse_line(line, path, line_no),
+        SourceKind::GeminiSession => gemini::parse_line(line, path, line_no),
         SourceKind::ClaudeProject | SourceKind::ExplicitFile => {
             claude::parse_line(line, path, line_no)
         }
@@ -942,6 +969,7 @@ fn project_for_file(source_kind: SourceKind, path: &Path) -> Option<String> {
     match source_kind {
         SourceKind::ClaudeProject => project_from_transcript_path(&path.to_string_lossy()),
         SourceKind::CodexSession => None,
+        SourceKind::GeminiSession => None,
         SourceKind::ExplicitFile => std::env::current_dir()
             .ok()
             .map(|path| path.to_string_lossy().to_string()),
@@ -963,6 +991,115 @@ fn update_codex_fallbacks(
     if let Some(session_id) = codex::session_id_from_line(line) {
         *fallback_session_id = Some(session_id);
     }
+}
+
+fn index_gemini_file(
+    pool: &DbPool,
+    storage: Option<&StorageConfig>,
+    source_id: i64,
+    path: &Path,
+    canonical: &str,
+    current_metadata: &FileMetadata,
+) -> Result<IndexResult> {
+    let raw = fs::read_to_string(path).context("Gemini transcript is not valid UTF-8")?;
+    let file_hash = hash_text(&raw);
+    let records = gemini::parse_file(&raw, path)?;
+    let mut result = IndexResult {
+        discovered_files: 1,
+        ..Default::default()
+    };
+    let mut batch = Vec::new();
+    let mut imports = Vec::new();
+    let mut chunk_bytes = 0usize;
+    let host = local_hostname();
+    let tool = SourceKind::GeminiSession.tool_name();
+    for (record_index, parsed) in records.into_iter().enumerate() {
+        let record_key = parsed.record_key;
+        let message = scrub_ai_message(&parsed.message, None);
+        let project = accept_metadata_field(
+            parsed.ai_project.as_deref(),
+            MAX_AI_PROJECT_CHARS,
+            "ai_project",
+            canonical,
+            &mut result,
+        );
+        let session_id = accept_metadata_field(
+            parsed.session_id.as_deref(),
+            MAX_AI_SESSION_ID_CHARS,
+            "ai_session_id",
+            canonical,
+            &mut result,
+        );
+        let transcript_path = accept_metadata_field(
+            Some(canonical),
+            MAX_TRANSCRIPT_PATH_CHARS,
+            "ai_transcript_path",
+            canonical,
+            &mut result,
+        );
+        let metadata_json = bounded_metadata_json(serde_json::json!({
+            "source_type": "transcript",
+            "source_kind": SourceKind::GeminiSession.as_str(),
+            "tool": tool,
+            "canonical_path": canonical,
+            "record_index": record_index,
+            "record_key": record_key,
+            "content_scrubbed": true,
+        }));
+        let entry = LogBatchEntry {
+            timestamp: normalize_timestamp(parsed.timestamp.as_deref())?,
+            hostname: host.clone(),
+            facility: Some("transcript".to_string()),
+            severity: "info".to_string(),
+            app_name: Some(format!("{tool}-transcript")),
+            process_id: None,
+            raw: message.clone(),
+            message,
+            source_ip: format!("transcript://{}", SourceKind::GeminiSession.as_str()),
+            docker_checkpoint: None,
+            ai_tool: Some(tool.to_string()),
+            ai_project: project,
+            ai_session_id: session_id,
+            ai_transcript_path: transcript_path,
+            metadata_json: Some(metadata_json),
+            http_status: None,
+            auth_outcome: None,
+            dns_blocked: None,
+            event_action: None,
+            parse_error: None,
+        };
+        chunk_bytes = chunk_bytes.saturating_add(log_entry_string_bytes(&entry));
+        batch.push(entry);
+        imports.push(record_key);
+        if batch.len() >= MAX_INDEX_CHUNK_RECORDS || chunk_bytes >= MAX_INDEX_CHUNK_BYTES {
+            if !flush_chunk(
+                pool,
+                storage,
+                source_id,
+                &mut batch,
+                &mut imports,
+                None,
+                &mut result,
+            )? {
+                return Ok(result);
+            }
+            chunk_bytes = 0;
+        }
+    }
+    let final_metadata = FileMetadata::from_path_metadata(path)?;
+    let completion_metadata = current_metadata
+        .same_size_and_mtime(&final_metadata)
+        .then(|| current_metadata.clone().with_hash_from_hex(file_hash));
+    let _ = flush_chunk(
+        pool,
+        storage,
+        source_id,
+        &mut batch,
+        &mut imports,
+        completion_metadata.as_ref(),
+        &mut result,
+    )?;
+    Ok(result)
 }
 
 fn merge_result(total: &mut IndexResult, next: &IndexResult) {
@@ -1174,7 +1311,13 @@ fn read_bounded_line<R: BufRead>(reader: &mut R, hasher: &mut Sha256) -> Result<
 fn default_roots() -> Vec<PathBuf> {
     std::env::var_os("HOME")
         .map(PathBuf::from)
-        .map(|home| vec![home.join(".claude/projects"), home.join(".codex/sessions")])
+        .map(|home| {
+            vec![
+                home.join(".claude/projects"),
+                home.join(".codex/sessions"),
+                home.join(".gemini/tmp"),
+            ]
+        })
         .unwrap_or_default()
 }
 
@@ -1210,6 +1353,11 @@ impl FileMetadata {
 
     fn with_hash(mut self, hash: &[u8]) -> Self {
         self.content_hash = hex_digest(hash);
+        self
+    }
+
+    fn with_hash_from_hex(mut self, hash: String) -> Self {
+        self.content_hash = hash;
         self
     }
 

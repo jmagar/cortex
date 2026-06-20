@@ -161,6 +161,27 @@ pub(crate) fn print_ai_doctor_response(response: &AiDoctorReport, json: bool) ->
             warn("false")
         }
     );
+    let gr = &response.gemini_root;
+    println!(
+        "{}: {} ({}, readable={}, writable={}, owner={:?}:{:?}, mode={:?}, strict_ok={})",
+        muted("gemini_root"),
+        primary(&gr.path),
+        if gr.exists {
+            success("exists")
+        } else {
+            warn("missing")
+        },
+        gr.readable,
+        gr.writable,
+        gr.owner_uid,
+        gr.owner_gid,
+        gr.mode.map(|m| format!("{m:o}")),
+        if gr.strict_ok {
+            success("true")
+        } else {
+            warn("false")
+        }
+    );
     println!(
         "{}: {}",
         muted("checkpoint_count"),

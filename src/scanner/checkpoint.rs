@@ -372,7 +372,7 @@ impl<'a> CheckpointStore<'a> {
                 missing_checkpoint_count += 1;
             }
         }
-        let (claude_root, codex_root) = default_root_statuses();
+        let (claude_root, codex_root, gemini_root) = default_root_statuses();
         Ok(AiDoctorReport {
             db_path: db_path.display().to_string(),
             db_schema_version: schema.version,
@@ -381,6 +381,7 @@ impl<'a> CheckpointStore<'a> {
             schema_current: schema.version >= schema.known_version,
             claude_root,
             codex_root,
+            gemini_root,
             checkpoint_count,
             checkpoint_error_count,
             missing_checkpoint_count,
@@ -490,15 +491,21 @@ impl<'a> CheckpointStore<'a> {
     }
 }
 
-fn default_root_statuses() -> (TranscriptRootStatus, TranscriptRootStatus) {
+fn default_root_statuses() -> (
+    TranscriptRootStatus,
+    TranscriptRootStatus,
+    TranscriptRootStatus,
+) {
     let home = std::env::var_os("HOME")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| std::path::PathBuf::from(""));
     let claude = home.join(".claude/projects");
     let codex = home.join(".codex/sessions");
+    let gemini = home.join(".gemini/tmp");
     (
         transcript_root_status(&claude),
         transcript_root_status(&codex),
+        transcript_root_status(&gemini),
     )
 }
 
