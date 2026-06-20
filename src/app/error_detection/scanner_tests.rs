@@ -1,6 +1,6 @@
 // scanner_tests.rs
 use super::{NORMALIZER_VERSION, process_chunk};
-use crate::config::StorageConfig;
+use crate::config::{ErrorDetectionConfig, StorageConfig};
 use crate::db::{self, DbPool};
 use tempfile::TempDir;
 
@@ -110,6 +110,44 @@ fn test_process_chunk_notifies_above_threshold() {
         count, 1,
         "one outbox notification above frequency_threshold"
     );
+}
+
+#[test]
+fn test_default_excludes_skip_warning_healthcheck_noise() {
+    let (pool, _dir) = test_pool();
+    {
+        let conn = pool.get().unwrap();
+        for _ in 0..6 {
+            insert_log(
+                &conn,
+                "GET request for '/' received from 127.0.0.1 using 'curl/8.14.1'",
+                "warning",
+                "squirts",
+            );
+            insert_log(
+                &conn,
+                "Permission denied reading /home/jmagar/.claude/projects/session.jsonl",
+                "warning",
+                "squirts",
+            );
+        }
+    }
+
+    let cfg = ErrorDetectionConfig::default();
+    process_chunk(&pool, 0, 200, 5, &cfg.exclude_patterns, u8::MAX).unwrap();
+
+    let conn = pool.get().unwrap();
+    let sigs: Vec<String> = {
+        let mut stmt = conn
+            .prepare("SELECT sample_message FROM error_signatures ORDER BY sample_message ASC")
+            .unwrap();
+        stmt.query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap()
+    };
+    assert_eq!(sigs.len(), 1);
+    assert!(sigs[0].contains("Permission denied"));
 }
 
 #[test]

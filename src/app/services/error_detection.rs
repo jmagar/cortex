@@ -1,5 +1,25 @@
 use super::*;
 
+const UNADDRESSED_WARNING_NOISE: &[&str] = &[
+    "get request for '/' received from 127.0.0.1 using 'curl",
+    "get response status for '/'",
+    "/.well-known/oauth-authorization-server",
+    "get /health => generated",
+    "skipping mandatory platform policies because no policy file was found",
+    "skipping recommended platform policies because no policy file was found",
+    "tool list ok",
+];
+
+fn is_unaddressed_warning_noise(severity: &str, template: &str, sample_message: &str) -> bool {
+    if severity != "warning" {
+        return false;
+    }
+    let haystack = format!("{template}\n{sample_message}").to_ascii_lowercase();
+    UNADDRESSED_WARNING_NOISE
+        .iter()
+        .any(|needle| haystack.contains(needle))
+}
+
 impl CortexService {
     // ---- Error detection MCP actions ----------------------------------------
 
@@ -7,12 +27,18 @@ impl CortexService {
         &self,
         req: models::UnaddressedErrorsRequest,
     ) -> ServiceResult<models::UnaddressedErrorsResponse> {
-        let limit = req.limit.unwrap_or(50) as i64;
+        let requested_limit = req.limit.unwrap_or(50).clamp(1, 500) as usize;
+        let fetch_limit = requested_limit.saturating_mul(5).clamp(50, 1_000) as i64;
         let include_acked = req.include_acknowledged.unwrap_or(false);
         self.run_db("unaddressed_errors", move |pool| {
-            let rows = crate::db::error_signatures::read_unaddressed(pool, limit, include_acked)?;
+            let rows =
+                crate::db::error_signatures::read_unaddressed(pool, fetch_limit, include_acked)?;
             let signatures = rows
                 .into_iter()
+                .filter(|r| {
+                    !is_unaddressed_warning_noise(&r.severity, &r.template, &r.sample_message)
+                })
+                .take(requested_limit)
                 .map(|r| models::ErrorSignatureEntry {
                     signature_hash: r.signature_hash,
                     template: r.template,
@@ -171,3 +197,7 @@ impl CortexService {
         })
     }
 }
+
+#[cfg(test)]
+#[path = "error_detection_tests.rs"]
+mod tests;

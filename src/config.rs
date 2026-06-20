@@ -204,6 +204,14 @@ impl Default for ErrorDetectionConfig {
                 "Delivered Stateless Notification".to_string(),
                 "Sent Gotify notification".to_string(),
                 "POST /notify".to_string(),
+                "GET request for '/' received from 127.0.0.1 using 'curl".to_string(),
+                "GET response status for '/'".to_string(),
+                "/.well-known/oauth-authorization-server".to_string(),
+                "GET /health => generated".to_string(),
+                "Skipping mandatory platform policies because no policy file was found".to_string(),
+                "Skipping recommended platform policies because no policy file was found"
+                    .to_string(),
+                "tool list ok".to_string(),
             ],
             notify_min_severity: "err".to_string(),
         }

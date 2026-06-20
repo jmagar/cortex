@@ -434,6 +434,7 @@ impl CortexService {
             ai_tool: req.tool,
             since: from,
             until: to,
+            limit: req.limit,
         };
         let result = self
             .run_db("usage_blocks", move |pool| {

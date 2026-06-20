@@ -66,6 +66,48 @@ fn schema_source_ips_exposes_pagination() {
 }
 
 #[test]
+fn schema_exposes_topic_correlate_fields() {
+    let tools = tool_definitions();
+    let schema = &tools[0]["inputSchema"];
+    let props = &schema["properties"];
+
+    assert_eq!(props["topic"]["type"], "string");
+    assert!(
+        props["topic"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("topic_correlate")
+    );
+    assert!(props["source_kinds"]["oneOf"].is_array());
+    assert_eq!(props["depth"]["maximum"], 6);
+
+    let topic_rule = schema["allOf"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|rule| rule["if"]["properties"]["action"]["const"] == "topic_correlate")
+        .expect("topic_correlate conditional");
+    assert!(
+        topic_rule["then"]["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|value| value == "topic")
+    );
+}
+
+#[test]
+fn schema_usage_blocks_accepts_limit() {
+    let tools = tool_definitions();
+    let props = &tools[0]["inputSchema"]["properties"];
+    let limit_desc = props["limit"]["description"].as_str().unwrap();
+    assert!(
+        limit_desc.contains("usage_blocks"),
+        "limit description must document usage_blocks"
+    );
+}
+
+#[test]
 fn schema_includes_file_tails_action() {
     let tool = tool_definitions()
         .into_iter()
@@ -172,7 +214,7 @@ fn schema_graph_exposes_lookup_and_neighborhood_arguments() {
     assert_eq!(tools[0]["inputSchema"]["additionalProperties"], false);
     assert_eq!(props["entity_id"]["minimum"], 1);
     assert_eq!(props["depth"]["minimum"], 1);
-    assert_eq!(props["depth"]["maximum"], 3);
+    assert_eq!(props["depth"]["maximum"], 6);
     for name in [
         "mode",
         "entity_id",

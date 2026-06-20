@@ -234,10 +234,21 @@ fn remote_docker_events_ssh_args_include_safe_options_and_remote_command() {
     assert!(args.contains(&"ServerAliveInterval=15".to_string()));
     assert!(args.contains(&"--".to_string()));
     assert_eq!(args[args.len() - 2], "squirts");
-    assert_eq!(
-        args[args.len() - 1],
-        "docker events --filter type=container --format '{{json .}}'"
-    );
+    let command = &args[args.len() - 1];
+    assert!(command.contains("command -v docker"));
+    assert!(command.contains(REMOTE_DOCKER_EVENTS_UNSUPPORTED_MARKER));
+    assert!(command.contains("exec docker events --filter type=container"));
+    assert!(command.contains("--format '{{json .}}'"));
+}
+
+#[test]
+fn remote_docker_events_unsupported_detects_preflight_marker() {
+    assert!(remote_docker_events_unsupported(
+        "ssh docker events exited with status=exit status: 78; stderr_sample=cortex: remote Docker events unsupported: docker command not found"
+    ));
+    assert!(!remote_docker_events_unsupported(
+        "ssh docker events exited with status=exit status: 255; stderr_sample=connection timed out"
+    ));
 }
 
 #[test]
