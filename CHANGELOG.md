@@ -20,6 +20,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now also tags the image with the `Cargo.toml` version on default-branch pushes
   (`type=raw,value=<version>,enable={{is_default_branch}}`), so every merge to
   `main` publishes `ghcr:<version>` independent of the tag trigger.
+- **`cortex deploy agent` reset custom agent config on every redeploy.** It built
+  the container env from a fixed flag set, overwrote the persisted
+  `heartbeat-agent.env`, and mounted only the three standard paths — so a custom
+  `CORTEX_AGENT_FILE_TAILS` (e.g. a host's Plex log) **and** the host mount it
+  needs were silently dropped on upgrade, even though the value was sitting in the
+  persisted env file. The Unraid deploy is now config-preserving: it carries
+  forward any non-managed env keys from the existing `heartbeat-agent.env` and any
+  non-standard mounts from the running container, so upgrading the binary keeps
+  per-host customizations. (Managed keys still come from the deploy flags.)
 
 ## [1.32.2] - 2026-06-19
 
