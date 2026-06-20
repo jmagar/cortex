@@ -279,7 +279,8 @@ fn spawn_remote_docker_event_tasks(
                             if let Err(error) = result {
                                 let error = error.to_string();
                                 if remote_docker_events_unsupported(&error) {
-                                    tracing::info!(
+                                    observability.record_remote_docker_event_stream_failure(&host, &error);
+                                    tracing::warn!(
                                         host,
                                         error,
                                         "inventory_refresh: remote Docker event streams disabled for host; Docker is unavailable"

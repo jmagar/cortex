@@ -1,23 +1,35 @@
 use super::*;
 
-const UNADDRESSED_WARNING_NOISE: &[&str] = &[
-    "get request for '/' received from 127.0.0.1 using 'curl",
-    "get response status for '/'",
-    "/.well-known/oauth-authorization-server",
-    "get /health => generated",
-    "skipping mandatory platform policies because no policy file was found",
-    "skipping recommended platform policies because no policy file was found",
-    "tool list ok",
-];
+const UNADDRESSED_SCAN_CAP: usize = 5_000;
 
 fn is_unaddressed_warning_noise(severity: &str, template: &str, sample_message: &str) -> bool {
     if severity != "warning" {
         return false;
     }
-    let haystack = format!("{template}\n{sample_message}").to_ascii_lowercase();
-    UNADDRESSED_WARNING_NOISE
-        .iter()
-        .any(|needle| haystack.contains(needle))
+
+    let template = template.trim().to_ascii_lowercase();
+    let sample = sample_message.trim().to_ascii_lowercase();
+
+    let curl_root_probe = template
+        .starts_with("get request for '/' received from 127.0.0.1 using 'curl")
+        && sample.starts_with("get response status for '/'");
+    let oauth_metadata_probe = template.starts_with("get /.well-known/oauth-authorization-server")
+        || sample.starts_with("get /.well-known/oauth-authorization-server");
+    let health_probe = template.starts_with("get /health => generated")
+        || sample.starts_with("get /health => generated");
+    let missing_policy_note = matches!(
+        template.as_str(),
+        "skipping mandatory platform policies because no policy file was found"
+            | "skipping recommended platform policies because no policy file was found"
+    );
+    let labby_tool_list_probe =
+        template == "tool list ok" && sample.starts_with("labby tool list ok in ");
+
+    curl_root_probe
+        || oauth_metadata_probe
+        || health_probe
+        || missing_policy_note
+        || labby_tool_list_probe
 }
 
 impl CortexService {
@@ -28,32 +40,60 @@ impl CortexService {
         req: models::UnaddressedErrorsRequest,
     ) -> ServiceResult<models::UnaddressedErrorsResponse> {
         let requested_limit = req.limit.unwrap_or(50).clamp(1, 500) as usize;
-        let fetch_limit = requested_limit.saturating_mul(5).clamp(50, 1_000) as i64;
+        let page_size = requested_limit.saturating_mul(5).clamp(50, 500);
         let include_acked = req.include_acknowledged.unwrap_or(false);
         self.run_db("unaddressed_errors", move |pool| {
-            let rows =
-                crate::db::error_signatures::read_unaddressed(pool, fetch_limit, include_acked)?;
-            let signatures = rows
-                .into_iter()
-                .filter(|r| {
-                    !is_unaddressed_warning_noise(&r.severity, &r.template, &r.sample_message)
-                })
-                .take(requested_limit)
-                .map(|r| models::ErrorSignatureEntry {
-                    signature_hash: r.signature_hash,
-                    template: r.template,
-                    sample_message: r.sample_message,
-                    severity: r.severity,
-                    sample_hostname: r.sample_hostname,
-                    sample_app_name: r.sample_app_name,
-                    first_seen_at: r.first_seen_at,
-                    last_seen_at: r.last_seen_at,
-                    total_count: r.total_count,
-                    count_last_1h: r.count_last_1h,
-                    acknowledged_at: r.acknowledged_at,
-                })
-                .collect();
-            Ok(models::UnaddressedErrorsResponse { signatures })
+            let mut signatures = Vec::with_capacity(requested_limit);
+            let mut filtered_count = 0usize;
+            let mut candidate_rows = 0usize;
+            let mut offset = 0i64;
+
+            while signatures.len() < requested_limit && candidate_rows < UNADDRESSED_SCAN_CAP {
+                let remaining_scan = UNADDRESSED_SCAN_CAP - candidate_rows;
+                let this_page = page_size.min(remaining_scan);
+                let rows = crate::db::error_signatures::read_unaddressed_page(
+                    pool,
+                    this_page as i64,
+                    offset,
+                    include_acked,
+                )?;
+                if rows.is_empty() {
+                    break;
+                }
+
+                candidate_rows += rows.len();
+                offset += rows.len() as i64;
+                for r in rows {
+                    if is_unaddressed_warning_noise(&r.severity, &r.template, &r.sample_message) {
+                        filtered_count += 1;
+                        continue;
+                    }
+                    signatures.push(models::ErrorSignatureEntry {
+                        signature_hash: r.signature_hash,
+                        template: r.template,
+                        sample_message: r.sample_message,
+                        severity: r.severity,
+                        sample_hostname: r.sample_hostname,
+                        sample_app_name: r.sample_app_name,
+                        first_seen_at: r.first_seen_at,
+                        last_seen_at: r.last_seen_at,
+                        total_count: r.total_count,
+                        count_last_1h: r.count_last_1h,
+                        acknowledged_at: r.acknowledged_at,
+                    });
+                    if signatures.len() == requested_limit {
+                        break;
+                    }
+                }
+            }
+
+            Ok(models::UnaddressedErrorsResponse {
+                signatures,
+                filtered_count,
+                candidate_rows,
+                candidate_cap: UNADDRESSED_SCAN_CAP,
+                candidate_window_truncated: candidate_rows >= UNADDRESSED_SCAN_CAP,
+            })
         })
         .await
     }

@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.32.5] - 2026-06-20
+
+### Fixed
+
+- **Topic-correlation source-kind filters now match the advertised API contract.**
+  MCP/REST callers may pass `source_kinds` as either a single string or an array,
+  invalid source-kind values now fail fast instead of silently widening the query,
+  and the schema/help text names the exact kebab-case source kinds that runtime
+  validation accepts.
+- **Unaddressed warning noise no longer hides real incidents.** Health/probe
+  chatter is recorded by the scanner, presentation filtering is narrowed to
+  warning-only exact probe shapes, and `unaddressed_errors` pages through filtered
+  candidates so benign warning noise does not underfill the requested result set.
+- **Remote Docker event-stream unsupported hosts are visible in observability.**
+  Hosts without a remote `docker` binary now emit a warning and update the remote
+  event-stream failure counters instead of disappearing as an info-only loop exit.
+
 ## [1.32.4] - 2026-06-19
 
 ### Fixed

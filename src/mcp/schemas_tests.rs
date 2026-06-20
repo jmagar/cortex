@@ -79,6 +79,18 @@ fn schema_exposes_topic_correlate_fields() {
             .contains("topic_correlate")
     );
     assert!(props["source_kinds"]["oneOf"].is_array());
+    assert!(
+        props["source_kinds"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("syslog-udp")
+    );
+    assert!(
+        !props["source_kinds"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("graph_evidence")
+    );
     assert_eq!(props["depth"]["maximum"], 6);
 
     let topic_rule = schema["allOf"]
@@ -250,6 +262,7 @@ fn schema_graph_target_constraints_match_runtime_validation() {
         .find(|constraint| constraint["if"]["properties"]["action"]["const"] == "graph")
         .map(|constraint| &constraint["then"])
         .unwrap();
+    assert_eq!(graph_then["properties"]["depth"]["maximum"], 3);
 
     let target_or_evidence = graph_then["oneOf"].as_array().unwrap();
     assert_eq!(target_or_evidence.len(), 2);

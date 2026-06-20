@@ -113,7 +113,7 @@ fn test_process_chunk_notifies_above_threshold() {
 }
 
 #[test]
-fn test_default_excludes_skip_warning_healthcheck_noise() {
+fn test_default_excludes_do_not_drop_warning_healthcheck_rows() {
     let (pool, _dir) = test_pool();
     {
         let conn = pool.get().unwrap();
@@ -146,8 +146,15 @@ fn test_default_excludes_skip_warning_healthcheck_noise() {
             .collect::<rusqlite::Result<Vec<_>>>()
             .unwrap()
     };
-    assert_eq!(sigs.len(), 1);
-    assert!(sigs[0].contains("Permission denied"));
+    assert_eq!(sigs.len(), 2);
+    assert!(
+        sigs.iter()
+            .any(|sample| sample.contains("GET request for '/'"))
+    );
+    assert!(
+        sigs.iter()
+            .any(|sample| sample.contains("Permission denied"))
+    );
 }
 
 #[test]

@@ -1,4 +1,6 @@
 use super::is_unaddressed_warning_noise;
+use crate::config::StorageConfig;
+use std::sync::Arc;
 
 #[test]
 fn unaddressed_warning_noise_filters_health_checks_only() {
@@ -13,6 +15,11 @@ fn unaddressed_warning_noise_filters_health_checks_only() {
         "labby tool list ok in 44ms",
     ));
     assert!(!is_unaddressed_warning_noise(
+        "warning",
+        "auth failure for admin",
+        "failed auth for admin after tool list ok",
+    ));
+    assert!(!is_unaddressed_warning_noise(
         "err",
         "GET /health => generated",
         "GET /health => generated HTTP 200",
@@ -22,4 +29,64 @@ fn unaddressed_warning_noise_filters_health_checks_only() {
         "imfile: cannot open file",
         "Permission denied reading /home/jmagar/.claude/projects/session.jsonl",
     ));
+}
+
+#[tokio::test]
+async fn unaddressed_errors_pages_past_filtered_warning_noise() {
+    let dir = tempfile::tempdir().unwrap();
+    let storage = StorageConfig::for_test(dir.path().join("unaddressed-errors.db"));
+    let pool = Arc::new(crate::db::init_pool(&storage).unwrap());
+    {
+        let conn = pool.get().unwrap();
+        for i in 0..60 {
+            let ts = format!("2026-01-01T00:{i:02}:00.000Z");
+            crate::db::error_signatures::upsert_signature(
+                &conn,
+                crate::db::error_signatures::UpsertSignatureParams {
+                    hash: &format!("{i:064x}"),
+                    normalizer_version: crate::app::error_detection::NORMALIZER_VERSION,
+                    template: "tool list ok",
+                    sample_message: "labby tool list ok in 44ms",
+                    sample_hostname: "dookie",
+                    sample_app_name: Some("labby"),
+                    severity: "warning",
+                    first_seen_at: &ts,
+                    last_seen_at: &ts,
+                    delta: 1,
+                },
+            )
+            .unwrap();
+        }
+        crate::db::error_signatures::upsert_signature(
+            &conn,
+            crate::db::error_signatures::UpsertSignatureParams {
+                hash: &format!("{:064x}", 10_000),
+                normalizer_version: crate::app::error_detection::NORMALIZER_VERSION,
+                template: "disk full on /var",
+                sample_message: "disk full on /var",
+                sample_hostname: "dookie",
+                sample_app_name: Some("kernel"),
+                severity: "err",
+                first_seen_at: "2026-01-01T00:00:00.000Z",
+                last_seen_at: "2025-12-31T23:59:00.000Z",
+                delta: 1,
+            },
+        )
+        .unwrap();
+    }
+
+    let svc = crate::app::CortexService::new(Arc::clone(&pool), storage);
+    let resp = svc
+        .unaddressed_errors(crate::app::models::UnaddressedErrorsRequest {
+            limit: Some(1),
+            include_acknowledged: None,
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(resp.signatures.len(), 1);
+    assert_eq!(resp.signatures[0].template, "disk full on /var");
+    assert_eq!(resp.filtered_count, 60);
+    assert!(resp.candidate_rows > 50);
+    assert!(!resp.candidate_window_truncated);
 }

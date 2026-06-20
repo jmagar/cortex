@@ -891,7 +891,7 @@ Resolve a free-text topic to investigation-graph entities, expand the graph, and
 - `topic` (string, required) — topic to correlate, e.g. `axon` or `dookie dns adguard` (terms OR-ed)
 - `since`, `until` (string, optional) — time window (ISO 8601 or relative like `1h`); defaults to the last hour
 - `depth` (integer, optional) — graph traversal depth (default 2, max 6)
-- `source_kinds` (array of string, optional) — restrict the timeline to these source kinds (kebab-case, e.g. `docker-stream`, `agent-command`)
+- `source_kinds` (array of string or string, optional) — restrict the timeline to exact kebab-case source kinds, e.g. `syslog-udp`, `docker-stream`, or `agent-command`
 - `limit` (integer, optional) — max timeline rows (default 200, max 1000)
 
 The response contains `resolved_entities` (with `match_kind`: exact/prefix/label/alias), `graph_expansion` (entities reached by traversal), `discovered_hosts`, a `timeline` (each row annotated with `source_kind` and an `entity_path` lane), and `heartbeat_summaries` for the discovered hosts.
@@ -968,7 +968,7 @@ topic through the investigation graph and returns a unified related timeline.
 - `topic` (string, required unless `reference_time` is supplied) — topic to resolve through the graph
 - `since`, `until` (string, optional) — timeline window; defaults to the last hour
 - `depth` (integer, optional) — graph traversal depth (default 2, max 6)
-- `source_kinds` (array of string, optional) — restrict graph timeline source kinds
+- `source_kinds` (array of string or string, optional) — restrict graph timeline source kinds by exact kebab-case wire name
 - `limit` (integer, optional) — max timeline rows (default 200, max 1000)
 
 ---

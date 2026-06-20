@@ -177,3 +177,42 @@ async fn topic_source_kind_filter_restricts_timeline() {
         "agent-command rows excluded by the syslog-udp filter"
     );
 }
+
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn topic_source_kind_accepts_string_form() {
+    let _guard = crate::db::graph::GRAPH_TEST_LOCK.lock();
+    let (svc, _pool, _dir) = seeded_service().await;
+
+    let req: TopicCorrelateRequest = serde_json::from_value(serde_json::json!({
+        "topic": "dookie",
+        "source_kinds": "syslog-udp"
+    }))
+    .unwrap();
+    let resp = svc.topic_correlate(req).await.unwrap();
+
+    assert!(!resp.timeline.is_empty());
+    assert!(
+        resp.timeline
+            .iter()
+            .all(|t| t.entity_path != "agent_command"),
+        "string-form source_kinds must apply the same filter as an array"
+    );
+}
+
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn topic_source_kind_rejects_invalid_filter() {
+    let _guard = crate::db::graph::GRAPH_TEST_LOCK.lock();
+    let (svc, _pool, _dir) = seeded_service().await;
+
+    let req = TopicCorrelateRequest {
+        topic: "dookie".to_string(),
+        source_kinds: Some(vec!["syslog".to_string()]),
+        ..Default::default()
+    };
+    let err = svc.topic_correlate(req).await.unwrap_err();
+
+    assert!(matches!(err, crate::app::ServiceError::InvalidInput(_)));
+    assert!(err.to_string().contains("invalid source_kinds"));
+}

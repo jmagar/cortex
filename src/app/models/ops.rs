@@ -21,6 +21,10 @@ pub struct UnaddressedErrorsRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UnaddressedErrorsResponse {
     pub signatures: Vec<ErrorSignatureEntry>,
+    pub filtered_count: usize,
+    pub candidate_rows: usize,
+    pub candidate_cap: usize,
+    pub candidate_window_truncated: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
