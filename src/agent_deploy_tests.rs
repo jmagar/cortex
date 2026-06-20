@@ -358,3 +358,52 @@ exit 0
     assert!(log.contains("cortex heartbeat agent"));
     assert!(log.contains("--host-id-path /mnt/user/appdata/cortex/heartbeat-host-id"));
 }
+
+#[test]
+fn preserved_custom_env_keeps_custom_keys_and_drops_managed() {
+    let existing = "\
+CORTEX_HEARTBEAT_TARGET=https://cortex.tootie.tv
+RUST_LOG=warn
+CORTEX_HEARTBEAT_TOKEN=secret
+CORTEX_AGENT_FILE_TAILS=/host/plex-logs/Plex Media Server.log:plex
+CUSTOM_THING=foo=bar baz
+";
+    let kept = preserved_custom_env(existing);
+    // Managed keys (target, RUST_LOG, token) are dropped — the deploy sets those.
+    assert!(
+        !kept
+            .iter()
+            .any(|(k, _)| MANAGED_ENV_KEYS.contains(&k.as_str()))
+    );
+    // The Plex file-tail (value has a space AND a colon) round-trips intact.
+    let ft = kept
+        .iter()
+        .find(|(k, _)| k == "CORTEX_AGENT_FILE_TAILS")
+        .expect("file-tail preserved");
+    assert_eq!(ft.1, "/host/plex-logs/Plex Media Server.log:plex");
+    // A value containing '=' splits only on the first '='.
+    let custom = kept.iter().find(|(k, _)| k == "CUSTOM_THING").unwrap();
+    assert_eq!(custom.1, "foo=bar baz");
+}
+
+#[test]
+fn preserved_custom_mount_flags_keeps_only_nonstandard_mounts() {
+    let inspect = format!(
+        "{appdata}\t{appdata}\trw\n\
+         /var/run/docker.sock\t/var/run/docker.sock\trw\n\
+         /var/log/syslog\t{syslog}\tro\n\
+         /mnt/cache/appdata/plex/Logs\t/host/plex-logs\tro\n",
+        appdata = UNRAID_APPDATA,
+        syslog = UNRAID_CONTAINER_SYSLOG,
+    );
+    let flags = preserved_custom_mount_flags(&inspect);
+    // Only the custom Plex-logs mount survives; the 3 standard ones are dropped.
+    assert_eq!(flags.len(), 1, "got: {flags:?}");
+    assert!(flags[0].contains("/mnt/cache/appdata/plex/Logs:/host/plex-logs:ro"));
+}
+
+#[test]
+fn preserved_custom_mount_flags_empty_on_first_deploy() {
+    assert!(preserved_custom_mount_flags("").is_empty());
+    assert!(preserved_custom_env("").is_empty());
+}

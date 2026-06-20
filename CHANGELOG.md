@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.32.3] - 2026-06-19
+
+### Fixed
+
+- **Versioned GHCR image was never published for 1.32.x.** `docker-publish.yml`
+  derives the version image tag from `type=semver`, which only fires on `v*`
+  git-tag pushes — but the auto-tag workflow creates those tags with the default
+  `GITHUB_TOKEN`, and GitHub does not trigger workflows from `GITHUB_TOKEN`-pushed
+  tags (loop prevention). So `ghcr.io/jmagar/cortex:1.32.x` was never built, and
+  the fleet agents (pinned to `ghcr:1.31.2`) had no image to update to. The build
+  now also tags the image with the `Cargo.toml` version on default-branch pushes
+  (`type=raw,value=<version>,enable={{is_default_branch}}`), so every merge to
+  `main` publishes `ghcr:<version>` independent of the tag trigger.
+- **`cortex deploy agent` reset custom agent config on every redeploy.** It built
+  the container env from a fixed flag set, overwrote the persisted
+  `heartbeat-agent.env`, and mounted only the three standard paths — so a custom
+  `CORTEX_AGENT_FILE_TAILS` (e.g. a host's Plex log) **and** the host mount it
+  needs were silently dropped on upgrade, even though the value was sitting in the
+  persisted env file. The Unraid deploy is now config-preserving: it carries
+  forward any non-managed env keys from the existing `heartbeat-agent.env` and any
+  non-standard mounts from the running container, so upgrading the binary keeps
+  per-host customizations. (Managed keys still come from the deploy flags.)
+
 ## [1.32.2] - 2026-06-19
 
 ### Fixed

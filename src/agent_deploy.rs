@@ -381,6 +381,23 @@ fn run_deploy_unraid(
     ssh_run(host, &format!("mkdir -p {UNRAID_APPDATA}"))?;
     ssh_run(host, &format!("docker pull {image}"))?;
 
+    // Config-preserving upgrade: carry forward any custom env (e.g. a Plex
+    // CORTEX_AGENT_FILE_TAILS) from the persisted env file, and any custom mounts
+    // (e.g. the host log dir that file-tail reads) from the running container, so
+    // a redeploy doesn't reset the agent to flag defaults. Both reads are
+    // best-effort (`|| true`): a first-time deploy has neither.
+    let preserved_env = preserved_custom_env(
+        &ssh_capture(host, &format!("cat {UNRAID_ENV} 2>/dev/null || true")).unwrap_or_default(),
+    );
+    let custom_mounts: String = preserved_custom_mount_flags(
+        &ssh_capture(
+            host,
+            &format!("docker inspect {UNRAID_CONTAINER} --format '{MOUNT_INSPECT_TMPL}' 2>/dev/null || true"),
+        )
+        .unwrap_or_default(),
+    )
+    .concat();
+
     // Build env key=value pairs for both the persistent env file and the -e flags
     // passed directly to docker run. We use -e flags (not --env-file) to avoid
     // any shell-quoting or whitespace ambiguity that arises when writing values
@@ -414,6 +431,9 @@ fn run_deploy_unraid(
     if let Some(t) = &config.token {
         env_pairs.push(("CORTEX_HEARTBEAT_TOKEN".into(), t.clone()));
     }
+    // Append any preserved custom env so it lands in both the env file and the
+    // -e flags below (managed keys already set above win over any stale copy).
+    env_pairs.extend(preserved_env);
 
     // Write a persistent env file for reference / manual restarts, then chmod 600.
     let mut write_cmd = format!("rm -f {UNRAID_ENV}");
@@ -458,6 +478,7 @@ fn run_deploy_unraid(
                -v {UNRAID_APPDATA}:{UNRAID_APPDATA} \
                -v /var/run/docker.sock:/var/run/docker.sock \
                -v {UNRAID_HOST_SYSLOG}:{UNRAID_CONTAINER_SYSLOG}:ro \
+               {custom_mounts}\
                {image} \
                cortex heartbeat agent \
                  --host-id-path {UNRAID_HOST_ID}"
@@ -473,6 +494,91 @@ fn deploy_syslog_target(heartbeat_target: Option<&str>) -> Option<String> {
             heartbeat_target
                 .and_then(crate::agent::AgentStreamsConfig::syslog_target_from_heartbeat)
         })
+}
+
+/// Env keys the deploy sets from its CLI flags. Anything else found in an
+/// existing agent env file (e.g. `CORTEX_AGENT_FILE_TAILS`) is custom config a
+/// prior deploy or manual edit added, and an upgrade must carry it forward
+/// rather than reset the agent to flag defaults.
+const MANAGED_ENV_KEYS: &[&str] = &[
+    "CORTEX_HEARTBEAT_TARGET",
+    "RUST_LOG",
+    "CORTEX_SYSLOG_TARGET",
+    "CORTEX_AGENT_DOCKER",
+    "CORTEX_AGENT_DOCKER_URL",
+    "CORTEX_AGENT_JOURNALD",
+    "CORTEX_AGENT_SYSLOG_FILE",
+    "CORTEX_HEARTBEAT_TOKEN",
+];
+
+/// Container mount destinations the deploy always provides itself. A mount with
+/// any other destination (e.g. host log dirs a file-tail reads) is custom and
+/// must survive an upgrade.
+const STANDARD_MOUNT_DESTS: &[&str] = &[
+    UNRAID_APPDATA,
+    "/var/run/docker.sock",
+    UNRAID_CONTAINER_SYSLOG,
+];
+
+/// `docker inspect --format` template emitting one `source\tdest\trw|ro` line per
+/// mount. Uses `{{"\t"}}`/`{{"\n"}}` (Go interprets those) so the separators are
+/// real control chars, not literal backslash sequences.
+const MOUNT_INSPECT_TMPL: &str = r#"{{range .Mounts}}{{.Source}}{{"\t"}}{{.Destination}}{{"\t"}}{{if .RW}}rw{{else}}ro{{end}}{{"\n"}}{{end}}"#;
+
+/// Parse an existing agent env file into the (key, value) pairs whose keys are
+/// NOT managed by deploy flags — the custom additions an upgrade preserves.
+/// Splits on the first `=` so values containing `=`/spaces/`:` (file-tail specs)
+/// round-trip intact.
+fn preserved_custom_env(existing_env_file: &str) -> Vec<(String, String)> {
+    existing_env_file
+        .lines()
+        .filter_map(|line| line.split_once('='))
+        .map(|(k, v)| (k.trim().to_string(), v.to_string()))
+        .filter(|(k, _)| !k.is_empty() && !MANAGED_ENV_KEYS.contains(&k.as_str()))
+        .collect()
+}
+
+/// From `MOUNT_INSPECT_TMPL` output, return `-v source:dest[:ro]` flags for any
+/// mount whose destination the deploy doesn't already provide, so a custom mount
+/// (e.g. host Plex logs) survives an upgrade.
+fn preserved_custom_mount_flags(inspect_mounts: &str) -> Vec<String> {
+    inspect_mounts
+        .lines()
+        .filter_map(|line| {
+            let mut parts = line.split('\t');
+            let src = parts.next()?.trim();
+            let dest = parts.next()?.trim();
+            let rw = parts.next().map(str::trim).unwrap_or("rw");
+            if src.is_empty() || dest.is_empty() || STANDARD_MOUNT_DESTS.contains(&dest) {
+                return None;
+            }
+            let spec = if rw == "ro" {
+                format!("{src}:{dest}:ro")
+            } else {
+                format!("{src}:{dest}")
+            };
+            Some(format!("-v {} ", shell_quote(&spec)))
+        })
+        .collect()
+}
+
+/// Run an SSH command and capture stdout. Commands that may legitimately fail
+/// (e.g. inspecting a not-yet-existing container) should append `|| true` so the
+/// ssh invocation itself succeeds and returns empty output.
+fn ssh_capture(host: &str, cmd: &str) -> io::Result<String> {
+    let out = Command::new("ssh")
+        .args([
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "StrictHostKeyChecking=accept-new",
+            "-o",
+            "LogLevel=ERROR",
+            host,
+            cmd,
+        ])
+        .output()?;
+    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
 fn ssh_run(host: &str, cmd: &str) -> io::Result<()> {

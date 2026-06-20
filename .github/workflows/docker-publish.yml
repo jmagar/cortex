@@ -71,6 +71,17 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Publish ghcr:<version> on main pushes, read from Cargo.toml. The
+      # `type=semver` tags below only fire on `v*` tag pushes — but the auto-tag
+      # workflow creates those tags with the default GITHUB_TOKEN, and GitHub
+      # does not trigger workflows from GITHUB_TOKEN-pushed tags (loop
+      # prevention). That left the versioned image (e.g. ghcr:1.32.x) never
+      # published. Tagging from Cargo.toml on the default branch decouples the
+      # version image from the dead tag trigger.
+      - name: Read crate version
+        id: crate
+        run: echo "version=$(grep -m1 '^version' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')" >> "$GITHUB_OUTPUT"
+
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
@@ -82,6 +93,7 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
+            type=raw,value=${{ steps.crate.outputs.version }},enable={{is_default_branch}}
             type=raw,value=latest,enable={{is_default_branch}}
             type=sha
 
