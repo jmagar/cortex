@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.33.2] - 2026-06-21
+
+### Added
+
+- **Design doc: authenticated bidirectional WebSocket agent channel**
+  (`docs/design/ws-agent-channel.md`). Proposes unifying the agent heartbeat
+  and log paths onto a single authenticated WebSocket on the existing port-3100
+  listener, with bounded at-least-once log delivery and a server-to-agent control
+  channel. Planning only; no runtime behavior changes.
+
 ## [1.33.1] - 2026-06-20
 
 ### Fixed
