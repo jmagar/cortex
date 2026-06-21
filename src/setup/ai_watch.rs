@@ -269,6 +269,8 @@ pub(crate) fn ai_watch_service_unit(
         .expect("validated Claude transcript root");
     let codex_root = setup_path_value(&user_home.join(".codex/sessions"))
         .expect("validated Codex transcript root");
+    let gemini_root =
+        setup_path_value(&user_home.join(".gemini/tmp")).expect("validated Gemini transcript root");
     let user_local_bin =
         setup_path_value(&user_home.join(".local/bin")).expect("validated user local bin path");
     let user_cargo_bin =
@@ -278,7 +280,7 @@ pub(crate) fn ai_watch_service_unit(
     let db_dir = setup_path_value(db_dir).expect("validated AI watch DB directory");
     let state_dir = setup_path_value(state_dir).expect("validated AI watch state directory");
     format!(
-        "[Unit]\nDescription=cortex real-time local AI transcript watch\nDocumentation=https://github.com/jmagar/cortex\nAfter=default.target\nStartLimitIntervalSec=300\nStartLimitBurst=5\n\n[Service]\nType=simple\nEnvironmentFile={env_path}\nEnvironment=PATH={user_local_bin}:{user_cargo_bin}:/usr/local/bin:/usr/bin:/bin\nEnvironment=CARGO_TARGET_DIR={cargo_target_dir}\nWorkingDirectory=/\nExecStart={cortex_bin} ai watch --no-initial-scan --json\nRestart=on-failure\nRestartSec=5\nUMask=0077\nNoNewPrivileges=true\nPrivateTmp=true\nProtectSystem=strict\nProtectHome=read-only\nBindReadOnlyPaths=-{claude_root} -{codex_root}\nBindPaths={db_dir} {state_dir}\nReadWritePaths={db_dir} {state_dir}\n\n[Install]\nWantedBy=default.target\n"
+        "[Unit]\nDescription=cortex real-time local AI transcript watch\nDocumentation=https://github.com/jmagar/cortex\nAfter=default.target\nStartLimitIntervalSec=300\nStartLimitBurst=5\n\n[Service]\nType=simple\nEnvironmentFile={env_path}\nEnvironment=PATH={user_local_bin}:{user_cargo_bin}:/usr/local/bin:/usr/bin:/bin\nEnvironment=CARGO_TARGET_DIR={cargo_target_dir}\nWorkingDirectory=/\nExecStart={cortex_bin} ai watch --no-initial-scan --json\nRestart=on-failure\nRestartSec=5\nUMask=0077\nNoNewPrivileges=true\nPrivateTmp=true\nProtectSystem=strict\nProtectHome=read-only\nBindReadOnlyPaths=-{claude_root} -{codex_root} -{gemini_root}\nBindPaths={db_dir} {state_dir}\nReadWritePaths={db_dir} {state_dir}\n\n[Install]\nWantedBy=default.target\n"
     )
 }
 
@@ -287,6 +289,7 @@ pub(crate) fn transcript_root_permissions_phase(user_home: &Path) -> SetupPhase 
     let roots = [
         user_home.join(".claude/projects"),
         user_home.join(".codex/sessions"),
+        user_home.join(".gemini/tmp"),
     ];
     let failures: Vec<String> = roots
         .iter()
@@ -530,6 +533,7 @@ mod tests {
         std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
         std::fs::create_dir_all(home.join(".claude/projects")).unwrap();
         std::fs::create_dir_all(home.join(".codex/sessions")).unwrap();
+        std::fs::create_dir_all(home.join(".gemini/tmp")).unwrap();
         std::fs::create_dir_all(&bin_dir).unwrap();
         write_executable(
             &bin_dir.join("cortex"),
@@ -576,6 +580,7 @@ mod tests {
         assert!(service.contains("ExecStart="));
         assert!(service.contains("ai watch --no-initial-scan --json"));
         assert!(service.contains("ProtectHome=read-only"));
+        assert!(service.contains(".gemini/tmp"));
 
         let check = run_ai_watch_service_setup(AiWatchServiceAction::Check)
             .await

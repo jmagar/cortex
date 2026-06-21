@@ -31,16 +31,29 @@ impl CortexService {
         let depth = req.depth.unwrap_or(TOPIC_DEFAULT_DEPTH);
         let limit = req.limit.unwrap_or(TOPIC_DEFAULT_LIMIT).clamp(1, 1000) as usize;
 
-        // Parse requested source kinds, dropping unrecognised values. An empty
-        // result (none valid) means "no filter" rather than "match nothing".
-        let source_kinds: Option<Vec<crate::enrich::parser::SourceKind>> =
-            req.source_kinds.as_ref().and_then(|kinds| {
-                let parsed: Vec<_> = kinds
-                    .iter()
-                    .filter_map(|k| crate::enrich::parser::SourceKind::from_wire(k))
-                    .collect();
+        let source_kinds: Option<Vec<crate::enrich::parser::SourceKind>> = match req
+            .source_kinds
+            .as_ref()
+        {
+            Some(kinds) => {
+                let mut parsed = Vec::with_capacity(kinds.len());
+                let mut invalid = Vec::new();
+                for kind in kinds {
+                    match crate::enrich::parser::SourceKind::from_wire(kind) {
+                        Some(kind) => parsed.push(kind),
+                        None => invalid.push(kind.clone()),
+                    }
+                }
+                if !invalid.is_empty() {
+                    return Err(ServiceError::InvalidInput(format!(
+                        "invalid source_kinds: {}. Expected one or more kebab-case source kinds",
+                        invalid.join(", ")
+                    )));
+                }
                 (!parsed.is_empty()).then_some(parsed)
-            });
+            }
+            None => None,
+        };
 
         if terms.is_empty() {
             return Ok(empty_topic_response(req.topic));

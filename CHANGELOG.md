@@ -7,6 +7,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.33.1] - 2026-06-20
+
+### Fixed
+
+- **Gemini transcript indexing no longer loses data on a single bad record.** A
+  malformed per-message timestamp is now recorded as a per-record parse error and
+  skipped while the rest of the file still ingests, instead of aborting the whole
+  file and re-failing it forever. A chat file missing its `messages` array is
+  surfaced as a recorded parse error rather than being silently checkpointed as
+  "fully indexed", and messages with no extractable text are counted/logged. All
+  failures now flow through the checkpoint store, so they appear in the AI
+  doctor's `checkpoint_error_count` like every other source kind.
+- **`cortex ai doctor --strict-permissions` now gates `gemini_root`.** Bad
+  permissions on `~/.gemini/tmp` previously passed the strict check, which only
+  inspected the Claude and Codex roots.
+- Removed the unreachable `gemini::parse_line` dead code path; Gemini sessions are
+  whole-file JSON and never flow through the per-line dispatch.
+
+### Changed
+
+- The MCP `source_kinds` schema enum is now generated from
+  `SourceKind::all_wire_names()` so the wire contract can never drift from the
+  Rust enum, with a regression test asserting the two stay in sync.
+- Split the per-transcript-root printing in `cortex ai doctor` into a shared
+  helper, bringing `src/cli/output_ai.rs` back under the module-size lint.
+
+## [1.33.0] - 2026-06-20
+
+### Added
+
+- **Gemini CLI transcript watcher.** Discover, index, and report
+  `~/.gemini/tmp/**/chats/session-*.json` sessions alongside the existing Claude
+  and Codex transcript ingestion, including a `gemini_root` in the AI doctor.
+
+## [1.32.5] - 2026-06-20
+
+### Fixed
+
+- **Topic-correlation source-kind filters now match the advertised API contract.**
+  MCP/REST callers may pass `source_kinds` as either a single string or an array,
+  invalid source-kind values now fail fast instead of silently widening the query,
+  and the schema/help text names the exact kebab-case source kinds that runtime
+  validation accepts.
+- **Unaddressed warning noise no longer hides real incidents.** Health/probe
+  chatter is recorded by the scanner, presentation filtering is narrowed to
+  warning-only exact probe shapes, and `unaddressed_errors` pages through filtered
+  candidates so benign warning noise does not underfill the requested result set.
+- **Remote Docker event-stream unsupported hosts are visible in observability.**
+  Hosts without a remote `docker` binary now emit a warning and update the remote
+  event-stream failure counters instead of disappearing as an info-only loop exit.
+
 ## [1.32.4] - 2026-06-19
 
 ### Fixed

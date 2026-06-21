@@ -80,7 +80,11 @@ fn root_status(exists: bool, strict_ok: bool) -> TranscriptRootStatus {
 
 #[test]
 fn human_status_and_incident_outputs_accept_optional_branches() {
-    let report = ai_doctor_report(root_status(true, true), root_status(false, false));
+    let report = ai_doctor_report(
+        root_status(true, true),
+        root_status(false, false),
+        root_status(false, false),
+    );
     print_ai_doctor_response(&report, false).unwrap();
 
     let watch = AiWatchStatusReport {
@@ -178,6 +182,7 @@ fn human_smoke_watch_output_accepts_report() {
 fn ai_doctor_report(
     claude_root: TranscriptRootStatus,
     codex_root: TranscriptRootStatus,
+    gemini_root: TranscriptRootStatus,
 ) -> AiDoctorReport {
     AiDoctorReport {
         db_path: "/tmp/cortex.db".to_string(),
@@ -187,6 +192,7 @@ fn ai_doctor_report(
         schema_current: true,
         claude_root,
         codex_root,
+        gemini_root,
         checkpoint_count: 0,
         checkpoint_error_count: 0,
         missing_checkpoint_count: 0,
@@ -230,7 +236,11 @@ fn ensure_index_success_reports_storage_parse_and_file_failures() {
 
 #[test]
 fn ensure_ai_doctor_success_enforces_strict_permissions_only_for_existing_roots() {
-    let strict_failure = ai_doctor_report(root_status(true, false), root_status(false, false));
+    let strict_failure = ai_doctor_report(
+        root_status(true, false),
+        root_status(false, false),
+        root_status(false, false),
+    );
     let err = ensure_ai_doctor_success(&strict_failure, true).unwrap_err();
     assert!(
         err.to_string()
@@ -239,6 +249,25 @@ fn ensure_ai_doctor_success_enforces_strict_permissions_only_for_existing_roots(
 
     ensure_ai_doctor_success(&strict_failure, false).unwrap();
 
-    let missing_roots = ai_doctor_report(root_status(false, false), root_status(false, false));
+    // A bad gemini_root must fail the strict gate just like claude_root/codex_root.
+    // Claude and Codex roots are absent here, so only the gemini disjunct can trip it.
+    let gemini_strict_failure = ai_doctor_report(
+        root_status(false, false),
+        root_status(false, false),
+        root_status(true, false),
+    );
+    let err = ensure_ai_doctor_success(&gemini_strict_failure, true).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("AI transcript root permission check failed")
+    );
+
+    ensure_ai_doctor_success(&gemini_strict_failure, false).unwrap();
+
+    let missing_roots = ai_doctor_report(
+        root_status(false, false),
+        root_status(false, false),
+        root_status(false, false),
+    );
     ensure_ai_doctor_success(&missing_roots, true).unwrap();
 }

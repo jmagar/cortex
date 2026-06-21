@@ -2,6 +2,7 @@ use anyhow::{Result, bail};
 use cortex::app::{IncidentResponse, ServiceLogsResponse};
 use cortex::scanner::{
     AiDoctorReport, CheckpointEntry, IndexResult, ParseErrorEntry, PruneCheckpointsResult,
+    TranscriptRootStatus,
 };
 
 use super::ai_watch::AiSmokeWatchReport;
@@ -97,6 +98,29 @@ pub(crate) fn print_prune_checkpoints_response(
     Ok(())
 }
 
+fn print_transcript_root(label: &str, root: &TranscriptRootStatus) {
+    println!(
+        "{}: {} ({}, readable={}, writable={}, owner={:?}:{:?}, mode={:?}, strict_ok={})",
+        muted(label),
+        primary(&root.path),
+        if root.exists {
+            success("exists")
+        } else {
+            warn("missing")
+        },
+        root.readable,
+        root.writable,
+        root.owner_uid,
+        root.owner_gid,
+        root.mode.map(|m| format!("{m:o}")),
+        if root.strict_ok {
+            success("true")
+        } else {
+            warn("false")
+        }
+    );
+}
+
 pub(crate) fn print_ai_doctor_response(response: &AiDoctorReport, json: bool) -> Result<()> {
     if json {
         return print_json(response);
@@ -119,48 +143,9 @@ pub(crate) fn print_ai_doctor_response(response: &AiDoctorReport, json: bool) ->
         muted("db_last_migration_at"),
         primary(response.db_last_migration_at.as_deref().unwrap_or("-"))
     );
-    let cr = &response.claude_root;
-    println!(
-        "{}: {} ({}, readable={}, writable={}, owner={:?}:{:?}, mode={:?}, strict_ok={})",
-        muted("claude_root"),
-        primary(&cr.path),
-        if cr.exists {
-            success("exists")
-        } else {
-            warn("missing")
-        },
-        cr.readable,
-        cr.writable,
-        cr.owner_uid,
-        cr.owner_gid,
-        cr.mode.map(|m| format!("{m:o}")),
-        if cr.strict_ok {
-            success("true")
-        } else {
-            warn("false")
-        }
-    );
-    let xr = &response.codex_root;
-    println!(
-        "{}: {} ({}, readable={}, writable={}, owner={:?}:{:?}, mode={:?}, strict_ok={})",
-        muted("codex_root"),
-        primary(&xr.path),
-        if xr.exists {
-            success("exists")
-        } else {
-            warn("missing")
-        },
-        xr.readable,
-        xr.writable,
-        xr.owner_uid,
-        xr.owner_gid,
-        xr.mode.map(|m| format!("{m:o}")),
-        if xr.strict_ok {
-            success("true")
-        } else {
-            warn("false")
-        }
-    );
+    print_transcript_root("claude_root", &response.claude_root);
+    print_transcript_root("codex_root", &response.codex_root);
+    print_transcript_root("gemini_root", &response.gemini_root);
     println!(
         "{}: {}",
         muted("checkpoint_count"),
@@ -493,7 +478,8 @@ pub(crate) fn ensure_ai_doctor_success(
 ) -> Result<()> {
     if strict_permissions
         && ((response.claude_root.exists && !response.claude_root.strict_ok)
-            || (response.codex_root.exists && !response.codex_root.strict_ok))
+            || (response.codex_root.exists && !response.codex_root.strict_ok)
+            || (response.gemini_root.exists && !response.gemini_root.strict_ok))
     {
         bail!("AI transcript root permission check failed");
     }

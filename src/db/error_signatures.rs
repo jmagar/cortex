@@ -182,11 +182,12 @@ pub(crate) struct SignatureRow {
     pub acknowledged_at: Option<String>,
 }
 
-/// Return top-N unacknowledged (or all, if `include_acknowledged`) signatures
-/// ordered by `last_seen_at DESC`.
-pub(crate) fn read_unaddressed(
+/// Return a page of unacknowledged (or all, if `include_acknowledged`)
+/// signatures ordered by `last_seen_at DESC`.
+pub(crate) fn read_unaddressed_page(
     pool: &DbPool,
     limit: i64,
+    offset: i64,
     include_acknowledged: bool,
 ) -> Result<Vec<SignatureRow>> {
     let conn = pool.get()?;
@@ -224,11 +225,11 @@ pub(crate) fn read_unaddressed(
          ) w USING (signature_hash, normalizer_version)
          WHERE 1=1 {filter_clause}
          ORDER BY s.last_seen_at DESC
-         LIMIT ?2"
+         LIMIT ?2 OFFSET ?3"
     );
 
     let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt.query_map(params![cutoff_1h, limit], |row| {
+    let rows = stmt.query_map(params![cutoff_1h, limit, offset.max(0)], |row| {
         Ok(SignatureRow {
             signature_hash: row.get(0)?,
             normalizer_version: row.get(1)?,
@@ -464,13 +465,13 @@ mod tests {
             .unwrap();
         }
 
-        let unaddressed = read_unaddressed(&pool, 10, false).unwrap();
+        let unaddressed = read_unaddressed_page(&pool, 10, 0, false).unwrap();
         assert_eq!(unaddressed.len(), 1);
         assert_eq!(unaddressed[0].signature_hash, "unacked");
         assert_eq!(unaddressed[0].count_last_1h, 4);
         assert!(unaddressed[0].acknowledged_at.is_none());
 
-        let with_acknowledged = read_unaddressed(&pool, 10, true).unwrap();
+        let with_acknowledged = read_unaddressed_page(&pool, 10, 0, true).unwrap();
         assert_eq!(
             with_acknowledged
                 .iter()
