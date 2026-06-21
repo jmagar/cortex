@@ -86,9 +86,4 @@ jobs:
 
       - name: Push regenerated branch (only when changed)
         if: steps.gen.outputs.changed == 'true'
-        run: |
-          if [ -n "${{ steps.gen.outputs.old_sha }}" ]; then
-            git push --force-with-lease=marketplace-no-mcp:${{ steps.gen.outputs.old_sha }} origin HEAD:marketplace-no-mcp
-          else
-            git push origin HEAD:marketplace-no-mcp
-          fi
+        run: git push --force origin HEAD:marketplace-no-mcp
