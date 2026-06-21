@@ -261,6 +261,11 @@ pub struct TopicCorrelateRequest {
     pub limit: Option<u32>,
 }
 
+/// Accept `source_kinds` as either a JSON string or an array of strings, for
+/// CLI bridges that cannot emit arrays. `null`/absent → `None`; a single string
+/// → a one-element vec. Non-string array elements (or any other scalar) are a
+/// hard deserialization error. Element *validity* (kebab-case wire names) is
+/// enforced later in `topic_correlate` against `SourceKind::from_wire`.
 fn deserialize_optional_string_vec<'de, D>(deserializer: D) -> Result<Option<Vec<String>>, D::Error>
 where
     D: serde::Deserializer<'de>,

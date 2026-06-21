@@ -21,9 +21,18 @@ pub struct UnaddressedErrorsRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UnaddressedErrorsResponse {
     pub signatures: Vec<ErrorSignatureEntry>,
+    /// Warning-noise rows hidden by `is_unaddressed_warning_noise` while
+    /// assembling this page (recorded but suppressed, not dropped at ingest).
     pub filtered_count: usize,
+    /// Signature rows scanned (post-noise-filter candidates examined), bounded
+    /// by `candidate_cap`.
     pub candidate_rows: usize,
+    /// Hard scan ceiling (`UNADDRESSED_SCAN_CAP`); echoes the server's cap so
+    /// consumers can recognize a truncated window.
     pub candidate_cap: usize,
+    /// True when the scan hit `candidate_cap` before filling the requested
+    /// limit — more candidates may exist beyond the scanned window. Always equal
+    /// to `candidate_rows >= candidate_cap`.
     pub candidate_window_truncated: bool,
 }
 

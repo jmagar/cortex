@@ -216,3 +216,48 @@ async fn topic_source_kind_rejects_invalid_filter() {
     assert!(matches!(err, crate::app::ServiceError::InvalidInput(_)));
     assert!(err.to_string().contains("invalid source_kinds"));
 }
+
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn topic_source_kind_rejects_request_with_any_invalid_kind() {
+    let _guard = crate::db::graph::GRAPH_TEST_LOCK.lock();
+    let (svc, _pool, _dir) = seeded_service().await;
+
+    // A single bad value rejects the whole request (no silent dropping), and the
+    // error names every invalid kind.
+    let req = TopicCorrelateRequest {
+        topic: "dookie".to_string(),
+        source_kinds: Some(vec![
+            "syslog-udp".to_string(),
+            "nope".to_string(),
+            "also-bad".to_string(),
+        ]),
+        ..Default::default()
+    };
+    let err = svc.topic_correlate(req).await.unwrap_err();
+    assert!(matches!(err, crate::app::ServiceError::InvalidInput(_)));
+    let msg = err.to_string();
+    assert!(
+        msg.contains("nope") && msg.contains("also-bad"),
+        "error must list all invalid kinds: {msg}"
+    );
+}
+
+#[test]
+fn source_kinds_deserializer_rejects_non_string_values() {
+    // A non-string array element is a hard error, not a silent coercion.
+    let err = serde_json::from_value::<TopicCorrelateRequest>(serde_json::json!({
+        "topic": "x",
+        "source_kinds": ["syslog-udp", 5]
+    }))
+    .unwrap_err();
+    assert!(err.to_string().contains("source_kinds"), "{err}");
+
+    // A non-string, non-array scalar is rejected too.
+    let err = serde_json::from_value::<TopicCorrelateRequest>(serde_json::json!({
+        "topic": "x",
+        "source_kinds": 5
+    }))
+    .unwrap_err();
+    assert!(err.to_string().contains("source_kinds"), "{err}");
+}

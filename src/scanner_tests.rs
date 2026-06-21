@@ -1080,3 +1080,136 @@ fn index_roots_skips_unreadable_directories_and_continues() {
             .contains("permission denied")
     );
 }
+
+#[test]
+fn gemini_reindex_skips_existing_and_ingests_appended_messages() {
+    let (pool, dir) = test_pool();
+    let file = dir.path().join("session-gemini.json");
+    std::fs::write(
+        &file,
+        r#"{"sessionId":"g","startTime":"2026-04-02T22:02:55.537Z","messages":[
+            {"id":"m1","timestamp":"2026-04-02T22:03:00.000Z","content":"first"},
+            {"id":"m2","timestamp":"2026-04-02T22:03:01.000Z","content":"second"}
+        ]}"#,
+    )
+    .unwrap();
+
+    let first = index_file(&pool, &file, "gemini_session").unwrap();
+    assert_eq!(first.ingested, 2);
+    assert_eq!(first.parse_errors, 0);
+
+    // Append a third message; the size changes so the whole file is re-read and
+    // dedup must skip the two already-imported records.
+    std::fs::write(
+        &file,
+        r#"{"sessionId":"g","startTime":"2026-04-02T22:02:55.537Z","messages":[
+            {"id":"m1","timestamp":"2026-04-02T22:03:00.000Z","content":"first"},
+            {"id":"m2","timestamp":"2026-04-02T22:03:01.000Z","content":"second"},
+            {"id":"m3","timestamp":"2026-04-02T22:03:02.000Z","content":"third"}
+        ]}"#,
+    )
+    .unwrap();
+
+    let second = index_file(&pool, &file, "gemini_session").unwrap();
+    assert_eq!(second.ingested, 1, "only the appended message is new");
+    assert_eq!(
+        second.skipped_dupes, 2,
+        "existing messages dedup by record_key on re-read"
+    );
+
+    let log_count: i64 = pool
+        .get()
+        .unwrap()
+        .query_row("SELECT COUNT(*) FROM logs", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(log_count, 3, "no duplicate rows across re-index");
+}
+
+#[test]
+fn gemini_bad_timestamp_skips_record_keeps_others_and_records_error() {
+    let (pool, dir) = test_pool();
+    let file = dir.path().join("session-bad-ts.json");
+    std::fs::write(
+        &file,
+        r#"{"sessionId":"g","messages":[
+            {"id":"good","timestamp":"2026-04-02T22:03:00.000Z","content":"good record"},
+            {"id":"bad","timestamp":"not-a-timestamp","content":"bad record"}
+        ]}"#,
+    )
+    .unwrap();
+
+    let result = index_file(&pool, &file, "gemini_session").unwrap();
+    assert_eq!(result.ingested, 1, "the good record is still ingested");
+    assert_eq!(
+        result.parse_errors, 1,
+        "one bad timestamp is a per-record parse error, not a whole-file abort"
+    );
+
+    let log_count: i64 = pool
+        .get()
+        .unwrap()
+        .query_row("SELECT COUNT(*) FROM logs", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(log_count, 1);
+
+    // The failure is observable to the AI doctor: a recorded parse error and a
+    // source-level last_error.
+    let parse_errors: i64 = pool
+        .get()
+        .unwrap()
+        .query_row("SELECT COUNT(*) FROM transcript_parse_errors", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    assert_eq!(parse_errors, 1);
+    let source_errors: i64 = pool
+        .get()
+        .unwrap()
+        .query_row(
+            "SELECT COUNT(*) FROM transcript_sources WHERE last_error IS NOT NULL",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(source_errors, 1);
+
+    // The file is not checkpointed clean: a re-index retries the bad record
+    // while the good one dedups — no data lost, failure still surfaced.
+    let second = index_file(&pool, &file, "gemini_session").unwrap();
+    assert_eq!(second.ingested, 0);
+    assert_eq!(second.skipped_dupes, 1);
+    assert_eq!(second.parse_errors, 1);
+}
+
+#[test]
+fn gemini_missing_messages_array_records_parse_error() {
+    let (pool, dir) = test_pool();
+    let file = dir.path().join("session-drift.json");
+    std::fs::write(
+        &file,
+        r#"{"sessionId":"g","history":[{"content":"renamed key"}]}"#,
+    )
+    .unwrap();
+
+    let result = index_file(&pool, &file, "gemini_session").unwrap();
+    assert_eq!(result.ingested, 0);
+    assert_eq!(
+        result.parse_errors, 1,
+        "a chat file with no messages array is recorded as a parse error"
+    );
+    assert_eq!(result.discovered_files, 1);
+
+    let source_errors: i64 = pool
+        .get()
+        .unwrap()
+        .query_row(
+            "SELECT COUNT(*) FROM transcript_sources WHERE last_error LIKE '%messages%'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        source_errors, 1,
+        "missing messages array surfaces as a recorded source error, not a clean checkpoint"
+    );
+}

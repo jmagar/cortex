@@ -2,6 +2,16 @@ use super::*;
 
 const UNADDRESSED_SCAN_CAP: usize = 5_000;
 
+/// Presentation-time noise filter for `unaddressed_errors`.
+///
+/// Distinct from `ErrorDetectionConfig::exclude_patterns`, which drops rows
+/// *during scanning* so they are never recorded as signatures. These
+/// warning-level probe/health/oauth/policy signatures are still ingested and
+/// stay searchable and ack-able — they are only hidden from the unaddressed
+/// list. Only `severity == "warning"` rows are eligible; `err+` is never
+/// filtered here. Do not fold these patterns back into `exclude_patterns`: the
+/// two mechanisms intentionally differ (recorded-but-hidden vs. never-recorded).
+/// Matched on the trimmed, lowercased template/sample.
 fn is_unaddressed_warning_noise(severity: &str, template: &str, sample_message: &str) -> bool {
     if severity != "warning" {
         return false;

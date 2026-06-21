@@ -958,7 +958,13 @@ fn parse_line_for_source(
 ) -> Result<Option<ParsedTranscriptRecord>> {
     match source_kind {
         SourceKind::CodexSession => codex::parse_line(line, path, line_no),
-        SourceKind::GeminiSession => gemini::parse_line(line, path, line_no),
+        // Gemini sessions are whole-file JSON and are diverted to
+        // `index_gemini_file` before this per-line loop is ever reached, so this
+        // arm is structurally unreachable. Keep the invariant explicit rather
+        // than carrying a dead line-parser that looks load-bearing.
+        SourceKind::GeminiSession => {
+            unreachable!("gemini sessions are indexed whole-file by index_gemini_file")
+        }
         SourceKind::ClaudeProject | SourceKind::ExplicitFile => {
             claude::parse_line(line, path, line_no)
         }
@@ -1001,30 +1007,69 @@ fn index_gemini_file(
     canonical: &str,
     current_metadata: &FileMetadata,
 ) -> Result<IndexResult> {
+    let checkpoint_store = checkpoint::CheckpointStore::new(pool);
     let raw = fs::read_to_string(path).context("Gemini transcript is not valid UTF-8")?;
     let file_hash = hash_text(&raw);
-    let records = gemini::parse_file(&raw, path)?;
+    let parsed = gemini::parse_file(&raw, path)?;
     let mut result = IndexResult {
         discovered_files: 1,
         ..Default::default()
     };
+
+    // A chat file with no `messages` array is almost certainly an upstream
+    // schema change. Surface it as a recorded parse error and do NOT write
+    // completion metadata, so the file is re-examined next scan instead of being
+    // silently checkpointed as fully indexed (which would hide every message).
+    if parsed.missing_messages {
+        let error = "Gemini chat file has no 'messages' array — upstream schema may have changed";
+        result.parse_errors += 1;
+        checkpoint_store.record_parse_error(source_id, 0, error, None)?;
+        checkpoint_store.mark_error(source_id, error)?;
+        tracing::warn!(path = %path.display(), "{error}");
+        return Ok(result);
+    }
+    if parsed.skipped_empty > 0 {
+        tracing::debug!(
+            path = %path.display(),
+            skipped = parsed.skipped_empty,
+            "gemini: skipped messages with no extractable text content"
+        );
+    }
+
     let mut batch = Vec::new();
     let mut imports = Vec::new();
     let mut chunk_bytes = 0usize;
     let host = local_hostname();
     let tool = SourceKind::GeminiSession.tool_name();
-    for (record_index, parsed) in records.into_iter().enumerate() {
-        let record_key = parsed.record_key;
-        let message = scrub_ai_message(&parsed.message, None);
+    for (record_index, record) in parsed.records.into_iter().enumerate() {
+        // A single malformed timestamp must not abort the whole file. Treat it
+        // like the JSONL per-line path: record the error, skip the record, keep
+        // ingesting the rest, and refuse the completion checkpoint at the end.
+        let timestamp = match normalize_timestamp(record.timestamp.as_deref()) {
+            Ok(timestamp) => timestamp,
+            Err(error) => {
+                result.parse_errors += 1;
+                checkpoint_store.record_parse_error(
+                    source_id,
+                    record_index as i64,
+                    &error.to_string(),
+                    Some(&record_preview(&record.message)),
+                )?;
+                checkpoint_store.mark_error(source_id, &error.to_string())?;
+                continue;
+            }
+        };
+        let record_key = record.record_key;
+        let message = scrub_ai_message(&record.message, None);
         let project = accept_metadata_field(
-            parsed.ai_project.as_deref(),
+            record.ai_project.as_deref(),
             MAX_AI_PROJECT_CHARS,
             "ai_project",
             canonical,
             &mut result,
         );
         let session_id = accept_metadata_field(
-            parsed.session_id.as_deref(),
+            record.session_id.as_deref(),
             MAX_AI_SESSION_ID_CHARS,
             "ai_session_id",
             canonical,
@@ -1047,7 +1092,7 @@ fn index_gemini_file(
             "content_scrubbed": true,
         }));
         let entry = LogBatchEntry {
-            timestamp: normalize_timestamp(parsed.timestamp.as_deref())?,
+            timestamp,
             hostname: host.clone(),
             facility: Some("transcript".to_string()),
             severity: "info".to_string(),
@@ -1089,7 +1134,27 @@ fn index_gemini_file(
     let final_metadata = FileMetadata::from_path_metadata(path)?;
     let completion_metadata = current_metadata
         .same_size_and_mtime(&final_metadata)
-        .then(|| current_metadata.clone().with_hash_from_hex(file_hash));
+        .then(|| current_metadata.clone().with_hash_from_hex(file_hash))
+        .filter(|_| result.parse_errors == 0);
+    if result.parse_errors > 0 {
+        flush_chunk(
+            pool,
+            storage,
+            source_id,
+            &mut batch,
+            &mut imports,
+            None,
+            &mut result,
+        )?;
+        checkpoint_store.mark_error(
+            source_id,
+            &format!(
+                "{} transcript record(s) failed to parse",
+                result.parse_errors
+            ),
+        )?;
+        return Ok(result);
+    }
     let _ = flush_chunk(
         pool,
         storage,

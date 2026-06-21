@@ -27,6 +27,9 @@ pub(super) fn tool_definitions() -> Vec<Value> {
         .collect::<Vec<_>>()
         .join(", ");
     let description = format!("Query cortex logs with action-based subcommands: {action_desc}.");
+    // Derive the `source_kinds` enum from the canonical SourceKind list so the
+    // wire schema can never drift from `crate::enrich::parser::SourceKind`.
+    let source_kind_wire_names = crate::enrich::parser::SourceKind::all_wire_names();
     vec![json!({
         "name": "cortex",
         "description": description,
@@ -141,12 +144,12 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                             "type": "array",
                             "items": {
                                 "type": "string",
-                                "enum": ["syslog-udp", "syslog-tcp", "docker-stream", "docker-event", "otlp", "adguard-api", "unifi-api", "agent", "shell-history", "agent-command", "file-tail"]
+                                "enum": source_kind_wire_names.clone()
                             }
                         },
                         {
                             "type": "string",
-                            "enum": ["syslog-udp", "syslog-tcp", "docker-stream", "docker-event", "otlp", "adguard-api", "unifi-api", "agent", "shell-history", "agent-command", "file-tail"]
+                            "enum": source_kind_wire_names
                         }
                     ],
                     "description": "For action=topic_correlate, or action=correlate with topic: optional source-kind filters using exact kebab-case wire names such as syslog-udp, syslog-tcp, agent-command, docker-event, or docker-stream. String form is accepted for CLI bridges that cannot send arrays."

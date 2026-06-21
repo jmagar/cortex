@@ -360,3 +360,30 @@ fn schema_timeline_and_patterns_warn_on_full_history_scan() {
         "from/to description must warn that omitting them causes a full-history scan for timeline/patterns"
     );
 }
+
+#[test]
+fn schema_source_kinds_enum_matches_source_kind_wire_names() {
+    let tools = tool_definitions();
+    let one_of = tools[0]["inputSchema"]["properties"]["source_kinds"]["oneOf"]
+        .as_array()
+        .unwrap();
+    let expected = crate::enrich::parser::SourceKind::all_wire_names();
+
+    // Both the array-items branch and the string branch must be generated from
+    // SourceKind so the wire schema can never drift from the enum.
+    let array_enum: Vec<&str> = one_of[0]["items"]["enum"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|value| value.as_str().unwrap())
+        .collect();
+    assert_eq!(array_enum, expected);
+
+    let string_enum: Vec<&str> = one_of[1]["enum"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|value| value.as_str().unwrap())
+        .collect();
+    assert_eq!(string_enum, expected);
+}
