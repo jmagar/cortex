@@ -719,6 +719,39 @@ fn usage_blocks_group_into_five_hour_windows() {
 }
 
 #[test]
+fn usage_blocks_honors_requested_limit() {
+    let (pool, _d) = test_pool();
+    for i in 0..3 {
+        insert_logs_batch(
+            &pool,
+            &[ai_entry(
+                "2026-01-01T00:00:00Z",
+                "claude",
+                &format!("/tmp/project-{i}"),
+                &format!("sess-{i}"),
+                "usage block",
+            )],
+        )
+        .unwrap();
+    }
+
+    let result = get_ai_usage_blocks(
+        &pool,
+        &AiUsageBlocksParams {
+            since: Some("2026-01-01T00:00:00Z".into()),
+            until: Some("2026-01-01T01:00:00Z".into()),
+            limit: Some(2),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(result.blocks.len(), 2);
+    assert_eq!(result.total_blocks, 2);
+    assert!(result.truncated);
+}
+
+#[test]
 fn usage_blocks_total_blocks_equals_len_when_truncated() {
     // When truncated, total_blocks == blocks.len() (the limit); truncated flag
     // is the authoritative indicator that more groups exist.

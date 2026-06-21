@@ -666,7 +666,7 @@ fn ai_blocks_args_into_request_snapshot() {
     let req = args.into_request();
     assert_eq!(
         format!("{req:?}"),
-        "UsageBlocksRequest { project: Some(\"/p\"), tool: None, since: None, until: None }"
+        "UsageBlocksRequest { project: Some(\"/p\"), tool: None, since: None, until: None, limit: None }"
     );
 }
 

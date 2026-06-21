@@ -1022,6 +1022,33 @@ async fn correlate_state_action_returns_bounded_window() {
 }
 
 #[tokio::test]
+async fn correlate_action_with_topic_routes_to_topic_correlation() {
+    let h = TestHarness::new();
+    let value = execute_tool(
+        &h.state,
+        "cortex",
+        json!({
+            "action": "correlate",
+            "topic": "squirts dockersocket",
+            "limit": 5
+        }),
+        None,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(value["topic"], "squirts dockersocket");
+    assert!(
+        value.get("resolved_entities").is_some(),
+        "topic correlation envelope missing resolved_entities: {value}"
+    );
+    assert!(
+        value.get("timeline").is_some(),
+        "topic correlation envelope missing timeline: {value}"
+    );
+}
+
+#[tokio::test]
 async fn host_state_action_reports_ambiguous_hostname() {
     let h = TestHarness::new();
     let conn = h.pool.get().unwrap();

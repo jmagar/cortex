@@ -750,6 +750,7 @@ fn transcript_root_permissions_phase_reports_missing_roots() {
     assert!(matches!(phase.status, SetupStatus::Error));
     assert!(phase.detail.contains(".claude/projects"));
     assert!(phase.detail.contains(".codex/sessions"));
+    assert!(phase.detail.contains(".gemini/tmp"));
 }
 
 #[test]
@@ -757,6 +758,7 @@ fn transcript_root_permissions_phase_accepts_owned_writable_roots() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(dir.path().join(".claude/projects")).unwrap();
     std::fs::create_dir_all(dir.path().join(".codex/sessions")).unwrap();
+    std::fs::create_dir_all(dir.path().join(".gemini/tmp")).unwrap();
 
     let phase = transcript_root_permissions_phase(dir.path());
 

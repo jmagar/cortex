@@ -29,6 +29,8 @@ const INVENTORY_WATCH_DEBOUNCE_SECS: u64 = 3;
 /// refresh; the 5-minute interval tick still guarantees eventual consistency.
 const INVENTORY_WATCH_COOLDOWN_SECS: u64 = 60;
 const REMOTE_DOCKER_EVENT_RECONNECT_SECS: u64 = 10;
+const REMOTE_DOCKER_EVENTS_UNSUPPORTED_MARKER: &str =
+    "cortex: remote Docker events unsupported: docker command not found";
 
 pub fn spawn(
     token: CancellationToken,
@@ -276,6 +278,15 @@ fn spawn_remote_docker_event_tasks(
                         result = run_remote_docker_events_once(&host, &ssh_context, trigger.clone(), token.clone()) => {
                             if let Err(error) = result {
                                 let error = error.to_string();
+                                if remote_docker_events_unsupported(&error) {
+                                    observability.record_remote_docker_event_stream_failure(&host, &error);
+                                    tracing::warn!(
+                                        host,
+                                        error,
+                                        "inventory_refresh: remote Docker event streams disabled for host; Docker is unavailable"
+                                    );
+                                    break;
+                                }
                                 observability.record_remote_docker_event_stream_failure(&host, &error);
                                 failure_log.record(&host, &error);
                             }
@@ -492,10 +503,14 @@ fn remote_docker_events_ssh_args(
     ssh_context: &crate::inventory::ssh::SshContext,
     host: &str,
 ) -> anyhow::Result<Vec<String>> {
-    ssh_context.ssh_args(
-        host,
-        "docker events --filter type=container --format '{{json .}}'",
-    )
+    let command = format!(
+        "if ! command -v docker >/dev/null 2>&1; then echo '{REMOTE_DOCKER_EVENTS_UNSUPPORTED_MARKER}' >&2; exit 78; fi; exec docker events --filter type=container --format '{{{{json .}}}}'"
+    );
+    ssh_context.ssh_args(host, &command)
+}
+
+fn remote_docker_events_unsupported(error: &str) -> bool {
+    error.contains(REMOTE_DOCKER_EVENTS_UNSUPPORTED_MARKER)
 }
 
 fn watched_config_targets(config: &crate::inventory::InventoryConfig) -> Vec<PathBuf> {

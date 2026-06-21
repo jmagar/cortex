@@ -283,6 +283,7 @@ mod tests {
         std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
         std::fs::create_dir_all(home.join(".claude/projects")).unwrap();
         std::fs::create_dir_all(home.join(".codex/sessions")).unwrap();
+        std::fs::create_dir_all(home.join(".gemini/tmp")).unwrap();
         std::fs::create_dir_all(repo.join("scripts")).unwrap();
         std::fs::create_dir_all(&bin_dir).unwrap();
         write_executable(

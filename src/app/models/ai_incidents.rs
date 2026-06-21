@@ -256,9 +256,38 @@ pub struct TopicCorrelateRequest {
     /// Graph traversal depth (default 2, clamped to 6).
     pub depth: Option<u8>,
     /// Restrict the timeline to these source kinds (kebab-case wire names).
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_optional_string_vec")]
     pub source_kinds: Option<Vec<String>>,
     pub limit: Option<u32>,
+}
+
+/// Accept `source_kinds` as either a JSON string or an array of strings, for
+/// CLI bridges that cannot emit arrays. `null`/absent → `None`; a single string
+/// → a one-element vec. Non-string array elements (or any other scalar) are a
+/// hard deserialization error. Element *validity* (kebab-case wire names) is
+/// enforced later in `topic_correlate` against `SourceKind::from_wire`.
+fn deserialize_optional_string_vec<'de, D>(deserializer: D) -> Result<Option<Vec<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = <Option<serde_json::Value> as serde::Deserialize>::deserialize(deserializer)?;
+    match value {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(serde_json::Value::String(value)) => Ok(Some(vec![value])),
+        Some(serde_json::Value::Array(values)) => values
+            .into_iter()
+            .map(|value| match value {
+                serde_json::Value::String(value) => Ok(value),
+                _ => Err(serde::de::Error::custom(
+                    "source_kinds must be a string or an array of strings",
+                )),
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map(Some),
+        _ => Err(serde::de::Error::custom(
+            "source_kinds must be a string or an array of strings",
+        )),
+    }
 }
 
 /// A graph entity a topic term resolved to.

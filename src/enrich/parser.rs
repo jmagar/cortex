@@ -50,6 +50,31 @@ pub enum SourceKind {
 }
 
 impl SourceKind {
+    /// Every variant in canonical wire order. Single source of truth for
+    /// iteration, [`SourceKind::from_wire`], and MCP schema `enum` generation —
+    /// keeps the kebab-case list from drifting between the enum, the JSON
+    /// schema, and validation code.
+    pub const ALL: [SourceKind; 11] = [
+        SourceKind::SyslogUdp,
+        SourceKind::SyslogTcp,
+        SourceKind::DockerStream,
+        SourceKind::DockerEvent,
+        SourceKind::Otlp,
+        SourceKind::AdguardApi,
+        SourceKind::UnifiApi,
+        SourceKind::Agent,
+        SourceKind::ShellHistory,
+        SourceKind::AgentCommand,
+        SourceKind::FileTail,
+    ];
+
+    /// Canonical kebab-case wire names for every variant, in [`SourceKind::ALL`]
+    /// order. Used to generate the MCP `source_kinds` schema `enum` so it can
+    /// never drift from this enum.
+    pub fn all_wire_names() -> Vec<&'static str> {
+        Self::ALL.iter().map(|kind| kind.as_str()).collect()
+    }
+
     /// Stable string form (kebab-case). Use this when comparing against
     /// values read from `metadata_json.source_kind` or written by the
     /// dispatcher.
@@ -73,21 +98,11 @@ impl SourceKind {
     /// Returns `None` for unrecognised values (e.g. a caller-supplied
     /// `--source-kinds` typo), letting callers skip rather than fail.
     pub fn from_wire(value: &str) -> Option<Self> {
-        const ALL: &[SourceKind] = &[
-            SourceKind::SyslogUdp,
-            SourceKind::SyslogTcp,
-            SourceKind::DockerStream,
-            SourceKind::DockerEvent,
-            SourceKind::Otlp,
-            SourceKind::AdguardApi,
-            SourceKind::UnifiApi,
-            SourceKind::Agent,
-            SourceKind::ShellHistory,
-            SourceKind::AgentCommand,
-            SourceKind::FileTail,
-        ];
         let trimmed = value.trim();
-        ALL.iter().copied().find(|kind| kind.as_str() == trimmed)
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|kind| kind.as_str() == trimmed)
     }
 
     /// True when the source is one of the two syslog listeners — convenient

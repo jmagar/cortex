@@ -29,6 +29,7 @@ fn doctor_with_roots(claude_path: String, codex_path: String) -> AiDoctorReport 
         schema_current: true,
         claude_root: root_status(claude_path, true),
         codex_root: root_status(codex_path, false),
+        gemini_root: root_status("/missing/gemini".to_string(), false),
         checkpoint_count: 0,
         checkpoint_error_count: 0,
         missing_checkpoint_count: 0,

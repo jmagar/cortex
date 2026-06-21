@@ -266,6 +266,7 @@ pub struct AiUsageBlocksParams {
     pub ai_tool: Option<String>,
     pub since: Option<String>,
     pub until: Option<String>,
+    pub limit: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

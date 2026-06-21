@@ -204,8 +204,8 @@ minor) via `cargo xtask bump-version minor`, taking whatever the then-current
 version is to the next minor (e.g. from the current `1.32.x` baseline → `1.33.0`).
 CHANGELOG entry required.
 
-(This design-doc PR itself is a docs-only change and used a `patch` bump,
-`1.32.4` → `1.32.5`, preserving the minor bump for the implementation.)
+(This design-doc PR itself is a docs-only change and uses a `patch` bump from
+the current base version, preserving the minor bump for the implementation.)
 
 ## Decisions
 

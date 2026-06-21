@@ -27,6 +27,9 @@ pub(super) fn tool_definitions() -> Vec<Value> {
         .collect::<Vec<_>>()
         .join(", ");
     let description = format!("Query cortex logs with action-based subcommands: {action_desc}.");
+    // Derive the `source_kinds` enum from the canonical SourceKind list so the
+    // wire schema can never drift from `crate::enrich::parser::SourceKind`.
+    let source_kind_wire_names = crate::enrich::parser::SourceKind::all_wire_names();
     vec![json!({
         "name": "cortex",
         "description": description,
@@ -54,7 +57,11 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                 },
                 "query": {
                     "type": "string",
-                    "description": "FTS5 query string. Required for action=similar_incidents (FTS5 match over system logs) and action=ask_history (FTS5 match over AI transcripts). Also used for action=search, search_sessions, and correlate. Examples: 'kernel panic', 'OOM AND killer', '\"connection refused\"', 'error*'. Hyphen is the FTS5 NOT operator; search hyphenated terms as phrases, e.g. '\"smoke-test\"'. Use ai_query/log_query for action=ai_correlate."
+                    "description": "FTS5 query string. Required for action=similar_incidents (FTS5 match over system logs) and action=ask_history (FTS5 match over AI transcripts). Also used for action=search, search_sessions, and timestamp-window action=correlate. Use topic for graph/topic correlation. Examples: 'kernel panic', 'OOM AND killer', '\"connection refused\"', 'error*'. Hyphen is the FTS5 NOT operator; search hyphenated terms as phrases, e.g. '\"smoke-test\"'. Use ai_query/log_query for action=ai_correlate."
+                },
+                "topic": {
+                    "type": "string",
+                    "description": "For action=topic_correlate, or action=correlate without reference_time: topic/entity string to resolve through the graph and correlate into a unified timeline."
                 },
                 "mode": {
                     "type": "string",
@@ -131,6 +138,22 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                     "enum": ["docker-stream", "docker-event", "file-tail", "agent-command", "shell-history", "transcript", "claude", "codex", "gemini"],
                     "description": "For action=filter: structured source alias. syslog-udp, syslog-tcp, and otlp are rejected in v1 because transport is not indexed separately."
                 },
+                "source_kinds": {
+                    "oneOf": [
+                        {
+                            "type": "array",
+                            "items": {
+                                "type": "string",
+                                "enum": source_kind_wire_names.clone()
+                            }
+                        },
+                        {
+                            "type": "string",
+                            "enum": source_kind_wire_names
+                        }
+                    ],
+                    "description": "For action=topic_correlate, or action=correlate with topic: optional source-kind filters using exact kebab-case wire names such as syslog-udp, syslog-tcp, agent-command, docker-event, or docker-stream. String form is accepted for CLI bridges that cannot send arrays."
+                },
                 "severity": {
                     "type": "string",
                     "enum": SEVERITY_LEVELS,
@@ -200,7 +223,7 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                 },
                 "limit": {
                     "type": "integer",
-                    "description": "For action=search or filter: max results, default 100, max 1000. For action=errors: max summary rows, max 100. For action=sessions: max results, default 100, max 1000. For action=search_sessions: max grouped results, default 20, max 100 and returns total_candidates, candidate_rows, candidate_cap, candidate_window_truncated, and truncated. For action=abuse: max matches, default 20, max 100, each with same-session context. For action=abuse_incidents: max incidents, default 20, max 100; response includes total_incidents, candidate_rows, truncated. For action=abuse_investigate: max incidents to expand into evidence bundles, default 3, max 10. For action=ai_correlate: max AI anchors, default 10, max 50. For action=project_context: recent representative entries, default 5, max 20 with 256-char message snippets and recent_entries_truncated. For action=list_ai_tools/list_ai_projects: inventory results are capped at 100/200 and include total/truncated metadata. For action=correlate: max total events, default 500, max 999. For action=correlate_state: max log rows per host, default 100, max 500. For action=host_state: max heartbeat samples, default 1, max 100. For action=patterns: alias for top_n, default 20, max 200. For action=clock_skew: max host rows, max 100. For action=apps: page size, default 500, max 5000; use with offset to paginate; response includes total count of all matching apps. For action=source_ips: page size, default 500, max 5000; use with offset to page through all results. For action=similar_incidents: max incident clusters, default 10, max 50. For action=ask_history: max sessions, default 10, max 50. For action=incident_context: max error log rows, default 50, max 200. For action=graph: alias candidate or relationship cap; entity lookup default 20 max 100, around default 100 max 500."
+                    "description": "For action=search or filter: max results, default 100, max 1000. For action=errors: max summary rows, max 100. For action=sessions: max results, default 100, max 1000. For action=search_sessions: max grouped results, default 20, max 100 and returns total_candidates, candidate_rows, candidate_cap, candidate_window_truncated, and truncated. For action=abuse: max matches, default 20, max 100, each with same-session context. For action=abuse_incidents: max incidents, default 20, max 100; response includes total_incidents, candidate_rows, truncated. For action=abuse_investigate: max incidents to expand into evidence bundles, default 3, max 10. For action=ai_correlate: max AI anchors, default 10, max 50. For action=usage_blocks: max 5-hour usage buckets, default 1000, max 1000. For action=project_context: recent representative entries, default 5, max 20 with 256-char message snippets and recent_entries_truncated. For action=list_ai_tools/list_ai_projects: inventory results are capped at 100/200 and include total/truncated metadata. For action=correlate: max total events, default 500, max 999 for timestamp correlation; with topic, max timeline entries, default 200, max 1000. For action=topic_correlate: max timeline entries, default 200, max 1000. For action=correlate_state: max log rows per host, default 100, max 500. For action=host_state: max heartbeat samples, default 1, max 100. For action=patterns: alias for top_n, default 20, max 200. For action=clock_skew: max host rows, max 100. For action=apps: page size, default 500, max 5000; use with offset to paginate; response includes total count of all matching apps. For action=source_ips: page size, default 500, max 5000; use with offset to page through all results. For action=similar_incidents: max incident clusters, default 10, max 50. For action=ask_history: max sessions, default 10, max 50. For action=incident_context: max error log rows, default 50, max 200. For action=graph: alias candidate or relationship cap; entity lookup default 20 max 100, around default 100 max 500."
                 },
                 "answer_limit": {
                     "type": "integer",
@@ -209,8 +232,8 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                 "depth": {
                     "type": "integer",
                     "minimum": 1,
-                    "maximum": 3,
-                    "description": "For action=graph mode=around or explain: traversal depth. Around supports depth=1 only; explain clamps to 1..3."
+                    "maximum": 6,
+                    "description": "For action=graph mode=around or explain: traversal depth. Around supports depth=1 only; explain clamps to 1..3. For action=topic_correlate, or action=correlate with topic: graph expansion depth, default 2, max 6."
                 },
                 "evidence_sample_limit": {
                     "type": "integer",
@@ -397,6 +420,10 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                         "properties": {
                             "mode": {
                                 "enum": ["entity", "around", "explain", "evidence"]
+                            },
+                            "depth": {
+                                "minimum": 1,
+                                "maximum": 3
                             }
                         },
                         "oneOf": [
@@ -553,6 +580,17 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                                 }
                             }
                         ]
+                    }
+                },
+                {
+                    "if": {
+                        "properties": {
+                            "action": { "const": "topic_correlate" }
+                        },
+                        "required": ["action"]
+                    },
+                    "then": {
+                        "required": ["topic"]
                     }
                 }
             ]

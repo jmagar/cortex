@@ -7,6 +7,7 @@ pub struct UsageBlocksRequest {
     pub tool: Option<String>,
     pub since: Option<String>,
     pub until: Option<String>,
+    pub limit: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

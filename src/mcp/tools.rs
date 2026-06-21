@@ -380,6 +380,11 @@ async fn tool_list_hosts(state: &AppState, _args: Value) -> anyhow::Result<Value
 }
 
 async fn tool_correlate_events(state: &AppState, args: Value) -> anyhow::Result<Value> {
+    if args.get("topic").is_some() {
+        let req: TopicCorrelateRequest = action_payload(args, "correlate")?;
+        let response = state.service.topic_correlate(req).await?;
+        return Ok(serde_json::to_value(response)?);
+    }
     let req: CorrelateEventsRequest = action_payload(args, "correlate")?;
     let response = state.service.correlate_events(req).await?;
     Ok(serde_json::to_value(response)?)
@@ -886,7 +891,7 @@ Resolve a free-text topic to investigation-graph entities, expand the graph, and
 - `topic` (string, required) — topic to correlate, e.g. `axon` or `dookie dns adguard` (terms OR-ed)
 - `since`, `until` (string, optional) — time window (ISO 8601 or relative like `1h`); defaults to the last hour
 - `depth` (integer, optional) — graph traversal depth (default 2, max 6)
-- `source_kinds` (array of string, optional) — restrict the timeline to these source kinds (kebab-case, e.g. `docker-stream`, `agent-command`)
+- `source_kinds` (array of string or string, optional) — restrict the timeline to exact kebab-case source kinds, e.g. `syslog-udp`, `docker-stream`, or `agent-command`
 - `limit` (integer, optional) — max timeline rows (default 200, max 1000)
 
 The response contains `resolved_entities` (with `match_kind`: exact/prefix/label/alias), `graph_expansion` (entities reached by traversal), `discovered_hosts`, a `timeline` (each row annotated with `source_kind` and an `entity_path` lane), and `heartbeat_summaries` for the discovered hosts.
@@ -900,6 +905,7 @@ AI activity bucketed into deterministic 5-hour UTC windows.
 - `project` (string, optional) — exact project path filter
 - `tool` (string, optional) — AI tool filter
 - `since`, `until` (string, optional) — time range (ISO 8601)
+- `limit` (integer, optional) — max 5-hour buckets (default 1000, max 1000)
 
 ---
 
@@ -945,18 +951,25 @@ on hostname-spoofable formats (e.g. UniFi CEF).
 ---
 
 ## cortex correlate
-Search for related events across multiple hosts within a time window.
-Useful for debugging cascading failures — finds events on all hosts within ±N minutes
-of a reference timestamp. Results are grouped by host and ordered by time.
+Universal correlation entrypoint. With `reference_time`, searches for related
+events across multiple hosts within a time window. With `topic`, resolves the
+topic through the investigation graph and returns a unified related timeline.
 
-**Parameters:**
-- `reference_time` (string, **required**) — center timestamp (ISO 8601, e.g. `2025-01-15T14:30:00Z`)
+**Timestamp parameters:**
+- `reference_time` (string, required unless `topic` is supplied) — center timestamp (ISO 8601, e.g. `2025-01-15T14:30:00Z`)
 - `window_minutes` (integer, optional) — minutes before and after reference_time to search (default 5, max 60)
 - `severity_min` (string, optional) — minimum severity to include (default `warning`); `debug` returns everything
 - `host` (string, optional) — limit correlation to a specific host
 - `source` (string, optional) — limit correlation to an exact source identifier. Syslog uses verified `IP:port`; OTLP uses verified peer IP; Docker stream rows use `docker://host/container/stream`; Docker lifecycle rows use `docker-event://host/container/action`.
 - `query` (string, optional) — optional FTS query to narrow results
 - `limit` (integer, optional) — max total events to return (default 500, max 999)
+
+**Topic parameters:**
+- `topic` (string, required unless `reference_time` is supplied) — topic to resolve through the graph
+- `since`, `until` (string, optional) — timeline window; defaults to the last hour
+- `depth` (integer, optional) — graph traversal depth (default 2, max 6)
+- `source_kinds` (array of string or string, optional) — restrict graph timeline source kinds by exact kebab-case wire name
+- `limit` (integer, optional) — max timeline rows (default 200, max 1000)
 
 ---
 

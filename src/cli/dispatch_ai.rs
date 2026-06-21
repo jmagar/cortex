@@ -90,6 +90,7 @@ impl AiBlocksArgs {
             tool: self.tool,
             since: self.since,
             until: self.until,
+            limit: self.limit.map(|value| value.min(u32::MAX as usize) as u32),
         }
     }
 }

@@ -346,9 +346,15 @@ pub fn get_ai_usage_blocks(
     params: &AiUsageBlocksParams,
 ) -> Result<AiUsageBlocksResult> {
     let conn = pool.get()?;
-    const LIMIT: usize = 1_000;
+    const DEFAULT_LIMIT: usize = 1_000;
+    const MAX_LIMIT: usize = 1_000;
     const DEFAULT_LOOKBACK_DAYS: i64 = 30;
     const BUCKET_SECS: i64 = 18_000;
+    let limit = params
+        .limit
+        .map(|value| value as usize)
+        .unwrap_or(DEFAULT_LIMIT)
+        .clamp(1, MAX_LIMIT);
     let mut sql = format!(
         "SELECT datetime((CAST(strftime('%s', timestamp) AS INTEGER) / {BUCKET_SECS}) * {BUCKET_SECS}, 'unixepoch') AS bucket_start,
                 datetime(((CAST(strftime('%s', timestamp) AS INTEGER) / {BUCKET_SECS}) * {BUCKET_SECS}) + {BUCKET_SECS}, 'unixepoch') AS bucket_end,
@@ -390,7 +396,7 @@ pub fn get_ai_usage_blocks(
         " GROUP BY bucket_start, bucket_end, ai_project, ai_tool
           ORDER BY bucket_start ASC, ai_project ASC, ai_tool ASC
           LIMIT {}",
-        LIMIT + 1
+        limit + 1
     ));
 
     let mut stmt = conn.prepare(&sql)?;
@@ -406,7 +412,7 @@ pub fn get_ai_usage_blocks(
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    let truncated = truncate_to_limit(&mut blocks, LIMIT);
+    let truncated = truncate_to_limit(&mut blocks, limit);
     Ok(AiUsageBlocksResult {
         total_blocks: blocks.len(),
         truncated,

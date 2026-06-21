@@ -66,6 +66,60 @@ fn schema_source_ips_exposes_pagination() {
 }
 
 #[test]
+fn schema_exposes_topic_correlate_fields() {
+    let tools = tool_definitions();
+    let schema = &tools[0]["inputSchema"];
+    let props = &schema["properties"];
+
+    assert_eq!(props["topic"]["type"], "string");
+    assert!(
+        props["topic"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("topic_correlate")
+    );
+    assert!(props["source_kinds"]["oneOf"].is_array());
+    assert!(
+        props["source_kinds"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("syslog-udp")
+    );
+    assert!(
+        !props["source_kinds"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("graph_evidence")
+    );
+    assert_eq!(props["depth"]["maximum"], 6);
+
+    let topic_rule = schema["allOf"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|rule| rule["if"]["properties"]["action"]["const"] == "topic_correlate")
+        .expect("topic_correlate conditional");
+    assert!(
+        topic_rule["then"]["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|value| value == "topic")
+    );
+}
+
+#[test]
+fn schema_usage_blocks_accepts_limit() {
+    let tools = tool_definitions();
+    let props = &tools[0]["inputSchema"]["properties"];
+    let limit_desc = props["limit"]["description"].as_str().unwrap();
+    assert!(
+        limit_desc.contains("usage_blocks"),
+        "limit description must document usage_blocks"
+    );
+}
+
+#[test]
 fn schema_includes_file_tails_action() {
     let tool = tool_definitions()
         .into_iter()
@@ -172,7 +226,7 @@ fn schema_graph_exposes_lookup_and_neighborhood_arguments() {
     assert_eq!(tools[0]["inputSchema"]["additionalProperties"], false);
     assert_eq!(props["entity_id"]["minimum"], 1);
     assert_eq!(props["depth"]["minimum"], 1);
-    assert_eq!(props["depth"]["maximum"], 3);
+    assert_eq!(props["depth"]["maximum"], 6);
     for name in [
         "mode",
         "entity_id",
@@ -208,6 +262,7 @@ fn schema_graph_target_constraints_match_runtime_validation() {
         .find(|constraint| constraint["if"]["properties"]["action"]["const"] == "graph")
         .map(|constraint| &constraint["then"])
         .unwrap();
+    assert_eq!(graph_then["properties"]["depth"]["maximum"], 3);
 
     let target_or_evidence = graph_then["oneOf"].as_array().unwrap();
     assert_eq!(target_or_evidence.len(), 2);
@@ -304,4 +359,31 @@ fn schema_timeline_and_patterns_warn_on_full_history_scan() {
         from_desc.contains("full-history scan"),
         "from/to description must warn that omitting them causes a full-history scan for timeline/patterns"
     );
+}
+
+#[test]
+fn schema_source_kinds_enum_matches_source_kind_wire_names() {
+    let tools = tool_definitions();
+    let one_of = tools[0]["inputSchema"]["properties"]["source_kinds"]["oneOf"]
+        .as_array()
+        .unwrap();
+    let expected = crate::enrich::parser::SourceKind::all_wire_names();
+
+    // Both the array-items branch and the string branch must be generated from
+    // SourceKind so the wire schema can never drift from the enum.
+    let array_enum: Vec<&str> = one_of[0]["items"]["enum"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|value| value.as_str().unwrap())
+        .collect();
+    assert_eq!(array_enum, expected);
+
+    let string_enum: Vec<&str> = one_of[1]["enum"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|value| value.as_str().unwrap())
+        .collect();
+    assert_eq!(string_enum, expected);
 }
