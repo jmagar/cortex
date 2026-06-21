@@ -39,8 +39,8 @@ jobs:
         id: gen
         run: |
           git fetch origin main
-          old_sha=$(git rev-parse origin/marketplace-no-mcp 2>/dev/null || echo "")
-          old_tree=$(git rev-parse "origin/marketplace-no-mcp^{tree}" 2>/dev/null || echo "")
+          old_sha=$(git rev-parse --verify -q origin/marketplace-no-mcp 2>/dev/null || echo "")
+          old_tree=$(git rev-parse --verify -q "origin/marketplace-no-mcp^{tree}" 2>/dev/null || echo "")
           git switch -C marketplace-no-mcp origin/main
           python3 - <<'PY'
           import glob, json
