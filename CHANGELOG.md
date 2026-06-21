@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.32.5] - 2026-06-21
+
+### Added
+
+- **Design doc: authenticated bidirectional WebSocket agent channel**
+  (`docs/design/ws-agent-channel.md`). Proposes unifying the agent's heartbeat
+  (HTTP) and log (unauthenticated TCP syslog) paths onto a single authenticated
+  WebSocket on the existing port-3100 listener, with bounded at-least-once log
+  delivery (cumulative acks + in-memory ring buffer, no WAL) and a server→agent
+  control channel. The generic 1514 syslog receiver is unchanged; transport is
+  opt-in via `CORTEX_AGENT_TRANSPORT`. Planning only — no behavior change.
+
 ## [1.32.4] - 2026-06-19
 
 ### Fixed
