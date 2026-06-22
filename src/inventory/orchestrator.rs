@@ -161,34 +161,26 @@ pub async fn refresh_inventory_with_inventory(
         ),
     ];
 
-    let results = match tokio::time::timeout(
-        config.collection_deadline,
-        futures_util::future::join_all(futures),
-    )
-    .await
-    {
-        Ok(results) => results,
-        Err(_) => {
-            let warning = format!(
-                "inventory collection exceeded {}ms",
-                config.collection_deadline.as_millis()
-            );
-            all_warnings.push(warning.clone());
-            COLLECTOR_NAMES
-                .into_iter()
-                .map(|name| {
-                    let now = Utc::now().to_rfc3339();
-                    let mut output = CollectorOutput::new(name);
-                    output.warn("collection_timeout", warning.clone());
-                    (
-                        name,
-                        now.clone(),
-                        now,
-                        config.collection_deadline.as_millis(),
-                        output,
-                    )
-                })
-                .collect()
+    let results = if config.collection_deadline.is_zero() {
+        drop(futures);
+        collection_timeout_results(
+            COLLECTOR_NAMES,
+            config.collection_deadline.as_millis(),
+            &mut all_warnings,
+        )
+    } else {
+        match tokio::time::timeout(
+            config.collection_deadline,
+            futures_util::future::join_all(futures),
+        )
+        .await
+        {
+            Ok(results) => results,
+            Err(_) => collection_timeout_results(
+                COLLECTOR_NAMES,
+                config.collection_deadline.as_millis(),
+                &mut all_warnings,
+            ),
         }
     };
 
@@ -289,6 +281,24 @@ fn timeout_output(name: &'static str, deadline: std::time::Duration) -> Collecto
         format!("collector {name} exceeded {}ms", deadline.as_millis()),
     );
     out
+}
+
+fn collection_timeout_results(
+    collector_names: impl IntoIterator<Item = &'static str>,
+    deadline_ms: u128,
+    warnings: &mut Vec<String>,
+) -> Vec<NamedOutput> {
+    let warning = format!("inventory collection exceeded {deadline_ms}ms");
+    warnings.push(warning.clone());
+    collector_names
+        .into_iter()
+        .map(|name| {
+            let now = Utc::now().to_rfc3339();
+            let mut output = CollectorOutput::new(name);
+            output.warn("collection_timeout", warning.clone());
+            (name, now.clone(), now, deadline_ms, output)
+        })
+        .collect()
 }
 
 fn run_collector(

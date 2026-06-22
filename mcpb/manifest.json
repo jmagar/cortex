@@ -3,7 +3,7 @@
   "manifest_version": "0.4",
   "name": "cortex",
   "display_name": "Cortex",
-  "version": "1.33.2",
+  "version": "1.33.3",
   "description": "Query local cortex SQLite logs through a bundled stdio MCP server.",
   "long_description": "cortex packages the existing cortex stdio entrypoint as a local MCP Bundle. It is query-only: it reads the configured SQLite database and does not start syslog listeners, HTTP servers, Docker Compose, REST, or deploy flows.",
   "author": {

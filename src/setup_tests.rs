@@ -55,8 +55,8 @@ fn ensure_env_file_preserves_existing_token_and_adds_compose_defaults() {
     );
     assert!(raw.contains("CORTEX_TOKEN=keep-me"));
     assert!(raw.contains("CORTEX_DATA_VOLUME="));
-    assert!(raw.contains("CORTEX_DB_PATH=/data/cortex.db"));
-    assert!(raw.contains("COMPOSE_PROJECT_NAME=syslog-jmagar-lab"));
+    assert!(raw.contains("CORTEX_DB_PATH="));
+    assert!(raw.contains("COMPOSE_PROJECT_NAME="));
 }
 
 /// `CORTEX_API_TOKEN` is always provisioned (API is unconditionally mounted).

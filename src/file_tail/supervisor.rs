@@ -94,7 +94,7 @@ impl FileTailSupervisor {
         });
         for source in sources {
             if source.enabled && !tasks.contains_key(&source.id) {
-                self.ensure_initial_checkpoint(&source)?;
+                let source = self.ensure_initial_checkpoint(source)?;
                 let (id, task) = self.build_task(source);
                 tasks.insert(id, task);
             }
@@ -102,12 +102,12 @@ impl FileTailSupervisor {
         Ok(())
     }
 
-    fn ensure_initial_checkpoint(&self, source: &FileTailSource) -> Result<()> {
+    fn ensure_initial_checkpoint(&self, mut source: FileTailSource) -> Result<FileTailSource> {
         let has_checkpoint = source.checkpoint_dev.is_some()
             || source.checkpoint_ino.is_some()
             || source.checkpoint_offset.is_some();
         if has_checkpoint {
-            return Ok(());
+            return Ok(source);
         }
 
         let file = open_validated_tail_file_sync(&source.path)?;
@@ -118,8 +118,12 @@ impl FileTailSupervisor {
             0
         };
         let (dev, ino) = metadata_identity(&metadata);
+        source.checkpoint_dev = Some(dev);
+        source.checkpoint_ino = Some(ino);
+        source.checkpoint_offset = Some(offset);
         self.registry
-            .update_checkpoint(&source.id, dev, ino, offset, &now_iso())
+            .update_checkpoint(&source.id, dev, ino, offset, &now_iso())?;
+        Ok(source)
     }
 
     fn build_task(&self, source: FileTailSource) -> (String, TailTask) {

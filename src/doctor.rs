@@ -745,13 +745,17 @@ fn status_color(s: &SetupStatus) -> u8 {
 /// color is enabled. Width is baked into the literal so alignment holds whether
 /// or not ANSI is present.
 fn status_label(s: &SetupStatus) -> String {
+    status_label_with_color(s, doctor_color())
+}
+
+fn status_label_with_color(s: &SetupStatus, color: bool) -> String {
     let text = match s {
         SetupStatus::Ok => "Ok   ",
         SetupStatus::Warn => "Warn ",
         SetupStatus::Error => "Error",
         SetupStatus::Skipped => "Skip ",
     };
-    if doctor_color() {
+    if color {
         crate::logging::aurora::bold(status_color(s), text)
     } else {
         text.to_string()

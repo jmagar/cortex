@@ -1,6 +1,6 @@
 use super::*;
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 #[test]
 fn pending_files_deduplicate_and_requeue_with_cap() {
@@ -190,6 +190,33 @@ fn remove_event_drops_pending_file_and_requests_checkpoint_prune() {
     assert!(!pending.files.contains_key(&path));
     assert!(!overflow_rescan.load(std::sync::atomic::Ordering::Relaxed));
     assert!(prune_missing.load(std::sync::atomic::Ordering::Relaxed));
+}
+
+#[test]
+fn overflow_rescan_since_uses_recent_safety_window() {
+    let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_800);
+
+    assert_eq!(
+        overflow_rescan_since(now),
+        SystemTime::UNIX_EPOCH + Duration::from_secs(1_500)
+    );
+}
+
+#[test]
+fn overflow_rescan_since_saturates_at_epoch() {
+    let now = SystemTime::UNIX_EPOCH + Duration::from_secs(30);
+
+    assert_eq!(overflow_rescan_since(now), SystemTime::UNIX_EPOCH);
+}
+
+#[test]
+fn system_time_to_rfc3339_is_parseable_by_cortex_time_parser() {
+    let time = SystemTime::UNIX_EPOCH + Duration::from_secs(1_800);
+
+    assert_eq!(
+        system_time_to_rfc3339(time),
+        "1970-01-01T00:30:00.000000000Z"
+    );
 }
 
 fn test_watch_options(path: PathBuf) -> WatchOptions {

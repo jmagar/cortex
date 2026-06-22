@@ -175,10 +175,13 @@ fn diag_status_maps_compose_diagnostic_severity_to_setup_status() {
 
 #[test]
 fn status_label_is_fixed_width_without_color() {
-    assert_eq!(status_label(&SetupStatus::Ok), "Ok   ");
-    assert_eq!(status_label(&SetupStatus::Warn), "Warn ");
-    assert_eq!(status_label(&SetupStatus::Error), "Error");
-    assert_eq!(status_label(&SetupStatus::Skipped), "Skip ");
+    assert_eq!(status_label_with_color(&SetupStatus::Ok, false), "Ok   ");
+    assert_eq!(status_label_with_color(&SetupStatus::Warn, false), "Warn ");
+    assert_eq!(status_label_with_color(&SetupStatus::Error, false), "Error");
+    assert_eq!(
+        status_label_with_color(&SetupStatus::Skipped, false),
+        "Skip "
+    );
 }
 
 #[test]

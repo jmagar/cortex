@@ -16,6 +16,8 @@ use crate::scanner::{self, IndexResult};
 const WATCH_EVENT_BUFFER: usize = 1024;
 const MAX_WATCH_DIRS: usize = 8192;
 const MAX_PENDING_FILES: usize = 4096;
+const OVERFLOW_RESCAN_LOOKBACK: Duration = Duration::from_secs(5 * 60);
+const OVERFLOW_RESCAN_MIN_INTERVAL: Duration = Duration::from_secs(60);
 
 #[derive(Debug, Clone)]
 pub struct WatchOptions {
@@ -190,7 +192,7 @@ pub async fn run(service: CortexService, options: WatchOptions) -> Result<()> {
 
     tracing::info!(targets = ?targets, watched_dirs = watched_dirs.len(), "AI transcript watcher started");
     if options.initial_scan
-        && run_rescan(&service, &options, "initial").await == RescanStatus::Retry
+        && run_rescan(&service, &options, "initial", None).await == RescanStatus::Retry
     {
         overflow_rescan.store(true, Ordering::Relaxed);
     }
@@ -201,6 +203,7 @@ pub async fn run(service: CortexService, options: WatchOptions) -> Result<()> {
         .max(Duration::from_millis(50));
     let mut tick = tokio::time::interval(tick_duration);
     let mut pending = PendingFiles::default();
+    let mut next_overflow_rescan_at = Instant::now();
 
     loop {
         tokio::select! {
@@ -215,10 +218,20 @@ pub async fn run(service: CortexService, options: WatchOptions) -> Result<()> {
                         prune_missing.store(true, Ordering::Relaxed);
                     }
                 }
-                if overflow_rescan.swap(false, Ordering::Relaxed)
-                    && run_rescan(&service, &options, "rescan").await == RescanStatus::Retry
-                {
-                    overflow_rescan.store(true, Ordering::Relaxed);
+                let now = Instant::now();
+                if overflow_rescan.load(Ordering::Relaxed) && now >= next_overflow_rescan_at {
+                    overflow_rescan.store(false, Ordering::Relaxed);
+                    let since = overflow_rescan_since(SystemTime::now());
+                    let since_log = system_time_to_rfc3339(since);
+                    tracing::warn!(
+                        since = %since_log,
+                        min_interval_ms = OVERFLOW_RESCAN_MIN_INTERVAL.as_millis(),
+                        "AI transcript watcher running bounded overflow rescan"
+                    );
+                    if run_rescan(&service, &options, "rescan", Some(since)).await == RescanStatus::Retry {
+                        overflow_rescan.store(true, Ordering::Relaxed);
+                    }
+                    next_overflow_rescan_at = Instant::now() + OVERFLOW_RESCAN_MIN_INTERVAL;
                 }
                 process_pending(&service, &options, &mut pending).await;
             }
@@ -477,9 +490,15 @@ enum RescanStatus {
     Retry,
 }
 
-async fn run_rescan(service: &CortexService, options: &WatchOptions, stage: &str) -> RescanStatus {
+async fn run_rescan(
+    service: &CortexService,
+    options: &WatchOptions,
+    stage: &str,
+    since: Option<SystemTime>,
+) -> RescanStatus {
     let path = options.path.as_ref().map(|path| path.display().to_string());
-    match service.index_ai_roots(path, false, None).await {
+    let since = since.map(system_time_to_rfc3339);
+    match service.index_ai_roots(path, false, since).await {
         Ok(result) => {
             emit_index_result(stage, &result, options.json);
             RescanStatus::Completed
@@ -489,6 +508,17 @@ async fn run_rescan(service: &CortexService, options: &WatchOptions, stage: &str
             RescanStatus::Retry
         }
     }
+}
+
+fn overflow_rescan_since(now: SystemTime) -> SystemTime {
+    match now.duration_since(SystemTime::UNIX_EPOCH) {
+        Ok(elapsed) if elapsed > OVERFLOW_RESCAN_LOOKBACK => now - OVERFLOW_RESCAN_LOOKBACK,
+        _ => SystemTime::UNIX_EPOCH,
+    }
+}
+
+fn system_time_to_rfc3339(time: SystemTime) -> String {
+    chrono::DateTime::<chrono::Utc>::from(time).to_rfc3339_opts(chrono::SecondsFormat::Nanos, true)
 }
 
 async fn process_pending(
