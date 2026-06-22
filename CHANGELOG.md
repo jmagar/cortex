@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.34.1] - 2026-06-22
+
+### Added
+
+- Add explicit XSS fixture coverage for the embedded investigation workspace's
+  text-only rendering contract across service names, graph labels, tooltip-like
+  strings, log excerpts, HTML entities, SVG/script payloads, ANSI escapes,
+  bearer-looking strings, cookies, and URL userinfo.
+
 ## [1.34.0] - 2026-06-21
 
 ### Added
