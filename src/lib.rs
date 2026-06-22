@@ -28,6 +28,7 @@ pub mod receiver;
 pub mod runtime;
 pub mod scanner;
 pub mod setup;
+pub mod web_app;
 
 pub(crate) mod db;
 pub(crate) mod docker_ingest;

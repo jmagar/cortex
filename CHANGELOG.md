@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.34.0] - 2026-06-21
+
+### Added
+
+- Serve an embedded Cortex investigation workspace under `/app/*`, with a
+  scoped SPA fallback, memory-only bearer-token entry, Aurora-styled operator
+  layout, pinned bundled Cytoscape.js graph rendering, cache/CSP headers, and
+  a visible `/api/v1` compatibility/degraded state.
+
 ## [1.33.4] - 2026-06-23
 
 ### Fixed
