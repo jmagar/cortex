@@ -20,13 +20,16 @@
 
 use std::borrow::Cow;
 use std::collections::HashMap;
-use std::path::Path;
 use std::sync::{LazyLock, Mutex};
-use std::{fs, path::PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 use regex::Regex;
 use serde::Deserialize;
 
+use crate::ai_project::normalize_ai_project_path;
 use crate::db::LogBatchEntry;
 
 /// Configuration for the enrichment pipeline. Built from environment variables
@@ -277,7 +280,7 @@ pub(crate) fn project_from_transcript_path(path: &str) -> Option<String> {
     }
     if let Some(project_part) = path.split("/.claude/projects/").nth(1) {
         let encoded = project_part.split('/').next()?;
-        return decode_claude_project(encoded);
+        return decode_claude_project(encoded).map(|project| normalize_ai_project_path(&project));
     }
     None
 }
@@ -315,7 +318,8 @@ fn project_from_sessions_index(path: &str) -> Option<String> {
                     .into_iter()
                     .find_map(|entry| entry.project_path)
             })
-        });
+        })
+        .map(|project| normalize_ai_project_path(&project));
 
     cache.insert(index_path, project.clone());
     project
@@ -336,7 +340,7 @@ fn fill_ai_metadata_from_json(entry: &mut LogBatchEntry, value: &serde_json::Val
             .get("cwd")
             .or_else(|| value.get("cwd"))
             .and_then(serde_json::Value::as_str)
-            .map(str::to_string);
+            .map(normalize_ai_project_path);
     }
     if entry.ai_project.is_none() {
         entry.ai_project = payload
@@ -346,7 +350,7 @@ fn fill_ai_metadata_from_json(entry: &mut LogBatchEntry, value: &serde_json::Val
             .and_then(|args| {
                 args.get("workdir")
                     .and_then(serde_json::Value::as_str)
-                    .map(str::to_string)
+                    .map(normalize_ai_project_path)
             });
     }
 }

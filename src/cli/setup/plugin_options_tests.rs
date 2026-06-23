@@ -1,4 +1,5 @@
 use super::*;
+use serial_test::serial;
 use std::sync::Mutex;
 
 static ENV_LOCK: Mutex<()> = Mutex::new(());
@@ -74,6 +75,7 @@ fn reject_unsafe_value_errors_on_newline_and_cr() {
 }
 
 #[test]
+#[serial]
 fn prepare_plugin_hook_env_maps_server_options_without_client_probe() {
     let _lock = ENV_LOCK.lock().unwrap();
     let env = EnvGuard::new(&[
@@ -117,6 +119,7 @@ fn prepare_plugin_hook_env_maps_server_options_without_client_probe() {
 }
 
 #[test]
+#[serial]
 fn prepare_oauth_env_derives_public_url_and_redirects_once() {
     let _lock = ENV_LOCK.lock().unwrap();
     let env = EnvGuard::new(&[
@@ -169,6 +172,7 @@ fn prepare_oauth_env_derives_public_url_and_redirects_once() {
 }
 
 #[test]
+#[serial]
 fn prepare_plugin_hook_env_rejects_unsafe_api_token_before_mapping() {
     let _lock = ENV_LOCK.lock().unwrap();
     let env = EnvGuard::new(&[

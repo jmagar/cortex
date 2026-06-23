@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.33.4] - 2026-06-23
+
+### Fixed
+
+- **AI transcript sessions from worktrees are attributed to the durable project
+  root.** Cortex now normalizes repo-local `.worktrees`, Claude
+  `.claude/worktrees`, and validated Codex app worktree paths before storing
+  `ai_project`, so worktree sessions group with the project they belong to
+  instead of fragmenting under temporary checkout paths.
+
 ## [1.33.3] - 2026-06-22
 
 ## [1.33.2] - 2026-06-21

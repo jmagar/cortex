@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use sha2::{Digest, Sha256};
 
+use crate::ai_project::normalize_local_ai_project_path;
 use crate::config::StorageConfig;
 use crate::db::{DbPool, LogBatchEntry, enforce_storage_budget, insert_logs_batch_in_tx};
 use crate::ingest_metadata::bounded_metadata_json;
@@ -285,6 +286,7 @@ fn is_known_transcript_root(path: &Path) -> bool {
     let allowed = [
         home.join(".claude/projects"),
         home.join(".codex/sessions"),
+        home.join(".codex/worktrees"),
         home.join(".gemini/tmp"),
     ];
     allowed
@@ -481,6 +483,7 @@ pub fn index_file_with_options(
     let mut imports = Vec::new();
     let mut batch = Vec::new();
     let mut chunk_bytes = 0usize;
+    let mut project_normalizer = ProjectNormalizer::default();
     let file = fs::File::open(&canonical_path)?;
     let mut reader = BufReader::new(file);
     let mut hasher = Sha256::new();
@@ -534,8 +537,13 @@ pub fn index_file_with_options(
             Ok(Some(parsed)) => {
                 let record_key = parsed.record_key;
                 let message = scrub_ai_message(&parsed.message, None);
+                let project_candidate = parsed
+                    .ai_project
+                    .as_deref()
+                    .or(fallback_project.as_deref())
+                    .map(|project| project_normalizer.normalize(project));
                 let project = accept_metadata_field(
-                    parsed.ai_project.as_deref().or(fallback_project.as_deref()),
+                    project_candidate.as_deref(),
                     MAX_AI_PROJECT_CHARS,
                     "ai_project",
                     &canonical,
@@ -920,7 +928,7 @@ fn looks_like_codex_record(line: &str) -> bool {
 
 fn detect_source_kind(path: &Path) -> SourceKind {
     let display = path.to_string_lossy();
-    if display.contains(".codex/sessions") {
+    if display.contains(".codex/sessions") || display.contains(".codex/worktrees") {
         SourceKind::CodexSession
     } else if display.contains(".gemini/tmp") {
         SourceKind::GeminiSession
@@ -978,7 +986,7 @@ fn project_for_file(source_kind: SourceKind, path: &Path) -> Option<String> {
         SourceKind::GeminiSession => None,
         SourceKind::ExplicitFile => std::env::current_dir()
             .ok()
-            .map(|path| path.to_string_lossy().to_string()),
+            .map(|path| normalize_local_ai_project_path(&path.to_string_lossy())),
     }
 }
 
@@ -996,6 +1004,22 @@ fn update_codex_fallbacks(
     }
     if let Some(session_id) = codex::session_id_from_line(line) {
         *fallback_session_id = Some(session_id);
+    }
+}
+
+#[derive(Default)]
+struct ProjectNormalizer {
+    cache: HashMap<String, String>,
+}
+
+impl ProjectNormalizer {
+    fn normalize(&mut self, project: &str) -> String {
+        if let Some(normalized) = self.cache.get(project) {
+            return normalized.clone();
+        }
+        let normalized = normalize_local_ai_project_path(project);
+        self.cache.insert(project.to_string(), normalized.clone());
+        normalized
     }
 }
 
@@ -1041,6 +1065,7 @@ fn index_gemini_file(
     let mut chunk_bytes = 0usize;
     let host = local_hostname();
     let tool = SourceKind::GeminiSession.tool_name();
+    let mut project_normalizer = ProjectNormalizer::default();
     for (record_index, record) in parsed.records.into_iter().enumerate() {
         // A single malformed timestamp must not abort the whole file. Treat it
         // like the JSONL per-line path: record the error, skip the record, keep
@@ -1061,8 +1086,12 @@ fn index_gemini_file(
         };
         let record_key = record.record_key;
         let message = scrub_ai_message(&record.message, None);
+        let project_candidate = record
+            .ai_project
+            .as_deref()
+            .map(|project| project_normalizer.normalize(project));
         let project = accept_metadata_field(
-            record.ai_project.as_deref(),
+            project_candidate.as_deref(),
             MAX_AI_PROJECT_CHARS,
             "ai_project",
             canonical,
@@ -1380,6 +1409,7 @@ fn default_roots() -> Vec<PathBuf> {
             vec![
                 home.join(".claude/projects"),
                 home.join(".codex/sessions"),
+                home.join(".codex/worktrees"),
                 home.join(".gemini/tmp"),
             ]
         })
