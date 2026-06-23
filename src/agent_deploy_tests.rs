@@ -125,7 +125,10 @@ fn unraid_constants_wire_socket_and_host_syslog() {
 }
 
 #[test]
+#[serial]
 fn deploy_syslog_target_derives_from_heartbeat_url() {
+    let _guard = EnvGuard::remove("CORTEX_SYSLOG_TARGET");
+
     assert_eq!(
         deploy_syslog_target(Some("https://cortex.example.test:3100")),
         Some("cortex.example.test:1514".to_string())

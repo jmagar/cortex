@@ -839,6 +839,103 @@ fn index_file_uses_session_meta_for_codex_response_items() {
 }
 
 #[test]
+fn index_file_normalizes_codex_project_local_worktree_cwd() {
+    let (pool, dir) = test_pool();
+    let project = dir.path().join("workspace/cortex");
+    std::fs::create_dir_all(&project).unwrap();
+    let file = dir.path().join("rollout-worktree.jsonl");
+    let worktree = project.join(".worktrees/session-indexing");
+    std::fs::write(
+        &file,
+        format!(
+            "{{\"type\":\"session_meta\",\"payload\":{{\"id\":\"worktree-session\",\"cwd\":\"{}\"}}}}\n\
+             {{\"type\":\"response_item\",\"payload\":{{\"content\":[{{\"type\":\"output_text\",\"text\":\"worktree normalized\"}}]}},\"timestamp\":\"2026-05-11T00:00:00Z\"}}\n",
+            worktree.display()
+        ),
+    )
+    .unwrap();
+
+    let result = index_file(&pool, &file, "codex_session").unwrap();
+    assert_eq!(result.ingested, 1);
+    let search = search_ai_sessions(
+        &pool,
+        &SearchAiSessionsParams {
+            query: "normalized".into(),
+            limit: Some(10),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(search.sessions[0].ai_project, project.to_string_lossy());
+}
+
+#[test]
+fn index_file_normalizes_claude_project_local_worktree_cwd() {
+    let (pool, dir) = test_pool();
+    let project = dir.path().join("workspace/cortex");
+    std::fs::create_dir_all(&project).unwrap();
+    let file = dir.path().join("claude-worktree.jsonl");
+    let worktree = project.join(".claude/worktrees/session-indexing");
+    std::fs::write(
+        &file,
+        format!(
+            "{{\"session_id\":\"claude-worktree\",\"cwd\":\"{}\",\"content\":\"claude worktree normalized\",\"timestamp\":\"2026-05-11T00:00:00Z\"}}\n",
+            worktree.display()
+        ),
+    )
+    .unwrap();
+
+    let result = index_file(&pool, &file, "claude_project").unwrap();
+    assert_eq!(result.ingested, 1);
+    let search = search_ai_sessions(
+        &pool,
+        &SearchAiSessionsParams {
+            query: "\"claude worktree\"".into(),
+            limit: Some(10),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(search.sessions[0].ai_tool, "claude");
+    assert_eq!(search.sessions[0].ai_project, project.to_string_lossy());
+}
+
+#[test]
+#[serial]
+fn index_file_normalizes_codex_app_worktree_cwd_to_workspace_project() {
+    let (pool, dir) = test_pool();
+    let _home = HomeOverride::set(dir.path());
+    let project = dir.path().join("workspace/cortex");
+    std::fs::create_dir_all(&project).unwrap();
+    let file = dir.path().join("rollout-codex-app-worktree.jsonl");
+    let worktree = dir
+        .path()
+        .join(".codex/worktrees/ade935ee-48ec-49f4-8e89-ccb0294e73eb/cortex");
+    std::fs::write(
+        &file,
+        format!(
+            "{{\"type\":\"session_meta\",\"payload\":{{\"id\":\"codex-app-worktree\",\"cwd\":\"{}\"}}}}\n\
+             {{\"type\":\"response_item\",\"payload\":{{\"content\":[{{\"type\":\"output_text\",\"text\":\"codex app worktree normalized\"}}]}},\"timestamp\":\"2026-05-11T00:00:00Z\"}}\n",
+            worktree.display()
+        ),
+    )
+    .unwrap();
+
+    let result = index_file(&pool, &file, "codex_session").unwrap();
+    assert_eq!(result.ingested, 1);
+    let search = search_ai_sessions(
+        &pool,
+        &SearchAiSessionsParams {
+            query: "\"codex app worktree\"".into(),
+            limit: Some(10),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(search.sessions[0].ai_project, project.to_string_lossy());
+}
+
+#[test]
 fn explicit_file_detects_codex_transcript_shape_outside_codex_root() {
     let (pool, dir) = test_pool();
     let file = dir.path().join("exported-codex.jsonl");

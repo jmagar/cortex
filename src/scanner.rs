@@ -9,7 +9,9 @@ use sha2::{Digest, Sha256};
 use crate::config::StorageConfig;
 use crate::db::{DbPool, LogBatchEntry, enforce_storage_budget, insert_logs_batch_in_tx};
 use crate::ingest_metadata::bounded_metadata_json;
-use crate::receiver::enrichment::{project_from_transcript_path, scrub_ai_message};
+use crate::receiver::enrichment::{
+    normalize_ai_project_path, project_from_transcript_path, scrub_ai_message,
+};
 
 mod checkpoint;
 mod claude;
@@ -534,8 +536,13 @@ pub fn index_file_with_options(
             Ok(Some(parsed)) => {
                 let record_key = parsed.record_key;
                 let message = scrub_ai_message(&parsed.message, None);
+                let project_candidate = parsed
+                    .ai_project
+                    .as_deref()
+                    .or(fallback_project.as_deref())
+                    .map(normalize_ai_project_path);
                 let project = accept_metadata_field(
-                    parsed.ai_project.as_deref().or(fallback_project.as_deref()),
+                    project_candidate.as_deref(),
                     MAX_AI_PROJECT_CHARS,
                     "ai_project",
                     &canonical,
@@ -978,7 +985,7 @@ fn project_for_file(source_kind: SourceKind, path: &Path) -> Option<String> {
         SourceKind::GeminiSession => None,
         SourceKind::ExplicitFile => std::env::current_dir()
             .ok()
-            .map(|path| path.to_string_lossy().to_string()),
+            .map(|path| normalize_ai_project_path(&path.to_string_lossy())),
     }
 }
 
@@ -992,7 +999,7 @@ fn update_codex_fallbacks(
         return;
     }
     if let Some(project) = codex::project_from_line(line) {
-        *fallback_project = Some(project);
+        *fallback_project = Some(normalize_ai_project_path(&project));
     }
     if let Some(session_id) = codex::session_id_from_line(line) {
         *fallback_session_id = Some(session_id);
@@ -1061,8 +1068,9 @@ fn index_gemini_file(
         };
         let record_key = record.record_key;
         let message = scrub_ai_message(&record.message, None);
+        let project_candidate = record.ai_project.as_deref().map(normalize_ai_project_path);
         let project = accept_metadata_field(
-            record.ai_project.as_deref(),
+            project_candidate.as_deref(),
             MAX_AI_PROJECT_CHARS,
             "ai_project",
             canonical,

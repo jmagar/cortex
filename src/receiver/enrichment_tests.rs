@@ -317,6 +317,26 @@ fn enriches_codex_function_call_workdir_when_session_meta_absent() {
 }
 
 #[test]
+fn enriches_codex_workdir_normalizes_project_local_worktree() {
+    let cfg = EnrichmentConfig::default();
+    let tmp = tempfile::tempdir().unwrap();
+    let project = tmp.path().join("workspace/cortex");
+    let worktree = project.join(".worktrees/session-indexing");
+    let e = entry(
+        "codex-transcript",
+        &format!(
+            "{{\"type\":\"response_item\",\"payload\":{{\"type\":\"function_call\",\"arguments\":\"{{\\\"cmd\\\":\\\"cargo test\\\",\\\"workdir\\\":\\\"{}\\\"}}\"}}}}",
+            worktree.display()
+        ),
+        "10.0.0.1:1",
+        "info",
+    );
+    let out = enrich_entry(e, &cfg);
+    assert_eq!(out.ai_tool.as_deref(), Some("codex"));
+    assert_eq!(out.ai_project.as_deref(), Some(project.to_str().unwrap()));
+}
+
+#[test]
 fn enriches_claude_project_from_transcript_path_in_raw() {
     let cfg = EnrichmentConfig::default();
     let mut e = entry(

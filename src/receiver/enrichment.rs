@@ -282,6 +282,49 @@ pub(crate) fn project_from_transcript_path(path: &str) -> Option<String> {
     None
 }
 
+/// Normalize AI project paths that point at temporary worktrees back to the
+/// durable project root used by Cortex's session inventory.
+pub(crate) fn normalize_ai_project_path(project: &str) -> String {
+    let project = project.trim();
+    if project.is_empty() || project.contains("://") {
+        return project.to_string();
+    }
+    if let Some(root) = project_local_worktree_root(project) {
+        return root;
+    }
+    if let Some(root) = codex_app_worktree_project(project) {
+        return root;
+    }
+    project.to_string()
+}
+
+fn project_local_worktree_root(project: &str) -> Option<String> {
+    ["/.worktrees/", "/.claude/worktrees/"]
+        .into_iter()
+        .find_map(|marker| {
+            project
+                .find(marker)
+                .and_then(|idx| (idx > 0).then(|| project[..idx].to_string()))
+        })
+}
+
+fn codex_app_worktree_project(project: &str) -> Option<String> {
+    let marker = "/.codex/worktrees/";
+    let idx = project.find(marker)?;
+    let home = &project[..idx];
+    let rest = &project[idx + marker.len()..];
+    let mut segments = rest.split('/').filter(|segment| !segment.is_empty());
+    let _worktree_id = segments.next()?;
+    let repo = segments.next()?;
+    Some(
+        Path::new(home)
+            .join("workspace")
+            .join(repo)
+            .display()
+            .to_string(),
+    )
+}
+
 /// Decode a Claude project directory name back to a path.
 ///
 /// Claude encodes project paths by replacing `/` with `-` and prefixing with `-`.
@@ -315,7 +358,8 @@ fn project_from_sessions_index(path: &str) -> Option<String> {
                     .into_iter()
                     .find_map(|entry| entry.project_path)
             })
-        });
+        })
+        .map(|project| normalize_ai_project_path(&project));
 
     cache.insert(index_path, project.clone());
     project
@@ -336,7 +380,7 @@ fn fill_ai_metadata_from_json(entry: &mut LogBatchEntry, value: &serde_json::Val
             .get("cwd")
             .or_else(|| value.get("cwd"))
             .and_then(serde_json::Value::as_str)
-            .map(str::to_string);
+            .map(normalize_ai_project_path);
     }
     if entry.ai_project.is_none() {
         entry.ai_project = payload
@@ -346,7 +390,7 @@ fn fill_ai_metadata_from_json(entry: &mut LogBatchEntry, value: &serde_json::Val
             .and_then(|args| {
                 args.get("workdir")
                     .and_then(serde_json::Value::as_str)
-                    .map(str::to_string)
+                    .map(normalize_ai_project_path)
             });
     }
 }
