@@ -2,6 +2,7 @@
 
 pub mod agent;
 pub mod agent_deploy;
+pub(crate) mod ai_project;
 pub mod ai_watch;
 pub mod api;
 pub mod app;

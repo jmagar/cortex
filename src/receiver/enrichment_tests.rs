@@ -337,6 +337,50 @@ fn enriches_codex_workdir_normalizes_project_local_worktree() {
 }
 
 #[test]
+fn enriches_codex_workdir_keeps_codex_app_worktree_even_when_workspace_project_exists() {
+    let cfg = EnrichmentConfig::default();
+    let tmp = tempfile::tempdir().unwrap();
+    let project = tmp.path().join("workspace/cortex");
+    fs::create_dir_all(&project).unwrap();
+    let worktree = tmp
+        .path()
+        .join(".codex/worktrees/ade935ee-48ec-49f4-8e89-ccb0294e73eb/cortex");
+    let e = entry(
+        "codex-transcript",
+        &format!(
+            "{{\"type\":\"response_item\",\"payload\":{{\"type\":\"function_call\",\"arguments\":\"{{\\\"cmd\\\":\\\"cargo test\\\",\\\"workdir\\\":\\\"{}\\\"}}\"}}}}",
+            worktree.display()
+        ),
+        "10.0.0.1:1",
+        "info",
+    );
+    let out = enrich_entry(e, &cfg);
+    assert_eq!(out.ai_tool.as_deref(), Some("codex"));
+    assert_eq!(out.ai_project.as_deref(), Some(worktree.to_str().unwrap()));
+}
+
+#[test]
+fn enriches_codex_workdir_keeps_codex_app_worktree_when_workspace_project_missing() {
+    let cfg = EnrichmentConfig::default();
+    let tmp = tempfile::tempdir().unwrap();
+    let worktree = tmp
+        .path()
+        .join(".codex/worktrees/ade935ee-48ec-49f4-8e89-ccb0294e73eb/cortex");
+    let e = entry(
+        "codex-transcript",
+        &format!(
+            "{{\"type\":\"response_item\",\"payload\":{{\"type\":\"function_call\",\"arguments\":\"{{\\\"cmd\\\":\\\"cargo test\\\",\\\"workdir\\\":\\\"{}\\\"}}\"}}}}",
+            worktree.display()
+        ),
+        "10.0.0.1:1",
+        "info",
+    );
+    let out = enrich_entry(e, &cfg);
+    assert_eq!(out.ai_tool.as_deref(), Some("codex"));
+    assert_eq!(out.ai_project.as_deref(), Some(worktree.to_str().unwrap()));
+}
+
+#[test]
 fn enriches_claude_project_from_transcript_path_in_raw() {
     let cfg = EnrichmentConfig::default();
     let mut e = entry(
@@ -385,5 +429,40 @@ fn project_from_transcript_path_prefers_sessions_index_original_path() {
     assert_eq!(
         project_from_transcript_path(transcript.to_str().unwrap()).as_deref(),
         Some(project.to_str().unwrap())
+    );
+}
+
+#[test]
+fn project_from_transcript_path_normalizes_sessions_index_worktree_path() {
+    let tmp = tempfile::tempdir().unwrap();
+    let project = tmp.path().join("workspace/cortex");
+    let worktree = project.join(".claude/worktrees/session-indexing");
+    fs::create_dir_all(&worktree).unwrap();
+
+    let transcript_dir = tmp.path().join(".claude/projects/-tmp-cortex");
+    fs::create_dir_all(&transcript_dir).unwrap();
+    fs::write(
+        transcript_dir.join("sessions-index.json"),
+        format!(
+            "{{\"version\":1,\"entries\":[{{\"projectPath\":\"{}\"}}]}}",
+            worktree.display()
+        ),
+    )
+    .unwrap();
+
+    let transcript = transcript_dir.join("session-123.jsonl");
+    assert_eq!(
+        project_from_transcript_path(transcript.to_str().unwrap()).as_deref(),
+        Some(project.to_str().unwrap())
+    );
+}
+
+#[test]
+fn project_from_transcript_path_normalizes_decoded_claude_worktree_fallback() {
+    let transcript = "/home/jmagar/.claude/projects/-home-jmagar-workspace-cortex-.claude-worktrees-session-indexing/session-123.jsonl";
+
+    assert_eq!(
+        project_from_transcript_path(transcript).as_deref(),
+        Some("/home/jmagar/workspace/cortex")
     );
 }
