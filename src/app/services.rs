@@ -109,6 +109,7 @@ pub struct CortexService {
     pool: Arc<DbPool>,
     pub(super) storage: StorageConfig,
     db_permits: Arc<Semaphore>,
+    pub(super) heavy_read_permits: Arc<Semaphore>,
     acquire_timeout: Duration,
     /// OS-level adapter for journalctl / systemd shell-outs.
     pub(super) os: Arc<dyn OsAdapter + Send + Sync>,
@@ -133,10 +134,12 @@ fn read_permits_for_pool(pool_size: u32) -> usize {
 impl CortexService {
     pub(crate) fn new(pool: Arc<DbPool>, storage: StorageConfig) -> Self {
         let permits = read_permits_for_pool(storage.pool_size);
+        let heavy_read_concurrency = storage.heavy_read_concurrency;
         Self {
             pool,
             storage,
             db_permits: Arc::new(Semaphore::new(permits)),
+            heavy_read_permits: Arc::new(Semaphore::new(heavy_read_concurrency)),
             acquire_timeout: DB_ACQUIRE_TIMEOUT,
             os: Arc::new(SystemOsAdapter),
             file_tail_registry: None,
@@ -154,10 +157,12 @@ impl CortexService {
         os: Arc<dyn OsAdapter + Send + Sync>,
     ) -> Self {
         let permits = read_permits_for_pool(storage.pool_size);
+        let heavy_read_concurrency = storage.heavy_read_concurrency;
         Self {
             pool,
             storage,
             db_permits: Arc::new(Semaphore::new(permits)),
+            heavy_read_permits: Arc::new(Semaphore::new(heavy_read_concurrency)),
             acquire_timeout: DB_ACQUIRE_TIMEOUT,
             os,
             file_tail_registry: None,
@@ -254,6 +259,38 @@ impl CortexService {
             }
         }
         result
+    }
+
+    async fn run_heavy_db<F, T>(&self, op: &'static str, f: F) -> ServiceResult<T>
+    where
+        F: FnOnce(&DbPool) -> anyhow::Result<T> + Send + 'static,
+        T: Send + 'static,
+    {
+        let wait_start = Instant::now();
+        let permit_result = tokio::time::timeout(
+            self.acquire_timeout,
+            Arc::clone(&self.heavy_read_permits).acquire_owned(),
+        )
+        .await;
+
+        let heavy_permit = match permit_result {
+            Err(_) => {
+                tracing::warn!(
+                    op,
+                    wait_ms = wait_start.elapsed().as_millis(),
+                    "heavy read limited"
+                );
+                return Err(ServiceError::Busy("heavy_read_limited".to_string()));
+            }
+            Ok(Err(_)) => {
+                tracing::warn!(op, "heavy read limiter closed");
+                return Err(ServiceError::Busy("heavy_read_limited".to_string()));
+            }
+            Ok(Ok(permit)) => permit,
+        };
+
+        let _heavy_permit = heavy_permit;
+        self.run_db(op, f).await
     }
 }
 

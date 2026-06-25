@@ -215,7 +215,7 @@ impl CortexService {
         let to2 = to.clone();
         let hid = host_id.clone();
         let heartbeat_summaries = self
-            .run_db("correlate_state.heartbeats", move |pool| {
+            .run_heavy_db("correlate_state.heartbeats", move |pool| {
                 db::heartbeat_window_summaries(pool, &from2, &to2, hid.as_deref())
             })
             .await?;
@@ -231,7 +231,7 @@ impl CortexService {
             let sev_levels = correlate::severity_at_or_above(&severity_min)?;
             let fetch_limit = limit + 1;
             let logs = self
-                .run_db("correlate_state.logs", move |pool| {
+                .run_heavy_db("correlate_state.logs", move |pool| {
                     db::search_logs(
                         pool,
                         &db::SearchParams {

@@ -454,7 +454,7 @@ impl CortexService {
             limit: req.limit,
         };
         let result = self
-            .run_db("project_context", move |pool| {
+            .run_heavy_db("project_context", move |pool| {
                 db::get_ai_project_context(pool, &params)
             })
             .await?;
@@ -535,7 +535,7 @@ impl CortexService {
             exclude_ai: false,
         };
         let mut rows = self
-            .run_db("correlate_events", move |pool| {
+            .run_heavy_db("correlate_events", move |pool| {
                 db::search_logs(pool, &params)
             })
             .await?;

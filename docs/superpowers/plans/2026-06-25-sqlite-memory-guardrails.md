@@ -448,7 +448,7 @@ Ran equivalent one-filter cargo command:
 RUSTC_WRAPPER='' cargo test classify_db_error --config 'build.rustc-wrapper=""'
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/app/error.rs src/app/services.rs src/app/error_tests.rs
@@ -456,6 +456,8 @@ git commit -m "fix: classify sqlite busy errors as retryable"
 ```
 
 ## Task 4: Shared Heavy-Read Limiter
+
+Status: completed
 
 **Files:**
 - Modify: `src/app/services.rs`
@@ -469,7 +471,7 @@ git commit -m "fix: classify sqlite busy errors as retryable"
 - Produces: `async fn run_heavy_db<F, T>(&self, op: &'static str, f: F) -> ServiceResult<T>`
 - Produces: shared field `heavy_read_permits: Arc<Semaphore>`
 
-- [ ] **Step 1: Add failing limiter test**
+- [x] **Step 1: Add failing limiter test**
 
 In `src/app/service_tests.rs`, add:
 
@@ -496,7 +498,7 @@ async fn heavy_read_limiter_times_out_when_permit_is_held() {
 
 If field privacy blocks this test from the sidecar module, keep the field `pub(super)` and place the test in the same module tree.
 
-- [ ] **Step 2: Run test to verify failure**
+- [x] **Step 2: Run test to verify failure**
 
 ```bash
 RUSTC_WRAPPER='' cargo test heavy_read_limiter_times_out_when_permit_is_held --config 'build.rustc-wrapper=""'
@@ -504,7 +506,7 @@ RUSTC_WRAPPER='' cargo test heavy_read_limiter_times_out_when_permit_is_held --c
 
 Expected: fail because the field/method do not exist.
 
-- [ ] **Step 3: Add semaphore field and constructor wiring**
+- [x] **Step 3: Add semaphore field and constructor wiring**
 
 In `CortexService`, add:
 
@@ -518,7 +520,7 @@ In both constructors, initialize:
 heavy_read_permits: Arc::new(Semaphore::new(storage.heavy_read_concurrency)),
 ```
 
-- [ ] **Step 4: Implement `run_heavy_db`**
+- [x] **Step 4: Implement `run_heavy_db`**
 
 Add below `run_db`:
 
@@ -550,7 +552,7 @@ where
 }
 ```
 
-- [ ] **Step 5: Route high-cost DB closures through `run_heavy_db`**
+- [x] **Step 5: Route high-cost DB closures through `run_heavy_db`**
 
 Replace `run_db` with `run_heavy_db` for these service methods where they wrap broad scans/aggregations:
 
@@ -567,7 +569,7 @@ src/app/services/logs.rs::correlate_state
 
 Do not route point lookups, health/status, `tail`, `search` with strict limits, or maintenance writes through the heavy-read limiter in this task.
 
-- [ ] **Step 6: Run focused tests**
+- [x] **Step 6: Run focused tests**
 
 ```bash
 RUSTC_WRAPPER='' cargo test heavy_read_limiter_times_out_when_permit_is_held --config 'build.rustc-wrapper=""'

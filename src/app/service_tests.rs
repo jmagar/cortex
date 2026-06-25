@@ -68,6 +68,26 @@ fn ai_entry(ts: &str, msg: &str) -> LogBatchEntry {
 }
 
 #[tokio::test]
+async fn heavy_read_limiter_times_out_when_permit_is_held() {
+    let (mut service, _pool, _dir) = test_service();
+    service.acquire_timeout = std::time::Duration::from_millis(10);
+    let held = service
+        .heavy_read_permits
+        .clone()
+        .acquire_owned()
+        .await
+        .expect("heavy permit");
+
+    let err = service
+        .run_heavy_db("heavy_test", |_pool| Ok::<_, anyhow::Error>(()))
+        .await
+        .unwrap_err();
+
+    drop(held);
+    assert!(matches!(err, ServiceError::Busy(message) if message == "heavy_read_limited"));
+}
+
+#[tokio::test]
 async fn graph_entity_lookup_resolves_exact_key_and_alias() {
     let (service, pool, _dir) = test_service();
     insert_logs_batch(

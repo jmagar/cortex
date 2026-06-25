@@ -4,7 +4,7 @@ impl CortexService {
     pub async fn get_stats(&self) -> ServiceResult<DbStats> {
         let storage = self.storage.clone();
         let stats = self
-            .run_db("get_stats", move |pool| db::get_stats(pool, &storage))
+            .run_heavy_db("get_stats", move |pool| db::get_stats(pool, &storage))
             .await?
             .into();
         Ok(stats)
