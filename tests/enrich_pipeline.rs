@@ -17,6 +17,10 @@ fn make_pool() -> (DbPool, TempDir) {
     let config = StorageConfig {
         db_path: dir.path().join("test.db"),
         pool_size: 1,
+        sqlite_page_cache_mb: 128,
+        sqlite_mmap_mb: 256,
+        heavy_read_concurrency: 1,
+        wal_checkpoint_mb: 256,
         retention_days: 0,
         wal_mode: false,
         max_db_size_mb: 0,

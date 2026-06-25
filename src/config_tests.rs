@@ -100,6 +100,27 @@ fn receiver_toml_section_deserializes_into_receiver_field() {
 }
 
 #[test]
+fn storage_defaults_include_sqlite_memory_guardrails() {
+    let storage = StorageConfig::default();
+    assert_eq!(storage.pool_size, 8);
+    assert_eq!(storage.sqlite_page_cache_mb, 128);
+    assert_eq!(storage.sqlite_mmap_mb, 256);
+    assert_eq!(storage.heavy_read_concurrency, 1);
+    assert_eq!(storage.wal_checkpoint_mb, 256);
+    assert_eq!(storage.sqlite_page_cache_kib_per_connection(), -16_384);
+    assert_eq!(storage.sqlite_mmap_bytes(), 256 * 1024 * 1024);
+    assert_eq!(storage.sqlite_page_cache_floor_bytes(), 128 * 1024 * 1024);
+}
+
+#[test]
+fn storage_page_cache_budget_is_clamped_per_connection() {
+    let mut storage = StorageConfig::default();
+    storage.pool_size = 128;
+    storage.sqlite_page_cache_mb = 1;
+    assert_eq!(storage.sqlite_page_cache_kib_per_connection(), -4_096);
+}
+
+#[test]
 #[serial]
 fn defaults_are_applied_without_env_vars() {
     // Clear any leaked env vars

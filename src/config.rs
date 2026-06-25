@@ -296,6 +296,22 @@ pub struct StorageConfig {
     /// Connection pool size
     #[serde(default = "default_pool_size")]
     pub pool_size: u32,
+    /// Total SQLite page-cache budget across the whole pool, in MiB.
+    /// This is divided by `pool_size` before applying `PRAGMA cache_size`.
+    #[serde(default = "default_sqlite_page_cache_mb")]
+    pub sqlite_page_cache_mb: u64,
+    /// Bounded SQLite mmap size in MiB. Resident mapped pages can still be
+    /// charged to cgroup memory, so this is measured and reported rather than
+    /// treated as a memory bypass.
+    #[serde(default = "default_sqlite_mmap_mb")]
+    pub sqlite_mmap_mb: u64,
+    /// Maximum concurrent expensive read operations. Cheap/moderate reads still
+    /// use the existing writer-reserving DB permit pool.
+    #[serde(default = "default_heavy_read_concurrency")]
+    pub heavy_read_concurrency: usize,
+    /// WAL size threshold in MiB for bounded opportunistic PASSIVE checkpoints.
+    #[serde(default = "default_wal_checkpoint_mb")]
+    pub wal_checkpoint_mb: u64,
     /// Days to retain logs before automatic deletion (0 = keep forever).
     #[serde(default = "default_retention_days")]
     pub retention_days: u32,
@@ -561,6 +577,18 @@ fn default_pool_size() -> u32 {
     // the larger pool keeps a full reconcile from starving readers.
     8
 }
+fn default_sqlite_page_cache_mb() -> u64 {
+    128
+}
+fn default_sqlite_mmap_mb() -> u64 {
+    256
+}
+fn default_heavy_read_concurrency() -> usize {
+    1
+}
+fn default_wal_checkpoint_mb() -> u64 {
+    256
+}
 fn default_retention_days() -> u32 {
     90
 }
@@ -656,6 +684,10 @@ impl Default for StorageConfig {
         Self {
             db_path: default_db_path(),
             pool_size: default_pool_size(),
+            sqlite_page_cache_mb: default_sqlite_page_cache_mb(),
+            sqlite_mmap_mb: default_sqlite_mmap_mb(),
+            heavy_read_concurrency: default_heavy_read_concurrency(),
+            wal_checkpoint_mb: default_wal_checkpoint_mb(),
             retention_days: default_retention_days(),
             wal_mode: true,
             max_db_size_mb: default_max_db_size_mb(),
@@ -667,6 +699,28 @@ impl Default for StorageConfig {
             err_floor_window_hours: default_err_floor_window_hours(),
             err_floor_per_source_cap: default_err_floor_per_source_cap(),
         }
+    }
+}
+
+impl StorageConfig {
+    pub fn sqlite_page_cache_kib_per_connection(&self) -> i64 {
+        const MIN_CACHE_KIB: u64 = 4 * 1024;
+        let pool_size = u64::from(self.pool_size.max(1));
+        let total_kib = self.sqlite_page_cache_mb.saturating_mul(1024);
+        let per_conn = (total_kib / pool_size).max(MIN_CACHE_KIB);
+        -(per_conn as i64)
+    }
+
+    pub fn sqlite_mmap_bytes(&self) -> u64 {
+        self.sqlite_mmap_mb.saturating_mul(1024 * 1024)
+    }
+
+    pub fn sqlite_page_cache_floor_bytes(&self) -> u64 {
+        self.sqlite_page_cache_mb.saturating_mul(1024 * 1024)
+    }
+
+    pub fn wal_checkpoint_threshold_bytes(&self) -> u64 {
+        self.wal_checkpoint_mb.saturating_mul(1024 * 1024)
     }
 }
 
@@ -820,6 +874,19 @@ impl Config {
             }
         }
         env_override_parse("CORTEX_POOL_SIZE", &mut config.storage.pool_size)?;
+        env_override_parse(
+            "CORTEX_SQLITE_PAGE_CACHE_MB",
+            &mut config.storage.sqlite_page_cache_mb,
+        )?;
+        env_override_parse("CORTEX_SQLITE_MMAP_MB", &mut config.storage.sqlite_mmap_mb)?;
+        env_override_parse(
+            "CORTEX_HEAVY_READ_CONCURRENCY",
+            &mut config.storage.heavy_read_concurrency,
+        )?;
+        env_override_parse(
+            "CORTEX_WAL_CHECKPOINT_MB",
+            &mut config.storage.wal_checkpoint_mb,
+        )?;
         env_override_parse("CORTEX_RETENTION_DAYS", &mut config.storage.retention_days)?;
         env_override_parse("CORTEX_MAX_DB_SIZE_MB", &mut config.storage.max_db_size_mb)?;
         env_override_parse(
@@ -1482,6 +1549,16 @@ fn validate_storage_config(storage: &StorageConfig) -> anyhow::Result<()> {
         ));
     }
 
+    if storage.sqlite_page_cache_mb == 0 {
+        anyhow::bail!("storage.sqlite_page_cache_mb must be > 0");
+    }
+    if storage.heavy_read_concurrency == 0 {
+        anyhow::bail!("storage.heavy_read_concurrency must be > 0");
+    }
+    if storage.wal_checkpoint_mb == 0 {
+        anyhow::bail!("storage.wal_checkpoint_mb must be > 0");
+    }
+
     // err+ retention floor (syslog-mcp-w4hh). The floor is dimensioned in
     // (time window × per-source row count), NOT bytes, so there is no
     // meaningful "floor < max_db_size_mb" byte comparison. The coherent
@@ -1567,6 +1644,10 @@ impl StorageConfig {
         Self {
             db_path,
             pool_size: 1,
+            sqlite_page_cache_mb: default_sqlite_page_cache_mb(),
+            sqlite_mmap_mb: default_sqlite_mmap_mb(),
+            heavy_read_concurrency: default_heavy_read_concurrency(),
+            wal_checkpoint_mb: default_wal_checkpoint_mb(),
             retention_days: 90,
             wal_mode: false,
             max_db_size_mb: 1024,
