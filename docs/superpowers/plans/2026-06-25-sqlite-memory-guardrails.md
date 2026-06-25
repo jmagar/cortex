@@ -221,7 +221,7 @@ git commit -m "fix: add sqlite memory guardrail config"
 
 ## Task 2: Apply Page Cache And mmap PRAGMAs Per Connection
 
-Status: in_progress
+Status: completed
 
 **Files:**
 - Modify: `src/db/pool.rs`
@@ -318,7 +318,7 @@ RUSTC_WRAPPER='' cargo test init_pool_applies_busy_timeout_to_each_pooled_connec
 
 Expected: pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/db/pool.rs src/db/pool_tests.rs
@@ -326,6 +326,8 @@ git commit -m "fix: derive sqlite pragmas from memory budget"
 ```
 
 ## Task 3: Classify SQLite BUSY And Pool Timeouts At Service Boundary
+
+Status: completed
 
 **Files:**
 - Modify: `src/app/error.rs`
@@ -336,7 +338,7 @@ git commit -m "fix: derive sqlite pragmas from memory budget"
 - Produces: `ServiceError::classify_db_error(error: anyhow::Error) -> ServiceError`
 - Consumes: existing `ServiceError::Busy(String)` and `ServiceError::DatabaseTimeout`
 
-- [ ] **Step 1: Add failing classifier tests**
+- [x] **Step 1: Add failing classifier tests**
 
 In `src/app/error_tests.rs`, add:
 
@@ -372,7 +374,7 @@ fn classify_db_error_promotes_sqlite_locked_to_retryable_busy() {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify failure**
+- [x] **Step 2: Run tests to verify failure**
 
 ```bash
 RUSTC_WRAPPER='' cargo test classify_db_error_promotes_sqlite_busy_to_retryable_busy classify_db_error_promotes_sqlite_locked_to_retryable_busy --config 'build.rustc-wrapper=""'
@@ -380,7 +382,7 @@ RUSTC_WRAPPER='' cargo test classify_db_error_promotes_sqlite_busy_to_retryable_
 
 Expected: fail because `classify_db_error` does not exist.
 
-- [ ] **Step 3: Implement classifier**
+- [x] **Step 3: Implement classifier**
 
 In `src/app/error.rs`, add:
 
@@ -422,7 +424,7 @@ fn is_retryable_sqlite_error(error: &rusqlite::Error) -> bool {
 
 If `r2d2::Error` is not directly available without adding an import, use the concrete type already pulled in by `r2d2_sqlite`; do not add a new dependency.
 
-- [ ] **Step 4: Use classifier in `run_db`**
+- [x] **Step 4: Use classifier in `run_db`**
 
 In `src/app/services.rs`, replace the `Ok(r) => r.map_err(...)` arm with:
 
@@ -432,13 +434,19 @@ Ok(r) => r.map_err(ServiceError::classify_db_error),
 
 Keep join errors as `Internal`; those are task execution failures, not SQLite contention.
 
-- [ ] **Step 5: Run focused tests**
+- [x] **Step 5: Run focused tests**
 
 ```bash
 RUSTC_WRAPPER='' cargo test classify_db_error_promotes_sqlite_busy_to_retryable_busy classify_db_error_promotes_sqlite_locked_to_retryable_busy --config 'build.rustc-wrapper=""'
 ```
 
 Expected: pass.
+
+Ran equivalent one-filter cargo command:
+
+```bash
+RUSTC_WRAPPER='' cargo test classify_db_error --config 'build.rustc-wrapper=""'
+```
 
 - [ ] **Step 6: Commit**
 

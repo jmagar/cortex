@@ -46,6 +46,43 @@ pub enum ServiceError {
 
 pub type ServiceResult<T> = Result<T, ServiceError>;
 
+impl ServiceError {
+    pub(crate) fn classify_db_error(error: anyhow::Error) -> Self {
+        match error.downcast::<ServiceError>() {
+            Ok(service_error) => service_error,
+            Err(error) => {
+                if let Some(sqlite) = error.downcast_ref::<rusqlite::Error>() {
+                    if is_retryable_sqlite_error(sqlite) {
+                        return ServiceError::Busy("database_busy".to_string());
+                    }
+                }
+
+                if let Some(pool_error) = error.downcast_ref::<r2d2::Error>() {
+                    let message = pool_error.to_string().to_ascii_lowercase();
+                    if message.contains("timed out") || message.contains("timeout") {
+                        return ServiceError::DatabaseTimeout;
+                    }
+                }
+
+                ServiceError::Internal(error)
+            }
+        }
+    }
+}
+
+fn is_retryable_sqlite_error(error: &rusqlite::Error) -> bool {
+    matches!(
+        error,
+        rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error {
+                code: rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked,
+                ..
+            },
+            _
+        )
+    )
+}
+
 #[cfg(test)]
 #[path = "error_tests.rs"]
 mod tests;

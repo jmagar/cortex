@@ -236,17 +236,10 @@ impl CortexService {
                     "Task join error: {e}"
                 )));
             }
-            // Preserve typed ServiceErrors raised inside the closure (e.g.
-            // InvalidInput/NotFound from query helpers) instead of flattening
-            // everything to Internal — the MCP surface maps each variant to a
-            // distinct client-visible error class (full-review AH1).
-            Ok(r) => r.map_err(|e| match e.downcast::<ServiceError>() {
-                Ok(svc) => svc,
-                Err(e) => {
-                    tracing::debug!(error = %e, "anyhow error not a ServiceError, classifying as Internal");
-                    ServiceError::Internal(e)
-                }
-            }),
+            // Preserve typed ServiceErrors raised inside the closure, and
+            // promote retryable SQLite/pool pressure into stable sanitized
+            // categories instead of surfacing opaque internal errors.
+            Ok(r) => r.map_err(ServiceError::classify_db_error),
         };
 
         if exec_ms > SLOW_DB_MS {
