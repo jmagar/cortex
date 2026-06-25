@@ -114,9 +114,11 @@ fn storage_defaults_include_sqlite_memory_guardrails() {
 
 #[test]
 fn storage_page_cache_budget_is_clamped_per_connection() {
-    let mut storage = StorageConfig::default();
-    storage.pool_size = 128;
-    storage.sqlite_page_cache_mb = 1;
+    let storage = StorageConfig {
+        pool_size: 128,
+        sqlite_page_cache_mb: 1,
+        ..StorageConfig::default()
+    };
     assert_eq!(storage.sqlite_page_cache_kib_per_connection(), -4_096);
 }
 

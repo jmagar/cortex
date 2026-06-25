@@ -862,7 +862,11 @@ reopens files on rename/create rotation or truncation. Lines are bounded by
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `CORTEX_DB_PATH` | no | `/data/cortex.db` | SQLite database path |
-| `CORTEX_POOL_SIZE` | no | `4` | SQLite connection pool size. MCP/REST reads get `pool_size - 1` permits; one connection is reserved for the ingest writer. |
+| `CORTEX_POOL_SIZE` | no | `8` | SQLite connection pool size. MCP/REST reads get `pool_size - 1` permits; one connection is reserved for the ingest writer. |
+| `CORTEX_SQLITE_PAGE_CACHE_MB` | no | `128` | Total SQLite page-cache budget across the pool; divided by `pool_size` before `PRAGMA cache_size`. |
+| `CORTEX_SQLITE_MMAP_MB` | no | `256` | Bounded SQLite mmap size. Resident mapped pages may still count toward cgroup memory. |
+| `CORTEX_HEAVY_READ_CONCURRENCY` | no | `1` | Shared service-layer limiter for expensive read actions. |
+| `CORTEX_WAL_CHECKPOINT_MB` | no | `256` | WAL size threshold for bounded PASSIVE checkpoint attempts. |
 | `CORTEX_RETENTION_DAYS` | no | `90` | Days to retain logs. `0` = keep forever. Purge runs hourly; err+ severities are exempt (see [Retention Policy](#retention-policy)). |
 | `CORTEX_MAX_DB_SIZE_MB` | no | `1024` | Logical DB size trigger: breach deletes oldest logs. `0` = disabled. |
 | `CORTEX_RECOVERY_DB_SIZE_MB` | no | `900` | Cleanup target after DB size trigger. Must be less than max. |

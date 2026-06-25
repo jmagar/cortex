@@ -817,6 +817,8 @@ git commit -m "test: lock expensive action metadata"
 
 ## Task 7: Docs, Version, And Full Verification
 
+Status: completed
+
 **Files:**
 - Modify: `CLAUDE.md`
 - Modify: `README.md`
@@ -828,7 +830,7 @@ git commit -m "test: lock expensive action metadata"
 - Produces docs for the new config contract and diagnostics.
 - Produces a patch version bump in all version-bearing files.
 
-- [ ] **Step 1: Update config docs**
+- [x] **Step 1: Update config docs**
 
 In `docs/contracts/config-schema.md`, update `[storage]` rows so `pool_size` default is `8`, not stale `4`, and add rows:
 
@@ -839,11 +841,11 @@ In `docs/contracts/config-schema.md`, update `[storage]` rows so `pool_size` def
 | `wal_checkpoint_mb` | `CORTEX_WAL_CHECKPOINT_MB` | u64 | `256` | tuning | restart-only | `> 0` | — | WAL size threshold for bounded PASSIVE checkpoint attempts |
 ```
 
-- [ ] **Step 2: Update operator docs**
+- [x] **Step 2: Update operator docs**
 
 In `CLAUDE.md` and `README.md`, add the same env vars under storage config. In `docs/api.md`, update `/api/db/status` response docs to mention the new memory/WAL/cgroup diagnostic fields and that cgroup paths/errors are not exposed.
 
-- [ ] **Step 3: Bump version**
+- [x] **Step 3: Bump version**
 
 Run:
 
@@ -853,7 +855,7 @@ cargo xtask bump-version patch
 
 Expected: version-bearing files update together and `CHANGELOG.md` gains a new patch entry.
 
-- [ ] **Step 4: Run formatting and focused tests**
+- [x] **Step 4: Run formatting and focused tests**
 
 ```bash
 cargo fmt --check
@@ -867,7 +869,7 @@ RUSTC_WRAPPER='' cargo test expensive_actions_include_memory_risky_queries --con
 
 Expected: all pass.
 
-- [ ] **Step 5: Run full repo gates**
+- [x] **Step 5: Run full repo gates**
 
 ```bash
 RUSTC_WRAPPER='' cargo test --config 'build.rustc-wrapper=""'

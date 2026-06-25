@@ -232,7 +232,11 @@ HOME, disables MCP servers/hooks/context-file loading, and parses Gemini's
 | Variable | Required | Default | Sensitive | Description |
 | --- | --- | --- | --- | --- |
 | `CORTEX_DB_PATH` | no | `/data/cortex.db` | no | Path to SQLite database file |
-| `CORTEX_POOL_SIZE` | no | `4` | no | SQLite connection pool size (must be > 0) |
+| `CORTEX_POOL_SIZE` | no | `8` | no | SQLite connection pool size (must be > 0); reads get `pool_size - 1` permits |
+| `CORTEX_SQLITE_PAGE_CACHE_MB` | no | `128` | no | Total SQLite page-cache budget across the pool; divided by `pool_size` before `PRAGMA cache_size` |
+| `CORTEX_SQLITE_MMAP_MB` | no | `256` | no | Bounded SQLite mmap size; resident mapped pages may still count toward cgroup memory |
+| `CORTEX_HEAVY_READ_CONCURRENCY` | no | `1` | no | Shared service-layer limiter for expensive reads |
+| `CORTEX_WAL_CHECKPOINT_MB` | no | `256` | no | WAL size threshold for bounded PASSIVE checkpoint attempts |
 | `CORTEX_RETENTION_DAYS` | no | `90` | no | Days to retain logs before automatic hourly purge (0 = keep forever) |
 
 ### Storage budget (`CORTEX_*`)

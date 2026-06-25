@@ -47,7 +47,11 @@ still win. They are not MCP transports and do not use `CORTEX_TOKEN`.
 | Variable | Required | Default | Description | Sensitive |
 | --- | --- | --- | --- | --- |
 | `CORTEX_DB_PATH` | no | `/data/cortex.db` | SQLite database file path | no |
-| `CORTEX_POOL_SIZE` | no | `4` | Connection pool size | no |
+| `CORTEX_POOL_SIZE` | no | `8` | Connection pool size; reads get `pool_size - 1` permits | no |
+| `CORTEX_SQLITE_PAGE_CACHE_MB` | no | `128` | Total SQLite page-cache budget across the pool | no |
+| `CORTEX_SQLITE_MMAP_MB` | no | `256` | Bounded SQLite mmap size; resident mapped pages may still count toward cgroup memory | no |
+| `CORTEX_HEAVY_READ_CONCURRENCY` | no | `1` | Shared service-layer limiter for expensive reads | no |
+| `CORTEX_WAL_CHECKPOINT_MB` | no | `256` | WAL size threshold for bounded PASSIVE checkpoint attempts | no |
 | `CORTEX_RETENTION_DAYS` | no | `90` | Days before automatic purge (0 = forever) | no |
 
 ## Storage budget
