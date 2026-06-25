@@ -45,6 +45,8 @@ use crate::app::{
 use crate::config::ApiConfig;
 use crate::mcp::{AuthPolicy, build_auth_layer};
 
+mod investigation;
+
 /// Crate version cached at compile time (CARGO_PKG_VERSION).
 const CRATE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -229,6 +231,7 @@ pub fn router(state: ApiState) -> anyhow::Result<Router> {
         .route("/api/correlate", get(correlate))
         .route("/api/stats", get(stats))
         .route("/api/version", get(version))
+        .merge(investigation::routes())
         // --- surface parity routes ---
         .route("/api/source-ips", get(source_ips))
         .route("/api/timeline", get(timeline))

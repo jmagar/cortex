@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const appVersion = "investigation-preview-1";
+  const appVersion = "investigation-v1";
   let bearerToken = "";
   let cy = null;
   let latestHosts = [];
@@ -25,6 +25,7 @@
     logStatus: $("[data-log-status]"),
     fitGraph: $("[data-fit-graph]"),
     refresh: $("[data-refresh]"),
+    clearToken: $("[data-clear-token]"),
   };
 
   const seed = {
@@ -92,6 +93,20 @@
   async function apiGet(path) {
     const response = await fetch(path, {
       headers: authHeaders(),
+      cache: "no-store",
+    });
+    if (!response.ok) {
+      const message = await response.text().catch(() => "");
+      throw new Error(`${response.status} ${response.statusText} ${message}`.trim());
+    }
+    return response.json();
+  }
+
+  async function apiPost(path, body) {
+    const response = await fetch(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify(body),
       cache: "no-store",
     });
     if (!response.ok) {
@@ -206,6 +221,32 @@
     cy.layout({ name: "cose", animate: false, padding: 38 }).run();
   }
 
+  function graphFromInvestigation(graph) {
+    const nodes = (graph?.entities || []).slice(0, 80).map((entity) => ({
+      data: {
+        id: `entity:${entity.id}`,
+        label: entity.label || entity.key || String(entity.id),
+        kind: entity.entity_type || "entity",
+        status: entity.trust_level === "verified" ? "online" : "unknown",
+      },
+    }));
+    const seen = new Set(nodes.map((node) => node.data.id));
+    const edges = (graph?.relationships || []).slice(0, 120).flatMap((rel) => {
+      const source = `entity:${rel.source_entity_id}`;
+      const target = `entity:${rel.target_entity_id}`;
+      if (!seen.has(source) || !seen.has(target)) return [];
+      return [{
+        data: {
+          id: `rel:${rel.id}`,
+          source,
+          target,
+          label: rel.relationship_type || rel.reason_code || "related",
+        },
+      }];
+    });
+    return nodes.length ? { nodes, edges } : seed;
+  }
+
   function showNodeEvidence(data) {
     ui.selectedTitle.textContent = data.label || data.id;
     setBadge(ui.selectedKind, data.kind || "node", data.status === "degraded" ? "warn" : "neutral");
@@ -266,6 +307,23 @@
     ui.answerStack.append(card);
   }
 
+  function renderClaims(prompt, envelope) {
+    clear(ui.answerStack);
+    const claims = envelope?.result?.claims || [];
+    if (!claims.length) {
+      renderAnswer(prompt, "Cortex returned no claims for this investigation.", "warn");
+      return;
+    }
+    claims.slice(0, 6).forEach((claim) => {
+      const tone = claim.claim_type === "open_question" ? "warn" : "violet";
+      const card = text("article", "answer-card", "");
+      card.append(text("span", `badge ${tone}`, claim.claim_type || "claim"));
+      card.append(text("h2", null, claim.title || prompt));
+      card.append(text("p", null, claim.summary || ""));
+      ui.answerStack.append(card);
+    });
+  }
+
   async function checkV1Compatibility() {
     try {
       const payload = await apiGet("/api/v1/investigation/version");
@@ -275,7 +333,7 @@
         setV1State("Compatible", "Investigation API v1 is available", "");
       }
     } catch (error) {
-      setV1State("Unavailable", "/api/v1 is not mounted; using preview shell", "warn");
+      setV1State("Unavailable", "/api/v1 is not mounted; Ask + Explain is disabled", "warn");
     }
   }
 
@@ -303,7 +361,7 @@
       setBadge(ui.logStatus, "Live", "success");
       updateGraph(graphFromHosts(latestHosts));
       renderTimeline(latestLogs);
-      renderAnswer("Live workspace connected", "Cortex returned version, stats, hosts, and recent log evidence. Select a graph node to inspect related rows.", "success");
+      renderAnswer("Live workspace connected", "Cortex returned version, stats, hosts, and recent log evidence. Ask a question to run the /api/v1 Ask + Explain workflow.", "success");
     } catch (error) {
       setBadge(ui.logStatus, "Error", "error");
       renderAnswer("Backend unavailable", error.message, "error");
@@ -317,10 +375,16 @@
       return;
     }
     try {
-      const params = new URLSearchParams({ query });
-      const payload = await apiGet(`/api/ai/ask-history?${params.toString()}`);
-      const summary = payload.answer || payload.summary || payload.content || "Ask history returned, but no summary field was present.";
-      renderAnswer(query, summary, "violet");
+      const envelope = await apiPost("/api/v1/investigations/ask", { prompt: query });
+      latestLogs = envelope.result?.logs || [];
+      renderClaims(query, envelope);
+      renderTimeline(latestLogs);
+      updateGraph(graphFromInvestigation(envelope.result?.graph));
+      if (envelope.metadata?.partial) {
+        setBadge(ui.logStatus, "Partial", "warn");
+      } else {
+        setBadge(ui.logStatus, "Explained", "success");
+      }
     } catch (error) {
       renderAnswer("Ask failed", error.message, "error");
     }
@@ -330,6 +394,18 @@
     event.preventDefault();
     bearerToken = new FormData(ui.tokenForm).get("token")?.toString().trim() || "";
     refresh();
+  });
+
+  ui.clearToken.addEventListener("click", () => {
+    bearerToken = "";
+    ui.tokenForm.reset();
+    latestHosts = [];
+    latestLogs = [];
+    updateGraph(seed);
+    renderTimeline([]);
+    setBadge(ui.logStatus, "Preview", "neutral");
+    setV1State("Disconnected", "Enter a bearer token to check /api/v1", "warn");
+    renderAnswer("Bearer token cleared", "The token was removed from memory.", "warn");
   });
 
   ui.askForm.addEventListener("submit", (event) => {

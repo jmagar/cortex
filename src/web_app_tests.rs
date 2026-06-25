@@ -39,6 +39,7 @@ async fn app_route_serves_workspace_shell_with_no_store_and_csp() {
     assert!(html.contains("Cortex investigation workspace"));
     assert!(html.contains("/app/assets/cytoscape-3.34.0.min.js"));
     assert!(!html.contains("CORTEX_API_TOKEN="));
+    assert!(html.contains("data-clear-token"));
 }
 
 #[tokio::test]
@@ -74,6 +75,8 @@ async fn app_script_uses_text_nodes_for_dynamic_content() {
     assert!(!APP_JS.contains("innerHTML"));
     assert!(APP_JS.contains("textContent"));
     assert!(APP_JS.contains("document.createElement"));
+    assert!(APP_JS.contains("/api/v1/investigations/ask"));
+    assert!(!APP_JS.contains("/api/ai/ask-history"));
 }
 
 #[tokio::test]

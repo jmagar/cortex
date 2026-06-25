@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Add authenticated `/api/v1` investigation endpoints for the embedded
+  workspace, including safe Ask + Explain envelopes, safe graph wrappers, and
+  no-store browser-facing responses.
 - Add explicit XSS fixture coverage for the embedded investigation workspace's
   text-only rendering contract across service names, graph labels, tooltip-like
   strings, log excerpts, HTML entities, SVG/script payloads, ANSI escapes,

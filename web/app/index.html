@@ -37,6 +37,7 @@
           <div class="token-row">
             <input id="api-token" name="token" type="password" autocomplete="off" placeholder="CORTEX_API_TOKEN">
             <button type="submit">Connect</button>
+            <button type="button" data-clear-token>Clear</button>
           </div>
         </form>
       </header>
@@ -67,7 +68,7 @@
       <section class="ask-panel">
         <form class="ask-bar" data-ask-form>
           <label for="ask-input">Ask Cortex</label>
-          <input id="ask-input" name="query" type="search" placeholder="What changed around the outage?">
+          <input id="ask-input" name="query" type="search" placeholder="Why did this host start failing?">
           <button type="submit">Ask</button>
         </form>
         <div class="answer-stack" data-answer-stack aria-live="polite">

@@ -3,11 +3,11 @@ use std::sync::Arc;
 
 use axum::body::to_bytes;
 use axum::extract::connect_info::MockConnectInfo;
-use axum::http::Request;
+use axum::http::{Request, header};
 use tower::util::ServiceExt;
 
 use crate::config::{ApiConfig, StorageConfig};
-use crate::db::{self, DbPool, LogBatchEntry};
+use crate::db::{self, DbPool, LogBatchEntry, insert_logs_batch};
 use crate::mcp::AuthPolicy;
 
 use super::*;
@@ -105,23 +105,35 @@ fn entry(ts: &str, host: &str, severity: &str, msg: &str, source_ip: &str) -> Lo
     }
 }
 
+fn refresh_graph_projection_for_test(pool: &DbPool) {
+    let _guard = crate::db::graph::GRAPH_TEST_LOCK.lock();
+    crate::db::graph::refresh_graph_projection(pool).unwrap();
+}
+
 async fn get_json(
     app: axum::Router,
     uri: &str,
     token: Option<&str>,
 ) -> (axum::http::StatusCode, serde_json::Value) {
-    let mut builder = Request::builder().method("GET").uri(uri);
-    if let Some(token) = token {
-        builder = builder.header("Authorization", format!("Bearer {token}"));
-    }
-    let response = app
-        .oneshot(builder.body(axum::body::Body::empty()).unwrap())
-        .await
-        .unwrap();
+    let response = get_response(app, uri, token).await;
     let status = response.status();
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let value = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
     (status, value)
+}
+
+async fn get_response(
+    app: axum::Router,
+    uri: &str,
+    token: Option<&str>,
+) -> axum::response::Response {
+    let mut builder = Request::builder().method("GET").uri(uri);
+    if let Some(token) = token {
+        builder = builder.header("Authorization", format!("Bearer {token}"));
+    }
+    app.oneshot(builder.body(axum::body::Body::empty()).unwrap())
+        .await
+        .unwrap()
 }
 
 #[test]
@@ -1043,6 +1055,171 @@ async fn post_json_with_admin(
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let value = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
     (status, value)
+}
+
+async fn post_json_response(
+    app: axum::Router,
+    uri: &str,
+    body: serde_json::Value,
+    token: Option<&str>,
+) -> axum::response::Response {
+    let mut builder = Request::builder()
+        .method("POST")
+        .uri(uri)
+        .header("Content-Type", "application/json");
+    if let Some(token) = token {
+        builder = builder.header("Authorization", format!("Bearer {token}"));
+    }
+    app.oneshot(
+        builder
+            .body(axum::body::Body::from(body.to_string()))
+            .unwrap(),
+    )
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn investigation_v1_ask_requires_auth_and_returns_no_store_safe_envelope() {
+    let (state, pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+    let mut app_log = entry(
+        "2026-01-01T00:00:00.000Z",
+        "host-a",
+        "err",
+        "nginx emitted password=secret token=abc",
+        "10.0.0.1:514",
+    );
+    app_log.app_name = Some("nginx".into());
+    insert_logs_batch(&pool, &[app_log]).unwrap();
+    refresh_graph_projection_for_test(&pool);
+
+    let response = post_json_response(
+        app.clone(),
+        "/api/v1/investigations/ask",
+        serde_json::json!({"prompt": "Why did host-a fail?", "host": "host-a"}),
+        None,
+    )
+    .await;
+    assert_eq!(response.status(), axum::http::StatusCode::UNAUTHORIZED);
+
+    let response = post_json_response(
+        app.clone(),
+        "/api/v1/investigations/ask",
+        serde_json::json!({"prompt": "Why did host-a fail?", "host": "host-a"}),
+        Some("secret"),
+    )
+    .await;
+    assert_eq!(response.status(), axum::http::StatusCode::OK);
+    assert_eq!(
+        response.headers().get(header::CACHE_CONTROL).unwrap(),
+        "no-store"
+    );
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let text = String::from_utf8(bytes.to_vec()).unwrap();
+    assert!(text.contains("\"metadata\""));
+    assert!(text.contains("\"result\""));
+    assert!(text.contains("supported_correlation"));
+    assert!(!text.contains("password="));
+    assert!(!text.contains("token="));
+    assert!(!text.contains("metadata_json"));
+    assert!(!text.contains("source_signature_hash"));
+
+    let entity_response = get_response(
+        app.clone(),
+        "/api/v1/graph/entity?entity_type=host&key=host-a",
+        Some("secret"),
+    )
+    .await;
+    assert_eq!(entity_response.status(), axum::http::StatusCode::OK);
+    assert_eq!(
+        entity_response
+            .headers()
+            .get(header::CACHE_CONTROL)
+            .unwrap(),
+        "no-store"
+    );
+    let bytes = to_bytes(entity_response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let text = String::from_utf8(bytes.to_vec()).unwrap();
+    assert!(text.contains("resolved_entity"));
+    assert!(!text.contains("source_id"));
+
+    let around_response = get_response(
+        app.clone(),
+        "/api/v1/graph/around?entity_type=host&key=host-a&limit=10&evidence_sample_limit=2",
+        Some("secret"),
+    )
+    .await;
+    assert_eq!(around_response.status(), axum::http::StatusCode::OK);
+    assert_eq!(
+        around_response
+            .headers()
+            .get(header::CACHE_CONTROL)
+            .unwrap(),
+        "no-store"
+    );
+    let bytes = to_bytes(around_response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let around: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    let around_text = String::from_utf8(bytes.to_vec()).unwrap();
+    assert!(
+        !around["result"]["relationships"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    let evidence_id = around["result"]["evidence"][0]["id"].as_i64().unwrap();
+    assert!(!around_text.contains("source_signature_hash"));
+    assert!(!around_text.contains("source_id"));
+
+    let explain_response = get_response(
+        app.clone(),
+        "/api/v1/graph/explain?entity_type=host&key=host-a&depth=1&beam_width=10&evidence_sample_limit=2",
+        Some("secret"),
+    )
+    .await;
+    assert_eq!(explain_response.status(), axum::http::StatusCode::OK);
+    assert_eq!(
+        explain_response
+            .headers()
+            .get(header::CACHE_CONTROL)
+            .unwrap(),
+        "no-store"
+    );
+    let bytes = to_bytes(explain_response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let explain_text = String::from_utf8(bytes.to_vec()).unwrap();
+    assert!(explain_text.contains("\"relationships\""));
+    assert!(!explain_text.contains("source_signature_hash"));
+    assert!(!explain_text.contains("source_id"));
+
+    let evidence_response = get_response(
+        app,
+        &format!("/api/v1/graph/evidence?evidence_id={evidence_id}"),
+        Some("secret"),
+    )
+    .await;
+    assert_eq!(evidence_response.status(), axum::http::StatusCode::OK);
+    assert_eq!(
+        evidence_response
+            .headers()
+            .get(header::CACHE_CONTROL)
+            .unwrap(),
+        "no-store"
+    );
+    let bytes = to_bytes(evidence_response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let evidence_text = String::from_utf8(bytes.to_vec()).unwrap();
+    assert!(evidence_text.contains("source_log_summary"));
+    assert!(!evidence_text.contains("password="));
+    assert!(!evidence_text.contains("token="));
+    assert!(!evidence_text.contains("source_signature_hash"));
+    assert!(!evidence_text.contains("source_id"));
 }
 
 #[tokio::test]
