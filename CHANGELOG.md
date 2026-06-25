@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.34.1] - 2026-06-22
+
+### Added
+
+- Add authenticated `/api/v1` investigation endpoints for the embedded
+  workspace, including safe Ask + Explain envelopes, safe graph wrappers, and
+  no-store browser-facing responses.
+- Add explicit XSS fixture coverage for the embedded investigation workspace's
+  text-only rendering contract across service names, graph labels, tooltip-like
+  strings, log excerpts, HTML entities, SVG/script payloads, ANSI escapes,
+  bearer-looking strings, cookies, and URL userinfo.
+
+## [1.34.0] - 2026-06-21
+
+### Added
+
+- Serve an embedded Cortex investigation workspace under `/app/*`, with a
+  scoped SPA fallback, memory-only bearer-token entry, Aurora-styled operator
+  layout, pinned bundled Cytoscape.js graph rendering, cache/CSP headers, and
+  a visible `/api/v1` compatibility/degraded state.
+
 ## [1.33.4] - 2026-06-23
 
 ### Fixed

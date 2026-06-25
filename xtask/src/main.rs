@@ -7,6 +7,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
+mod pre_push;
 mod version;
 
 #[derive(Debug, Parser)]
@@ -28,6 +29,8 @@ enum Command {
         #[arg(value_enum)]
         level: version::BumpLevel,
     },
+    /// Run the path-aware local pre-push router.
+    PrePush(pre_push::PrePushArgs),
 }
 
 fn main() -> Result<()> {
@@ -37,6 +40,7 @@ fn main() -> Result<()> {
         Command::CheckVersionSync => version::check_sync(&root)?,
         Command::CheckReleaseVersions => version::check_release(&root)?,
         Command::BumpVersion { level } => version::bump(&root, level)?,
+        Command::PrePush(args) => pre_push::run(&root, args)?,
     }
     Ok(())
 }

@@ -174,6 +174,7 @@ fn diag_status_maps_compose_diagnostic_severity_to_setup_status() {
 }
 
 #[test]
+#[serial]
 fn status_label_is_fixed_width_without_color() {
     assert_eq!(status_label_with_color(&SetupStatus::Ok, false), "Ok   ");
     assert_eq!(status_label_with_color(&SetupStatus::Warn, false), "Warn ");
