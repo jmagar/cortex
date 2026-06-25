@@ -45,8 +45,8 @@ pub use maintenance::{
     DiskSpaceProbe, MaintenanceJob, SystemDiskSpaceProbe, db_full_vacuum, db_incremental_vacuum,
     db_integrity_check, db_wal_checkpoint, enforce_storage_budget,
     enforce_storage_budget_with_state, exceeds_trigger, finish_maintenance_job,
-    get_maintenance_job, get_storage_metrics, insert_maintenance_job, physical_size_bytes,
-    purge_by_tag_window, purge_old_heartbeats, purge_old_logs,
+    get_maintenance_job, get_storage_metrics, insert_maintenance_job, maybe_checkpoint_wal_by_size,
+    physical_size_bytes, purge_by_tag_window, purge_old_heartbeats, purge_old_logs,
 };
 pub(crate) use maintenance::{PragmaName, db_pragma_i64, db_pragma_string};
 pub use models::{

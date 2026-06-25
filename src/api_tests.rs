@@ -1627,6 +1627,16 @@ async fn db_status_returns_pragma_snapshot() {
         "missing page_size: {value}"
     );
     assert!(value.get("journal_mode").is_some());
+    assert_eq!(value["sqlite_page_cache_mb"], 128);
+    assert_eq!(value["sqlite_page_cache_kib_per_connection"], -131_072);
+    assert_eq!(value["sqlite_mmap_mb"], 256);
+    assert_eq!(value["sqlite_mmap_bytes"], 256 * 1024 * 1024);
+    assert_eq!(value["heavy_read_concurrency"], 1);
+    assert_eq!(value["wal_checkpoint_mb"], 256);
+    assert_eq!(value["wal_checkpoint_threshold_bytes"], 256 * 1024 * 1024);
+    assert!(value.get("cgroup_memory_max_bytes").is_some());
+    assert!(value.get("cgroup_memory_current_bytes").is_some());
+    assert!(value.get("cgroup_memory_peak_bytes").is_some());
 }
 
 #[tokio::test]

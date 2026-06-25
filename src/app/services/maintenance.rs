@@ -27,8 +27,9 @@ impl CortexService {
             let shm_size_bytes = std::fs::metadata(shm_path(&storage.db_path))
                 .ok()
                 .map(|metadata| metadata.len());
+            let cgroup = read_cgroup_memory_snapshot();
             Ok(DbMaintenanceStatus {
-                db_path: storage.db_path,
+                db_path: storage.db_path.clone(),
                 page_count,
                 freelist_count,
                 page_size,
@@ -36,6 +37,17 @@ impl CortexService {
                 physical_size_bytes,
                 wal_size_bytes,
                 shm_size_bytes,
+                sqlite_page_cache_mb: storage.sqlite_page_cache_mb,
+                sqlite_page_cache_kib_per_connection: storage
+                    .sqlite_page_cache_kib_per_connection(),
+                sqlite_mmap_mb: storage.sqlite_mmap_mb,
+                sqlite_mmap_bytes: storage.sqlite_mmap_bytes(),
+                heavy_read_concurrency: storage.heavy_read_concurrency,
+                wal_checkpoint_mb: storage.wal_checkpoint_mb,
+                wal_checkpoint_threshold_bytes: storage.wal_checkpoint_threshold_bytes(),
+                cgroup_memory_max_bytes: cgroup.max_bytes,
+                cgroup_memory_current_bytes: cgroup.current_bytes,
+                cgroup_memory_peak_bytes: cgroup.peak_bytes,
                 auto_vacuum,
                 journal_mode,
                 integrity_ok: None,
@@ -270,6 +282,30 @@ fn wal_path(db_path: &std::path::Path) -> PathBuf {
 
 fn shm_path(db_path: &std::path::Path) -> PathBuf {
     PathBuf::from(format!("{}-shm", db_path.display()))
+}
+
+#[derive(Debug, Clone, Default)]
+struct CgroupMemorySnapshot {
+    max_bytes: Option<u64>,
+    current_bytes: Option<u64>,
+    peak_bytes: Option<u64>,
+}
+
+fn read_cgroup_memory_snapshot() -> CgroupMemorySnapshot {
+    fn read_value(path: &str) -> Option<u64> {
+        let raw = std::fs::read_to_string(path).ok()?;
+        let trimmed = raw.trim();
+        if trimmed == "max" {
+            return None;
+        }
+        trimmed.parse::<u64>().ok()
+    }
+
+    CgroupMemorySnapshot {
+        max_bytes: read_value("/sys/fs/cgroup/memory.max"),
+        current_bytes: read_value("/sys/fs/cgroup/memory.current"),
+        peak_bytes: read_value("/sys/fs/cgroup/memory.peak"),
+    }
 }
 
 fn backup_path_for(db_path: &std::path::Path, output: Option<PathBuf>) -> anyhow::Result<PathBuf> {

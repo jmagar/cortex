@@ -586,6 +586,8 @@ git commit -m "fix: limit concurrent expensive reads"
 
 ## Task 5: WAL Threshold Checkpointing And Diagnostics
 
+Status: completed
+
 **Files:**
 - Modify: `src/app/models/core.rs`
 - Modify: `src/app/services/maintenance.rs`
@@ -606,7 +608,7 @@ git commit -m "fix: limit concurrent expensive reads"
   - `cgroup_memory_current_bytes: Option<u64>`
   - `cgroup_memory_peak_bytes: Option<u64>`
 
-- [ ] **Step 1: Add failing API status assertions**
+- [x] **Step 1: Add failing API status assertions**
 
 Extend `db_status_returns_pragma_snapshot` in `src/api_tests.rs`:
 
@@ -623,7 +625,7 @@ assert!(value.get("cgroup_memory_current_bytes").is_some());
 assert!(value.get("cgroup_memory_peak_bytes").is_some());
 ```
 
-- [ ] **Step 2: Run test to verify failure**
+- [x] **Step 2: Run test to verify failure**
 
 ```bash
 RUSTC_WRAPPER='' cargo test db_status_returns_pragma_snapshot --config 'build.rustc-wrapper=""'
@@ -631,7 +633,7 @@ RUSTC_WRAPPER='' cargo test db_status_returns_pragma_snapshot --config 'build.ru
 
 Expected: fail because fields do not exist.
 
-- [ ] **Step 3: Extend model**
+- [x] **Step 3: Extend model**
 
 In `src/app/models/core.rs`, extend `DbMaintenanceStatus`:
 
@@ -648,7 +650,7 @@ pub cgroup_memory_current_bytes: Option<u64>,
 pub cgroup_memory_peak_bytes: Option<u64>,
 ```
 
-- [ ] **Step 4: Add cgroup probe helper**
+- [x] **Step 4: Add cgroup probe helper**
 
 In `src/app/services/maintenance.rs`, add a small helper:
 
@@ -680,7 +682,7 @@ fn read_cgroup_memory_snapshot() -> CgroupMemorySnapshot {
 
 This helper must not return raw paths or raw read errors to clients.
 
-- [ ] **Step 5: Populate status fields**
+- [x] **Step 5: Populate status fields**
 
 In `db_status`, before constructing `DbMaintenanceStatus`, call:
 
@@ -690,7 +692,7 @@ let cgroup = read_cgroup_memory_snapshot();
 
 Populate the new fields from `storage` and `cgroup`.
 
-- [ ] **Step 6: Add bounded WAL threshold helper**
+- [x] **Step 6: Add bounded WAL threshold helper**
 
 In `src/db/maintenance.rs`, add:
 
@@ -714,7 +716,7 @@ pub fn maybe_checkpoint_wal_by_size(pool: &DbPool, db_path: &Path, threshold_byt
 
 Export it from `src/db.rs`.
 
-- [ ] **Step 7: Call threshold helper from maintenance path**
+- [x] **Step 7: Call threshold helper from maintenance path**
 
 In `checkpoint_wal_and_incremental_vacuum`, replace the unconditional `PRAGMA wal_checkpoint(PASSIVE)` block with:
 
@@ -734,7 +736,7 @@ match maybe_checkpoint_wal_by_size(
 
 If `checkpoint_wal_and_incremental_vacuum` does not currently receive `StorageConfig`, update its caller to pass it. Keep the attempt `PASSIVE` only.
 
-- [ ] **Step 8: Run focused tests**
+- [x] **Step 8: Run focused tests**
 
 ```bash
 RUSTC_WRAPPER='' cargo test db_status_returns_pragma_snapshot --config 'build.rustc-wrapper=""'

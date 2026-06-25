@@ -456,7 +456,7 @@ pub fn enforce_storage_budget_with_state(
             fts_incremental_merge(pool, deleted_log_rows, 0);
         }
 
-        checkpoint_wal_and_incremental_vacuum(pool)?;
+        checkpoint_wal_and_incremental_vacuum(pool, config)?;
     }
 
     tracing::debug!(
@@ -1074,16 +1074,46 @@ fn reconcile_hosts(pool: &DbPool, hostnames: &[String]) -> Result<()> {
     Ok(())
 }
 
-fn checkpoint_wal_and_incremental_vacuum(pool: &DbPool) -> Result<()> {
-    let conn = pool.get()?;
-    match conn.execute_batch("PRAGMA wal_checkpoint(PASSIVE);") {
-        Err(e) => {
-            tracing::warn!(error = %e, "WAL checkpoint skipped (non-fatal)");
+pub fn maybe_checkpoint_wal_by_size(
+    pool: &DbPool,
+    db_path: &Path,
+    threshold_bytes: u64,
+) -> Result<Option<(i64, i64, i64)>> {
+    if threshold_bytes == 0 {
+        return Ok(None);
+    }
+    let wal_path = std::path::PathBuf::from(format!("{}-wal", db_path.display()));
+    let wal_size = match std::fs::metadata(&wal_path) {
+        Ok(metadata) => metadata.len(),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    if wal_size < threshold_bytes {
+        return Ok(None);
+    }
+    db_wal_checkpoint(pool, "passive").map(Some)
+}
+
+fn checkpoint_wal_and_incremental_vacuum(pool: &DbPool, config: &StorageConfig) -> Result<()> {
+    match maybe_checkpoint_wal_by_size(
+        pool,
+        &config.db_path,
+        config.wal_checkpoint_threshold_bytes(),
+    ) {
+        Ok(Some((busy, log_frames, checkpointed_frames))) => {
+            tracing::debug!(
+                busy,
+                log_frames,
+                checkpointed_frames,
+                "WAL threshold checkpoint completed"
+            );
         }
-        _ => {
-            tracing::debug!("WAL checkpoint completed");
+        Ok(None) => tracing::debug!("WAL threshold checkpoint skipped"),
+        Err(error) => {
+            tracing::warn!(error = %error, "WAL threshold checkpoint skipped (non-fatal)");
         }
     }
+    let conn = pool.get()?;
     let _write_guard = crate::db::write_lock();
     match conn.execute_batch("PRAGMA incremental_vacuum(1000);") {
         Err(e) => {
