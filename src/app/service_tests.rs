@@ -602,6 +602,61 @@ async fn graph_explain_declines_without_relationship_evidence() {
 }
 
 #[tokio::test]
+async fn investigation_ask_returns_safe_supported_claims_and_graph() {
+    let (service, pool, _dir) = test_service();
+    let mut app_log = entry(
+        "2026-01-01T00:00:00.000Z",
+        "host-a",
+        "err",
+        "nginx emitted password=secret token=abc <script>alert(1)</script>",
+        "10.0.0.1:514",
+    );
+    app_log.app_name = Some("nginx".into());
+    insert_logs_batch(&pool, &[app_log]).unwrap();
+    refresh_graph_projection_for_test(&pool);
+
+    let envelope = service
+        .investigation_ask(AskInvestigationRequest {
+            prompt: "Why did host-a start failing?".into(),
+            host: Some("host-a".into()),
+            limit: Some(5),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(envelope.metadata.auth_state, "bearer");
+    assert_eq!(
+        envelope.metadata.graph_projection_status.as_deref(),
+        Some("ready")
+    );
+    assert_eq!(
+        envelope.result.resolved_entity.as_ref().unwrap().label,
+        "host-a"
+    );
+    assert!(
+        envelope
+            .result
+            .claims
+            .iter()
+            .any(|claim| claim.claim_type == InvestigationClaimType::SupportedCorrelation)
+    );
+    assert!(
+        envelope
+            .result
+            .claims
+            .iter()
+            .all(|claim| !claim.summary.contains("caused"))
+    );
+    assert!(!envelope.result.graph.relationships.is_empty());
+    let json = serde_json::to_string(&envelope).unwrap();
+    assert!(!json.contains("password="));
+    assert!(!json.contains("token="));
+    assert!(!json.contains("metadata_json"));
+    assert!(!json.contains("source_signature_hash"));
+}
+
+#[tokio::test]
 async fn graph_around_rejects_depth_above_one_and_redacts_safe_evidence() {
     let (service, pool, _dir) = test_service();
     insert_logs_batch(

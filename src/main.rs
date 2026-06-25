@@ -1,6 +1,6 @@
 use anyhow::Result;
 use axum::Router;
-use cortex::{api, doctor, logging, mcp, runtime::RuntimeCore};
+use cortex::{api, doctor, logging, mcp, runtime::RuntimeCore, web_app};
 use rmcp::{ServiceExt, transport::stdio};
 use tracing::info;
 
@@ -445,6 +445,8 @@ async fn serve_mcp() -> Result<()> {
     info!("OTLP receiver mounted at /v1/logs (and /v1/metrics, /v1/traces → 404)");
     app = app.merge(runtime.heartbeat_router());
     info!("Heartbeat receiver mounted at /v1/heartbeats");
+    app = app.merge(web_app::router());
+    info!("Investigation workspace mounted under /app");
     if runtime.config.mcp.api_token.is_none() && !runtime.config.mcp.host.starts_with("127.") {
         tracing::warn!(
             bind = %runtime.config.mcp.bind_addr(),

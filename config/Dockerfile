@@ -25,6 +25,7 @@ RUN --mount=type=cache,id=cortex-cargo-registry-v2,target=/usr/local/cargo/regis
 
 # Build real binary
 COPY src/ src/
+COPY web/ web/
 COPY plugins/cortex/skills/cortex-frustration-assessment/ plugins/cortex/skills/cortex-frustration-assessment/
 COPY docker-compose.yml docker-compose.prod.yml ./
 COPY config/Dockerfile config/Dockerfile
