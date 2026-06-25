@@ -753,6 +753,8 @@ git commit -m "fix: expose sqlite memory and wal diagnostics"
 
 ## Task 6: Action Cost Parity Tests
 
+Status: completed
+
 **Files:**
 - Modify: `src/mcp/actions.rs`
 - Modify: `src/mcp/tools.rs` if needed
@@ -761,7 +763,7 @@ git commit -m "fix: expose sqlite memory and wal diagnostics"
 **Interfaces:**
 - Produces a test-visible helper to enumerate expensive action names.
 
-- [ ] **Step 1: Add helper and test**
+- [x] **Step 1: Add helper and test**
 
 In `src/mcp/actions.rs`, add:
 
@@ -798,7 +800,7 @@ fn expensive_actions_include_memory_risky_queries() {
 }
 ```
 
-- [ ] **Step 2: Run focused test**
+- [x] **Step 2: Run focused test**
 
 ```bash
 RUSTC_WRAPPER='' cargo test expensive_actions_include_memory_risky_queries --config 'build.rustc-wrapper=""'

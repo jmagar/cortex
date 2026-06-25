@@ -73,3 +73,24 @@ fn actions_without_positional_metadata_default_to_none() {
     assert_eq!(d.limit, None);
     assert_eq!(d.since, None);
 }
+
+#[test]
+fn expensive_actions_include_memory_risky_queries() {
+    let names = expensive_action_names_for_test();
+    for expected in [
+        "stats",
+        "patterns",
+        "clock_skew",
+        "anomalies",
+        "compare",
+        "abuse_investigate",
+        "compose_doctor",
+        "fleet_state",
+        "correlate_state",
+    ] {
+        assert!(
+            names.contains(&expected),
+            "missing expensive action {expected}"
+        );
+    }
+}

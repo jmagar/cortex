@@ -551,6 +551,15 @@ pub(super) fn action_names() -> Vec<&'static str> {
     ACTION_SPECS.iter().map(|s| s.name).collect()
 }
 
+#[cfg(test)]
+pub(crate) fn expensive_action_names_for_test() -> Vec<&'static str> {
+    ACTION_SPECS
+        .iter()
+        .filter(|spec| spec.cost == Cost::Expensive)
+        .map(|spec| spec.name)
+        .collect()
+}
+
 /// Find the executable handler for a registered action.
 pub(super) fn handler_for(action: &str) -> Option<ActionHandler> {
     ACTION_SPECS
