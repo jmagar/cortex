@@ -43,7 +43,7 @@
 
 ## Task 1: Storage Config And Derived SQLite Budget
 
-Status: in_progress
+Status: completed
 
 **Files:**
 - Modify: `src/config.rs`
@@ -212,7 +212,7 @@ RUSTC_WRAPPER='' cargo test storage_defaults_include_sqlite_memory_guardrails st
 
 Expected: pass.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/config.rs
@@ -220,6 +220,8 @@ git commit -m "fix: add sqlite memory guardrail config"
 ```
 
 ## Task 2: Apply Page Cache And mmap PRAGMAs Per Connection
+
+Status: in_progress
 
 **Files:**
 - Modify: `src/db/pool.rs`
@@ -230,7 +232,7 @@ git commit -m "fix: add sqlite memory guardrail config"
 - Consumes: `StorageConfig::sqlite_mmap_bytes()`
 - Produces: every pooled connection has derived `PRAGMA cache_size` and `PRAGMA mmap_size`
 
-- [ ] **Step 1: Add failing pool tests**
+- [x] **Step 1: Add failing pool tests**
 
 Append to `src/db/pool_tests.rs`:
 
@@ -280,7 +282,7 @@ fn init_pool_applies_sqlite_mmap_to_each_pooled_connection() {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify failure**
+- [x] **Step 2: Run tests to verify failure**
 
 ```bash
 RUSTC_WRAPPER='' cargo test init_pool_applies_sqlite_cache_budget_to_each_pooled_connection init_pool_applies_sqlite_mmap_to_each_pooled_connection --config 'build.rustc-wrapper=""'
@@ -288,7 +290,7 @@ RUSTC_WRAPPER='' cargo test init_pool_applies_sqlite_cache_budget_to_each_pooled
 
 Expected: cache test sees `-64000`; mmap test sees `0` or platform default.
 
-- [ ] **Step 3: Change pool setup to pass full storage config**
+- [x] **Step 3: Change pool setup to pass full storage config**
 
 In `src/db/pool.rs`, change connection customization so `configure_connection_pragmas` receives `&StorageConfig`, not only `wal_mode`. The target signature is:
 
@@ -308,7 +310,7 @@ fn configure_connection_pragmas(conn: &mut Connection, storage: &StorageConfig) 
 
 If current pool setup captures only `wal_mode`, change the customizer/call site to clone `StorageConfig` into the closure.
 
-- [ ] **Step 4: Run focused tests**
+- [x] **Step 4: Run focused tests**
 
 ```bash
 RUSTC_WRAPPER='' cargo test init_pool_applies_busy_timeout_to_each_pooled_connection init_pool_applies_sqlite_cache_budget_to_each_pooled_connection init_pool_applies_sqlite_mmap_to_each_pooled_connection --config 'build.rustc-wrapper=""'
