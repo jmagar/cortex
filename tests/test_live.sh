@@ -959,12 +959,13 @@ phase_cli_parity() {
   #   - timestamps/dates (server-side `now()`-style fields)
   #   - elapsed_ms / duration counters
   #   - request-scoped ids (run_id, request_id)
+  #   - live cgroup counters sampled at different instants
   # Recursively walks the structure and deletes the keys wherever found.
   local jq_strip='
     def strip:
       if type == "object" then
         with_entries(
-          select(.key | test("^(generated_at|elapsed_ms|duration_ms|started_at|finished_at|request_id|run_id|timestamp|ts|now)$") | not)
+          select(.key | test("^(generated_at|elapsed_ms|duration_ms|started_at|finished_at|request_id|run_id|timestamp|ts|now|cgroup_memory_current_bytes|cgroup_memory_peak_bytes)$") | not)
         ) | map_values(strip)
       elif type == "array" then map(strip)
       else . end;
