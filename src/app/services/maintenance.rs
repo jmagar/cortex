@@ -18,15 +18,21 @@ impl CortexService {
             let page_size = db::db_pragma_i64(pool, db::PragmaName("page_size"))?;
             let auto_vacuum = db::db_pragma_i64(pool, db::PragmaName("auto_vacuum"))?;
             let journal_mode = db::db_pragma_string(pool, db::PragmaName("journal_mode"))?;
+            let sqlite_page_cache_kib_per_connection =
+                db::db_pragma_i64(pool, db::PragmaName("cache_size"))?;
+            let sqlite_mmap_bytes =
+                db::db_pragma_i64(pool, db::PragmaName("mmap_size"))?.max(0) as u64;
             let logical_size_bytes =
                 ((page_count - freelist_count).max(0) * page_size).max(0) as u64;
             let physical_size_bytes = db::physical_size_bytes(&storage.db_path)?;
-            let wal_size_bytes = std::fs::metadata(wal_path(&storage.db_path))
-                .ok()
-                .map(|metadata| metadata.len());
-            let shm_size_bytes = std::fs::metadata(shm_path(&storage.db_path))
-                .ok()
-                .map(|metadata| metadata.len());
+            let wal_size_bytes =
+                std::fs::metadata(db::sqlite_sidecar_path(&storage.db_path, "wal"))
+                    .ok()
+                    .map(|metadata| metadata.len());
+            let shm_size_bytes =
+                std::fs::metadata(db::sqlite_sidecar_path(&storage.db_path, "shm"))
+                    .ok()
+                    .map(|metadata| metadata.len());
             let cgroup = read_cgroup_memory_snapshot();
             Ok(DbMaintenanceStatus {
                 db_path: storage.db_path.clone(),
@@ -38,13 +44,13 @@ impl CortexService {
                 wal_size_bytes,
                 shm_size_bytes,
                 sqlite_page_cache_mb: storage.sqlite_page_cache_mb,
-                sqlite_page_cache_kib_per_connection: storage
-                    .sqlite_page_cache_kib_per_connection(),
+                sqlite_page_cache_kib_per_connection,
                 sqlite_mmap_mb: storage.sqlite_mmap_mb,
-                sqlite_mmap_bytes: storage.sqlite_mmap_bytes(),
+                sqlite_mmap_bytes,
                 heavy_read_concurrency: storage.heavy_read_concurrency,
                 wal_checkpoint_mb: storage.wal_checkpoint_mb,
                 wal_checkpoint_threshold_bytes: storage.wal_checkpoint_threshold_bytes(),
+                cgroup_memory_status: cgroup.status,
                 cgroup_memory_max_bytes: cgroup.max_bytes,
                 cgroup_memory_current_bytes: cgroup.current_bytes,
                 cgroup_memory_peak_bytes: cgroup.peak_bytes,
@@ -164,6 +170,12 @@ impl CortexService {
     async fn db_checkpoint(&self, mode: String) -> ServiceResult<DbCheckpointResult> {
         self.run_db("db_checkpoint", move |pool| {
             let (busy, log_frames, checkpointed_frames) = db::db_wal_checkpoint(pool, &mode)?;
+            if !db::wal_checkpoint_complete(busy, log_frames, checkpointed_frames) {
+                return Err(ServiceError::Busy(format!(
+                    "wal_checkpoint_incomplete busy={busy} checkpointed_frames={checkpointed_frames} log_frames={log_frames}"
+                ))
+                .into());
+            }
             Ok(DbCheckpointResult {
                 mode,
                 busy,
@@ -276,35 +288,56 @@ impl CortexService {
     }
 }
 
-fn wal_path(db_path: &std::path::Path) -> PathBuf {
-    PathBuf::from(format!("{}-wal", db_path.display()))
-}
-
-fn shm_path(db_path: &std::path::Path) -> PathBuf {
-    PathBuf::from(format!("{}-shm", db_path.display()))
-}
-
 #[derive(Debug, Clone, Default)]
 struct CgroupMemorySnapshot {
+    status: String,
     max_bytes: Option<u64>,
     current_bytes: Option<u64>,
     peak_bytes: Option<u64>,
 }
 
 fn read_cgroup_memory_snapshot() -> CgroupMemorySnapshot {
-    fn read_value(path: &str) -> Option<u64> {
-        let raw = std::fs::read_to_string(path).ok()?;
+    fn read_value(path: &str) -> std::io::Result<Option<u64>> {
+        let raw = std::fs::read_to_string(path)?;
         let trimmed = raw.trim();
         if trimmed == "max" {
-            return None;
+            return Ok(None);
         }
-        trimmed.parse::<u64>().ok()
+        trimmed.parse::<u64>().map(Some).map_err(|error| {
+            std::io::Error::new(std::io::ErrorKind::InvalidData, error.to_string())
+        })
     }
 
+    let max = read_value("/sys/fs/cgroup/memory.max");
+    let current = read_value("/sys/fs/cgroup/memory.current");
+    let peak = read_value("/sys/fs/cgroup/memory.peak");
+
+    let peak_missing = matches!(
+        &peak,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound
+    );
+
+    let status = match (&max, &current, &peak) {
+        (Err(max_err), Err(current_err), _)
+            if max_err.kind() == std::io::ErrorKind::NotFound
+                && current_err.kind() == std::io::ErrorKind::NotFound =>
+        {
+            "unavailable"
+        }
+        (Ok(None), Ok(Some(_)), _) if peak.is_ok() || peak_missing => "unlimited",
+        (Ok(Some(_)), Ok(Some(_)), _) if peak.is_ok() || peak_missing => "ok",
+        _ => {
+            tracing::warn!("cgroup memory diagnostics could not be read cleanly");
+            "error"
+        }
+    }
+    .to_string();
+
     CgroupMemorySnapshot {
-        max_bytes: read_value("/sys/fs/cgroup/memory.max"),
-        current_bytes: read_value("/sys/fs/cgroup/memory.current"),
-        peak_bytes: read_value("/sys/fs/cgroup/memory.peak"),
+        status,
+        max_bytes: max.ok().flatten(),
+        current_bytes: current.ok().flatten(),
+        peak_bytes: peak.ok().flatten(),
     }
 }
 

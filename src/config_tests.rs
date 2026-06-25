@@ -107,19 +107,47 @@ fn storage_defaults_include_sqlite_memory_guardrails() {
     assert_eq!(storage.sqlite_mmap_mb, 256);
     assert_eq!(storage.heavy_read_concurrency, 1);
     assert_eq!(storage.wal_checkpoint_mb, 256);
-    assert_eq!(storage.sqlite_page_cache_kib_per_connection(), -16_384);
+    assert_eq!(
+        storage.sqlite_page_cache_kib_per_connection().unwrap(),
+        -16_384
+    );
     assert_eq!(storage.sqlite_mmap_bytes(), 256 * 1024 * 1024);
-    assert_eq!(storage.sqlite_page_cache_floor_bytes(), 128 * 1024 * 1024);
 }
 
 #[test]
-fn storage_page_cache_budget_is_clamped_per_connection() {
+fn storage_page_cache_budget_is_divided_per_connection_without_hidden_floor() {
     let storage = StorageConfig {
         pool_size: 128,
         sqlite_page_cache_mb: 1,
         ..StorageConfig::default()
     };
-    assert_eq!(storage.sqlite_page_cache_kib_per_connection(), -4_096);
+    assert_eq!(storage.sqlite_page_cache_kib_per_connection().unwrap(), -8);
+}
+
+#[test]
+fn storage_rejects_sqlite_page_cache_overflow() {
+    let storage = StorageConfig {
+        sqlite_page_cache_mb: u64::MAX,
+        ..StorageConfig::default()
+    };
+    let err = validate_storage_config(&storage).unwrap_err();
+    assert!(
+        err.to_string().contains("sqlite_page_cache_mb"),
+        "wrong error: {err}"
+    );
+}
+
+#[test]
+fn storage_rejects_sqlite_mmap_overflow() {
+    let storage = StorageConfig {
+        sqlite_mmap_mb: u64::MAX,
+        ..StorageConfig::default()
+    };
+    let err = validate_storage_config(&storage).unwrap_err();
+    assert!(
+        err.to_string().contains("sqlite_mmap_mb"),
+        "wrong error: {err}"
+    );
 }
 
 #[test]
@@ -142,6 +170,10 @@ fn defaults_are_applied_without_env_vars() {
         "CORTEX_NO_AUTH",
         "CORTEX_DB_PATH",
         "CORTEX_POOL_SIZE",
+        "CORTEX_SQLITE_PAGE_CACHE_MB",
+        "CORTEX_SQLITE_MMAP_MB",
+        "CORTEX_HEAVY_READ_CONCURRENCY",
+        "CORTEX_WAL_CHECKPOINT_MB",
         "CORTEX_RETENTION_DAYS",
         "CORTEX_TOKEN",
         "CORTEX_API_TOKEN",
@@ -431,6 +463,14 @@ fn env_var_overrides_storage_budget_settings() {
     unsafe { std::env::set_var("CORTEX_RECOVERY_FREE_DISK_MB", "1536") };
     // TODO: Audit that the environment access only happens in single-threaded code.
     unsafe { std::env::set_var("CORTEX_CLEANUP_INTERVAL_SECS", "120") };
+    // TODO: Audit that the environment access only happens in single-threaded code.
+    unsafe { std::env::set_var("CORTEX_SQLITE_PAGE_CACHE_MB", "64") };
+    // TODO: Audit that the environment access only happens in single-threaded code.
+    unsafe { std::env::set_var("CORTEX_SQLITE_MMAP_MB", "128") };
+    // TODO: Audit that the environment access only happens in single-threaded code.
+    unsafe { std::env::set_var("CORTEX_HEAVY_READ_CONCURRENCY", "2") };
+    // TODO: Audit that the environment access only happens in single-threaded code.
+    unsafe { std::env::set_var("CORTEX_WAL_CHECKPOINT_MB", "32") };
 
     let result = Config::load();
 
@@ -441,6 +481,10 @@ fn env_var_overrides_storage_budget_settings() {
         "CORTEX_MIN_FREE_DISK_MB",
         "CORTEX_RECOVERY_FREE_DISK_MB",
         "CORTEX_CLEANUP_INTERVAL_SECS",
+        "CORTEX_SQLITE_PAGE_CACHE_MB",
+        "CORTEX_SQLITE_MMAP_MB",
+        "CORTEX_HEAVY_READ_CONCURRENCY",
+        "CORTEX_WAL_CHECKPOINT_MB",
     ] {
         // TODO: Audit that the environment access only happens in single-threaded code.
         unsafe { std::env::remove_var(key) };
@@ -452,6 +496,40 @@ fn env_var_overrides_storage_budget_settings() {
     assert_eq!(cfg.storage.min_free_disk_mb, 1024);
     assert_eq!(cfg.storage.recovery_free_disk_mb, 1536);
     assert_eq!(cfg.storage.cleanup_interval_secs, 120);
+    assert_eq!(cfg.storage.sqlite_page_cache_mb, 64);
+    assert_eq!(cfg.storage.sqlite_mmap_mb, 128);
+    assert_eq!(cfg.storage.heavy_read_concurrency, 2);
+    assert_eq!(cfg.storage.wal_checkpoint_mb, 32);
+}
+
+#[test]
+fn storage_rejects_zero_sqlite_memory_guardrails() {
+    for (label, storage) in [
+        (
+            "sqlite_page_cache_mb",
+            StorageConfig {
+                sqlite_page_cache_mb: 0,
+                ..StorageConfig::default()
+            },
+        ),
+        (
+            "heavy_read_concurrency",
+            StorageConfig {
+                heavy_read_concurrency: 0,
+                ..StorageConfig::default()
+            },
+        ),
+        (
+            "wal_checkpoint_mb",
+            StorageConfig {
+                wal_checkpoint_mb: 0,
+                ..StorageConfig::default()
+            },
+        ),
+    ] {
+        let err = validate_storage_config(&storage).unwrap_err();
+        assert!(err.to_string().contains(label), "wrong error: {err}");
+    }
 }
 
 #[test]

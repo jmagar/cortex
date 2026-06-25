@@ -69,14 +69,19 @@ impl CortexService {
         let include_ok = req.include_ok.unwrap_or(true);
         let sort = req.sort.clone().unwrap_or_else(|| "pressure".into());
 
-        let entries = self
-            .run_db("fleet_state.latest", db::heartbeat_latest_all)
-            .await?;
+        let (entries, metrics_map) = self
+            .with_heavy_read_permit("fleet_state", || async move {
+                let entries = self
+                    .run_db("fleet_state.latest", db::heartbeat_latest_all)
+                    .await?;
 
-        let hb_ids: Vec<i64> = entries.iter().map(|e| e.heartbeat_id).collect();
-        let metrics_map = self
-            .run_db("fleet_state.metrics", move |pool| {
-                db::heartbeat_metric_snapshot_batch(pool, &hb_ids)
+                let hb_ids: Vec<i64> = entries.iter().map(|e| e.heartbeat_id).collect();
+                let metrics_map = self
+                    .run_db("fleet_state.metrics", move |pool| {
+                        db::heartbeat_metric_snapshot_batch(pool, &hb_ids)
+                    })
+                    .await?;
+                Ok((entries, metrics_map))
             })
             .await?;
 

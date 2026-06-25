@@ -1,7 +1,10 @@
 use super::dispatch::http_or_cancel;
 
 use anyhow::{Result, bail};
-use cortex::app::{DbBackupRequest, DbCheckpointRequest, DbIntegrityRequest, DbVacuumRequest};
+use cortex::app::{
+    DbBackupRequest, DbCheckpointRequest, DbIntegrityRequest, DbVacuumRequest,
+    wal_checkpoint_complete,
+};
 
 use super::DbIntegrityStatusArgs;
 use super::output_ops::{print_db_integrity_job_started, print_db_integrity_job_status};
@@ -171,8 +174,17 @@ pub(crate) async fn run_db_checkpoint(mode: &CliMode, args: DbCheckpointArgs) ->
         CliMode::Http(client) => http_or_cancel(client.db_checkpoint(&req)).await?,
     };
     print_db_checkpoint_response(&response, json)?;
-    if response.busy != 0 {
-        bail!("database WAL checkpoint was busy");
+    if !wal_checkpoint_complete(
+        response.busy,
+        response.log_frames,
+        response.checkpointed_frames,
+    ) {
+        bail!(
+            "database WAL checkpoint incomplete: busy={} checkpointed_frames={} log_frames={}",
+            response.busy,
+            response.checkpointed_frames,
+            response.log_frames
+        );
     }
     Ok(())
 }

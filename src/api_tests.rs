@@ -1634,9 +1634,27 @@ async fn db_status_returns_pragma_snapshot() {
     assert_eq!(value["heavy_read_concurrency"], 1);
     assert_eq!(value["wal_checkpoint_mb"], 256);
     assert_eq!(value["wal_checkpoint_threshold_bytes"], 256 * 1024 * 1024);
-    assert!(value.get("cgroup_memory_max_bytes").is_some());
-    assert!(value.get("cgroup_memory_current_bytes").is_some());
-    assert!(value.get("cgroup_memory_peak_bytes").is_some());
+    assert!(matches!(
+        value["cgroup_memory_status"].as_str(),
+        Some("ok" | "unlimited" | "unavailable" | "error")
+    ));
+    for key in [
+        "cgroup_memory_max_bytes",
+        "cgroup_memory_current_bytes",
+        "cgroup_memory_peak_bytes",
+    ] {
+        assert!(
+            value
+                .get(key)
+                .is_some_and(|field| field.is_null() || field.is_number()),
+            "{key} should be null or numeric: {value}"
+        );
+    }
+    let rendered = value.to_string();
+    assert!(
+        !rendered.contains("/sys/fs/cgroup"),
+        "cgroup diagnostics must not expose host paths: {rendered}"
+    );
 }
 
 #[tokio::test]

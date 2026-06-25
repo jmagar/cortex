@@ -270,7 +270,7 @@ impl CortexService {
         let cut_5m_q = cut_5m.clone();
         let cut_15m_q = cut_15m.clone();
         let result = self
-            .run_db("ingest_rate", move |pool| -> anyhow::Result<_> {
+            .run_heavy_db("ingest_rate", move |pool| -> anyhow::Result<_> {
                 let buckets = db::ingest_rate(pool, &now_clone, &cut_1m_q, &cut_5m_q, &cut_15m_q)?;
                 let by_host = if want_by_host {
                     Some(db::ingest_rate_by_host(

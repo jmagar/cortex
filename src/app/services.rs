@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::future::Future;
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
@@ -87,6 +88,10 @@ pub use compose::run_compose_status;
 pub use journal::run_service_logs;
 #[cfg(test)]
 use journal::{normalize_syslog_owned_service, parse_journal_json_lines};
+
+pub fn wal_checkpoint_complete(busy: i64, log_frames: i64, checkpointed_frames: i64) -> bool {
+    db::wal_checkpoint_complete(busy, log_frames, checkpointed_frames)
+}
 
 /// Parse the `source_kind` recorded in a log row's `metadata_json`, if present.
 /// Shared by the `ai_correlate` and `topic_correlate` lanes.
@@ -266,6 +271,15 @@ impl CortexService {
         F: FnOnce(&DbPool) -> anyhow::Result<T> + Send + 'static,
         T: Send + 'static,
     {
+        self.with_heavy_read_permit(op, || async move { self.run_db(op, f).await })
+            .await
+    }
+
+    async fn with_heavy_read_permit<F, Fut, T>(&self, op: &'static str, f: F) -> ServiceResult<T>
+    where
+        F: FnOnce() -> Fut,
+        Fut: Future<Output = ServiceResult<T>>,
+    {
         let wait_start = Instant::now();
         let permit_result = tokio::time::timeout(
             self.acquire_timeout,
@@ -290,7 +304,7 @@ impl CortexService {
         };
 
         let _heavy_permit = heavy_permit;
-        self.run_db(op, f).await
+        f().await
     }
 }
 

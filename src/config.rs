@@ -703,20 +703,31 @@ impl Default for StorageConfig {
 }
 
 impl StorageConfig {
-    pub fn sqlite_page_cache_kib_per_connection(&self) -> i64 {
-        const MIN_CACHE_KIB: u64 = 4 * 1024;
+    pub fn sqlite_page_cache_kib_per_connection(&self) -> anyhow::Result<i64> {
         let pool_size = u64::from(self.pool_size.max(1));
-        let total_kib = self.sqlite_page_cache_mb.saturating_mul(1024);
-        let per_conn = (total_kib / pool_size).max(MIN_CACHE_KIB);
-        -(per_conn as i64)
+        let total_kib = self
+            .sqlite_page_cache_mb
+            .checked_mul(1024)
+            .ok_or_else(|| anyhow::anyhow!("storage.sqlite_page_cache_mb is too large"))?;
+        let per_conn = (total_kib / pool_size).max(1);
+        let per_conn = i64::try_from(per_conn).map_err(|_| {
+            anyhow::anyhow!(
+                "storage.sqlite_page_cache_mb is too large; derived cache_size must fit in i64"
+            )
+        })?;
+        Ok(-per_conn)
+    }
+
+    pub fn sqlite_mmap_bytes_i64(&self) -> anyhow::Result<i64> {
+        i64::try_from(self.sqlite_mmap_bytes()).map_err(|_| {
+            anyhow::anyhow!(
+                "storage.sqlite_mmap_mb is too large; derived mmap_size must fit in i64"
+            )
+        })
     }
 
     pub fn sqlite_mmap_bytes(&self) -> u64 {
         self.sqlite_mmap_mb.saturating_mul(1024 * 1024)
-    }
-
-    pub fn sqlite_page_cache_floor_bytes(&self) -> u64 {
-        self.sqlite_page_cache_mb.saturating_mul(1024 * 1024)
     }
 
     pub fn wal_checkpoint_threshold_bytes(&self) -> u64 {
@@ -1552,6 +1563,8 @@ fn validate_storage_config(storage: &StorageConfig) -> anyhow::Result<()> {
     if storage.sqlite_page_cache_mb == 0 {
         anyhow::bail!("storage.sqlite_page_cache_mb must be > 0");
     }
+    storage.sqlite_page_cache_kib_per_connection()?;
+    storage.sqlite_mmap_bytes_i64()?;
     if storage.heavy_read_concurrency == 0 {
         anyhow::bail!("storage.heavy_read_concurrency must be > 0");
     }

@@ -28,7 +28,11 @@ max_message_size = 8192
 
 [storage]
 db_path = "/data/cortex.db"
-pool_size = 4
+pool_size = 8
+sqlite_page_cache_mb = 128
+sqlite_mmap_mb = 256
+heavy_read_concurrency = 1
+wal_checkpoint_mb = 256
 retention_days = 90
 wal_mode = true
 max_db_size_mb = 1024
@@ -235,7 +239,7 @@ HOME, disables MCP servers/hooks/context-file loading, and parses Gemini's
 | `CORTEX_POOL_SIZE` | no | `8` | no | SQLite connection pool size (must be > 0); reads get `pool_size - 1` permits |
 | `CORTEX_SQLITE_PAGE_CACHE_MB` | no | `128` | no | Total SQLite page-cache budget across the pool; divided by `pool_size` before `PRAGMA cache_size` |
 | `CORTEX_SQLITE_MMAP_MB` | no | `256` | no | Bounded SQLite mmap size; resident mapped pages may still count toward cgroup memory |
-| `CORTEX_HEAVY_READ_CONCURRENCY` | no | `1` | no | Shared service-layer limiter for expensive reads |
+| `CORTEX_HEAVY_READ_CONCURRENCY` | no | `1` | no | Shared service-layer limiter for SQLite-heavy reads |
 | `CORTEX_WAL_CHECKPOINT_MB` | no | `256` | no | WAL size threshold for bounded PASSIVE checkpoint attempts |
 | `CORTEX_RETENTION_DAYS` | no | `90` | no | Days to retain logs before automatic hourly purge (0 = keep forever) |
 
@@ -303,6 +307,10 @@ If a migration must be abandoned, stop the new process before changing files, re
 ## Validation rules
 
 - `CORTEX_POOL_SIZE` must be > 0
+- `CORTEX_SQLITE_PAGE_CACHE_MB` must be > 0 and its derived KiB-per-connection value must fit SQLite's signed PRAGMA range
+- `CORTEX_SQLITE_MMAP_MB` derived bytes must fit SQLite's signed PRAGMA range
+- `CORTEX_HEAVY_READ_CONCURRENCY` must be > 0
+- `CORTEX_WAL_CHECKPOINT_MB` must be > 0
 - `recovery_db_size_mb` must be > 0 and < `max_db_size_mb` when DB size guard is enabled
 - `recovery_free_disk_mb` must be > 0 and > `min_free_disk_mb` when free-disk guard is enabled
 - `cleanup_interval_secs` must be >= 5

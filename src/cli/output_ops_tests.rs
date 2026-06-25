@@ -64,6 +64,7 @@ fn human_db_maintenance_outputs_accept_representative_payloads() {
             heavy_read_concurrency: 1,
             wal_checkpoint_mb: 256,
             wal_checkpoint_threshold_bytes: 256 * 1024 * 1024,
+            cgroup_memory_status: "ok".to_string(),
             cgroup_memory_max_bytes: Some(2 * 1024 * 1024 * 1024),
             cgroup_memory_current_bytes: Some(512 * 1024 * 1024),
             cgroup_memory_peak_bytes: Some(1024 * 1024 * 1024),

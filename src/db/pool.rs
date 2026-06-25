@@ -2624,12 +2624,22 @@ fn configure_connection_pragmas(
     }
     conn.pragma_update(None, "synchronous", "NORMAL")?;
     conn.pragma_update(None, "busy_timeout", 5000_i64)?;
-    conn.pragma_update(
-        None,
-        "cache_size",
-        storage.sqlite_page_cache_kib_per_connection(),
-    )?;
-    conn.pragma_update(None, "mmap_size", storage.sqlite_mmap_bytes() as i64)?;
+    let cache_size = storage
+        .sqlite_page_cache_kib_per_connection()
+        .map_err(|error| {
+            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                error.to_string(),
+            )))
+        })?;
+    conn.pragma_update(None, "cache_size", cache_size)?;
+    let mmap_size = storage.sqlite_mmap_bytes_i64().map_err(|error| {
+        rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            error.to_string(),
+        )))
+    })?;
+    conn.pragma_update(None, "mmap_size", mmap_size)?;
     conn.pragma_update(None, "analysis_limit", 400_i64)?;
     Ok(())
 }

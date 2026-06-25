@@ -2,7 +2,7 @@ use thiserror::Error;
 
 /// Typed service-layer errors.
 ///
-/// Prefer specific variants over `Internal` at sqlx call sites. Use
+/// Prefer specific variants over `Internal` at SQLite/pool call sites. Use
 /// `Internal` only for genuinely opaque errors (anyhow wrapping, etc.).
 /// The `#[from] anyhow::Error` impl on `Internal` allows `?` on `anyhow`
 /// result chains until all call sites are migrated to explicit `map_err`.
@@ -21,7 +21,7 @@ pub enum ServiceError {
     #[error("{0}")]
     NotFound(String),
 
-    /// A SQLite / sqlx pool timeout was detected. Semantic alias for `Busy`
+    /// A SQLite / r2d2 pool timeout was detected. Semantic alias for `Busy`
     /// that lets callers distinguish pool starvation from other transient
     /// errors without downcasting `anyhow::Error`.
     #[error("database timeout: pool did not yield a connection in time")]

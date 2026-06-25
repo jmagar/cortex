@@ -332,7 +332,7 @@ pub(super) const ACTION_SPECS: &[ActionSpec] = &[
         "ai_correlate",
         Read,
         "Correlate AI transcript events with syslog",
-        Moderate,
+        Expensive,
         AiCorrelate
     ),
     action_spec!(
@@ -362,7 +362,7 @@ pub(super) const ACTION_SPECS: &[ActionSpec] = &[
         "project_context",
         Read,
         "Full project context from AI transcripts",
-        Moderate,
+        Expensive,
         ProjectContext
     ),
     action_spec!(

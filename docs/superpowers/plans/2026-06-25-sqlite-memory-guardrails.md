@@ -50,10 +50,12 @@ Status: completed
 - Test: existing `src/config.rs` unit tests or add sidecar tests if present in this file
 
 **Interfaces:**
-- Produces: `StorageConfig::sqlite_page_cache_kib_per_connection(&self) -> i64`
+- Produces: `StorageConfig::sqlite_page_cache_kib_per_connection(&self) -> anyhow::Result<i64>`
 - Produces: `StorageConfig::sqlite_mmap_bytes(&self) -> u64`
-- Produces: `StorageConfig::sqlite_page_cache_floor_bytes(&self) -> u64`
+- Produces: `StorageConfig::sqlite_mmap_bytes_i64(&self) -> anyhow::Result<i64>`
 - Produces: `StorageConfig` fields `sqlite_page_cache_mb`, `sqlite_mmap_mb`, `heavy_read_concurrency`, `wal_checkpoint_mb`
+
+> Review note: the original draft below used a hidden 4 MiB per-connection page-cache floor. That was deliberately superseded during review so `sqlite_page_cache_mb` remains a true total pool budget.
 
 - [x] **Step 1: Add failing config defaults test**
 
@@ -68,9 +70,8 @@ fn storage_defaults_include_sqlite_memory_guardrails() {
     assert_eq!(storage.sqlite_mmap_mb, 256);
     assert_eq!(storage.heavy_read_concurrency, 1);
     assert_eq!(storage.wal_checkpoint_mb, 256);
-    assert_eq!(storage.sqlite_page_cache_kib_per_connection(), -16_384);
+    assert_eq!(storage.sqlite_page_cache_kib_per_connection().unwrap(), -16_384);
     assert_eq!(storage.sqlite_mmap_bytes(), 256 * 1024 * 1024);
-    assert_eq!(storage.sqlite_page_cache_floor_bytes(), 128 * 1024 * 1024);
 }
 
 #[test]
@@ -78,7 +79,7 @@ fn storage_page_cache_budget_is_clamped_per_connection() {
     let mut storage = StorageConfig::default();
     storage.pool_size = 128;
     storage.sqlite_page_cache_mb = 1;
-    assert_eq!(storage.sqlite_page_cache_kib_per_connection(), -4_096);
+    assert_eq!(storage.sqlite_page_cache_kib_per_connection().unwrap(), -8);
 }
 ```
 
@@ -146,20 +147,15 @@ Add this impl block after `impl Default for StorageConfig`:
 
 ```rust
 impl StorageConfig {
-    pub fn sqlite_page_cache_kib_per_connection(&self) -> i64 {
-        const MIN_CACHE_KIB: u64 = 4 * 1024;
+    pub fn sqlite_page_cache_kib_per_connection(&self) -> anyhow::Result<i64> {
         let pool_size = u64::from(self.pool_size.max(1));
         let total_kib = self.sqlite_page_cache_mb.saturating_mul(1024);
-        let per_conn = (total_kib / pool_size).max(MIN_CACHE_KIB);
-        -(per_conn as i64)
+        let per_conn = i64::try_from((total_kib / pool_size).max(1))?;
+        Ok(-per_conn)
     }
 
     pub fn sqlite_mmap_bytes(&self) -> u64 {
         self.sqlite_mmap_mb.saturating_mul(1024 * 1024)
-    }
-
-    pub fn sqlite_page_cache_floor_bytes(&self) -> u64 {
-        self.sqlite_page_cache_mb.saturating_mul(1024 * 1024)
     }
 
     pub fn wal_checkpoint_threshold_bytes(&self) -> u64 {
@@ -301,8 +297,8 @@ fn configure_connection_pragmas(conn: &mut Connection, storage: &StorageConfig) 
     }
     conn.pragma_update(None, "synchronous", "NORMAL")?;
     conn.pragma_update(None, "busy_timeout", 5000_i64)?;
-    conn.pragma_update(None, "cache_size", storage.sqlite_page_cache_kib_per_connection())?;
-    conn.pragma_update(None, "mmap_size", storage.sqlite_mmap_bytes() as i64)?;
+    conn.pragma_update(None, "cache_size", storage.sqlite_page_cache_kib_per_connection()?)?;
+    conn.pragma_update(None, "mmap_size", storage.sqlite_mmap_bytes_i64()?)?;
     conn.pragma_update(None, "analysis_limit", 400_i64)?;
     Ok(())
 }
@@ -836,8 +832,8 @@ In `docs/contracts/config-schema.md`, update `[storage]` rows so `pool_size` def
 
 ```markdown
 | `sqlite_page_cache_mb` | `CORTEX_SQLITE_PAGE_CACHE_MB` | u64 | `128` | tuning | restart-only | `> 0` | — | Total SQLite page-cache budget across the pool; divided by `pool_size` before `PRAGMA cache_size` |
-| `sqlite_mmap_mb` | `CORTEX_SQLITE_MMAP_MB` | u64 | `256` | tuning | restart-only | any u64 | — | Bounded SQLite mmap size; resident pages may still count toward cgroup memory |
-| `heavy_read_concurrency` | `CORTEX_HEAVY_READ_CONCURRENCY` | usize | `1` | tuning | restart-only | `> 0` | — | Shared service-layer limiter for expensive reads |
+| `sqlite_mmap_mb` | `CORTEX_SQLITE_MMAP_MB` | u64 | `256` | tuning | restart-only | derived bytes must fit `i64` | — | Bounded SQLite mmap size; resident pages may still count toward cgroup memory |
+| `heavy_read_concurrency` | `CORTEX_HEAVY_READ_CONCURRENCY` | usize | `1` | tuning | restart-only | `> 0` | — | Shared service-layer limiter for SQLite-heavy reads |
 | `wal_checkpoint_mb` | `CORTEX_WAL_CHECKPOINT_MB` | u64 | `256` | tuning | restart-only | `> 0` | — | WAL size threshold for bounded PASSIVE checkpoint attempts |
 ```
 

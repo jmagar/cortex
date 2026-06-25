@@ -75,11 +75,12 @@ fn actions_without_positional_metadata_default_to_none() {
 }
 
 #[test]
-fn expensive_actions_include_memory_risky_queries() {
+fn expensive_actions_include_broad_planning_queries() {
     let names = expensive_action_names_for_test();
     for expected in [
         "stats",
         "patterns",
+        "ingest_rate",
         "clock_skew",
         "anomalies",
         "compare",
@@ -87,6 +88,9 @@ fn expensive_actions_include_memory_risky_queries() {
         "compose_doctor",
         "fleet_state",
         "correlate_state",
+        "ai_correlate",
+        "project_context",
+        "graph",
     ] {
         assert!(
             names.contains(&expected),

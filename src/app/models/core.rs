@@ -117,6 +117,7 @@ pub struct DbMaintenanceStatus {
     pub heavy_read_concurrency: usize,
     pub wal_checkpoint_mb: u64,
     pub wal_checkpoint_threshold_bytes: u64,
+    pub cgroup_memory_status: String,
     pub cgroup_memory_max_bytes: Option<u64>,
     pub cgroup_memory_current_bytes: Option<u64>,
     pub cgroup_memory_peak_bytes: Option<u64>,

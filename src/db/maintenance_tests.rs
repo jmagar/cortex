@@ -90,6 +90,64 @@ fn test_storage_metrics_report_logical_size() {
 }
 
 #[test]
+fn physical_db_size_counts_extensionless_sqlite_sidecars() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("cortex");
+    std::fs::write(&db_path, b"db").unwrap();
+    std::fs::write(sqlite_sidecar_path(&db_path, "wal"), b"wal").unwrap();
+    std::fs::write(sqlite_sidecar_path(&db_path, "shm"), b"shm").unwrap();
+
+    let total = physical_db_size_bytes(&db_path).unwrap();
+    assert_eq!(total, 2 + 3 + 3);
+}
+
+#[test]
+fn maybe_checkpoint_wal_by_size_skips_missing_disabled_and_below_threshold_wal() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("missing.db");
+    let config = test_storage_config(db_path.clone());
+    let pool = init_pool(&config).unwrap();
+
+    assert!(
+        maybe_checkpoint_wal_by_size(&pool, &db_path, 0)
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        maybe_checkpoint_wal_by_size(&pool, &db_path, u64::MAX)
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[test]
+fn maybe_checkpoint_wal_by_size_runs_when_wal_exceeds_threshold() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("wal-threshold.db");
+    let mut config = test_storage_config(db_path.clone());
+    config.pool_size = 2;
+    config.wal_mode = true;
+    let pool = init_pool(&config).unwrap();
+    let held_conn = pool.get().unwrap();
+    held_conn
+        .execute_batch(
+            "CREATE TABLE wal_threshold_probe(id INTEGER PRIMARY KEY, value TEXT);
+             INSERT INTO wal_threshold_probe(value) VALUES ('x');",
+        )
+        .unwrap();
+    assert!(
+        sqlite_sidecar_path(&db_path, "wal").exists(),
+        "test setup should create a WAL sidecar"
+    );
+
+    let checkpoint = maybe_checkpoint_wal_by_size(&pool, &db_path, 1)
+        .unwrap()
+        .expect("WAL above tiny threshold should checkpoint");
+    assert!(checkpoint.1 >= checkpoint.2);
+    drop(held_conn);
+}
+
+#[test]
 fn test_purge_old_logs_removes_old() {
     let (pool, _dir) = test_pool();
     let entries = vec![
