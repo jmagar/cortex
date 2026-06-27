@@ -7,11 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.34.5] - 2026-06-27
+
+### Changed
+
+- Stop plugin setup hooks from auto-installing or linking the `cortex` binary;
+  they now delegate to an installed binary, honoring `CORTEX_MCP_BIN` when set.
+
+## [1.34.4] - 2026-06-27
+
+### Changed
+
+- Tighten the split `map_findings`, MCP prompt, and assessment module visibility
+  so helper modules match their filesystem layout without test-only exposure.
+- Publish both bare and `v`-prefixed Docker image tags so the MCP registry image
+  reference matches a produced GHCR tag.
+- Redact local transcript identifiers and absolute transcript paths from the
+  saved session artifact.
+
+## [1.34.3] - 2026-06-27
+
+### Changed
+
+- Move the remaining inline Rust test bodies into sidecar test files and split
+  the oversized `map_findings`, `assessment`, and MCP prompt modules into
+  smaller sibling modules.
+
 ## [1.34.2] - 2026-06-25
 
 ### Fixed
 
 - Bound SQLite memory behavior for large Cortex databases by deriving per-connection page cache from a total pool budget, applying bounded mmap settings, limiting concurrent heavy reads, classifying SQLite busy/locked errors as retryable, and exposing cache/WAL/cgroup diagnostics in DB status.
+
+### Changed
+
+- Move inline Rust unit tests into sibling sidecar files across the CLI,
+  notification, setup, agent, database, Docker ingest, OAuth, API, and service
+  modules while keeping the source modules limited to test hooks.
 
 ## [1.34.1] - 2026-06-22
 
