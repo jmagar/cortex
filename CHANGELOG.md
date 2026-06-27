@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.34.5] - 2026-06-27
+
+### Changed
+
+- Stop plugin setup hooks from auto-installing or linking the `cortex` binary;
+  they now delegate to an installed binary, honoring `CORTEX_MCP_BIN` when set.
+
 ## [1.34.4] - 2026-06-27
 
 ### Changed

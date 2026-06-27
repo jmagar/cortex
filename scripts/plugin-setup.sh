@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SessionStart / ConfigChange hook for cortex.
-# Keep setup policy in the cortex binary; this script adapts plugin settings to env.
+# Adapts plugin settings to env and delegates setup to an installed cortex binary.
 set -euo pipefail
 
 : "${CLAUDE_PLUGIN_ROOT:=$(cd "$(dirname "$0")/.." && pwd)}"
@@ -23,22 +23,16 @@ export_if_set() {
   export "${env_name}=${value}"
 }
 
-ensure_cortex_binary() {
-  if command -v cortex >/dev/null 2>&1; then
+cortex_binary() {
+  local binary="${CORTEX_MCP_BIN:-cortex}"
+  if command -v "${binary}" >/dev/null 2>&1; then
+    command -v "${binary}"
     return 0
   fi
 
-  local bundled="${CLAUDE_PLUGIN_ROOT}/bin/cortex"
-  if [[ -x "${bundled}" ]]; then
-    mkdir -p "${HOME}/.local/bin"
-    ln -sf "${bundled}" "${HOME}/.local/bin/cortex"
-    export PATH="${HOME}/.local/bin:${PATH}"
-  fi
-
-  command -v cortex >/dev/null 2>&1 || {
-    printf 'cortex plugin setup: cortex binary not found on PATH or at %s\n' "${bundled}" >&2
-    exit 1
-  }
+  printf 'cortex plugin setup: cortex is not installed or not on PATH.\n' >&2
+  printf 'Install cortex separately, then run: cortex setup\n' >&2
+  return 1
 }
 
 validate_client() {
@@ -115,6 +109,7 @@ prepare_oauth_env() {
 
 main() {
   local is_server="${CLAUDE_PLUGIN_OPTION_IS_SERVER:-true}"
+  local cortex_bin
 
   reject_unsafe_value "CLAUDE_PLUGIN_OPTION_API_TOKEN" "${CLAUDE_PLUGIN_OPTION_API_TOKEN:-}"
   export_if_set CORTEX_TOKEN CLAUDE_PLUGIN_OPTION_API_TOKEN
@@ -149,8 +144,11 @@ main() {
   chmod 700 "${CORTEX_DATA_DIR}" 2>/dev/null || true
   export CORTEX_DATA_DIR
 
-  ensure_cortex_binary
-  cortex setup plugin-hook "$@"
+  if ! cortex_bin="$(cortex_binary)"; then
+    return 0
+  fi
+
+  "${cortex_bin}" setup plugin-hook "$@"
 }
 
 main "$@"
