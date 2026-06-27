@@ -12,7 +12,7 @@ const PARSER_TOKENS: &[&str] = &[
     "hosts",
     "sessions",
     "incident",
-    "ai",
+    "sessions",
     "shell",
     "agent-command",
     "heartbeat",
@@ -117,8 +117,8 @@ fn command_help_shows_detailed_flags() {
 #[test]
 fn nested_help_shows_subcommand_specific_usage() {
     let out = render_command("ai search", false).expect("ai search is known");
-    assert!(out.contains("cortex ai search QUERY"), "got: {out}");
-    assert!(!out.contains("cortex ai investigate"), "got: {out}");
+    assert!(out.contains("cortex sessions search QUERY"), "got: {out}");
+    assert!(!out.contains("cortex sessions investigate"), "got: {out}");
 
     let out = render_command("ai investigate", false).expect("ai investigate is known");
     assert!(out.contains("--detail compact|full"), "got: {out}");
@@ -188,7 +188,7 @@ fn classify_help_distinguishes_top_level_command_and_none() {
         HelpRequest::Command("db status".to_string())
     );
     assert_eq!(
-        classify_help(&v(&["ai", "search", "--help"])),
+        classify_help(&v(&["sessions", "search", "--help"])),
         HelpRequest::Command("ai search".to_string())
     );
     assert_eq!(
@@ -208,11 +208,11 @@ fn classify_help_distinguishes_top_level_command_and_none() {
     // position) must NOT trigger help — these run the actual search.
     assert_eq!(classify_help(&v(&["search", "help"])), HelpRequest::None);
     assert_eq!(
-        classify_help(&v(&["ai", "search", "help"])),
+        classify_help(&v(&["sessions", "search", "help"])),
         HelpRequest::None
     );
     assert_eq!(
-        classify_help(&v(&["ai", "abuse", "--term", "help"])),
+        classify_help(&v(&["sessions", "abuse", "--term", "help"])),
         HelpRequest::None
     );
     // But `help` in command position is still a top-level request.

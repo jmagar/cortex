@@ -2,8 +2,8 @@ use anyhow::{Result, anyhow, bail};
 use cortex::app::CortexService;
 
 use super::args::{
-    AgentCommandCommand, AiCommand, CliCommand, DbCommand, GraphCommand, NotifyCommand,
-    ShellCommand, SigCommand,
+    AgentCommandCommand, CliCommand, DbCommand, GraphCommand, NotifyCommand, ShellCommand,
+    SigCommand,
 };
 use super::dispatch;
 
@@ -54,39 +54,51 @@ pub(crate) async fn run(mode: CliMode, command: CliCommand) -> Result<()> {
         CliCommand::Incident(args) => dispatch::run_incident(&mode, args).await,
         CliCommand::Correlate(args) => dispatch::run_correlate(&mode, args).await,
         CliCommand::Stats(args) => dispatch::run_stats(&mode, args).await,
-        CliCommand::Sessions(args) => dispatch::run_sessions(&mode, args).await,
         CliCommand::FileTail(command) => dispatch::run_file_tail(&mode, command).await,
-        // AI commands (bead 0p8r.8). 10 are HTTP-capable; 6 are LOCAL-only
-        // and bail in HTTP mode with a per-command inline message.
-        CliCommand::Ai(ai) => match ai {
-            AiCommand::Search(args) => dispatch::run_ai_search(&mode, args).await,
-            AiCommand::Abuse(args) => dispatch::run_ai_abuse(&mode, args).await,
-            AiCommand::Correlate(args) => dispatch::run_ai_correlate(&mode, args).await,
-            AiCommand::Blocks(args) => dispatch::run_ai_blocks(&mode, args).await,
-            AiCommand::Context(args) => dispatch::run_ai_context(&mode, args).await,
-            AiCommand::Tools(args) => dispatch::run_ai_tools(&mode, args).await,
-            AiCommand::Projects(args) => dispatch::run_ai_projects(&mode, args).await,
-            AiCommand::Checkpoints(args) => dispatch::run_ai_checkpoints(&mode, args).await,
-            AiCommand::Errors(args) => dispatch::run_ai_errors(&mode, args).await,
-            AiCommand::PruneCheckpoints(args) => {
+        CliCommand::Sessions(command) => match command {
+            super::SessionsCommand::List(args) => dispatch::run_sessions(&mode, args).await,
+            super::SessionsCommand::Search(args) => dispatch::run_ai_search(&mode, args).await,
+            super::SessionsCommand::Abuse(args) => dispatch::run_ai_abuse(&mode, args).await,
+            super::SessionsCommand::Correlate(args) => {
+                dispatch::run_ai_correlate(&mode, args).await
+            }
+            super::SessionsCommand::Blocks(args) => dispatch::run_ai_blocks(&mode, args).await,
+            super::SessionsCommand::Context(args) => dispatch::run_ai_context(&mode, args).await,
+            super::SessionsCommand::Tools(args) => dispatch::run_ai_tools(&mode, args).await,
+            super::SessionsCommand::Projects(args) => dispatch::run_ai_projects(&mode, args).await,
+            super::SessionsCommand::Checkpoints(args) => {
+                dispatch::run_ai_checkpoints(&mode, args).await
+            }
+            super::SessionsCommand::Errors(args) => dispatch::run_ai_errors(&mode, args).await,
+            super::SessionsCommand::PruneCheckpoints(args) => {
                 dispatch::run_ai_prune_checkpoints(&mode, args).await
             }
-            AiCommand::Index(args) => dispatch::run_ai_index(&mode, args).await,
-            AiCommand::Add(args) => dispatch::run_ai_add(&mode, args).await,
-            AiCommand::Doctor(args) => dispatch::run_ai_doctor(&mode, args).await,
-            AiCommand::SmokeWatch(args) => dispatch::run_ai_smoke_watch(&mode, args).await,
-            AiCommand::WatchStatus(args) => dispatch::run_ai_watch_status(&mode, args).await,
-            AiCommand::Watch(args) => dispatch::run_ai_watch(&mode, args).await,
-            AiCommand::SimilarIncidents(args) => {
+            super::SessionsCommand::Index(args) => dispatch::run_ai_index(&mode, args).await,
+            super::SessionsCommand::Add(args) => dispatch::run_ai_add(&mode, args).await,
+            super::SessionsCommand::Doctor(args) => dispatch::run_ai_doctor(&mode, args).await,
+            super::SessionsCommand::SmokeWatch(args) => {
+                dispatch::run_ai_smoke_watch(&mode, args).await
+            }
+            super::SessionsCommand::WatchStatus(args) => {
+                dispatch::run_sessions_watch_status(&mode, args).await
+            }
+            super::SessionsCommand::Watch(args) => dispatch::run_sessions_watch(&mode, args).await,
+            super::SessionsCommand::SimilarIncidents(args) => {
                 dispatch::run_ai_similar_incidents(&mode, args).await
             }
-            AiCommand::AskHistory(args) => dispatch::run_ai_ask_history(&mode, args).await,
-            AiCommand::IncidentContext(args) => {
+            super::SessionsCommand::AskHistory(args) => {
+                dispatch::run_ai_ask_history(&mode, args).await
+            }
+            super::SessionsCommand::IncidentContext(args) => {
                 dispatch::run_ai_incident_context(&mode, args).await
             }
-            AiCommand::Incidents(args) => dispatch::run_ai_incidents(&mode, args).await,
-            AiCommand::Investigate(args) => dispatch::run_ai_investigate(&mode, args).await,
-            AiCommand::Assess(args) => dispatch::run_ai_assess(&mode, args).await,
+            super::SessionsCommand::Incidents(args) => {
+                dispatch::run_ai_incidents(&mode, args).await
+            }
+            super::SessionsCommand::Investigate(args) => {
+                dispatch::run_ai_investigate(&mode, args).await
+            }
+            super::SessionsCommand::Assess(args) => dispatch::run_ai_assess(&mode, args).await,
         },
         CliCommand::Shell(shell) => match shell {
             ShellCommand::Index(args) => {

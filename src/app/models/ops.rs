@@ -105,7 +105,7 @@ impl NotificationsRecentRequest {
 // `deny_unknown_fields` on all three: typo'd POST/JSON fields must surface
 // as 400, not be silently dropped (eng-review #A1 echo).
 
-/// Query parameters for `GET /api/ai/checkpoints`.
+/// Query parameters for `GET /api/sessions/checkpoints`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AiCheckpointsRequest {
@@ -118,14 +118,14 @@ pub struct AiCheckpointsRequest {
     pub limit: Option<u32>,
 }
 
-/// Query parameters for `GET /api/ai/errors`.
+/// Query parameters for `GET /api/sessions/errors`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AiParseErrorsRequest {
     pub limit: Option<u32>,
 }
 
-/// JSON body for `POST /api/ai/prune-checkpoints`.
+/// JSON body for `POST /api/sessions/prune-checkpoints`.
 ///
 /// `dry_run` is intentionally `bool` (not `Option<bool>`): the handler
 /// pre-validates the JSON body contains the key before deserialization

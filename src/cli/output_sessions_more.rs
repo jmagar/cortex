@@ -5,7 +5,7 @@ use cortex::app::{
 };
 use serde_json::{Value, json};
 
-use super::AiOutputDetail;
+use super::SessionsOutputDetail;
 use super::color::{cyan, muted, primary, severity, violet, warn};
 use super::output_common::{local_ts, print_json, truncate, truncate_bytes};
 
@@ -215,7 +215,7 @@ pub(crate) fn print_ai_incidents_response(response: &AiIncidentResponse, json: b
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct AiInvestigatePrintOptions {
-    pub detail: AiOutputDetail,
+    pub detail: SessionsOutputDetail,
     pub include_transcript: bool,
     pub max_bytes: usize,
 }
@@ -223,7 +223,7 @@ pub(crate) struct AiInvestigatePrintOptions {
 impl Default for AiInvestigatePrintOptions {
     fn default() -> Self {
         Self {
-            detail: AiOutputDetail::Compact,
+            detail: SessionsOutputDetail::Compact,
             include_transcript: false,
             max_bytes: 240,
         }
@@ -235,7 +235,7 @@ pub(crate) fn print_ai_investigate_response_with_options(
     json: bool,
     options: AiInvestigatePrintOptions,
 ) -> Result<()> {
-    if json && matches!(options.detail, AiOutputDetail::Full) {
+    if json && matches!(options.detail, SessionsOutputDetail::Full) {
         return print_json(response);
     }
     if json {
@@ -292,7 +292,7 @@ pub(crate) fn print_ai_investigate_response_with_options(
         // just JSON): surface the transcript window and non-error nearby logs so
         // full evidence is available without --json.
         let show_transcript =
-            options.include_transcript || matches!(options.detail, AiOutputDetail::Full);
+            options.include_transcript || matches!(options.detail, SessionsOutputDetail::Full);
         if show_transcript && !ev.transcript_before.is_empty() {
             println!("  {}:", muted("transcript before"));
             for l in &ev.transcript_before {
@@ -313,7 +313,7 @@ pub(crate) fn print_ai_investigate_response_with_options(
                 );
             }
         }
-        if matches!(options.detail, AiOutputDetail::Full) && !ev.nearby_logs.is_empty() {
+        if matches!(options.detail, SessionsOutputDetail::Full) && !ev.nearby_logs.is_empty() {
             println!("  {}:", muted("nearby logs"));
             for l in &ev.nearby_logs {
                 println!(
@@ -429,5 +429,5 @@ fn compact_logs(logs: &[LogEntry], max_bytes: usize) -> Vec<Value> {
 }
 
 #[cfg(test)]
-#[path = "output_ai_more_tests.rs"]
+#[path = "output_sessions_more_tests.rs"]
 mod tests;

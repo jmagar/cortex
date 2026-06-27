@@ -100,7 +100,7 @@ mcporter call --config config/mcporter.json cortex.cortex action=abuse terms=ai-
 mcporter call --config config/mcporter.json cortex.cortex action=abuse_incidents limit=3
 mcporter call --config config/mcporter.json cortex.cortex action=abuse_investigate limit=1
 mcporter call --config config/mcporter.json cortex.cortex action=correlate_state reference_time=2026-01-01T00:00:00Z window_minutes=10
-mcporter call --config config/mcporter.json cortex.cortex action=ai_correlate project=/tmp/cortex-ai-smoke limit=2 events_per_anchor=3
+mcporter call --config config/mcporter.json cortex.cortex action=ai_correlate project=/tmp/cortex-sessions-smoke limit=2 events_per_anchor=3
 mcporter call --config config/mcporter.json cortex.cortex action=apps
 mcporter call --config config/mcporter.json cortex.cortex action=source_ips
 mcporter call --config config/mcporter.json cortex.cortex action=timeline
@@ -140,10 +140,10 @@ directly through the `cortex` binary. All outputs are bounded; the investigation
 
 ```bash
 # Group abuse hits into scored incident candidates (bounded; capped result set)
-cortex ai incidents --limit 3 --json
+cortex sessions incidents --limit 3 --json
 
 # Expand the top incidents into deterministic evidence bundles + findings
-cortex ai investigate --limit 1 --json
+cortex sessions investigate --limit 1 --json
 
 # Heartbeat fleet state parity commands
 cortex host-state --host tootie --json
@@ -190,7 +190,7 @@ curl -s -X POST http://localhost:3100/mcp \
 ## Testing checklist
 
 - [ ] **All actions return expected shape** -- cortex search, cortex tail, cortex errors, cortex hosts, cortex host_state, cortex sessions, cortex correlate, cortex stats, cortex status, cortex help
-- [ ] **AI session analytics return expected shape and seeded rows** -- cortex search_sessions, cortex abuse, cortex ai_correlate, cortex usage_blocks, cortex project_context, cortex list_ai_tools, cortex list_ai_projects
+- [ ] **AI session analytics return expected shape and seeded rows** -- cortex search_sessions, cortex abuse, cortex sessions_correlate, cortex usage_blocks, cortex project_context, cortex list_ai_tools, cortex list_ai_projects
 - [ ] **Auth: valid token** -- 200 with correct Bearer token
 - [ ] **Auth: invalid token** -- 401 Unauthorized
 - [ ] **Auth: no token when required** -- 401 Unauthorized

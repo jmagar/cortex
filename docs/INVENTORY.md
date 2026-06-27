@@ -93,12 +93,12 @@ methods as the MCP actions.
 | `cortex graph around` | `graph` | One-hop graph neighborhood with typed relationships and evidence |
 | `cortex graph explain` | `graph` | Evidence-backed deterministic incident explanation over graph chains |
 | `cortex graph evidence` | `graph` | Inspect one evidence id with relationship endpoints and bounded source proof |
-| `cortex ai correlate` | `ai_correlate` | AI transcript anchors cross-referenced against nearby non-AI logs |
-| `cortex ai incidents` | `abuse_incidents` | Grouped abuse incident candidates |
-| `cortex ai investigate` | `abuse_investigate` | Abuse incident evidence bundles |
-| `cortex ai similar` | `similar_incidents` | Historical incident clusters |
-| `cortex ai ask-history` | `ask_history` | AI transcript history search |
-| `cortex ai incident-context` | `incident_context` | Full context bundle for a time window |
+| `cortex sessions correlate` | `ai_correlate` | AI transcript anchors cross-referenced against nearby non-AI logs |
+| `cortex sessions incidents` | `abuse_incidents` | Grouped abuse incident candidates |
+| `cortex sessions investigate` | `abuse_investigate` | Abuse incident evidence bundles |
+| `cortex sessions similar` | `similar_incidents` | Historical incident clusters |
+| `cortex sessions ask-history` | `ask_history` | AI transcript history search |
+| `cortex sessions incident-context` | `incident_context` | Full context bundle for a time window |
 | `cortex stats` | `stats` | Database and storage metrics |
 
 ## MCP resources

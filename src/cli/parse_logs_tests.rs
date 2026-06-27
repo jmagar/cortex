@@ -152,7 +152,7 @@ fn parse_search_tail_sessions_incident_and_correlate_cover_common_filters() {
     ]))
     .unwrap();
     match sessions {
-        crate::cli::CliCommand::Sessions(args) => {
+        crate::cli::CliCommand::Sessions(crate::cli::SessionsCommand::List(args)) => {
             assert_eq!(args.project.as_deref(), Some("/repo"));
             assert_eq!(args.tool.as_deref(), Some("Bash"));
             assert_eq!(args.limit, Some(4));
@@ -309,7 +309,7 @@ fn filter_and_sessions_normalize_relative_from() {
 
     // Equals form is normalized too.
     let sessions = parse_sessions(&strings(&["--since=1h"])).unwrap();
-    let crate::cli::CliCommand::Sessions(args) = sessions else {
+    let crate::cli::CliCommand::Sessions(crate::cli::SessionsCommand::List(args)) = sessions else {
         panic!("expected Sessions");
     };
     assert!(

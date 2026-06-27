@@ -4,7 +4,7 @@ use super::argdefaults::{effective_limit, effective_since, positional_value};
 use super::parse_common::{FlagCursor, parse_output_args, parse_u32_flag, value_after_equals};
 use super::{
     CliCommand, CorrelateArgs, FilterArgs, IncidentArgs, IngestRateArgs, PatternsArgs, SearchArgs,
-    SessionsArgs, SourceIpsArgs, TailArgs, TimeRangeArgs, TimelineArgs,
+    SessionsArgs, SessionsCommand, SourceIpsArgs, TailArgs, TimeRangeArgs, TimelineArgs,
 };
 use cortex::app::parse_time_arg;
 
@@ -311,7 +311,7 @@ pub(crate) fn parse_sessions(args: &[String]) -> Result<CliCommand> {
             _ => bail!("unexpected sessions argument: {arg}"),
         }
     }
-    Ok(CliCommand::Sessions(parsed))
+    Ok(CliCommand::Sessions(SessionsCommand::List(parsed)))
 }
 
 pub(crate) fn parse_incident(args: &[String]) -> Result<CliCommand> {

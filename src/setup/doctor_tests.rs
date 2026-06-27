@@ -163,7 +163,7 @@ async fn run_setup_doctor_collects_temp_home_sections_without_live_services() {
     write_executable(&bin_dir.join("cortex"), "#!/bin/sh\nexit 0\n");
     write_executable(
         &bin_dir.join("systemctl"),
-        "#!/bin/sh\ncase \"$*\" in\n  *is-active*cortex-ai-index.timer*) printf 'inactive\\n' ;;\n  *is-enabled*cortex-ai-index.timer*) printf 'disabled\\n' ;;\n  *is-enabled*cortex-ai-watch.service*) printf 'disabled\\n' ;;\n  *is-active*cortex-ai-watch.service*) printf 'inactive\\n' ;;\n  *) printf 'ok\\n' ;;\nesac\nexit 0\n",
+        "#!/bin/sh\ncase \"$*\" in\n  *is-active*cortex-sessions-index.timer*) printf 'inactive\\n' ;;\n  *is-enabled*cortex-sessions-index.timer*) printf 'disabled\\n' ;;\n  *is-enabled*cortex-sessions-watch.service*) printf 'disabled\\n' ;;\n  *is-active*cortex-sessions-watch.service*) printf 'inactive\\n' ;;\n  *) printf 'ok\\n' ;;\nesac\nexit 0\n",
     );
 
     let _cwd = CwdGuard::set(&repo);
@@ -193,6 +193,6 @@ async fn run_setup_doctor_collects_temp_home_sections_without_live_services() {
         report
             .phases
             .iter()
-            .any(|phase| phase.name == "ai-watch-service-content")
+            .any(|phase| phase.name == "sessions-watch-service-content")
     );
 }

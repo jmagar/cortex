@@ -18,7 +18,7 @@ use super::ServiceResult;
 use super::models::AiWatchStatusReport;
 use super::services::CortexService;
 
-const SERVICE: &str = "cortex-ai-watch.service";
+const SERVICE: &str = "cortex-sessions-watch.service";
 
 impl CortexService {
     /// Collect the ai watch-status report.

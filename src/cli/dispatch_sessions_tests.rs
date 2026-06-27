@@ -1,6 +1,6 @@
 #[test]
 fn ai_search_args_into_request_keeps_filters() {
-    let req = crate::cli::AiSearchArgs {
+    let req = crate::cli::SessionsSearchArgs {
         query: "error".to_string(),
         project: Some("/repo".to_string()),
         tool: Some("codex".to_string()),

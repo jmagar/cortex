@@ -4,25 +4,27 @@ use std::time::Instant;
 
 use super::systemd::{systemctl_user_phase, systemctl_user_required_phase};
 use super::{
-    AiIndexTimerAction, PhaseTimer, SetupPhase, SetupReport, SetupStatus, check_file_phase,
+    PhaseTimer, SessionsIndexTimerAction, SetupPhase, SetupReport, SetupStatus, check_file_phase,
     host_local_report_input, setup_report,
 };
 
-pub async fn run_ai_index_timer_setup(action: AiIndexTimerAction) -> io::Result<SetupReport> {
+pub async fn run_sessions_index_timer_setup(
+    action: SessionsIndexTimerAction,
+) -> io::Result<SetupReport> {
     let started = Instant::now();
     let home = super::cortex_home_dir()?;
     let env_path = home.join(".env");
     let compose_dir = home.join("compose");
     let data_dir = home.join("data");
     let user_home = super::user_home_dir()?;
-    let bin_path = user_home.join(".local/bin/cortex-ai-index");
+    let bin_path = user_home.join(".local/bin/cortex-sessions-index");
     let systemd_dir = user_home.join(".config/systemd/user");
-    let service_path = systemd_dir.join("cortex-ai-index.service");
-    let timer_path = systemd_dir.join("cortex-ai-index.timer");
+    let service_path = systemd_dir.join("cortex-sessions-index.service");
+    let timer_path = systemd_dir.join("cortex-sessions-index.timer");
     let mut phases = Vec::new();
 
     match action {
-        AiIndexTimerAction::Install => {
+        SessionsIndexTimerAction::Install => {
             phases.push(install_ai_index_timer_files(
                 &bin_path,
                 &systemd_dir,
@@ -33,14 +35,14 @@ pub async fn run_ai_index_timer_setup(action: AiIndexTimerAction) -> io::Result<
             phases.push(systemctl_user_required_phase(&[
                 "enable",
                 "--now",
-                "cortex-ai-index.timer",
+                "cortex-sessions-index.timer",
             ]));
         }
-        AiIndexTimerAction::Remove => {
+        SessionsIndexTimerAction::Remove => {
             phases.push(systemctl_user_phase(&[
                 "disable",
                 "--now",
-                "cortex-ai-index.timer",
+                "cortex-sessions-index.timer",
             ]));
             phases.push(remove_ai_index_timer_files(
                 &bin_path,
@@ -49,25 +51,25 @@ pub async fn run_ai_index_timer_setup(action: AiIndexTimerAction) -> io::Result<
             )?);
             phases.push(systemctl_user_phase(&["daemon-reload"]));
         }
-        AiIndexTimerAction::Check => {
+        SessionsIndexTimerAction::Check => {
             phases.push(check_file_phase(
-                "ai-index-bin",
+                "sessions-index-bin",
                 &bin_path,
-                "run cortex setup ai-index-timer install",
+                "run cortex setup sessions-index-timer install",
             ));
             phases.push(check_file_phase(
-                "ai-index-service",
+                "sessions-index-service",
                 &service_path,
-                "run cortex setup ai-index-timer install",
+                "run cortex setup sessions-index-timer install",
             ));
             phases.push(check_file_phase(
-                "ai-index-timer",
+                "sessions-index-timer",
                 &timer_path,
-                "run cortex setup ai-index-timer install",
+                "run cortex setup sessions-index-timer install",
             ));
             phases.push(systemctl_user_phase(&[
                 "is-enabled",
-                "cortex-ai-index.timer",
+                "cortex-sessions-index.timer",
             ]));
         }
     }
@@ -92,7 +94,7 @@ fn install_ai_index_timer_files(
     service_path: &Path,
     timer_path: &Path,
 ) -> io::Result<SetupPhase> {
-    let timer = PhaseTimer::start("ai-index-timer-files");
+    let timer = PhaseTimer::start("sessions-index-timer-files");
     if let Some(bin_dir) = bin_path.parent() {
         std::fs::create_dir_all(bin_dir)?;
     }
@@ -116,7 +118,7 @@ fn remove_ai_index_timer_files(
     service_path: &Path,
     timer_path: &Path,
 ) -> io::Result<SetupPhase> {
-    let timer = PhaseTimer::start("ai-index-timer-files");
+    let timer = PhaseTimer::start("sessions-index-timer-files");
     for path in [bin_path, service_path, timer_path] {
         match std::fs::remove_file(path) {
             Ok(()) => {}
@@ -133,8 +135,8 @@ set -euo pipefail
 
 STATE_DIR="${XDG_STATE_HOME:-${HOME}/.local/state}/cortex"
 mkdir -p "$STATE_DIR"
-LOCK_FILE="$STATE_DIR/ai-index.lock"
-LOG_FILE="$STATE_DIR/ai-index.log"
+LOCK_FILE="$STATE_DIR/sessions-index.lock"
+LOG_FILE="$STATE_DIR/sessions-index.log"
 
 if [[ -z "${CORTEX_DB_PATH:-}" ]]; then
   if [[ -f "${HOME}/.claude/plugins/data/syslog-jmagar-lab/cortex.db" ]]; then
@@ -151,7 +153,7 @@ export RUST_LOG="${RUST_LOG:-warn}"
   printf '== %s ==\n' "$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
   command -v cortex
   cortex --version
-  cortex ai index --json
+  cortex sessions index --json
 } >>"$LOG_FILE" 2>&1
 "#
     .to_string()
@@ -172,5 +174,5 @@ pub(crate) fn ai_index_timer_unit() -> &'static str {
 use super::write_executable_file;
 
 #[cfg(test)]
-#[path = "ai_index_tests.rs"]
+#[path = "sessions_index_tests.rs"]
 mod tests;

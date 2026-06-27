@@ -1,6 +1,6 @@
 use super::super::{
-    AiCommand, FileTailAddArgs, FileTailCommand, FileTailListArgs, HeartbeatAgentArgs,
-    HeartbeatCommand, InventoryArgs, InventoryCommand, OutputArgs,
+    FileTailAddArgs, FileTailCommand, FileTailListArgs, HeartbeatAgentArgs, HeartbeatCommand,
+    InventoryArgs, InventoryCommand, OutputArgs, SessionsCommand,
 };
 use super::*;
 
@@ -631,8 +631,8 @@ fn time_flags_normalize_relative_across_state_admin_and_ai_commands() {
     assert!(hs.since.unwrap().ends_with("+00:00"));
 
     // ai search --since
-    let CliCommand::Ai(AiCommand::Search(ai)) = parse_command(vec![
-        "ai".into(),
+    let CliCommand::Sessions(SessionsCommand::Search(ai)) = parse_command(vec![
+        "sessions".into(),
         "search".into(),
         "boom".into(),
         "--since".into(),
@@ -666,7 +666,7 @@ fn time_flags_reject_non_time_values() {
             "notatime".into(),
         ],
         vec![
-            "ai".to_string(),
+            "sessions".to_string(),
             "search".into(),
             "q".into(),
             "--since".into(),

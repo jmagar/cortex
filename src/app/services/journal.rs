@@ -1,6 +1,6 @@
 const CORTEX_OWNED_USER_SERVICES: &[&str] = &[
-    "cortex-ai-watch.service",
-    "cortex-ai-index.service",
+    "cortex-sessions-watch.service",
+    "cortex-sessions-index.service",
     "cortex.service",
 ];
 

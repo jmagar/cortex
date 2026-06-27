@@ -36,7 +36,7 @@ impl CortexService {
 
         if matching.is_empty() {
             return Err(ServiceError::InvalidInput(format!(
-                "no incident found with id '{}'; run `cortex ai incidents` to list available ids",
+                "no incident found with id '{}'; run `cortex sessions incidents` to list available ids",
                 incident_id
             )));
         }

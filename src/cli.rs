@@ -7,20 +7,21 @@ use cortex::compose::{
 mod args;
 mod args_config;
 pub(crate) use args::{
-    AgentCommandCommand, AgentCommandIngestSpoolArgs, AgentCommandWrapArgs, AiAbuseArgs, AiAddArgs,
-    AiAskHistoryArgs, AiAssessArgs, AiBlocksArgs, AiCheckpointsArgs, AiCommand, AiContextArgs,
-    AiCorrelateArgs, AiDoctorArgs, AiErrorsArgs, AiIncidentContextArgs, AiIncidentsArgs,
-    AiIndexArgs, AiInvestigateArgs, AiListArgs, AiOutputDetail, AiPruneCheckpointsArgs,
-    AiSearchArgs, AiSimilarArgs, AiWatchArgs, CliCommand, ComposeArgs, ComposeCommand,
-    ComposeLogsArgs, ComposeMutationArgs, CorrelateArgs, DbBackupArgs, DbCheckpointArgs, DbCommand,
-    DbIntegrityArgs, DbIntegrityStatusArgs, DbStatusArgs, DbVacuumArgs, EntityArgs,
-    FileTailAddArgs, FileTailCommand, FileTailIdArgs, FileTailListArgs, FilterArgs,
-    GraphAroundArgs, GraphCommand, GraphEvidenceArgs, GraphExplainArgs, GraphRebuildArgs,
-    GraphStatusArgs, HeartbeatAgentArgs, HeartbeatCommand, IncidentArgs, IngestRateArgs,
-    InventoryArgs, InventoryCommand, NotifyRecentArgs, NotifyTestArgs, OutputArgs, PatternsArgs,
-    PluginHookArgs, SearchArgs, ServiceCommand, ServiceLogsArgs, SessionsArgs, SetupArgs,
-    SetupCommand, ShellAtuinIndexArgs, ShellCommand, ShellIndexArgs, SigAckArgs, SigListArgs,
-    SigUnackArgs, SourceIpsArgs, TailArgs, TimeRangeArgs, TimelineArgs,
+    AgentCommandCommand, AgentCommandIngestSpoolArgs, AgentCommandWrapArgs, CliCommand,
+    ComposeArgs, ComposeCommand, ComposeLogsArgs, ComposeMutationArgs, CorrelateArgs, DbBackupArgs,
+    DbCheckpointArgs, DbCommand, DbIntegrityArgs, DbIntegrityStatusArgs, DbStatusArgs,
+    DbVacuumArgs, EntityArgs, FileTailAddArgs, FileTailCommand, FileTailIdArgs, FileTailListArgs,
+    FilterArgs, GraphAroundArgs, GraphCommand, GraphEvidenceArgs, GraphExplainArgs,
+    GraphRebuildArgs, GraphStatusArgs, HeartbeatAgentArgs, HeartbeatCommand, IncidentArgs,
+    IngestRateArgs, InventoryArgs, InventoryCommand, NotifyRecentArgs, NotifyTestArgs, OutputArgs,
+    PatternsArgs, PluginHookArgs, SearchArgs, ServiceCommand, ServiceLogsArgs, SessionsAbuseArgs,
+    SessionsAddArgs, SessionsArgs, SessionsAskHistoryArgs, SessionsAssessArgs, SessionsBlocksArgs,
+    SessionsCheckpointsArgs, SessionsCommand, SessionsContextArgs, SessionsCorrelateArgs,
+    SessionsDoctorArgs, SessionsErrorsArgs, SessionsIncidentContextArgs, SessionsIncidentsArgs,
+    SessionsIndexArgs, SessionsInvestigateArgs, SessionsListArgs, SessionsOutputDetail,
+    SessionsPruneCheckpointsArgs, SessionsSearchArgs, SessionsSimilarArgs, SessionsWatchArgs,
+    SetupArgs, SetupCommand, ShellAtuinIndexArgs, ShellCommand, ShellIndexArgs, SigAckArgs,
+    SigListArgs, SigUnackArgs, SourceIpsArgs, TailArgs, TimeRangeArgs, TimelineArgs,
 };
 pub(crate) use args_config::{
     ConfigCommand, ConfigGetArgs, ConfigListArgs, ConfigSetArgs, ConfigTarget, ConfigUnsetArgs,
@@ -34,7 +35,6 @@ pub(crate) use dispatch_command_log::run_agent_command_wrap;
 pub(crate) use run::ENV_USE_HTTP;
 pub(crate) use run::{CliMode, GlobalFlags, run};
 
-mod ai_watch;
 mod argdefaults;
 pub(crate) mod color;
 mod complete;
@@ -47,21 +47,23 @@ mod format;
 mod heartbeat_agent;
 pub(crate) mod help;
 mod hyperlinks;
-mod output_ai;
-mod output_ai_more;
 mod output_common;
 mod output_graph;
 mod output_logs;
 mod output_ops;
+mod output_sessions;
+mod output_sessions_more;
 mod panel;
 mod parse;
 mod parse_admin;
-mod parse_ai;
-mod parse_ai_more;
 mod parse_command_log;
 mod parse_common;
 mod parse_config;
 mod parse_logs;
+mod parse_sessions;
+mod parse_sessions_more;
+mod parse_sessions_ops;
+mod sessions_watch;
 mod setup;
 mod sparkline;
 mod suggest;
@@ -237,32 +239,32 @@ pub(crate) async fn run_service_no_db(command: CliCommand) -> Result<()> {
                 &cortex::app::SystemOsAdapter,
             )
             .await?;
-            output_ai::print_service_logs_response(&report, json)
+            output_sessions::print_service_logs_response(&report, json)
         }
     }
 }
 
 #[cfg(test)]
-use ai_watch::smoke_watch_target;
-#[cfg(test)]
 use coordination::{
-    DoctorCache, SystemctlEnv, ai_watch_coordination_phase, canonicalize_with_warning,
-    lookup_systemd_db_path, parse_systemctl_env_output,
+    DoctorCache, SystemctlEnv, canonicalize_with_warning, lookup_systemd_db_path,
+    parse_systemctl_env_output, sessions_watch_coordination_phase,
 };
 #[cfg(test)]
 use cortex::scanner::AiDoctorReport;
-#[cfg(test)]
-use output_ai::ensure_ai_doctor_success;
 #[cfg(test)]
 use output_common::truncate;
 #[cfg(test)]
 use output_ops::ensure_doctor_coordination_ok;
 #[cfg(test)]
+use output_sessions::ensure_ai_doctor_success;
+#[cfg(test)]
+use sessions_watch::smoke_watch_target;
+#[cfg(test)]
 use setup::{SetupPhase, SetupStatus};
 
 mod dispatch;
-mod dispatch_ai;
 mod dispatch_db;
+mod dispatch_sessions;
 mod dispatch_surface;
 mod dispatch_surface_analytics;
 mod dispatch_surface_gap;

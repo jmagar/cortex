@@ -72,7 +72,7 @@ const SECTIONS: &[(&str, &[&str])] = &[
             "compare",
         ],
     ),
-    ("AI Transcripts", &["ai"]),
+    ("AI Transcripts", &["sessions"]),
     ("Signals & Alerts", &["sig", "notify"]),
     (
         "Ingestion",
@@ -255,28 +255,28 @@ const CATALOG: &[CommandDoc] = &[
     },
     // ── AI Transcripts ─────────────────────────────────────────────────────
     CommandDoc {
-        name: "ai",
+        name: "sessions",
         summary: "AI transcript search, correlation, and indexing",
         usage: &[
-            "cortex ai search QUERY [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--json]",
-            "cortex ai abuse [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--before N] [--after N] [--term WORD] [--json]",
-            "cortex ai incidents [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--window-minutes N] [--term WORD] [--json]",
-            "cortex ai investigate [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--window-minutes N] [--correlation-window-minutes N] [--term WORD] [--detail compact|full] [--include-transcript] [--max-bytes N] [--json]",
-            "cortex ai assess INCIDENT_ID [--model MODEL] [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--window-minutes N] [--correlation-window-minutes N] [--term WORD] [--json]",
-            "cortex ai correlate [--project PATH] [--tool TOOL] [--session-id ID] [--ai-query FTS] [--log-query FTS] [--host HOST] [--source SOURCE] [--app APP] [--since TIME] [--until TIME] [--window-minutes N] [--severity-min LEVEL] [--limit N] [--events-per-anchor N] [--json]",
-            "cortex ai blocks [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--detail compact|full] [--json]",
-            "cortex ai context --project PATH [--tool TOOL] [--limit N] [--json]",
-            "cortex ai tools [--project PATH] [--since TIME] [--until TIME] [--json]",
-            "cortex ai projects [--tool TOOL] [--since TIME] [--until TIME] [--json]",
-            "cortex ai index [--path PATH] [--since TIME] [--force] [--json]",
-            "cortex ai add --file FILE [--force] [--json]",
-            "cortex ai watch [--path PATH] [--debounce-ms N] [--settle-ms N] [--max-retries N] [--no-initial-scan] [--json]",
-            "cortex ai checkpoints [--errors] [--missing] [--limit N] [--json]",
-            "cortex ai errors [--limit N] [--json]",
-            "cortex ai prune-checkpoints --missing [--dry-run] [--limit N] [--json]",
-            "cortex ai doctor [--strict-permissions] [--json]",
-            "cortex ai watch-status [--json]",
-            "cortex ai smoke-watch [--json]",
+            "cortex sessions search QUERY [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--json]",
+            "cortex sessions abuse [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--before N] [--after N] [--term WORD] [--json]",
+            "cortex sessions incidents [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--window-minutes N] [--term WORD] [--json]",
+            "cortex sessions investigate [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--window-minutes N] [--correlation-window-minutes N] [--term WORD] [--detail compact|full] [--include-transcript] [--max-bytes N] [--json]",
+            "cortex sessions assess INCIDENT_ID [--model MODEL] [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--window-minutes N] [--correlation-window-minutes N] [--term WORD] [--json]",
+            "cortex sessions correlate [--project PATH] [--tool TOOL] [--session-id ID] [--ai-query FTS] [--log-query FTS] [--host HOST] [--source SOURCE] [--app APP] [--since TIME] [--until TIME] [--window-minutes N] [--severity-min LEVEL] [--limit N] [--events-per-anchor N] [--json]",
+            "cortex sessions blocks [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--detail compact|full] [--json]",
+            "cortex sessions context --project PATH [--tool TOOL] [--limit N] [--json]",
+            "cortex sessions tools [--project PATH] [--since TIME] [--until TIME] [--json]",
+            "cortex sessions projects [--tool TOOL] [--since TIME] [--until TIME] [--json]",
+            "cortex sessions index [--path PATH] [--since TIME] [--force] [--json]",
+            "cortex sessions add --file FILE [--force] [--json]",
+            "cortex sessions watch [--path PATH] [--debounce-ms N] [--settle-ms N] [--max-retries N] [--no-initial-scan] [--json]",
+            "cortex sessions checkpoints [--errors] [--missing] [--limit N] [--json]",
+            "cortex sessions errors [--limit N] [--json]",
+            "cortex sessions prune-checkpoints --missing [--dry-run] [--limit N] [--json]",
+            "cortex sessions doctor [--strict-permissions] [--json]",
+            "cortex sessions watch-status [--json]",
+            "cortex sessions smoke-watch [--json]",
         ],
     },
     // ── Signals & Alerts ───────────────────────────────────────────────────
@@ -389,8 +389,8 @@ const CATALOG: &[CommandDoc] = &[
         summary: "Initialize, check, and repair configuration",
         usage: &[
             "cortex setup check|repair [--json]",
-            "cortex setup ai-index-timer install|remove|check [--json]",
-            "cortex setup ai-watch-service install|remove|check [--json]",
+            "cortex setup sessions-index-timer install|remove|check [--json]",
+            "cortex setup sessions-watch-service install|remove|check [--json]",
             "cortex setup agent-command install|remove|check [--json]",
             "cortex setup heartbeat-agent install|remove|check [--json]",
             "cortex setup debug-wrapper install|remove|check [--json]",
@@ -436,28 +436,28 @@ const NESTED_CATALOG: &[NestedCommandDoc] = &[
         path: "ai search",
         summary: "Full-text search over indexed AI transcript sessions",
         usage: &[
-            "cortex ai search QUERY [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--json]",
+            "cortex sessions search QUERY [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--json]",
         ],
     },
     NestedCommandDoc {
         path: "ai abuse",
         summary: "Find risky or failure-related transcript messages",
         usage: &[
-            "cortex ai abuse [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--before N] [--after N] [--term WORD] [--json]",
+            "cortex sessions abuse [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--before N] [--after N] [--term WORD] [--json]",
         ],
     },
     NestedCommandDoc {
         path: "ai incidents",
         summary: "Cluster AI transcript abuse matches into incidents",
         usage: &[
-            "cortex ai incidents [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--window-minutes N] [--term WORD] [--json]",
+            "cortex sessions incidents [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--window-minutes N] [--term WORD] [--json]",
         ],
     },
     NestedCommandDoc {
         path: "ai investigate",
         summary: "Expand AI incidents into evidence bundles",
         usage: &[
-            "cortex ai investigate [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--window-minutes N] [--correlation-window-minutes N] [--term WORD] [--detail compact|full] [--include-transcript] [--max-bytes N] [--json]",
+            "cortex sessions investigate [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--window-minutes N] [--correlation-window-minutes N] [--term WORD] [--detail compact|full] [--include-transcript] [--max-bytes N] [--json]",
             "Default output is compact; use --detail full for complete evidence.",
         ],
     },
@@ -465,105 +465,105 @@ const NESTED_CATALOG: &[NestedCommandDoc] = &[
         path: "ai assess",
         summary: "Assess one AI incident with optional model context",
         usage: &[
-            "cortex ai assess INCIDENT_ID [--model MODEL] [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--window-minutes N] [--correlation-window-minutes N] [--term WORD] [--json]",
+            "cortex sessions assess INCIDENT_ID [--model MODEL] [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--window-minutes N] [--correlation-window-minutes N] [--term WORD] [--json]",
         ],
     },
     NestedCommandDoc {
         path: "ai correlate",
         summary: "Correlate AI transcript anchors with non-AI logs",
         usage: &[
-            "cortex ai correlate [--project PATH] [--tool TOOL] [--session-id ID] [--ai-query FTS] [--log-query FTS] [--host HOST] [--source SOURCE] [--app APP] [--since TIME] [--until TIME] [--window-minutes N] [--severity-min LEVEL] [--limit N] [--events-per-anchor N] [--json]",
+            "cortex sessions correlate [--project PATH] [--tool TOOL] [--session-id ID] [--ai-query FTS] [--log-query FTS] [--host HOST] [--source SOURCE] [--app APP] [--since TIME] [--until TIME] [--window-minutes N] [--severity-min LEVEL] [--limit N] [--events-per-anchor N] [--json]",
         ],
     },
     NestedCommandDoc {
         path: "ai blocks",
         summary: "AI transcript activity grouped into 5-hour UTC blocks",
         usage: &[
-            "cortex ai blocks [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--detail compact|full] [--json]",
+            "cortex sessions blocks [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--detail compact|full] [--json]",
             "Default output is capped for interactive use; use --detail full for every block.",
         ],
     },
     NestedCommandDoc {
         path: "ai context",
         summary: "Recent AI transcript context for one project",
-        usage: &["cortex ai context --project PATH [--tool TOOL] [--limit N] [--json]"],
+        usage: &["cortex sessions context --project PATH [--tool TOOL] [--limit N] [--json]"],
     },
     NestedCommandDoc {
         path: "ai tools",
         summary: "List AI tools present in transcript metadata",
-        usage: &["cortex ai tools [--project PATH] [--since TIME] [--until TIME] [--json]"],
+        usage: &["cortex sessions tools [--project PATH] [--since TIME] [--until TIME] [--json]"],
     },
     NestedCommandDoc {
         path: "ai projects",
         summary: "List AI projects present in transcript metadata",
-        usage: &["cortex ai projects [--tool TOOL] [--since TIME] [--until TIME] [--json]"],
+        usage: &["cortex sessions projects [--tool TOOL] [--since TIME] [--until TIME] [--json]"],
     },
     NestedCommandDoc {
         path: "ai index",
         summary: "Index local AI transcript roots",
-        usage: &["cortex ai index [--path PATH] [--since TIME] [--force] [--json]"],
+        usage: &["cortex sessions index [--path PATH] [--since TIME] [--force] [--json]"],
     },
     NestedCommandDoc {
         path: "ai add",
         summary: "Index one AI transcript file",
-        usage: &["cortex ai add --file FILE [--force] [--json]"],
+        usage: &["cortex sessions add --file FILE [--force] [--json]"],
     },
     NestedCommandDoc {
         path: "ai watch",
         summary: "Run the local transcript watch daemon",
         usage: &[
-            "cortex ai watch [--path PATH] [--debounce-ms N] [--settle-ms N] [--max-retries N] [--no-initial-scan] [--json]",
+            "cortex sessions watch [--path PATH] [--debounce-ms N] [--settle-ms N] [--max-retries N] [--no-initial-scan] [--json]",
         ],
     },
     NestedCommandDoc {
         path: "ai checkpoints",
         summary: "List AI transcript indexing checkpoints",
-        usage: &["cortex ai checkpoints [--errors] [--missing] [--limit N] [--json]"],
+        usage: &["cortex sessions checkpoints [--errors] [--missing] [--limit N] [--json]"],
     },
     NestedCommandDoc {
         path: "ai errors",
         summary: "List AI transcript parse errors",
-        usage: &["cortex ai errors [--limit N] [--json]"],
+        usage: &["cortex sessions errors [--limit N] [--json]"],
     },
     NestedCommandDoc {
         path: "ai prune-checkpoints",
         summary: "Prune stale AI indexing checkpoints",
-        usage: &["cortex ai prune-checkpoints --missing [--dry-run] [--limit N] [--json]"],
+        usage: &["cortex sessions prune-checkpoints --missing [--dry-run] [--limit N] [--json]"],
     },
     NestedCommandDoc {
         path: "ai doctor",
         summary: "Check local AI transcript indexing prerequisites",
-        usage: &["cortex ai doctor [--strict-permissions] [--json]"],
+        usage: &["cortex sessions doctor [--strict-permissions] [--json]"],
     },
     NestedCommandDoc {
         path: "ai watch-status",
         summary: "Inspect the local AI transcript watch service",
-        usage: &["cortex ai watch-status [--json]"],
+        usage: &["cortex sessions watch-status [--json]"],
     },
     NestedCommandDoc {
         path: "ai smoke-watch",
         summary: "Run a local AI transcript watch smoke test",
-        usage: &["cortex ai smoke-watch [--json]"],
+        usage: &["cortex sessions smoke-watch [--json]"],
     },
     NestedCommandDoc {
         path: "ai similar",
         summary: "Find incidents similar to a free-text query",
         usage: &[
-            "cortex ai similar QUERY [--host HOST] [--app APP] [--severity-min LEVEL] [--since TIME] [--until TIME] [--window-minutes N] [--limit N] [--json]",
+            "cortex sessions similar QUERY [--host HOST] [--app APP] [--severity-min LEVEL] [--since TIME] [--until TIME] [--window-minutes N] [--limit N] [--json]",
         ],
     },
     NestedCommandDoc {
         path: "ai ask-history",
         summary: "Search historical AI sessions and nearby system logs",
         usage: &[
-            "cortex ai ask-history QUERY [--host HOST] [--app APP] [--since TIME] [--until TIME] [--limit N] [--json]",
+            "cortex sessions ask-history QUERY [--host HOST] [--app APP] [--since TIME] [--until TIME] [--limit N] [--json]",
         ],
     },
     NestedCommandDoc {
         path: "ai incident-context",
         summary: "Build incident context from an explicit time window",
         usage: &[
-            "cortex ai incident-context --since TIME --until TIME [--host HOST] [--app APP] [--query FTS] [--severity-min LEVEL] [--limit N] [--json]",
+            "cortex sessions incident-context --since TIME --until TIME [--host HOST] [--app APP] [--query FTS] [--severity-min LEVEL] [--limit N] [--json]",
         ],
     },
     NestedCommandDoc {
@@ -787,7 +787,7 @@ const QUICK_START: &[&str] = &[
     "cortex search \"oom killer\" --host web-01 --since 1h",
     "cortex search --grep \"smoke-test\"   # literal text, no FTS5 syntax",
     "cortex tail -n 50 --severity err",
-    "cortex ai investigate --window-minutes 30",
+    "cortex sessions investigate --window-minutes 30",
 ];
 
 // ── Color helpers (pure: driven by the `color` flag) ────────────────────────
@@ -977,7 +977,7 @@ pub(crate) enum HelpRequest {
 /// *flags* count anywhere (nobody queries those literals), but the bare word
 /// `help` counts only in command position (`args[0]`). This keeps free-text
 /// queries that contain "help" working — `cortex search help`,
-/// `cortex ai search help`, and `cortex ai abuse --term help` all run the
+/// `cortex sessions search help`, and `cortex sessions abuse --term help` all run the
 /// query, not the help banner.
 pub(crate) fn classify_help(args: &[String]) -> HelpRequest {
     let is_help_flag = |s: &str| matches!(s, "-h" | "--help");

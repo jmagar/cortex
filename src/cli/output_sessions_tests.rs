@@ -88,11 +88,11 @@ fn human_status_and_incident_outputs_accept_optional_branches() {
     print_ai_doctor_response(&report, false).unwrap();
 
     let watch = AiWatchStatusReport {
-        service: "cortex-ai-watch.service".to_string(),
+        service: "cortex-sessions-watch.service".to_string(),
         active: Some("active".to_string()),
         enabled: Some("enabled".to_string()),
         main_pid: Some(1234),
-        exec_start: Some("/usr/bin/cortex ai watch".to_string()),
+        exec_start: Some("/usr/bin/cortex sessions watch".to_string()),
         exec_main_start_timestamp: Some("Sat 2026-06-13".to_string()),
         process_start_time: Some("2026-06-13T00:00:00Z".to_string()),
         db_path: "/tmp/cortex.db".to_string(),
@@ -115,7 +115,7 @@ fn human_status_and_incident_outputs_accept_optional_branches() {
         latest_journal: vec!["one log line".to_string()],
         journal_error: None,
     };
-    print_ai_watch_status_response(&watch, false).unwrap();
+    print_sessions_watch_status_response(&watch, false).unwrap();
 
     let watch_unhealthy = AiWatchStatusReport {
         health: None,
@@ -124,7 +124,7 @@ fn human_status_and_incident_outputs_accept_optional_branches() {
         journal_error: Some("journalctl failed".to_string()),
         ..watch
     };
-    print_ai_watch_status_response(&watch_unhealthy, false).unwrap();
+    print_sessions_watch_status_response(&watch_unhealthy, false).unwrap();
 
     let service_logs = cortex::app::ServiceLogsResponse {
         service: "cortex.service".to_string(),

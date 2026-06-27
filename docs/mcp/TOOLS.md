@@ -199,7 +199,7 @@ Response includes `evidence` (array of bundles), `total_incidents`, `truncated`.
 
 Optional arguments: `project`, `tool`, `from`, `to`, `limit` (default 3, max 10), `window_minutes`, `correlation_window_minutes` (default 5, max 120), `terms`.
 
-## cortex ai_correlate
+## cortex sessions_correlate
 
 Use AI transcript rows as timeline anchors and pull nearby non-AI syslog,
 Docker, OTLP, and host events from the same database. Related logs explicitly
@@ -307,7 +307,7 @@ JSON-RPC level errors use standard codes:
 
 ## Transcript Visibility Policy
 
-AI transcript rows imported through `cortex ai index` or `cortex ai add` are stored in the main `logs` table. They are therefore visible through raw log actions such as `search`, `tail`, `context`, and `get`. Scanner imports scrub known credential/token patterns before storage and FTS indexing, but local `ai_transcript_path` values remain visible. Treat MCP log-read access as access to scrubbed transcript content plus local path metadata.
+AI transcript rows imported through `cortex sessions index` or `cortex sessions add` are stored in the main `logs` table. They are therefore visible through raw log actions such as `search`, `tail`, `context`, and `get`. Scanner imports scrub known credential/token patterns before storage and FTS indexing, but local `ai_transcript_path` values remain visible. Treat MCP log-read access as access to scrubbed transcript content plus local path metadata.
 
 OTLP AI metadata (`ai.tool`/`ai_tool`, `session.id`/`session_id`, `project.path`, `codebase.root_path`, and `session.cwd`) is producer-supplied, not network-verified identity. Oversized AI tool, project, and session values are rejected before storage; accepted OTLP metadata should be used for grouping/search convenience, not as an authorization or provenance boundary.
 

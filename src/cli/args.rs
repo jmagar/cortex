@@ -1,14 +1,16 @@
 use super::args_config::ConfigCommand;
 use cortex::compose::{ComposeTarget, MutationOptions};
 
-mod ai;
+mod sessions;
 mod surface;
 
-pub(crate) use ai::{
-    AiAbuseArgs, AiAddArgs, AiAskHistoryArgs, AiAssessArgs, AiBlocksArgs, AiCheckpointsArgs,
-    AiCommand, AiContextArgs, AiCorrelateArgs, AiDoctorArgs, AiErrorsArgs, AiIncidentContextArgs,
-    AiIncidentsArgs, AiIndexArgs, AiInvestigateArgs, AiListArgs, AiOutputDetail,
-    AiPruneCheckpointsArgs, AiSearchArgs, AiSimilarArgs, AiWatchArgs,
+pub(crate) use sessions::{
+    SessionsAbuseArgs, SessionsAddArgs, SessionsAskHistoryArgs, SessionsAssessArgs,
+    SessionsBlocksArgs, SessionsCheckpointsArgs, SessionsCommand, SessionsContextArgs,
+    SessionsCorrelateArgs, SessionsDoctorArgs, SessionsErrorsArgs, SessionsIncidentContextArgs,
+    SessionsIncidentsArgs, SessionsIndexArgs, SessionsInvestigateArgs, SessionsListArgs,
+    SessionsOutputDetail, SessionsPruneCheckpointsArgs, SessionsSearchArgs, SessionsSimilarArgs,
+    SessionsWatchArgs,
 };
 pub(crate) use surface::{
     AnomaliesArgs, AppsArgs, ClockSkewArgs, CompareArgs, CorrelateStateArgs, FleetStateArgs,
@@ -22,9 +24,8 @@ pub(crate) enum CliCommand {
     Tail(TailArgs),
     Errors(TimeRangeArgs),
     Hosts(OutputArgs),
-    Sessions(SessionsArgs),
+    Sessions(SessionsCommand),
     Incident(IncidentArgs),
-    Ai(AiCommand),
     Correlate(CorrelateArgs),
     Stats(OutputArgs),
     Compose(ComposeCommand),

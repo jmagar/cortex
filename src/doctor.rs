@@ -581,7 +581,7 @@ async fn collect_ai_section() -> DoctorSection {
                                     SetupStatus::Error,
                                     "ai_watch_schema_drift",
                                     format!(
-                                        "watcher started {start}; {} migration(s) applied later; fix: systemctl --user restart cortex-ai-watch.service",
+                                        "watcher started {start}; {} migration(s) applied later; fix: systemctl --user restart cortex-sessions-watch.service",
                                         health.schema_drift_migrations.len()
                                     ),
                                 ));
@@ -623,7 +623,7 @@ async fn collect_ai_section() -> DoctorSection {
 }
 
 pub fn ai_watcher_process_start_time() -> Option<String> {
-    const SERVICE: &str = "cortex-ai-watch.service";
+    const SERVICE: &str = "cortex-sessions-watch.service";
     // systemd 247+ renders ExecMainStartTimestamp as `@<unix_seconds>` when
     // passed `--timestamp=unix` — locale/TZ-independent. Older systemd
     // ignores the flag and returns the human form, parsed by the fallback.
@@ -641,14 +641,14 @@ pub fn ai_watcher_process_start_time() -> Option<String> {
     parse_systemctl_timestamp_utc(String::from_utf8_lossy(&output.stdout).trim())
 }
 
-/// Best-effort check: is `cortex-ai-watch.service` loaded and active right
+/// Best-effort check: is `cortex-sessions-watch.service` loaded and active right
 /// now? Used to distinguish "watcher down, start time legitimately n/a" from
 /// "watcher running but start-time parsing failed" — the latter is a
 /// diagnostic the operator needs to see.
 fn ai_watcher_is_active() -> bool {
     let Ok(output) = std::process::Command::new("systemctl")
         .arg("--user")
-        .args(["is-active", "cortex-ai-watch.service"])
+        .args(["is-active", "cortex-sessions-watch.service"])
         .output()
     else {
         return false;

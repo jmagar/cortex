@@ -8,13 +8,15 @@ use super::systemd::{
     systemctl_user_phase, systemctl_user_required_named_phase, systemctl_user_state,
 };
 use super::{
-    AI_WATCH_SERVICE_ACTIVE_PHASE, AI_WATCH_SERVICE_ENABLED_PHASE, AiWatchServiceAction,
-    PhaseTimer, SetupIssueKind, SetupPhase, SetupReport, SetupStatus, check_file_phase,
-    host_local_report_input, setup_path_value, setup_report, should_skip_ai_watch_systemd_enable,
-    skipped_phase,
+    AI_WATCH_SERVICE_ACTIVE_PHASE, AI_WATCH_SERVICE_ENABLED_PHASE, PhaseTimer,
+    SessionsWatchServiceAction, SetupIssueKind, SetupPhase, SetupReport, SetupStatus,
+    check_file_phase, host_local_report_input, setup_path_value, setup_report,
+    should_skip_ai_watch_systemd_enable, skipped_phase,
 };
 
-pub async fn run_ai_watch_service_setup(action: AiWatchServiceAction) -> io::Result<SetupReport> {
+pub async fn run_sessions_watch_service_setup(
+    action: SessionsWatchServiceAction,
+) -> io::Result<SetupReport> {
     let started = Instant::now();
     let home = super::cortex_home_dir()?;
     let env_path = home.join(".env");
@@ -22,14 +24,14 @@ pub async fn run_ai_watch_service_setup(action: AiWatchServiceAction) -> io::Res
     let data_dir = home.join("data");
     let user_home = super::user_home_dir()?;
     let config_dir = user_home.join(".config/cortex");
-    let watch_env_path = config_dir.join("ai-watch.env");
+    let watch_env_path = config_dir.join("sessions-watch.env");
     let state_dir = user_home.join(".local/state/cortex");
     let systemd_dir = user_home.join(".config/systemd/user");
-    let service_path = systemd_dir.join("cortex-ai-watch.service");
+    let service_path = systemd_dir.join("cortex-sessions-watch.service");
     let mut phases = Vec::new();
 
     match action {
-        AiWatchServiceAction::Install => {
+        SessionsWatchServiceAction::Install => {
             let cortex_bin = super::resolve_cortex_binary()?;
             let db_path = super::resolve_ai_watch_db_path(&home, &user_home)?;
             phases.push(install_ai_watch_service_files(
@@ -68,32 +70,32 @@ pub async fn run_ai_watch_service_setup(action: AiWatchServiceAction) -> io::Res
             phases.push(systemctl_user_phase(&[
                 "disable",
                 "--now",
-                "cortex-ai-index.timer",
+                "cortex-sessions-index.timer",
             ]));
             phases.push(ai_index_timer_disabled_phase());
             phases.push(systemctl_user_phase(&[
                 "reset-failed",
-                "cortex-ai-watch.service",
+                "cortex-sessions-watch.service",
             ]));
             phases.push(super::systemd::systemctl_user_required_phase(&[
                 "enable",
                 "--now",
-                "cortex-ai-watch.service",
+                "cortex-sessions-watch.service",
             ]));
             phases.push(systemctl_user_required_named_phase(
                 AI_WATCH_SERVICE_ENABLED_PHASE,
-                &["is-enabled", "cortex-ai-watch.service"],
+                &["is-enabled", "cortex-sessions-watch.service"],
             ));
             phases.push(systemctl_user_required_named_phase(
                 AI_WATCH_SERVICE_ACTIVE_PHASE,
-                &["is-active", "cortex-ai-watch.service"],
+                &["is-active", "cortex-sessions-watch.service"],
             ));
         }
-        AiWatchServiceAction::Remove => {
+        SessionsWatchServiceAction::Remove => {
             phases.push(systemctl_user_phase(&[
                 "disable",
                 "--now",
-                "cortex-ai-watch.service",
+                "cortex-sessions-watch.service",
             ]));
             phases.push(remove_ai_watch_service_files(
                 &watch_env_path,
@@ -101,18 +103,18 @@ pub async fn run_ai_watch_service_setup(action: AiWatchServiceAction) -> io::Res
             )?);
             phases.push(systemctl_user_phase(&["daemon-reload"]));
         }
-        AiWatchServiceAction::Check => {
+        SessionsWatchServiceAction::Check => {
             let cortex_bin = super::resolve_cortex_binary()?;
             let db_path = super::resolve_ai_watch_db_path(&home, &user_home)?;
             phases.push(check_file_phase(
-                "ai-watch-env",
+                "sessions-watch-env",
                 &watch_env_path,
-                "run cortex setup ai-watch-service install",
+                "run cortex setup sessions-watch-service install",
             ));
             phases.push(check_file_phase(
-                "ai-watch-service",
+                "sessions-watch-service",
                 &service_path,
-                "run cortex setup ai-watch-service install",
+                "run cortex setup sessions-watch-service install",
             ));
             phases.push(check_ai_watch_service_content_phase(
                 &watch_env_path,
@@ -126,11 +128,11 @@ pub async fn run_ai_watch_service_setup(action: AiWatchServiceAction) -> io::Res
             phases.push(ai_index_timer_disabled_phase());
             phases.push(systemctl_user_required_named_phase(
                 AI_WATCH_SERVICE_ENABLED_PHASE,
-                &["is-enabled", "cortex-ai-watch.service"],
+                &["is-enabled", "cortex-sessions-watch.service"],
             ));
             phases.push(systemctl_user_required_named_phase(
                 AI_WATCH_SERVICE_ACTIVE_PHASE,
-                &["is-active", "cortex-ai-watch.service"],
+                &["is-active", "cortex-sessions-watch.service"],
             ));
         }
     }
@@ -150,21 +152,21 @@ pub async fn run_ai_watch_service_setup(action: AiWatchServiceAction) -> io::Res
 }
 
 pub(super) fn ai_index_timer_disabled_phase() -> SetupPhase {
-    let timer = PhaseTimer::start("ai-index-timer-disabled");
-    let active = systemctl_user_state("is-active", "cortex-ai-index.timer");
-    let enabled = systemctl_user_state("is-enabled", "cortex-ai-index.timer");
+    let timer = PhaseTimer::start("sessions-index-timer-disabled");
+    let active = systemctl_user_state("is-active", "cortex-sessions-index.timer");
+    let enabled = systemctl_user_state("is-enabled", "cortex-sessions-index.timer");
     if active.as_deref() == Some("active") || enabled.as_deref() == Some("enabled") {
         return timer.finish(
             SetupStatus::Error,
             format!(
-                "cortex-ai-index.timer still active/enabled (active={active:?}, enabled={enabled:?})"
+                "cortex-sessions-index.timer still active/enabled (active={active:?}, enabled={enabled:?})"
             ),
         );
     }
     timer.finish(
         SetupStatus::Ok,
         format!(
-            "cortex-ai-index.timer inactive or absent (active={active:?}, enabled={enabled:?})"
+            "cortex-sessions-index.timer inactive or absent (active={active:?}, enabled={enabled:?})"
         ),
     )
 }
@@ -178,7 +180,7 @@ fn install_ai_watch_service_files(
     db_path: &Path,
     user_home: &Path,
 ) -> io::Result<SetupPhase> {
-    let timer = PhaseTimer::start("ai-watch-service-files");
+    let timer = PhaseTimer::start("sessions-watch-service-files");
     if let Some(env_dir) = env_path.parent() {
         ensure_private_dir(env_dir)?;
     }
@@ -196,7 +198,7 @@ fn install_ai_watch_service_files(
 }
 
 fn remove_ai_watch_service_files(env_path: &Path, service_path: &Path) -> io::Result<SetupPhase> {
-    let timer = PhaseTimer::start("ai-watch-service-files");
+    let timer = PhaseTimer::start("sessions-watch-service-files");
     for path in [env_path, service_path] {
         match std::fs::remove_file(path) {
             Ok(()) => {}
@@ -215,7 +217,7 @@ pub(crate) fn check_ai_watch_service_content_phase(
     db_path: &Path,
     user_home: &Path,
 ) -> SetupPhase {
-    let timer = PhaseTimer::start("ai-watch-service-content");
+    let timer = PhaseTimer::start("sessions-watch-service-content");
     let expected_env = ai_watch_env_file(db_path);
     let expected_unit = ai_watch_service_unit(cortex_bin, env_path, db_path, state_dir, user_home);
     let current_env = match std::fs::read_to_string(env_path) {
@@ -280,7 +282,7 @@ pub(crate) fn ai_watch_service_unit(
     let db_dir = setup_path_value(db_dir).expect("validated AI watch DB directory");
     let state_dir = setup_path_value(state_dir).expect("validated AI watch state directory");
     format!(
-        "[Unit]\nDescription=cortex real-time local AI transcript watch\nDocumentation=https://github.com/jmagar/cortex\nAfter=default.target\nStartLimitIntervalSec=300\nStartLimitBurst=5\n\n[Service]\nType=simple\nEnvironmentFile={env_path}\nEnvironment=PATH={user_local_bin}:{user_cargo_bin}:/usr/local/bin:/usr/bin:/bin\nEnvironment=CARGO_TARGET_DIR={cargo_target_dir}\nWorkingDirectory=/\nExecStart={cortex_bin} ai watch --no-initial-scan --json\nRestart=on-failure\nRestartSec=5\nUMask=0077\nNoNewPrivileges=true\nPrivateTmp=true\nProtectSystem=strict\nProtectHome=read-only\nBindReadOnlyPaths=-{claude_root} -{codex_root} -{gemini_root}\nBindPaths={db_dir} {state_dir}\nReadWritePaths={db_dir} {state_dir}\n\n[Install]\nWantedBy=default.target\n"
+        "[Unit]\nDescription=cortex real-time local AI transcript watch\nDocumentation=https://github.com/jmagar/cortex\nAfter=default.target\nStartLimitIntervalSec=300\nStartLimitBurst=5\n\n[Service]\nType=simple\nEnvironmentFile={env_path}\nEnvironment=PATH={user_local_bin}:{user_cargo_bin}:/usr/local/bin:/usr/bin:/bin\nEnvironment=CARGO_TARGET_DIR={cargo_target_dir}\nWorkingDirectory=/\nExecStart={cortex_bin} sessions watch --no-initial-scan --json\nRestart=on-failure\nRestartSec=5\nUMask=0077\nNoNewPrivileges=true\nPrivateTmp=true\nProtectSystem=strict\nProtectHome=read-only\nBindReadOnlyPaths=-{claude_root} -{codex_root} -{gemini_root}\nBindPaths={db_dir} {state_dir}\nReadWritePaths={db_dir} {state_dir}\n\n[Install]\nWantedBy=default.target\n"
     )
 }
 
@@ -344,7 +346,7 @@ fn transcript_root_permission_error(root: &Path) -> Option<String> {
 }
 
 pub(crate) fn run_ai_watch_initial_index_phase(cortex_bin: &Path, env_path: &Path) -> SetupPhase {
-    let timer = PhaseTimer::start("ai-watch-initial-index");
+    let timer = PhaseTimer::start("sessions-watch-initial-index");
     let env = match std::fs::read_to_string(env_path) {
         Ok(raw) => parse_env(&raw),
         Err(error) => {
@@ -355,7 +357,7 @@ pub(crate) fn run_ai_watch_initial_index_phase(cortex_bin: &Path, env_path: &Pat
         }
     };
     let mut command = Command::new(cortex_bin);
-    command.args(["ai", "index", "--json"]);
+    command.args(["sessions", "index", "--json"]);
     for (key, value) in env {
         command.env(key, value);
     }
@@ -420,7 +422,7 @@ pub(crate) fn summarize_ai_index_output(stdout: &str) -> String {
     let (status, _) = ai_index_output_status(stdout);
     if matches!(status, SetupStatus::Warn) {
         format!(
-            "{summary}; inspect with `cortex ai errors --limit 20`, `cortex ai checkpoints --errors`, then rerun `cortex ai index --json` after fixes"
+            "{summary}; inspect with `cortex sessions errors --limit 20`, `cortex sessions checkpoints --errors`, then rerun `cortex sessions index --json` after fixes"
         )
     } else {
         summary
@@ -463,5 +465,5 @@ pub(crate) fn ai_index_output_status(stdout: &str) -> (SetupStatus, Option<Setup
 use super::write_private_file;
 
 #[cfg(test)]
-#[path = "ai_watch_tests.rs"]
+#[path = "sessions_watch_tests.rs"]
 mod tests;

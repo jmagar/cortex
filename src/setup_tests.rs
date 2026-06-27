@@ -412,18 +412,20 @@ fn ai_index_timer_script_uses_host_cortex_and_disables_docker_ingest() {
     let script = ai_index_script();
     assert!(script.contains("command -v cortex"));
     assert!(script.contains("cortex --version"));
-    assert!(script.contains("cortex ai index --json"));
+    assert!(script.contains("cortex sessions index --json"));
     assert!(script.contains("CORTEX_DOCKER_INGEST_ENABLED"));
     assert!(script.contains(".claude/plugins/data/syslog-jmagar-lab/cortex.db"));
 }
 
 #[test]
 fn ai_index_timer_units_are_host_user_units() {
-    let unit = ai_index_service_unit(std::path::Path::new("/home/me/.local/bin/cortex-ai-index"));
+    let unit = ai_index_service_unit(std::path::Path::new(
+        "/home/me/.local/bin/cortex-sessions-index",
+    ));
     let timer = ai_index_timer_unit();
 
     assert!(unit.contains("Description=cortex local AI transcript index"));
-    assert!(unit.contains("ExecStart=/home/me/.local/bin/cortex-ai-index"));
+    assert!(unit.contains("ExecStart=/home/me/.local/bin/cortex-sessions-index"));
     assert!(timer.contains("OnUnitActiveSec=30min"));
     assert!(timer.contains("WantedBy=timers.target"));
 }
@@ -511,7 +513,9 @@ fn ai_watch_service_unit_is_hardened_and_uses_absolute_exec() {
     );
     assert!(unit.contains("WorkingDirectory=/"));
     assert!(
-        unit.contains("ExecStart=/home/me/.local/bin/cortex ai watch --no-initial-scan --json")
+        unit.contains(
+            "ExecStart=/home/me/.local/bin/cortex sessions watch --no-initial-scan --json"
+        )
     );
     assert!(unit.contains("Restart=on-failure"));
     assert!(unit.contains("StartLimitBurst=5"));
@@ -625,7 +629,7 @@ fn private_and_executable_writers_reject_symlinks() {
 fn ai_watch_service_content_phase_detects_stale_unit() {
     let dir = tempfile::tempdir().unwrap();
     let env_path = dir.path().join("ai-watch.env");
-    let service_path = dir.path().join("cortex-ai-watch.service");
+    let service_path = dir.path().join("cortex-sessions-watch.service");
     let state_dir = dir.path().join("state");
     let db_path = dir.path().join("data/cortex.db");
     let user_home = dir.path().join("home");
@@ -656,7 +660,7 @@ fn ai_watch_service_content_phase_detects_stale_unit() {
 fn ai_watch_service_content_phase_accepts_generated_files() {
     let dir = tempfile::tempdir().unwrap();
     let env_path = dir.path().join("ai-watch.env");
-    let service_path = dir.path().join("cortex-ai-watch.service");
+    let service_path = dir.path().join("cortex-sessions-watch.service");
     let state_dir = dir.path().join("state");
     let db_path = dir.path().join("data/cortex.db");
     let user_home = dir.path().join("home");
@@ -784,7 +788,7 @@ fn summarize_ai_index_output_reports_key_counts() {
 
     assert_eq!(
         summary,
-        "indexed files=3 ingested=2 duplicates=1 parse_errors=4 storage_blocked=0 dropped_metadata_fields=0 file_errors=1; inspect with `cortex ai errors --limit 20`, `cortex ai checkpoints --errors`, then rerun `cortex ai index --json` after fixes"
+        "indexed files=3 ingested=2 duplicates=1 parse_errors=4 storage_blocked=0 dropped_metadata_fields=0 file_errors=1; inspect with `cortex sessions errors --limit 20`, `cortex sessions checkpoints --errors`, then rerun `cortex sessions index --json` after fixes"
     );
 }
 
@@ -831,7 +835,7 @@ fn ai_index_output_status_classifies_blocking_and_recoverable_failures() {
 #[test]
 fn ai_watch_systemd_enable_gate_allows_data_quality_warnings() {
     let phases = vec![
-        PhaseTimer::start("ai-watch-service-files").finish(SetupStatus::Ok, "ok"),
+        PhaseTimer::start("sessions-watch-service-files").finish(SetupStatus::Ok, "ok"),
         PhaseTimer::start("ai-watch-initial-index").finish_with_issue(
             SetupStatus::Warn,
             Some(SetupIssueKind::DataQualityWarning),
@@ -862,7 +866,7 @@ fn setup_report_exposes_ai_watch_summary_fields() {
     ];
     let report = setup_report(
         SetupReportInput {
-            mode: "ai-watch-service-check",
+            mode: "sessions-watch-service-check",
             elapsed_ms: 0,
             home: PathBuf::from("/tmp/home"),
             env_path: PathBuf::from("/tmp/home/.env"),

@@ -318,11 +318,11 @@ fn run_deploy_agent(
 async fn run_setup(command: SetupCommand) -> Result<()> {
     let report = match command.kind {
         SetupCommandKind::Main(mode) => cortex::setup::run_setup(mode).await?,
-        SetupCommandKind::AiIndexTimer(action) => {
-            cortex::setup::run_ai_index_timer_setup(action).await?
+        SetupCommandKind::SessionsIndexTimer(action) => {
+            cortex::setup::run_sessions_index_timer_setup(action).await?
         }
-        SetupCommandKind::AiWatchService(action) => {
-            cortex::setup::run_ai_watch_service_setup(action).await?
+        SetupCommandKind::SessionsWatchService(action) => {
+            cortex::setup::run_sessions_watch_service_setup(action).await?
         }
         SetupCommandKind::AgentCommand(action) => {
             cortex::setup::run_agent_command_setup(action).await?
@@ -549,8 +549,8 @@ enum DeployCommandKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum SetupCommandKind {
     Main(cortex::setup::SetupMode),
-    AiIndexTimer(cortex::setup::AiIndexTimerAction),
-    AiWatchService(cortex::setup::AiWatchServiceAction),
+    SessionsIndexTimer(cortex::setup::SessionsIndexTimerAction),
+    SessionsWatchService(cortex::setup::SessionsWatchServiceAction),
     AgentCommand(cortex::setup::AgentCommandAction),
     HeartbeatAgent(cortex::setup::HeartbeatAgentAction),
     DebugWrapper(cortex::setup::DebugWrapperAction),
@@ -736,30 +736,30 @@ fn parse_setup_command(args: &[String]) -> Result<SetupCommand> {
     }
     if matches!(
         iter.clone().next().map(String::as_str),
-        Some("ai-index-timer")
+        Some("sessions-index-timer")
     ) {
         let _ = iter.next();
-        let (action, json) = parse_setup_subcommand_args("ai-index-timer", iter)?;
+        let (action, json) = parse_setup_subcommand_args("sessions-index-timer", iter)?;
         return Ok(SetupCommand {
-            kind: SetupCommandKind::AiIndexTimer(match action {
-                "install" => cortex::setup::AiIndexTimerAction::Install,
-                "remove" => cortex::setup::AiIndexTimerAction::Remove,
-                _ => cortex::setup::AiIndexTimerAction::Check,
+            kind: SetupCommandKind::SessionsIndexTimer(match action {
+                "install" => cortex::setup::SessionsIndexTimerAction::Install,
+                "remove" => cortex::setup::SessionsIndexTimerAction::Remove,
+                _ => cortex::setup::SessionsIndexTimerAction::Check,
             }),
             json,
         });
     }
     if matches!(
         iter.clone().next().map(String::as_str),
-        Some("ai-watch-service")
+        Some("sessions-watch-service")
     ) {
         let _ = iter.next();
-        let (action, json) = parse_setup_subcommand_args("ai-watch-service", iter)?;
+        let (action, json) = parse_setup_subcommand_args("sessions-watch-service", iter)?;
         return Ok(SetupCommand {
-            kind: SetupCommandKind::AiWatchService(match action {
-                "install" => cortex::setup::AiWatchServiceAction::Install,
-                "remove" => cortex::setup::AiWatchServiceAction::Remove,
-                _ => cortex::setup::AiWatchServiceAction::Check,
+            kind: SetupCommandKind::SessionsWatchService(match action {
+                "install" => cortex::setup::SessionsWatchServiceAction::Install,
+                "remove" => cortex::setup::SessionsWatchServiceAction::Remove,
+                _ => cortex::setup::SessionsWatchServiceAction::Check,
             }),
             json,
         });

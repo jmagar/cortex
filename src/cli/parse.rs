@@ -1,12 +1,12 @@
 use anyhow::{Result, anyhow, bail};
 
 use super::parse_admin::{parse_compose, parse_db, parse_service, parse_setup, parse_stats};
-use super::parse_ai::parse_ai;
 use super::parse_command_log::{parse_agent_command, parse_shell};
 use super::parse_logs::{
     parse_correlate, parse_errors, parse_filter, parse_hosts, parse_incident, parse_ingest_rate,
-    parse_patterns, parse_search, parse_sessions, parse_source_ips, parse_tail, parse_timeline,
+    parse_patterns, parse_search, parse_source_ips, parse_tail, parse_timeline,
 };
+use super::parse_sessions::parse_sessions_command;
 use super::{CliCommand, commands, parse_config, suggest};
 
 pub(crate) const TOP_LEVEL_COMMANDS: &[&str] = &[
@@ -17,7 +17,6 @@ pub(crate) const TOP_LEVEL_COMMANDS: &[&str] = &[
     "hosts",
     "sessions",
     "incident",
-    "ai",
     "shell",
     "agent-command",
     "heartbeat",
@@ -58,9 +57,8 @@ pub(crate) fn parse_command(args: Vec<String>) -> Result<CliCommand> {
         "tail" => parse_tail(rest),
         "errors" => parse_errors(rest),
         "hosts" => parse_hosts(rest),
-        "sessions" => parse_sessions(rest),
+        "sessions" => parse_sessions_command(rest),
         "incident" => parse_incident(rest),
-        "ai" => parse_ai(rest),
         "shell" => parse_shell(rest),
         "agent-command" => parse_agent_command(rest),
         "heartbeat" => parse_heartbeat(rest),

@@ -509,10 +509,10 @@ impl HttpClient {
     // ─── REST surface: bead 0p8r.2 (AI session queries) ─────────────────────
 
     pub async fn ai_search(&self, req: &SearchSessionsRequest) -> Result<SearchSessionsResponse> {
-        self.get_json("/api/ai/search", Some(req)).await
+        self.get_json("/api/sessions/search", Some(req)).await
     }
 
-    /// `/api/ai/abuse` round-trips `AbuseSearchRequest` directly on the wire
+    /// `/api/sessions/abuse` round-trips `AbuseSearchRequest` directly on the wire
     /// via `serde_qs` (bead 0p8r.15 — closes the previous hand-rolled flat
     /// query that ignored `terms` beyond the first). `serde_qs::to_string`
     /// renders `Vec<String>` as repeated `?terms=a&terms=b` params; the
@@ -521,33 +521,35 @@ impl HttpClient {
     pub async fn ai_abuse(&self, req: &AbuseSearchRequest) -> Result<AbuseSearchResponse> {
         let qs = serde_qs::to_string(req)
             .context("failed to serialize AbuseSearchRequest as query string")?;
-        self.get_json_with_raw_query("/api/ai/abuse", &qs).await
+        self.get_json_with_raw_query("/api/sessions/abuse", &qs)
+            .await
     }
 
     pub async fn ai_correlate(&self, req: &AiCorrelateRequest) -> Result<AiCorrelateResponse> {
-        self.get_json("/api/ai/correlate", Some(req)).await
+        self.get_json("/api/sessions/correlate", Some(req)).await
     }
 
     pub async fn ai_blocks(&self, req: &UsageBlocksRequest) -> Result<UsageBlocksResponse> {
-        self.get_json("/api/ai/blocks", Some(req)).await
+        self.get_json("/api/sessions/blocks", Some(req)).await
     }
 
     pub async fn ai_context(&self, req: &ProjectContextRequest) -> Result<ProjectContextResponse> {
-        self.get_json("/api/ai/context", Some(req)).await
+        self.get_json("/api/sessions/context", Some(req)).await
     }
 
     pub async fn ai_tools(&self, req: &ListAiToolsRequest) -> Result<ListAiToolsResponse> {
-        self.get_json("/api/ai/tools", Some(req)).await
+        self.get_json("/api/sessions/tools", Some(req)).await
     }
 
     pub async fn ai_projects(&self, req: &ListAiProjectsRequest) -> Result<ListAiProjectsResponse> {
-        self.get_json("/api/ai/projects", Some(req)).await
+        self.get_json("/api/sessions/projects", Some(req)).await
     }
 
     pub async fn ai_incidents(&self, req: &AiIncidentRequest) -> Result<AiIncidentResponse> {
         let qs = serde_qs::to_string(req)
             .context("failed to serialize AiIncidentRequest as query string")?;
-        self.get_json_with_raw_query("/api/ai/incidents", &qs).await
+        self.get_json_with_raw_query("/api/sessions/incidents", &qs)
+            .await
     }
 
     pub async fn ai_investigate(
@@ -556,28 +558,28 @@ impl HttpClient {
     ) -> Result<AiInvestigateResponse> {
         let qs = serde_qs::to_string(req)
             .context("failed to serialize AiInvestigateRequest as query string")?;
-        self.get_json_with_raw_query("/api/ai/investigate", &qs)
+        self.get_json_with_raw_query("/api/sessions/investigate", &qs)
             .await
     }
 
     // ─── REST surface: bead 0p8r.3 (AI diagnostic + admin) ──────────────────
 
     pub async fn ai_checkpoints(&self, req: &AiCheckpointsRequest) -> Result<Vec<CheckpointEntry>> {
-        self.get_json("/api/ai/checkpoints", Some(req)).await
+        self.get_json("/api/sessions/checkpoints", Some(req)).await
     }
 
     pub async fn ai_parse_errors(
         &self,
         req: &AiParseErrorsRequest,
     ) -> Result<Vec<ParseErrorEntry>> {
-        self.get_json("/api/ai/errors", Some(req)).await
+        self.get_json("/api/sessions/errors", Some(req)).await
     }
 
     pub async fn prune_ai_checkpoints(
         &self,
         req: &AiPruneCheckpointsRequest,
     ) -> Result<PruneCheckpointsResult> {
-        self.post_json("/api/ai/prune-checkpoints", req).await
+        self.post_json("/api/sessions/prune-checkpoints", req).await
     }
 
     pub async fn file_tails(&self, req: &FileTailRequest) -> Result<FileTailResponse> {
@@ -753,7 +755,7 @@ impl HttpClient {
     }
 
     pub async fn ask_history(&self, req: &AskHistoryRequest) -> Result<AskHistoryResponse> {
-        self.get_json("/api/ai/ask-history", Some(req)).await
+        self.get_json("/api/sessions/ask-history", Some(req)).await
     }
 
     pub async fn incident_context(

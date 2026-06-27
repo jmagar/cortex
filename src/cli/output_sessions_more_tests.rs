@@ -75,7 +75,7 @@ fn compact_ai_investigate_json_omits_transcript_by_default_and_preserves_counts(
     let value = compact_ai_investigate_json(
         &investigate_response(),
         AiInvestigatePrintOptions {
-            detail: AiOutputDetail::Compact,
+            detail: SessionsOutputDetail::Compact,
             include_transcript: false,
             max_bytes: 12,
         },
@@ -102,7 +102,7 @@ fn compact_ai_investigate_json_includes_transcript_when_requested() {
     let value = compact_ai_investigate_json(
         &investigate_response(),
         AiInvestigatePrintOptions {
-            detail: AiOutputDetail::Compact,
+            detail: SessionsOutputDetail::Compact,
             include_transcript: true,
             max_bytes: 64,
         },
@@ -225,7 +225,7 @@ fn human_ai_more_outputs_accept_representative_payloads() {
         &investigate_response(),
         false,
         AiInvestigatePrintOptions {
-            detail: AiOutputDetail::Full,
+            detail: SessionsOutputDetail::Full,
             include_transcript: true,
             max_bytes: 80,
         },

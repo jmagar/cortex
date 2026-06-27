@@ -180,12 +180,12 @@ Flags:
 | `--limit N` | Maximum returned rows |
 | `--json` | Print JSON response |
 
-### `cortex ai search`
+### `cortex sessions search`
 
 Ranked grouped session search across AI transcript rows.
 
 ```bash
-cortex ai search authentication --tool claude --limit 10
+cortex sessions search authentication --tool claude --limit 10
 ```
 
 Human output now states that grouping is computed over the newest matching
@@ -194,14 +194,14 @@ candidate window. JSON includes `total_candidates`, `candidate_rows`,
 candidate window is truncated, narrow with `--project`, `--tool`, `--since`, or
 `--until` for exact grouping within that filter.
 
-### `cortex ai abuse`
+### `cortex sessions abuse`
 
 Detect abuse in AI transcript rows and return surrounding rows from the same
 AI session.
 
 ```bash
-cortex ai abuse --project /home/jmagar/workspace/cortex --limit 10 --before 3 --after 3
-cortex ai abuse --tool codex --term dang --term heck --json
+cortex sessions abuse --project /home/jmagar/workspace/cortex --limit 10 --before 3 --after 3
+cortex sessions abuse --tool codex --term dang --term heck --json
 ```
 
 By default this uses the built-in abuse list and returns 2 rows before and
@@ -209,77 +209,77 @@ after each hit. Use repeated `--term WORD` flags to replace the built-in list
 with a custom detector. JSON includes `candidate_rows`, `candidate_cap`,
 `candidate_window_truncated`, `truncated`, and `matches[].{term,entry,before,after}`.
 
-### `cortex ai incidents`
+### `cortex sessions incidents`
 
 Group abuse hits into scored incident candidates.
 
 ```bash
-cortex ai incidents --project /home/jmagar/workspace/cortex --limit 10
-cortex ai incidents --tool codex --term dang --term heck --json
+cortex sessions incidents --project /home/jmagar/workspace/cortex --limit 10
+cortex sessions incidents --tool codex --term dang --term heck --json
 ```
 
 Use `--window-minutes` to change how nearby abuse hits are grouped into one
 incident. JSON includes `total_incidents`, `candidate_rows`, `candidate_cap`,
 `candidate_window_truncated`, `truncated`, and `incidents[]`.
 
-### `cortex ai investigate`
+### `cortex sessions investigate`
 
 Expand top incidents into deterministic evidence bundles without calling an LLM.
 
 ```bash
-cortex ai investigate --project /home/jmagar/workspace/cortex --limit 3
-cortex ai investigate --correlation-window-minutes 15 --json
+cortex sessions investigate --project /home/jmagar/workspace/cortex --limit 3
+cortex sessions investigate --correlation-window-minutes 15 --json
 ```
 
 Each evidence bundle includes the incident, anchor transcript rows, same-session
 before/after context, nearby non-AI logs, and nearby warning-or-higher logs.
 The public command expands at most 10 incidents per run.
 
-### `cortex ai assess`
+### `cortex sessions assess`
 
 Fetch one incident evidence bundle and run the local Gemini CLI to produce a
 Markdown frustration assessment.
 
 ```bash
-cortex ai incidents --limit 10
-cortex ai assess inc-f9a1d8e70cad13e6 --limit 3
-cortex ai assess inc-f9a1d8e70cad13e6 --model gemini-3.1-flash-lite-preview --json
+cortex sessions incidents --limit 10
+cortex sessions assess inc-f9a1d8e70cad13e6 --limit 3
+cortex sessions assess inc-f9a1d8e70cad13e6 --model gemini-3.1-flash-lite-preview --json
 ```
 
 `assess` is local-only and rejects `--http` because it spawns Gemini on the
-local host. It can assess any incident ID returned by `cortex ai incidents`
+local host. It can assess any incident ID returned by `cortex sessions incidents`
 within the incident-list cap, even when that incident is outside the top 10
 investigation bundles.
 
-### `cortex ai blocks`
+### `cortex sessions blocks`
 
 Bucket AI activity into 5-hour UTC windows.
 
 ```bash
-cortex ai blocks --project /home/jmagar/workspace/cortex
+cortex sessions blocks --project /home/jmagar/workspace/cortex
 ```
 
 When `--since` is omitted, usage blocks default to the last 30 days. Returned
 JSON includes `total_blocks` and `truncated`; at most 1000 buckets are returned.
 
-### `cortex ai context`
+### `cortex sessions context`
 
 Summarize one AI project path.
 
 ```bash
-cortex ai context --project /home/jmagar/workspace/cortex --limit 5
+cortex sessions context --project /home/jmagar/workspace/cortex --limit 5
 ```
 
 Recent representative entries are capped at 20 rows, and message snippets are
 bounded to 256 characters for predictable MCP/CLI payload size.
 
-### `cortex ai correlate`
+### `cortex sessions correlate`
 
 Cross-reference AI transcript rows against nearby non-AI logs.
 
 ```bash
-cortex ai correlate --project /home/jmagar/workspace/cortex --limit 5
-cortex ai correlate --ai-query deploy --log-query container --window-minutes 10 --severity-min warning --json
+cortex sessions correlate --project /home/jmagar/workspace/cortex --limit 5
+cortex sessions correlate --ai-query deploy --log-query container --window-minutes 10 --severity-min warning --json
 ```
 
 The AI side uses transcript rows as anchors. The related log side searches the
@@ -287,38 +287,38 @@ normal log corpus inside each anchor window and excludes AI transcript rows, so
 the command surfaces host, Docker, OTLP, and syslog events around the session
 without duplicating the transcript stream itself.
 
-### `cortex ai tools`
+### `cortex sessions tools`
 
 List distinct AI tools with counts.
 
 ```bash
-cortex ai tools --json
+cortex sessions tools --json
 ```
 
 Returned JSON includes `total_tools` and `truncated`; at most 100 tools are
 returned.
 
-### `cortex ai projects`
+### `cortex sessions projects`
 
 List distinct AI projects with counts.
 
 ```bash
-cortex ai projects --tool claude
+cortex sessions projects --tool claude
 ```
 
 Returned JSON includes `total_projects` and `truncated`; at most 200 projects
 are returned.
 
-### `cortex ai index`
+### `cortex sessions index`
 
 Explicitly scan local transcript roots (`~/.claude/projects`, `~/.codex/sessions`, `~/.gemini/tmp`) or one `--path`.
 
 ```bash
-cortex ai index
-cortex ai index --path ~/.claude/projects
-cortex ai index --since 2026-05-14T00:00:00Z
-cortex ai index --path ~/.codex/sessions --force
-cortex ai index --path ~/.gemini/tmp
+cortex sessions index
+cortex sessions index --path ~/.claude/projects
+cortex sessions index --since 2026-05-14T00:00:00Z
+cortex sessions index --path ~/.codex/sessions --force
+cortex sessions index --path ~/.gemini/tmp
 ```
 
 Path policy is intentionally narrow. Recursive `--path` scans are accepted only
@@ -338,85 +338,85 @@ RFC3339 timestamp. `--force` clears existing import identities and previously
 stored log rows for each scanned transcript path before reimporting, which is
 the right option after parser fixes or scrubber changes.
 
-### `cortex ai add`
+### `cortex sessions add`
 
 Ingest one explicit transcript file.
 
 ```bash
-cortex ai add --file ~/.claude/projects/example/session.jsonl
-cortex ai add --file ~/.codex/sessions/2026/05/14/session.jsonl --force
+cortex sessions add --file ~/.claude/projects/example/session.jsonl
+cortex sessions add --file ~/.codex/sessions/2026/05/14/session.jsonl --force
 ```
 
 `--force` reimports that one transcript from scratch without leaving duplicate
 log rows.
 
-### `cortex ai watch`
+### `cortex sessions watch`
 
 Watch local Claude/Codex/Gemini transcript roots and index stable changed
 transcript files as they are written.
 
 ```bash
-cortex ai watch
-cortex ai watch --path ~/.claude/projects --no-initial-scan
-cortex ai watch --path ~/.gemini/tmp --no-initial-scan
-cortex ai watch --debounce-ms 750 --settle-ms 500 --max-retries 5 --json
+cortex sessions watch
+cortex sessions watch --path ~/.claude/projects --no-initial-scan
+cortex sessions watch --path ~/.gemini/tmp --no-initial-scan
+cortex sessions watch --debounce-ms 750 --settle-ms 500 --max-retries 5 --json
 ```
 
 The watcher is a host-local helper, not part of the Docker Compose runtime. It
 reuses the same scanner root policy, file support checks, checkpoints,
 append-offset indexing, duplicate suppression, parse-error persistence, and
-storage guardrails as `cortex ai index` and `cortex ai add`. The watcher only
+storage guardrails as `cortex sessions index` and `cortex sessions add`. The watcher only
 coalesces filesystem events, waits for files to stabilize, and retries
 transient parse/storage/file errors up to the configured cap.
 
-### `cortex ai checkpoints`
+### `cortex sessions checkpoints`
 
 Inspect structured scanner checkpoints without opening SQLite directly.
 
 ```bash
-cortex ai checkpoints --limit 20
-cortex ai checkpoints --errors --json
-cortex ai checkpoints --missing
+cortex sessions checkpoints --limit 20
+cortex sessions checkpoints --errors --json
+cortex sessions checkpoints --missing
 ```
 
 The output shows source kind, imported record count, last successful checkpoint,
 missing-source status, parse error count, and the last parser/indexing error
 when present.
 
-### `cortex ai errors`
+### `cortex sessions errors`
 
 Inspect persisted transcript parser errors.
 
 ```bash
-cortex ai errors --limit 20
-cortex ai errors --json
+cortex sessions errors --limit 20
+cortex sessions errors --json
 ```
 
 Errors include source path, source kind, line number, timestamp, and a bounded
 scrubbed preview so parser failures can be investigated without opening the
 database directly.
 
-### `cortex ai prune-checkpoints`
+### `cortex sessions prune-checkpoints`
 
 Remove checkpoints for transcript files that no longer exist.
 
 ```bash
-cortex ai prune-checkpoints --missing --dry-run
-cortex ai prune-checkpoints --missing --limit 100
+cortex sessions prune-checkpoints --missing --dry-run
+cortex sessions prune-checkpoints --missing --limit 100
 ```
 
 Pruning is deliberately limited to `--missing` checkpoints. It removes scanner
 source metadata, import identities, and parse-error rows for missing files; it
 does not delete already imported log rows.
 
-### `cortex ai doctor`
+### `cortex sessions doctor`
 
 Summarize the local AI indexing state.
 
 ```bash
-cortex ai doctor
-cortex ai doctor --json
-cortex ai doctor --strict-permissions --json
+cortex sessions doctor
+cortex sessions doctor --json
+cortex sessions doctor --strict-permissions --json
 ```
 
 The doctor reports the DB path in use, whether `~/.claude/projects` and
@@ -427,22 +427,22 @@ Without `--strict-permissions`, this is a report-only command. With
 `--strict-permissions`, it exits non-zero when either transcript root is
 missing, unreadable, unwritable, or owned by another user.
 
-### `cortex ai watch-status`
+### `cortex sessions watch-status`
 
 Inspect the supported user-systemd watcher without reading systemd internals by
 hand.
 
 ```bash
-cortex ai watch-status
-cortex ai watch-status --json
+cortex sessions watch-status
+cortex sessions watch-status --json
 ```
 
-The status command reports `syslog-ai-watch.service` active/enabled state, main
+The status command reports `syslog-sessions-watch.service` active/enabled state, main
 PID, ExecStart, and the latest bounded journal lines. It uses the same user bus
 fallback as setup commands, so it still works from shells or tool environments
 that do not export `DBUS_SESSION_BUS_ADDRESS`.
 
-### `cortex ai smoke-watch`
+### `cortex sessions smoke-watch`
 
 Run a bounded live smoke test of the host-local watcher. The command writes a
 temporary Claude transcript under `~/.claude/projects`, waits for the watcher to
@@ -450,11 +450,11 @@ ingest it into the configured database, deletes the temp file, then waits for
 the missing-checkpoint pruner to clear scanner metadata.
 
 ```bash
-cortex ai smoke-watch
-cortex ai smoke-watch --json
+cortex sessions smoke-watch
+cortex sessions smoke-watch --json
 ```
 
-This is a live command. It requires `syslog-ai-watch.service` to be running and
+This is a live command. It requires `syslog-sessions-watch.service` to be running and
 writing to the same `CORTEX_DB_PATH` used by the CLI process.
 
 ### `cortex shell index`
@@ -508,21 +508,21 @@ not rescan already-ingested commands. Imported rows use
 and `source_ip` identities shaped like
 `agent-command://<hostname>/<agent>/<session_id>`.
 
-### `cortex setup ai-watch-service`
+### `cortex setup sessions-watch-service`
 
 Install, remove, or inspect the supported host-local user-systemd watcher for
 near-real-time transcript ingestion.
 
 ```bash
-cortex setup ai-watch-service install
-cortex setup ai-watch-service check --json
-cortex setup ai-watch-service remove
+cortex setup sessions-watch-service install
+cortex setup sessions-watch-service check --json
+cortex setup sessions-watch-service remove
 ```
 
 Install resolves an absolute `cortex` binary and a concrete SQLite DB path,
 writes a private environment file under `~/.config/cortex/`, runs one
-initial `cortex ai index --json` phase, disables the older polling timer, and
-starts `syslog-ai-watch.service` with `cortex ai watch --no-initial-scan
+initial `cortex sessions index --json` phase, disables the older polling timer, and
+starts `syslog-sessions-watch.service` with `cortex sessions watch --no-initial-scan
 --json`. The helper is intentionally outside the container because it must read
 host-local Claude/Codex/Gemini transcript files; Docker Compose remains the
 server/query deployment. Remove events from watched transcript files trigger a
@@ -537,15 +537,15 @@ watcher from historical transcript cleanup work. When data-quality warnings are
 reported, inspect them with:
 
 ```bash
-cortex ai errors --limit 20
-cortex ai checkpoints --errors
-cortex ai index --json
+cortex sessions errors --limit 20
+cortex sessions checkpoints --errors
+cortex sessions index --json
 ```
 
 Storage-blocked writes, invalid JSON from the indexer, command failures, stale
 unit content, permission failures, and failed `systemctl enable --now` phases
 remain blocking errors. Installing the watch service disables the older
-`syslog-ai-index.timer` to avoid duplicate background ingestion loops.
+`syslog-sessions-index.timer` to avoid duplicate background ingestion loops.
 
 ### `cortex setup debug-wrapper`
 
@@ -623,22 +623,22 @@ environment before running it when you need to preserve specific values. It is
 CLI-only, requires an explicit host argument, and does not add REST or MCP
 deploy mutation surfaces.
 
-### `cortex setup ai-index-timer`
+### `cortex setup sessions-index-timer`
 
 Install, remove, or inspect the optional host-local user-systemd polling
-fallback that periodically runs `cortex ai index`.
+fallback that periodically runs `cortex sessions index`.
 
 ```bash
-cortex setup ai-index-timer install
-cortex setup ai-index-timer check --json
-cortex setup ai-index-timer remove
+cortex setup sessions-index-timer install
+cortex setup sessions-index-timer check --json
+cortex setup sessions-index-timer remove
 ```
 
 This helper is intentionally not part of the Docker container. It scans
 host-local transcript roots (`~/.claude/projects`, `~/.codex/sessions`,
 `~/.gemini/tmp`) using a
 host `cortex` binary, then writes to the configured SQLite DB. Prefer
-`cortex setup ai-watch-service install` for normal use; the watcher install
+`cortex setup sessions-watch-service install` for normal use; the watcher install
 disables this timer to avoid duplicate background ingestion loops.
 
 ### `cortex doctor binary`
@@ -664,7 +664,7 @@ bash scripts/smoke-ai-mcp.sh
 The smoke scripts resolve `CORTEX_BIN` first, then `cortex` on `PATH`, then the
 repo-local debug binary at `target/debug/cortex`.
 
-With `syslog-ai-watch.service` installed, new transcript lines usually become
+With `syslog-sessions-watch.service` installed, new transcript lines usually become
 searchable within a few seconds of the writer closing or flushing the file.
 Imported transcript messages are scrubbed for known credential/token patterns
 before storage and FTS indexing, but scrubbing is best-effort. Raw log actions
@@ -992,18 +992,18 @@ models.
 | `cortex errors` | `cortex` with `action="errors"` |
 | `cortex hosts` | `cortex` with `action="hosts"` |
 | `cortex sessions` | `cortex` with `action="sessions"` |
-| `cortex ai search` | `cortex` with `action="search_sessions"` |
-| `cortex ai abuse` | `cortex` with `action="abuse"` |
-| `cortex ai incidents` | `cortex` with `action="abuse_incidents"` |
-| `cortex ai investigate` | `cortex` with `action="abuse_investigate"` |
-| `cortex ai correlate` | `cortex` with `action="ai_correlate"` |
-| `cortex ai blocks` | `cortex` with `action="usage_blocks"` |
-| `cortex ai context` | `cortex` with `action="project_context"` |
-| `cortex ai tools` | `cortex` with `action="list_ai_tools"` |
-| `cortex ai projects` | `cortex` with `action="list_ai_projects"` |
-| `cortex ai similar` | `cortex` with `action="similar_incidents"` |
-| `cortex ai ask-history` | `cortex` with `action="ask_history"` |
-| `cortex ai incident-context` | `cortex` with `action="incident_context"` |
+| `cortex sessions search` | `cortex` with `action="search_sessions"` |
+| `cortex sessions abuse` | `cortex` with `action="abuse"` |
+| `cortex sessions incidents` | `cortex` with `action="abuse_incidents"` |
+| `cortex sessions investigate` | `cortex` with `action="abuse_investigate"` |
+| `cortex sessions correlate` | `cortex` with `action="ai_correlate"` |
+| `cortex sessions blocks` | `cortex` with `action="usage_blocks"` |
+| `cortex sessions context` | `cortex` with `action="project_context"` |
+| `cortex sessions tools` | `cortex` with `action="list_ai_tools"` |
+| `cortex sessions projects` | `cortex` with `action="list_ai_projects"` |
+| `cortex sessions similar` | `cortex` with `action="similar_incidents"` |
+| `cortex sessions ask-history` | `cortex` with `action="ask_history"` |
+| `cortex sessions incident-context` | `cortex` with `action="incident_context"` |
 | `cortex correlate` | `cortex` with `action="correlate"` |
 | `cortex host-state` | `cortex` with `action="host_state"` |
 | `cortex fleet-state` | `cortex` with `action="fleet_state"` |

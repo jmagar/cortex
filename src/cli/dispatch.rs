@@ -26,11 +26,11 @@ use cortex::app::{
 };
 use std::future::Future;
 
-use super::output_ai::print_incident_response;
 use super::output_logs::{
     print_correlate_response, print_errors_response, print_hosts_response, print_search_response,
     print_sessions_response, print_stats_response,
 };
+use super::output_sessions::print_incident_response;
 use super::{
     CliMode, CorrelateArgs, FileTailCommand, FileTailIdArgs, FilterArgs, IncidentArgs, SearchArgs,
     SessionsArgs, TailArgs, TimeRangeArgs,
@@ -351,16 +351,16 @@ fn id_request(op: FileTailOp, args: FileTailIdArgs) -> (FileTailRequest, bool) {
     (FileTailRequest::id_op(op, args.id), args.json)
 }
 
-pub(crate) use super::dispatch_ai::{
-    run_ai_abuse, run_ai_add, run_ai_ask_history, run_ai_assess, run_ai_blocks, run_ai_checkpoints,
-    run_ai_context, run_ai_correlate, run_ai_doctor, run_ai_errors, run_ai_incident_context,
-    run_ai_incidents, run_ai_index, run_ai_investigate, run_ai_projects, run_ai_prune_checkpoints,
-    run_ai_search, run_ai_similar_incidents, run_ai_smoke_watch, run_ai_tools, run_ai_watch,
-    run_ai_watch_status,
-};
 pub(crate) use super::dispatch_db::{
     run_db_backup, run_db_checkpoint, run_db_integrity, run_db_integrity_status, run_db_status,
     run_db_vacuum,
+};
+pub(crate) use super::dispatch_sessions::{
+    run_ai_abuse, run_ai_add, run_ai_ask_history, run_ai_assess, run_ai_blocks, run_ai_checkpoints,
+    run_ai_context, run_ai_correlate, run_ai_doctor, run_ai_errors, run_ai_incident_context,
+    run_ai_incidents, run_ai_index, run_ai_investigate, run_ai_projects, run_ai_prune_checkpoints,
+    run_ai_search, run_ai_similar_incidents, run_ai_smoke_watch, run_ai_tools, run_sessions_watch,
+    run_sessions_watch_status,
 };
 pub(crate) use super::dispatch_surface::{
     run_anomalies, run_apps, run_clock_skew, run_compare, run_correlate_state, run_entity_lookup,

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Command;
 
-use super::ai_watch::systemctl_user_output;
+use super::sessions_watch::systemctl_user_output;
 use super::setup::{SetupPhase, SetupStatus, read_env_value, setup_data_dir};
 #[derive(Debug, Clone)]
 pub(crate) struct ContainerMountInfo {
@@ -51,7 +51,7 @@ impl DoctorCache {
     }
 }
 
-/// Run both coordination phases (data-mount + ai-watch-coord) with a shared
+/// Run both coordination phases (data-mount + sessions-watch-coord) with a shared
 /// cache so the underlying `docker inspect` only fires once.
 pub(crate) fn run_coordination_phases() -> Vec<SetupPhase> {
     let data_dir = setup_data_dir();
@@ -59,7 +59,7 @@ pub(crate) fn run_coordination_phases() -> Vec<SetupPhase> {
     let mut cache = DoctorCache::default();
     vec![
         data_mount_phase_cached(data_dir.as_path(), env_path.as_path(), &mut cache),
-        ai_watch_coordination_phase(env_path.as_path(), &mut cache),
+        sessions_watch_coordination_phase(env_path.as_path(), &mut cache),
     ]
 }
 
@@ -207,7 +207,7 @@ pub(crate) fn lookup_systemd_db_path(env: &SystemctlEnv) -> Option<String> {
 // Sole caller was setup_report (SessionStart hook), which no longer needs it
 // post-cutover. All remaining callers (compose doctor, db status --check-coord)
 // use data_mount_phase_cached so the docker inspect result can be shared with
-// ai_watch_coordination_phase within a single invocation.
+// sessions_watch_coordination_phase within a single invocation.
 
 /// Cached variant of `data_mount_phase`. See module-level note for why we
 /// share `docker inspect` across phases.
@@ -229,7 +229,7 @@ pub(crate) fn data_mount_phase_cached(
         Ok(info) => info,
         Err(detail) => {
             // Distinguish "container absent" (Skipped per doctor spec —
-            // ai-watch absent style) from "docker enumeration failed"
+            // sessions-watch absent style) from "docker enumeration failed"
             // (Warn — could not enumerate inputs). docker inspect on a
             // missing container reports "No such object" / "no such
             // container"; anything else is a probe failure.
@@ -315,26 +315,26 @@ pub(crate) fn data_mount_phase_cached(
     }
 }
 
-/// Verify the host systemd `cortex-ai-watch.service`'s effective
+/// Verify the host systemd `cortex-sessions-watch.service`'s effective
 /// `CORTEX_DB_PATH` resolves to the same canonical host path as the
-/// container's `/data` bind source. A mismatch means the host ai-watch
+/// container's `/data` bind source. A mismatch means the host sessions-watch
 /// service is writing checkpoints to a DB the container will never read.
 ///
 /// Status semantics (per epic decisions):
-/// - `Skipped` — ai-watch unit not installed or not loadable. Only valid
+/// - `Skipped` — sessions-watch unit not installed or not loadable. Only valid
 ///   skipped reason.
 /// - `Ok` — canonical paths match.
 /// - `Warning` — could not enumerate the inputs (docker/systemctl failed,
 ///   canonicalize ENOENT/EACCES). The drift bug was a silent literal-string
 ///   compare fallback; we never do that — always warn with the OS error.
 /// - `Error` — both sides resolved and the canonical paths differ.
-pub(crate) fn ai_watch_coordination_phase(
+pub(crate) fn sessions_watch_coordination_phase(
     env_path: &std::path::Path,
     cache: &mut DoctorCache,
 ) -> SetupPhase {
-    let name = "ai-watch-coord";
+    let name = "sessions-watch-coord";
     let unit = std::env::var("CORTEX_AI_WATCH_UNIT")
-        .unwrap_or_else(|_| "cortex-ai-watch.service".to_string());
+        .unwrap_or_else(|_| "cortex-sessions-watch.service".to_string());
     let container = std::env::var("CORTEX_CONTAINER_NAME").unwrap_or_else(|_| "cortex".to_string());
 
     let env = match cache.systemctl_env(&unit) {
@@ -342,7 +342,7 @@ pub(crate) fn ai_watch_coordination_phase(
         Err(detail) => {
             // systemctl enumeration failed (binary missing, bus error,
             // permission denied, etc.); per the doctor spec this is
-            // `warn` — `skipped` is reserved for "ai-watch absent".
+            // `warn` — `skipped` is reserved for "sessions-watch absent".
             return SetupPhase {
                 name,
                 status: SetupStatus::Warn,
@@ -391,7 +391,7 @@ pub(crate) fn ai_watch_coordination_phase(
         };
     };
 
-    // ai-watch points at the SQLite *file*; container exposes the parent dir.
+    // sessions-watch points at the SQLite *file*; container exposes the parent dir.
     let ai_path = PathBuf::from(&ai_db_path);
     let ai_dir = ai_path.parent().map(PathBuf::from).unwrap_or(ai_path);
     let canonical_ai = match canonicalize_with_warning(&ai_dir) {
@@ -423,7 +423,7 @@ pub(crate) fn ai_watch_coordination_phase(
             name,
             status: SetupStatus::Ok,
             detail: format!(
-                "ai-watch CORTEX_DB_PATH ({}) and container /data bind ({}) resolve to {}",
+                "sessions-watch CORTEX_DB_PATH ({}) and container /data bind ({}) resolve to {}",
                 ai_db_path,
                 mount_source,
                 canonical_ai.display()
@@ -434,7 +434,7 @@ pub(crate) fn ai_watch_coordination_phase(
         name,
         status: SetupStatus::Error,
         detail: format!(
-            "ai-watch CORTEX_DB_PATH canonicalizes to {} but container /data bind canonicalizes to {} — \
+            "sessions-watch CORTEX_DB_PATH canonicalizes to {} but container /data bind canonicalizes to {} — \
              host service and container are writing different DBs",
             canonical_ai.display(),
             canonical_container.display()

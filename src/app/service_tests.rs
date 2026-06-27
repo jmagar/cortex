@@ -847,8 +847,8 @@ async fn graph_entity_lookup_missing_entity_returns_not_found() {
 #[test]
 fn normalize_syslog_owned_service_rejects_arbitrary_units() {
     assert_eq!(
-        normalize_syslog_owned_service("cortex-ai-watch").unwrap(),
-        "cortex-ai-watch.service"
+        normalize_syslog_owned_service("cortex-sessions-watch").unwrap(),
+        "cortex-sessions-watch.service"
     );
 
     let err = normalize_syslog_owned_service("ssh").unwrap_err();
@@ -857,13 +857,16 @@ fn normalize_syslog_owned_service_rejects_arbitrary_units() {
 
 #[test]
 fn parse_journal_json_lines_extracts_service_log_fields() {
-    let raw = r#"{"__REALTIME_TIMESTAMP":"1780000000123456","_SYSTEMD_USER_UNIT":"cortex-ai-watch.service","PRIORITY":"3","CORTEX_IDENTIFIER":"syslog","_PID":"42","MESSAGE":"AI transcript indexing failed","__CURSOR":"cursor-1"}"#;
+    let raw = r#"{"__REALTIME_TIMESTAMP":"1780000000123456","_SYSTEMD_USER_UNIT":"cortex-sessions-watch.service","PRIORITY":"3","CORTEX_IDENTIFIER":"syslog","_PID":"42","MESSAGE":"AI transcript indexing failed","__CURSOR":"cursor-1"}"#;
 
     let (entries, dropped) = parse_journal_json_lines(raw);
     assert_eq!(dropped, 0);
 
     assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].unit.as_deref(), Some("cortex-ai-watch.service"));
+    assert_eq!(
+        entries[0].unit.as_deref(),
+        Some("cortex-sessions-watch.service")
+    );
     assert_eq!(entries[0].priority.as_deref(), Some("3"));
     assert_eq!(entries[0].syslog_identifier.as_deref(), Some("syslog"));
     assert_eq!(entries[0].pid.as_deref(), Some("42"));

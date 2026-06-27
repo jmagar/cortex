@@ -156,11 +156,11 @@ fn mode_parse_accepts_setup_namespace() {
 }
 
 #[test]
-fn mode_parse_accepts_ai_index_timer_setup_namespace() {
+fn mode_parse_accepts_sessions_index_timer_setup_namespace() {
     assert!(matches!(
         Mode::parse(vec![
             "setup".into(),
-            "ai-index-timer".into(),
+            "sessions-index-timer".into(),
             "install".into(),
             "--json".into()
         ])
@@ -170,17 +170,28 @@ fn mode_parse_accepts_ai_index_timer_setup_namespace() {
 }
 
 #[test]
-fn mode_parse_accepts_ai_watch_service_setup_namespace() {
+fn mode_parse_accepts_sessions_watch_service_setup_namespace() {
     assert!(matches!(
         Mode::parse(vec![
             "setup".into(),
-            "ai-watch-service".into(),
+            "sessions-watch-service".into(),
             "install".into(),
             "--json".into()
         ])
         .unwrap(),
         Mode::Setup(_)
     ));
+}
+
+#[test]
+fn mode_parse_rejects_old_ai_setup_namespaces() {
+    for old_name in ["ai-index-timer", "ai-watch-service"] {
+        let err = Mode::parse(vec!["setup".into(), old_name.into(), "check".into()]).unwrap_err();
+        assert!(
+            err.to_string().contains("unknown setup argument"),
+            "expected {old_name} to be rejected, got: {err}"
+        );
+    }
 }
 
 #[test]
@@ -478,12 +489,12 @@ fn parse_deploy_agent_reports_missing_option_values() {
 fn mode_parse_setup_subcommands_default_to_check_and_parse_remove() {
     let cases = [
         (
-            vec!["setup", "ai-index-timer", "--json"],
-            "ai-index-timer check",
+            vec!["setup", "sessions-index-timer", "--json"],
+            "sessions-index-timer check",
         ),
         (
-            vec!["setup", "ai-watch-service", "remove", "--json"],
-            "ai-watch-service remove",
+            vec!["setup", "sessions-watch-service", "remove", "--json"],
+            "sessions-watch-service remove",
         ),
         (
             vec!["setup", "agent-command", "remove", "--json"],
@@ -513,10 +524,10 @@ fn mode_parse_setup_subcommands_default_to_check_and_parse_remove() {
 }
 
 #[test]
-fn mode_parse_rejects_duplicate_ai_watch_service_actions() {
+fn mode_parse_rejects_duplicate_sessions_watch_service_actions() {
     let err = Mode::parse(vec![
         "setup".into(),
-        "ai-watch-service".into(),
+        "sessions-watch-service".into(),
         "install".into(),
         "remove".into(),
     ])
@@ -524,7 +535,7 @@ fn mode_parse_rejects_duplicate_ai_watch_service_actions() {
 
     assert!(
         err.to_string()
-            .contains("ai-watch-service action specified more than once")
+            .contains("sessions-watch-service action specified more than once")
     );
 }
 
