@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::future::Future;
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
@@ -88,6 +89,10 @@ pub use journal::run_service_logs;
 #[cfg(test)]
 use journal::{normalize_syslog_owned_service, parse_journal_json_lines};
 
+pub fn wal_checkpoint_complete(busy: i64, log_frames: i64, checkpointed_frames: i64) -> bool {
+    db::wal_checkpoint_complete(busy, log_frames, checkpointed_frames)
+}
+
 /// Parse the `source_kind` recorded in a log row's `metadata_json`, if present.
 /// Shared by the `ai_correlate` and `topic_correlate` lanes.
 pub(crate) fn row_source_kind(entry: &db::LogEntry) -> Option<String> {
@@ -109,6 +114,7 @@ pub struct CortexService {
     pool: Arc<DbPool>,
     pub(super) storage: StorageConfig,
     db_permits: Arc<Semaphore>,
+    pub(super) heavy_read_permits: Arc<Semaphore>,
     acquire_timeout: Duration,
     /// OS-level adapter for journalctl / systemd shell-outs.
     pub(super) os: Arc<dyn OsAdapter + Send + Sync>,
@@ -133,10 +139,12 @@ fn read_permits_for_pool(pool_size: u32) -> usize {
 impl CortexService {
     pub(crate) fn new(pool: Arc<DbPool>, storage: StorageConfig) -> Self {
         let permits = read_permits_for_pool(storage.pool_size);
+        let heavy_read_concurrency = storage.heavy_read_concurrency;
         Self {
             pool,
             storage,
             db_permits: Arc::new(Semaphore::new(permits)),
+            heavy_read_permits: Arc::new(Semaphore::new(heavy_read_concurrency)),
             acquire_timeout: DB_ACQUIRE_TIMEOUT,
             os: Arc::new(SystemOsAdapter),
             file_tail_registry: None,
@@ -154,10 +162,12 @@ impl CortexService {
         os: Arc<dyn OsAdapter + Send + Sync>,
     ) -> Self {
         let permits = read_permits_for_pool(storage.pool_size);
+        let heavy_read_concurrency = storage.heavy_read_concurrency;
         Self {
             pool,
             storage,
             db_permits: Arc::new(Semaphore::new(permits)),
+            heavy_read_permits: Arc::new(Semaphore::new(heavy_read_concurrency)),
             acquire_timeout: DB_ACQUIRE_TIMEOUT,
             os,
             file_tail_registry: None,
@@ -236,17 +246,10 @@ impl CortexService {
                     "Task join error: {e}"
                 )));
             }
-            // Preserve typed ServiceErrors raised inside the closure (e.g.
-            // InvalidInput/NotFound from query helpers) instead of flattening
-            // everything to Internal — the MCP surface maps each variant to a
-            // distinct client-visible error class (full-review AH1).
-            Ok(r) => r.map_err(|e| match e.downcast::<ServiceError>() {
-                Ok(svc) => svc,
-                Err(e) => {
-                    tracing::debug!(error = %e, "anyhow error not a ServiceError, classifying as Internal");
-                    ServiceError::Internal(e)
-                }
-            }),
+            // Preserve typed ServiceErrors raised inside the closure, and
+            // promote retryable SQLite/pool pressure into stable sanitized
+            // categories instead of surfacing opaque internal errors.
+            Ok(r) => r.map_err(ServiceError::classify_db_error),
         };
 
         if exec_ms > SLOW_DB_MS {
@@ -261,6 +264,47 @@ impl CortexService {
             }
         }
         result
+    }
+
+    async fn run_heavy_db<F, T>(&self, op: &'static str, f: F) -> ServiceResult<T>
+    where
+        F: FnOnce(&DbPool) -> anyhow::Result<T> + Send + 'static,
+        T: Send + 'static,
+    {
+        self.with_heavy_read_permit(op, || async move { self.run_db(op, f).await })
+            .await
+    }
+
+    async fn with_heavy_read_permit<F, Fut, T>(&self, op: &'static str, f: F) -> ServiceResult<T>
+    where
+        F: FnOnce() -> Fut,
+        Fut: Future<Output = ServiceResult<T>>,
+    {
+        let wait_start = Instant::now();
+        let permit_result = tokio::time::timeout(
+            self.acquire_timeout,
+            Arc::clone(&self.heavy_read_permits).acquire_owned(),
+        )
+        .await;
+
+        let heavy_permit = match permit_result {
+            Err(_) => {
+                tracing::warn!(
+                    op,
+                    wait_ms = wait_start.elapsed().as_millis(),
+                    "heavy read limited"
+                );
+                return Err(ServiceError::Busy("heavy_read_limited".to_string()));
+            }
+            Ok(Err(_)) => {
+                tracing::warn!(op, "heavy read limiter closed");
+                return Err(ServiceError::Busy("heavy_read_limited".to_string()));
+            }
+            Ok(Ok(permit)) => permit,
+        };
+
+        let _heavy_permit = heavy_permit;
+        f().await
     }
 }
 

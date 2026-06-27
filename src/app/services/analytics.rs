@@ -121,7 +121,7 @@ impl CortexService {
         let scan_limit = req.scan_limit.unwrap_or(db::PATTERN_SCAN_LIMIT_MAX);
         let top_n = req.top_n.unwrap_or(20).min(200);
         let (patterns, scanned, truncated) = self
-            .run_db("patterns", move |pool| {
+            .run_heavy_db("patterns", move |pool| {
                 let (rows, truncated) = db::fetch_pattern_rows(
                     pool,
                     from.as_deref(),
@@ -270,7 +270,7 @@ impl CortexService {
         let cut_5m_q = cut_5m.clone();
         let cut_15m_q = cut_15m.clone();
         let result = self
-            .run_db("ingest_rate", move |pool| -> anyhow::Result<_> {
+            .run_heavy_db("ingest_rate", move |pool| -> anyhow::Result<_> {
                 let buckets = db::ingest_rate(pool, &now_clone, &cut_1m_q, &cut_5m_q, &cut_15m_q)?;
                 let by_host = if want_by_host {
                     Some(db::ingest_rate_by_host(
@@ -327,7 +327,7 @@ impl CortexService {
         let q = since_str.clone();
         let limit = req.limit.map(|limit| limit.clamp(1, 100));
         let hosts = self
-            .run_db("clock_skew", move |pool| db::clock_skew(pool, &q, limit))
+            .run_heavy_db("clock_skew", move |pool| db::clock_skew(pool, &q, limit))
             .await?;
         Ok(ClockSkewResponse {
             since: since_str,
@@ -351,7 +351,7 @@ impl CortexService {
         let bf = baseline_from.clone();
         let bt = baseline_to.clone();
         let hosts = self
-            .run_db("anomalies", move |pool| {
+            .run_heavy_db("anomalies", move |pool| {
                 db::anomalies(pool, &rf, &rt, &bf, &bt, recent_minutes, baseline_minutes)
             })
             .await?;
@@ -401,7 +401,7 @@ impl CortexService {
         let b_from_q = b_from.clone();
         let b_to_q = b_to.clone();
         let result = self
-            .run_db("compare", move |pool| -> anyhow::Result<_> {
+            .run_heavy_db("compare", move |pool| -> anyhow::Result<_> {
                 let a = db::summarize_range(pool, &a_from_q, &a_to_q)?;
                 let b = db::summarize_range(pool, &b_from_q, &b_to_q)?;
                 Ok((a, b))

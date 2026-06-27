@@ -68,6 +68,70 @@ fn ai_entry(ts: &str, msg: &str) -> LogBatchEntry {
 }
 
 #[tokio::test]
+async fn heavy_read_limiter_times_out_when_permit_is_held() {
+    let (mut service, _pool, _dir) = test_service();
+    service.acquire_timeout = std::time::Duration::from_millis(10);
+    let held = service
+        .heavy_read_permits
+        .clone()
+        .acquire_owned()
+        .await
+        .expect("heavy permit");
+
+    let err = service
+        .run_heavy_db("heavy_test", |_pool| Ok::<_, anyhow::Error>(()))
+        .await
+        .unwrap_err();
+
+    drop(held);
+    assert!(matches!(err, ServiceError::Busy(message) if message == "heavy_read_limited"));
+}
+
+#[tokio::test]
+async fn sqlite_heavy_public_reads_use_heavy_limiter() {
+    async fn assert_heavy_limited<T>(result: ServiceResult<T>) {
+        let err = match result {
+            Ok(_) => panic!("held heavy permit should reject the read"),
+            Err(err) => err,
+        };
+        assert!(
+            matches!(err, ServiceError::Busy(ref message) if message == "heavy_read_limited"),
+            "expected heavy_read_limited, got {err:?}"
+        );
+    }
+
+    let (mut service, _pool, _dir) = test_service();
+    service.acquire_timeout = std::time::Duration::from_millis(10);
+    let held = service
+        .heavy_read_permits
+        .clone()
+        .acquire_owned()
+        .await
+        .expect("heavy permit");
+
+    assert_heavy_limited(service.fleet_state(FleetStateRequest::default()).await).await;
+    assert_heavy_limited(service.ingest_rate(IngestRateRequest::default()).await).await;
+    assert_heavy_limited(
+        service
+            .investigate_ai_incidents(AiInvestigateRequest::default())
+            .await,
+    )
+    .await;
+    assert_heavy_limited(
+        service
+            .graph_entity_lookup(GraphEntityLookupRequest {
+                entity_type: Some("host".to_string()),
+                key: Some("host-a".to_string()),
+                ..GraphEntityLookupRequest::default()
+            })
+            .await,
+    )
+    .await;
+
+    drop(held);
+}
+
+#[tokio::test]
 async fn graph_entity_lookup_resolves_exact_key_and_alias() {
     let (service, pool, _dir) = test_service();
     insert_logs_batch(

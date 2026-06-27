@@ -52,13 +52,17 @@ For every row in §4:
 | TOML key | Env var | Type | Default | Sens. | Reload | Validation | plugin.json | Notes |
 |---|---|---|---|---|---|---|---|---|
 | `db_path` | `CORTEX_DB_PATH` | path | `/data/cortex.db` | public | restart-only | parent dir must exist when env is set | `data_dir` (parent) | See §2 for `/data/` rewrite rule |
-| `pool_size` | `CORTEX_POOL_SIZE` | u32 | `4` | tuning | restart-only | `> 0` | — | r2d2 pool size |
+| `pool_size` | `CORTEX_POOL_SIZE` | u32 | `8` | tuning | restart-only | `> 0` | — | r2d2 pool size; reads get `pool_size - 1` permits so one connection remains available for ingest |
+| `sqlite_page_cache_mb` | `CORTEX_SQLITE_PAGE_CACHE_MB` | u64 | `128` | tuning | restart-only | `> 0`; derived KiB per connection must fit `i64` | — | Total SQLite page-cache budget across the pool; divided by `pool_size` before `PRAGMA cache_size` |
+| `sqlite_mmap_mb` | `CORTEX_SQLITE_MMAP_MB` | u64 | `256` | tuning | restart-only | derived bytes must fit `i64` | — | Bounded SQLite mmap size; resident pages may still count toward cgroup memory |
+| `heavy_read_concurrency` | `CORTEX_HEAVY_READ_CONCURRENCY` | usize | `1` | tuning | restart-only | `> 0` | — | Shared service-layer limiter for SQLite-heavy reads |
+| `wal_checkpoint_mb` | `CORTEX_WAL_CHECKPOINT_MB` | u64 | `256` | tuning | restart-only | `> 0` | — | WAL size threshold for bounded PASSIVE checkpoint attempts |
 | `retention_days` | `CORTEX_RETENTION_DAYS` | u32 | `90` | tuning | restart-only | `0` disables age purge | `retention_days` | Hourly purge task |
 | `wal_mode` | — | bool | `true` | tuning | restart-only | — | — | WAL is effectively mandatory |
 | `max_db_size_mb` | `CORTEX_MAX_DB_SIZE_MB` | u64 | `1024` | tuning | restart-only | see §6 | `max_db_size_mb` | `0` disables soft cap |
 | `recovery_db_size_mb` | `CORTEX_RECOVERY_DB_SIZE_MB` | u64 | `900` | tuning | restart-only | see §6 | — | Target after eviction |
-| `min_free_disk_mb` | `CORTEX_MIN_FREE_DISK_MB` | u64 | `512` | tuning | restart-only | see §6 | — | `0` disables disk guard |
-| `recovery_free_disk_mb` | `CORTEX_RECOVERY_FREE_DISK_MB` | u64 | `768` | tuning | restart-only | see §6 | — | |
+| `min_free_disk_mb` | `CORTEX_MIN_FREE_DISK_MB` | u64 | `0` | tuning | restart-only | see §6 | — | `0` disables disk guard; breach blocks writes instead of deleting data |
+| `recovery_free_disk_mb` | `CORTEX_RECOVERY_FREE_DISK_MB` | u64 | `0` | tuning | restart-only | see §6 | — | Hysteresis target before writes resume |
 | `cleanup_interval_secs` | `CORTEX_CLEANUP_INTERVAL_SECS` | u64 | `60` | tuning | restart-only | `>= 5` | — | Storage task tick |
 | `cleanup_chunk_size` | `CORTEX_CLEANUP_CHUNK_SIZE` | usize | `2_000` | tuning | restart-only | `> 0` and `<= 1_000_000` | — | Rows-per-chunk during eviction |
 

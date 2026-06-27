@@ -162,11 +162,11 @@ Cross-host moves additionally require ensuring the new host's UID `1000` (or wha
 The data dir's footprint is governed by `[storage]` knobs (see `docs/contracts/config-schema.md` §4):
 
 - **Soft cap on logical DB size**: `storage.max_db_size_mb` (default `1024`, plugin default `8192`). When exceeded, oldest rows are deleted in `cleanup_chunk_size` batches until `recovery_db_size_mb` is reached.
-- **Minimum free disk floor**: `storage.min_free_disk_mb` (default `512`). When the filesystem's free space drops below this, the storage task evicts to reach `recovery_free_disk_mb`.
+- **Minimum free disk floor**: `storage.min_free_disk_mb` (default `0`, disabled). When enabled and the filesystem's free space drops below this, the storage task blocks new writes until free space reaches `recovery_free_disk_mb`; it does not delete rows to chase external whole-filesystem pressure.
 - **Age-based purge**: `storage.retention_days` (default `90`). Hourly task deletes rows older than this regardless of size.
 - **AdGuard tag exception**: AdGuard query records (`adguard-allowed`, `adguard-query`, `adguard-rewrite`) are hard-capped at 7 days (`ADGUARD_RETENTION_DAYS` in `src/runtime.rs`) because their volume otherwise dominates the FTS5 index.
-- **Write-block on full**: if eviction cannot free enough space, `writer_storage_blocked` flips to `true` in `/health` and new writes are dropped (counters: `writer_logs_retained`, `writer_logs_discarded`). The DB itself never grows past the configured cap once enforcement is engaged.
-- **WAL growth**: SQLite's WAL grows during long transactions and shrinks on checkpoint. V1 does not pin a WAL size cap; under normal load it stays under a few MB. `cortex db checkpoint --mode truncate` forces a shrink when needed.
+- **Write-block on full**: if DB-size eviction cannot free enough space, or the free-disk guard is enabled and below threshold, `writer_storage_blocked` flips to `true` in `/health` and new writes are dropped (counters: `writer_logs_retained`, `writer_logs_discarded`).
+- **WAL growth**: SQLite's WAL grows during long transactions and shrinks on checkpoint. Cortex attempts bounded PASSIVE checkpoints after the WAL reaches `storage.wal_checkpoint_mb`; `cortex db checkpoint --mode truncate` forces a shrink when needed.
 
 There is no explicit cap on `auth.db` size — it stays small (sessions only) and is bounded operationally by user count + refresh-token TTL.
 

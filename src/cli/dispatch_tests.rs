@@ -1165,6 +1165,17 @@ fn db_status_body() -> serde_json::Value {
         "physical_size_bytes": 4096,
         "wal_size_bytes": null,
         "shm_size_bytes": null,
+        "sqlite_page_cache_mb": 128,
+        "sqlite_page_cache_kib_per_connection": -16_384,
+        "sqlite_mmap_mb": 256,
+        "sqlite_mmap_bytes": 268435456u64,
+        "heavy_read_concurrency": 1,
+        "wal_checkpoint_mb": 256,
+        "wal_checkpoint_threshold_bytes": 268435456u64,
+        "cgroup_memory_status": "unavailable",
+        "cgroup_memory_max_bytes": null,
+        "cgroup_memory_current_bytes": null,
+        "cgroup_memory_peak_bytes": null,
         "auto_vacuum": 0,
         "journal_mode": "wal",
         "integrity_ok": null,
@@ -1316,7 +1327,10 @@ async fn run_db_checkpoint_bails_when_busy_nonzero() {
     )
     .await
     .expect_err("must bail when busy");
-    assert_eq!(err.to_string(), "database WAL checkpoint was busy");
+    assert_eq!(
+        err.to_string(),
+        "database WAL checkpoint incomplete: busy=1 checkpointed_frames=0 log_frames=0"
+    );
 }
 
 // ─── DB vacuum --force serializes correctly in the request body ─────────────

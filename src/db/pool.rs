@@ -82,9 +82,9 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
         std::fs::create_dir_all(parent)?;
     }
 
-    let wal_mode = config.wal_mode;
+    let storage = config.clone();
     let manager = SqliteConnectionManager::file(&config.db_path)
-        .with_init(move |conn| configure_connection_pragmas(conn, wal_mode));
+        .with_init(move |conn| configure_connection_pragmas(conn, &storage));
     // connection_timeout is set to 6s — slightly above the service layer's 5s
     // DB_ACQUIRE_TIMEOUT so the semaphore fires first, giving a clean ServiceError::Busy
     // rather than an r2d2 timeout on the rare path where background tasks exhaust the pool.
@@ -2615,16 +2615,32 @@ fn apply_migration_19_heartbeat_latest(conn: &Connection) -> rusqlite::Result<()
     }
 }
 
-fn configure_connection_pragmas(conn: &mut Connection, wal_mode: bool) -> rusqlite::Result<()> {
-    if wal_mode {
+fn configure_connection_pragmas(
+    conn: &mut Connection,
+    storage: &StorageConfig,
+) -> rusqlite::Result<()> {
+    if storage.wal_mode {
         conn.execute_batch("PRAGMA journal_mode=WAL;")?;
     }
-    conn.execute_batch(
-        "PRAGMA synchronous=NORMAL;
-         PRAGMA busy_timeout=5000;
-         PRAGMA cache_size=-64000;
-         PRAGMA analysis_limit=400;",
-    )?;
+    conn.pragma_update(None, "synchronous", "NORMAL")?;
+    conn.pragma_update(None, "busy_timeout", 5000_i64)?;
+    let cache_size = storage
+        .sqlite_page_cache_kib_per_connection()
+        .map_err(|error| {
+            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                error.to_string(),
+            )))
+        })?;
+    conn.pragma_update(None, "cache_size", cache_size)?;
+    let mmap_size = storage.sqlite_mmap_bytes_i64().map_err(|error| {
+        rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            error.to_string(),
+        )))
+    })?;
+    conn.pragma_update(None, "mmap_size", mmap_size)?;
+    conn.pragma_update(None, "analysis_limit", 400_i64)?;
     Ok(())
 }
 

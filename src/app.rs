@@ -186,6 +186,7 @@ pub use models::{
     app_relationship_summary,
     topology_findings,
 };
+pub use services::wal_checkpoint_complete;
 // Transport-facing constants re-exported so surfaces (mcp/schemas.rs) never
 // import db:: directly — app/ is the only db consumer (full-review AL1).
 pub(crate) use crate::db::{PATTERN_SCAN_LIMIT_MAX, SEVERITY_LEVELS};

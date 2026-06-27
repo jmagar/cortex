@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use chrono::Utc;
@@ -96,6 +96,10 @@ pub fn db_wal_checkpoint(pool: &DbPool, mode: &str) -> Result<(i64, i64, i64)> {
         ))
     })?;
     Ok(result)
+}
+
+pub fn wal_checkpoint_complete(busy: i64, log_frames: i64, checkpointed_frames: i64) -> bool {
+    busy == 0 && checkpointed_frames >= log_frames
 }
 
 pub fn db_incremental_vacuum(pool: &DbPool, pages: u32) -> Result<()> {
@@ -456,7 +460,7 @@ pub fn enforce_storage_budget_with_state(
             fts_incremental_merge(pool, deleted_log_rows, 0);
         }
 
-        checkpoint_wal_and_incremental_vacuum(pool)?;
+        checkpoint_wal_and_incremental_vacuum(pool, config)?;
     }
 
     tracing::debug!(
@@ -1074,16 +1078,55 @@ fn reconcile_hosts(pool: &DbPool, hostnames: &[String]) -> Result<()> {
     Ok(())
 }
 
-fn checkpoint_wal_and_incremental_vacuum(pool: &DbPool) -> Result<()> {
-    let conn = pool.get()?;
-    match conn.execute_batch("PRAGMA wal_checkpoint(PASSIVE);") {
-        Err(e) => {
-            tracing::warn!(error = %e, "WAL checkpoint skipped (non-fatal)");
+pub fn maybe_checkpoint_wal_by_size(
+    pool: &DbPool,
+    db_path: &Path,
+    threshold_bytes: u64,
+) -> Result<Option<(i64, i64, i64)>> {
+    if threshold_bytes == 0 {
+        return Ok(None);
+    }
+    let wal_path = sqlite_sidecar_path(db_path, "wal");
+    let wal_size = match std::fs::metadata(&wal_path) {
+        Ok(metadata) => metadata.len(),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    if wal_size < threshold_bytes {
+        return Ok(None);
+    }
+    db_wal_checkpoint(pool, "passive").map(Some)
+}
+
+fn checkpoint_wal_and_incremental_vacuum(pool: &DbPool, config: &StorageConfig) -> Result<()> {
+    match maybe_checkpoint_wal_by_size(
+        pool,
+        &config.db_path,
+        config.wal_checkpoint_threshold_bytes(),
+    ) {
+        Ok(Some((busy, log_frames, checkpointed_frames))) => {
+            if busy != 0 || checkpointed_frames < log_frames {
+                tracing::warn!(
+                    busy,
+                    log_frames,
+                    checkpointed_frames,
+                    "WAL threshold checkpoint incomplete"
+                );
+            } else {
+                tracing::debug!(
+                    busy,
+                    log_frames,
+                    checkpointed_frames,
+                    "WAL threshold checkpoint completed"
+                );
+            }
         }
-        _ => {
-            tracing::debug!("WAL checkpoint completed");
+        Ok(None) => tracing::debug!("WAL threshold checkpoint skipped"),
+        Err(error) => {
+            tracing::warn!(error = %error, "WAL threshold checkpoint skipped (non-fatal)");
         }
     }
+    let conn = pool.get()?;
     let _write_guard = crate::db::write_lock();
     match conn.execute_batch("PRAGMA incremental_vacuum(1000);") {
         Err(e) => {
@@ -1181,15 +1224,16 @@ fn mb_to_bytes(mb: u64) -> u64 {
 
 fn physical_db_size_bytes(db_path: &Path) -> Result<u64> {
     let mut total = file_size_if_exists(db_path)?;
-    total += file_size_if_exists(&db_path.with_extension(format!(
-        "{}-wal",
-        db_path.extension().and_then(|ext| ext.to_str()).unwrap_or_default()
-    )))?;
-    total += file_size_if_exists(&db_path.with_extension(format!(
-        "{}-shm",
-        db_path.extension().and_then(|ext| ext.to_str()).unwrap_or_default()
-    )))?;
+    total += file_size_if_exists(&sqlite_sidecar_path(db_path, "wal"))?;
+    total += file_size_if_exists(&sqlite_sidecar_path(db_path, "shm"))?;
     Ok(total)
+}
+
+pub(crate) fn sqlite_sidecar_path(db_path: &Path, suffix: &str) -> PathBuf {
+    let mut path = db_path.as_os_str().to_os_string();
+    path.push("-");
+    path.push(suffix);
+    PathBuf::from(path)
 }
 
 fn file_size_if_exists(path: &Path) -> Result<u64> {

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.34.2] - 2026-06-25
+
+### Fixed
+
+- Bound SQLite memory behavior for large Cortex databases by deriving per-connection page cache from a total pool budget, applying bounded mmap settings, limiting concurrent heavy reads, classifying SQLite busy/locked errors as retryable, and exposing cache/WAL/cgroup diagnostics in DB status.
+
 ## [1.34.1] - 2026-06-22
 
 ### Added

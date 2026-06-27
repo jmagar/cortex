@@ -26,6 +26,34 @@ fn anyhow_errors_convert_to_internal_service_errors() {
 }
 
 #[test]
+fn classify_db_error_promotes_sqlite_busy_to_retryable_busy() {
+    let error = rusqlite::Error::SqliteFailure(
+        rusqlite::ffi::Error {
+            code: rusqlite::ErrorCode::DatabaseBusy,
+            extended_code: rusqlite::ffi::SQLITE_BUSY,
+        },
+        Some("database is locked".to_string()),
+    );
+
+    let classified = ServiceError::classify_db_error(anyhow::Error::new(error));
+    assert!(matches!(classified, ServiceError::Busy(message) if message == "database_busy"));
+}
+
+#[test]
+fn classify_db_error_promotes_sqlite_locked_to_retryable_busy() {
+    let error = rusqlite::Error::SqliteFailure(
+        rusqlite::ffi::Error {
+            code: rusqlite::ErrorCode::DatabaseLocked,
+            extended_code: rusqlite::ffi::SQLITE_LOCKED,
+        },
+        Some("database table is locked".to_string()),
+    );
+
+    let classified = ServiceError::classify_db_error(anyhow::Error::new(error));
+    assert!(matches!(classified, ServiceError::Busy(message) if message == "database_busy"));
+}
+
+#[test]
 fn typed_variants_display_correctly() {
     assert_eq!(
         ServiceError::DatabaseTimeout.to_string(),

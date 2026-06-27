@@ -332,7 +332,7 @@ pub(super) const ACTION_SPECS: &[ActionSpec] = &[
         "ai_correlate",
         Read,
         "Correlate AI transcript events with syslog",
-        Moderate,
+        Expensive,
         AiCorrelate
     ),
     action_spec!(
@@ -362,7 +362,7 @@ pub(super) const ACTION_SPECS: &[ActionSpec] = &[
         "project_context",
         Read,
         "Full project context from AI transcripts",
-        Moderate,
+        Expensive,
         ProjectContext
     ),
     action_spec!(
@@ -549,6 +549,15 @@ pub(super) const ACTION_SPECS: &[ActionSpec] = &[
 /// and scope table cannot drift.
 pub(super) fn action_names() -> Vec<&'static str> {
     ACTION_SPECS.iter().map(|s| s.name).collect()
+}
+
+#[cfg(test)]
+pub(crate) fn expensive_action_names_for_test() -> Vec<&'static str> {
+    ACTION_SPECS
+        .iter()
+        .filter(|spec| spec.cost == Cost::Expensive)
+        .map(|spec| spec.name)
+        .collect()
 }
 
 /// Find the executable handler for a registered action.

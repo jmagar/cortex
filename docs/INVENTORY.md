@@ -123,7 +123,11 @@ methods as the MCP actions.
 | `CORTEX_ALLOWED_ORIGINS` | no | (none) | no |
 | `CORTEX_API_TOKEN` | yes (always-on `/api/*`) | (none) | yes |
 | `CORTEX_DB_PATH` | no | `/data/cortex.db` | no |
-| `CORTEX_POOL_SIZE` | no | `4` | no |
+| `CORTEX_POOL_SIZE` | no | `8` | no |
+| `CORTEX_SQLITE_PAGE_CACHE_MB` | no | `128` | no |
+| `CORTEX_SQLITE_MMAP_MB` | no | `256` | no |
+| `CORTEX_HEAVY_READ_CONCURRENCY` | no | `1` | no |
+| `CORTEX_WAL_CHECKPOINT_MB` | no | `256` | no |
 | `CORTEX_RETENTION_DAYS` | no | `90` | no |
 | `CORTEX_MAX_DB_SIZE_MB` | no | `1024` | no |
 | `CORTEX_RECOVERY_DB_SIZE_MB` | no | `900` | no |

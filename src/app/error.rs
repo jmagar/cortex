@@ -2,7 +2,7 @@ use thiserror::Error;
 
 /// Typed service-layer errors.
 ///
-/// Prefer specific variants over `Internal` at sqlx call sites. Use
+/// Prefer specific variants over `Internal` at SQLite/pool call sites. Use
 /// `Internal` only for genuinely opaque errors (anyhow wrapping, etc.).
 /// The `#[from] anyhow::Error` impl on `Internal` allows `?` on `anyhow`
 /// result chains until all call sites are migrated to explicit `map_err`.
@@ -21,7 +21,7 @@ pub enum ServiceError {
     #[error("{0}")]
     NotFound(String),
 
-    /// A SQLite / sqlx pool timeout was detected. Semantic alias for `Busy`
+    /// A SQLite / r2d2 pool timeout was detected. Semantic alias for `Busy`
     /// that lets callers distinguish pool starvation from other transient
     /// errors without downcasting `anyhow::Error`.
     #[error("database timeout: pool did not yield a connection in time")]
@@ -45,6 +45,43 @@ pub enum ServiceError {
 }
 
 pub type ServiceResult<T> = Result<T, ServiceError>;
+
+impl ServiceError {
+    pub(crate) fn classify_db_error(error: anyhow::Error) -> Self {
+        match error.downcast::<ServiceError>() {
+            Ok(service_error) => service_error,
+            Err(error) => {
+                if let Some(sqlite) = error.downcast_ref::<rusqlite::Error>() {
+                    if is_retryable_sqlite_error(sqlite) {
+                        return ServiceError::Busy("database_busy".to_string());
+                    }
+                }
+
+                if let Some(pool_error) = error.downcast_ref::<r2d2::Error>() {
+                    let message = pool_error.to_string().to_ascii_lowercase();
+                    if message.contains("timed out") || message.contains("timeout") {
+                        return ServiceError::DatabaseTimeout;
+                    }
+                }
+
+                ServiceError::Internal(error)
+            }
+        }
+    }
+}
+
+fn is_retryable_sqlite_error(error: &rusqlite::Error) -> bool {
+    matches!(
+        error,
+        rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error {
+                code: rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked,
+                ..
+            },
+            _
+        )
+    )
+}
 
 #[cfg(test)]
 #[path = "error_tests.rs"]

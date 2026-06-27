@@ -959,12 +959,16 @@ phase_cli_parity() {
   #   - timestamps/dates (server-side `now()`-style fields)
   #   - elapsed_ms / duration counters
   #   - request-scoped ids (run_id, request_id)
-  # Recursively walks the structure and deletes the keys wherever found.
+  #   - live cgroup counters sampled from transport-specific runtimes
+  # Recursively walks the structure, deleting volatile non-contract keys and
+  # replacing volatile cgroup values with sentinels so field presence/type
+  # drift still fails parity.
   local jq_strip='
     def strip:
       if type == "object" then
         with_entries(
           select(.key | test("^(generated_at|elapsed_ms|duration_ms|started_at|finished_at|request_id|run_id|timestamp|ts|now)$") | not)
+          | if (.key | test("^cgroup_memory_(current|peak)_bytes$")) then .value = "__volatile_number_or_null__" else . end
         ) | map_values(strip)
       elif type == "array" then map(strip)
       else . end;
