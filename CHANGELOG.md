@@ -11,8 +11,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Preserve the Codex plugin scanner PR gate while completing the sidecar-test
-  refactor.
 - Tighten the split `map_findings`, MCP prompt, and assessment module visibility
   so helper modules match their filesystem layout without test-only exposure.
 - Publish both bare and `v`-prefixed Docker image tags so the MCP registry image
