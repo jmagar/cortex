@@ -1,5 +1,6 @@
 use super::super::graph_safety::*;
 use super::super::*;
+use super::collector_health::{graph_projection_not_ready, has_core_collector_degradation};
 use super::{InventoryReadIssue, MapFindingContext};
 use crate::app::topology_findings as finding_const;
 use crate::app::topology_findings::reason as reason_const;
@@ -7,19 +8,6 @@ use crate::inventory::{
     InventoryConfig, inventory_status, is_not_found_error, read_inventory_cache,
 };
 use std::collections::{BTreeMap, HashSet};
-
-#[path = "collector_health.rs"]
-mod collector_health;
-#[path = "risky_mounts.rs"]
-mod risky_mounts;
-
-pub(super) use collector_health::{
-    collector_health_findings, graph_projection_health_finding, graph_projection_not_ready,
-    has_core_collector_degradation,
-};
-pub(super) use risky_mounts::risky_mount_findings;
-#[cfg(test)]
-pub(super) use risky_mounts::{classify_mount, safe_mount_target};
 pub(in crate::app::services::map_findings) async fn read_map_finding_context()
 -> ServiceResult<MapFindingContext> {
     let config = InventoryConfig::from_env();
@@ -140,7 +128,7 @@ fn public_route_evidence(
     )
 }
 
-fn graph_row_evidence(
+pub(in crate::app::services::map_findings) fn graph_row_evidence(
     evidence_id: Option<i64>,
     safe_excerpt: Option<String>,
     evidence_limit: usize,
@@ -155,7 +143,10 @@ fn graph_row_evidence(
     )
 }
 
-fn bounded_evidence(evidence: Vec<TopologyFindingEvidence>, limit: usize) -> BoundedEvidence {
+pub(in crate::app::services::map_findings) fn bounded_evidence(
+    evidence: Vec<TopologyFindingEvidence>,
+    limit: usize,
+) -> BoundedEvidence {
     let candidates = evidence
         .into_iter()
         .filter(|item| item.evidence_id.is_some() || item.safe_excerpt.is_some())
@@ -172,11 +163,11 @@ fn bounded_evidence(evidence: Vec<TopologyFindingEvidence>, limit: usize) -> Bou
 }
 
 #[derive(Debug)]
-struct BoundedEvidence {
-    items: Vec<TopologyFindingEvidence>,
-    total: usize,
-    truncated: bool,
-    omitted: usize,
+pub(in crate::app::services::map_findings) struct BoundedEvidence {
+    pub(in crate::app::services::map_findings) items: Vec<TopologyFindingEvidence>,
+    pub(in crate::app::services::map_findings) total: usize,
+    pub(in crate::app::services::map_findings) truncated: bool,
+    pub(in crate::app::services::map_findings) omitted: usize,
 }
 
 pub(in crate::app::services::map_findings) fn apply_findings_payload_budget(
@@ -212,7 +203,11 @@ fn findings_payload_size(findings: &[TopologyFinding]) -> usize {
         .unwrap_or(usize::MAX)
 }
 
-fn entity(entity_type: &str, key: &str, label: &str) -> TopologyFindingEntity {
+pub(in crate::app::services::map_findings) fn entity(
+    entity_type: &str,
+    key: &str,
+    label: &str,
+) -> TopologyFindingEntity {
     TopologyFindingEntity {
         entity_type: entity_type.to_string(),
         key: key.to_string(),
@@ -298,7 +293,7 @@ fn severity_rank(severity: &str) -> u8 {
     }
 }
 
-fn sanitize_token(value: &str) -> String {
+pub(in crate::app::services::map_findings) fn sanitize_token(value: &str) -> String {
     value
         .chars()
         .map(|ch| {

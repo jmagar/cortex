@@ -376,7 +376,7 @@ async fn read_bounded_stderr(stderr: tokio::process::ChildStderr) -> std::io::Re
 }
 
 mod gemini_stream;
-pub(crate) use gemini_stream::GeminiStreamState;
+use gemini_stream::GeminiStreamState;
 
 fn env_or_default(var_name: &str, default_program: &str) -> String {
     non_empty_env(var_name).unwrap_or_else(|| default_program.to_string())

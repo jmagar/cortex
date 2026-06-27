@@ -23,7 +23,7 @@ fn rendered_prompts_reference_cortex_tool_actions() {
 
 #[test]
 fn rendered_prompts_reference_only_known_actions() {
-    let known_actions = super::super::actions::action_names();
+    let known_actions = crate::mcp::actions::action_names();
     for (name, text) in rendered_prompt_texts() {
         for action in action_references(&text) {
             assert!(

@@ -1,4 +1,6 @@
+mod collector_health;
 mod finding_support;
+mod risky_mounts;
 use super::graph_safety::redact_graph_text;
 use super::*;
 use crate::app::topology_findings as finding_const;
@@ -170,17 +172,12 @@ impl CortexService {
     }
 }
 
-#[cfg(test)]
-use crate::inventory::schema::MountRef;
-use finding_support::{
-    RequestedFindingTypes, apply_findings_payload_budget, collector_health_findings,
-    finding_next_queries, finding_proof_queries, finding_sort_key, graph_projection_health_finding,
-    graph_projection_not_ready, has_core_collector_degradation, public_route_findings,
-    read_map_finding_context, risky_mount_findings,
+use collector_health::{
+    collector_health_findings, graph_projection_health_finding, graph_projection_not_ready,
+    has_core_collector_degradation,
 };
-#[cfg(test)]
-use finding_support::{classify_mount, safe_mount_target};
-
-#[cfg(test)]
-#[path = "map_findings_tests.rs"]
-mod tests;
+use finding_support::{
+    RequestedFindingTypes, apply_findings_payload_budget, finding_next_queries,
+    finding_proof_queries, finding_sort_key, public_route_findings, read_map_finding_context,
+};
+use risky_mounts::risky_mount_findings;

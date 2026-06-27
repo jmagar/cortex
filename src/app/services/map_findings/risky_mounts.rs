@@ -1,8 +1,9 @@
-use super::super::super::*;
-use super::super::MapFindingContext;
-use super::{entity, graph_row_evidence};
+use super::MapFindingContext;
+use super::finding_support::{entity, graph_row_evidence};
+use crate::app::models::TopologyFinding;
 use crate::app::topology_findings as finding_const;
 use crate::app::topology_findings::reason as reason_const;
+use crate::db;
 use crate::inventory::schema::{HomelabInventory, InventoryService, MountRef};
 use std::collections::BTreeMap;
 
@@ -88,7 +89,7 @@ fn risky_mount_finding(
     }
 }
 
-pub(in crate::app::services::map_findings) fn service_mount_index(
+fn service_mount_index(
     inventory: &HomelabInventory,
 ) -> BTreeMap<String, Vec<(&InventoryService, &MountRef)>> {
     let mut services = BTreeMap::new();
@@ -110,16 +111,14 @@ pub(in crate::app::services::map_findings) fn service_mount_index(
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(in crate::app::services::map_findings) struct MountRisk {
-    pub(in crate::app::services::map_findings) severity: &'static str,
-    pub(in crate::app::services::map_findings) reason_code: &'static str,
+struct MountRisk {
+    severity: &'static str,
+    reason_code: &'static str,
     source_kind: &'static str,
     remediation: &'static str,
 }
 
-pub(in crate::app::services::map_findings) fn classify_mount(
-    mount: &MountRef,
-) -> Option<MountRisk> {
+fn classify_mount(mount: &MountRef) -> Option<MountRisk> {
     let source = mount.source.as_deref().unwrap_or_default();
     let target = mount.target.as_str();
     if source == "/var/run/docker.sock" || target == "/var/run/docker.sock" {
@@ -202,7 +201,7 @@ fn canonical_component(value: &str) -> String {
     value.trim().to_ascii_lowercase()
 }
 
-pub(in crate::app::services::map_findings) fn safe_mount_target(target: &str) -> String {
+fn safe_mount_target(target: &str) -> String {
     match target {
         "/var/run/docker.sock" => "/var/run/docker.sock".to_string(),
         "/" => "/".to_string(),
@@ -211,3 +210,7 @@ pub(in crate::app::services::map_findings) fn safe_mount_target(target: &str) ->
         _ => "relative_mount_target".to_string(),
     }
 }
+
+#[cfg(test)]
+#[path = "risky_mounts_tests.rs"]
+mod tests;

@@ -2,14 +2,14 @@ use anyhow::{Result, anyhow, bail};
 use serde_json::Value;
 
 #[derive(Default)]
-pub(crate) struct GeminiStreamState {
+pub(super) struct GeminiStreamState {
     text: String,
     result_text: Option<String>,
     saw_success: bool,
 }
 
 impl GeminiStreamState {
-    pub(crate) fn handle_line<F>(&mut self, line: &str, on_delta: &mut F) -> Result<()>
+    pub(super) fn handle_line<F>(&mut self, line: &str, on_delta: &mut F) -> Result<()>
     where
         F: FnMut(&str) -> Result<()> + Send,
     {
@@ -89,7 +89,7 @@ impl GeminiStreamState {
         on_delta(delta)
     }
 
-    pub(crate) fn finish(self) -> Result<String> {
+    pub(super) fn finish(self) -> Result<String> {
         if !self.saw_success {
             bail!("Gemini headless stream ended without a success result");
         }

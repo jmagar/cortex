@@ -1,8 +1,9 @@
-use super::super::super::*;
-use super::super::{InventoryReadIssue, MapFindingContext};
-use super::{bounded_evidence, sanitize_token};
+use super::finding_support::{bounded_evidence, sanitize_token};
+use super::{InventoryReadIssue, MapFindingContext};
+use crate::app::models::{TopologyFinding, TopologyFindingEntity, TopologyFindingEvidence};
 use crate::app::topology_findings as finding_const;
 use crate::app::topology_findings::reason as reason_const;
+use crate::db;
 use crate::inventory::schema::CollectionError;
 use std::collections::BTreeMap;
 

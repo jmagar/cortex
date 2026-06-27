@@ -2,8 +2,8 @@ use rmcp::model::{Prompt, PromptArgument, PromptMessage, PromptMessageRole};
 use serde_json::Map;
 
 #[derive(Clone, Copy)]
-pub(super) struct PromptSpec {
-    pub(super) name: &'static str,
+struct PromptSpec {
+    name: &'static str,
     title: &'static str,
     description: &'static str,
     arguments: &'static [PromptArgSpec],
@@ -46,16 +46,14 @@ const CONTAINER_ARG: PromptArgSpec = PromptArgSpec {
     required: false,
 };
 
-#[path = "prompt_text.rs"]
-mod prompt_text;
-use prompt_text::{
+use super::prompt_text::{
     after_deploy_check_prompt, agent_change_correlation_prompt, auth_bruteforce_prompt,
     docker_container_regression_prompt, host_health_prompt, incident_triage_prompt,
     network_dns_failure_prompt, noise_reduction_prompt, security_auth_review_prompt,
     service_outage_prompt, storage_pressure_prompt, syslog_forwarding_gap_prompt,
 };
 
-pub(super) const PROMPTS: &[PromptSpec] = &[
+const PROMPTS: &[PromptSpec] = &[
     PromptSpec {
         name: "infra.incident-triage",
         title: "Incident Triage",
@@ -213,6 +211,10 @@ pub(in crate::mcp) fn prompt_definitions() -> Vec<Prompt> {
         })
         .collect()
 }
+
+#[cfg(test)]
+#[path = "catalog_tests.rs"]
+mod tests;
 
 pub(in crate::mcp) fn get_prompt(
     name: &str,

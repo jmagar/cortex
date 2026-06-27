@@ -3,8 +3,8 @@ date: 2026-06-27 00:00:38 EST
 repo: git@github.com:jmagar/cortex.git
 branch: codex/sibling-test-files
 head: acd0b85
-session id: 8e2881c3-9d86-4c87-b604-0d26f03652ea
-transcript: /home/jmagar/.claude/projects/-home-jmagar-workspace-cortex/8e2881c3-9d86-4c87-b604-0d26f03652ea.jsonl
+session id: redacted local Claude session id
+transcript: redacted local Claude transcript
 working directory: /home/jmagar/workspace/cortex
 worktree: /home/jmagar/workspace/cortex  acd0b857 [codex/sibling-test-files]
 pr: #98 refactor: move inline tests to sidecars (https://github.com/jmagar/cortex/pull/98)
@@ -220,7 +220,7 @@ The main risk is that the first v1 Ask workflow is intentionally conservative an
 - Active current branch PR #98: https://github.com/jmagar/cortex/pull/98
 - Merged commit: `6556232cb7f07b37c82f88b789cb7b6830247088`
 - Beads: `syslog-mcp-6b9tk.1`, `syslog-mcp-6b9tk.2`, `syslog-mcp-6b9tk.3`
-- Transcript checked: `/home/jmagar/.claude/projects/-home-jmagar-workspace-cortex/8e2881c3-9d86-4c87-b604-0d26f03652ea.jsonl`
+- Transcript checked: redacted local Claude transcript
 
 ## Open Questions
 
