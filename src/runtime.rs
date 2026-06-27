@@ -995,17 +995,29 @@ impl RuntimeCore {
                             );
                         }
                     }
-                    match db::db_wal_checkpoint(&pool, "passive") {
-                        Ok((busy, log_frames, checkpointed_frames)) => {
-                            if log_frames > 0 || busy != 0 {
+                    match db::maybe_checkpoint_wal_by_size(
+                        &pool,
+                        &storage.db_path,
+                        storage.wal_checkpoint_threshold_bytes(),
+                    ) {
+                        Ok(Some((busy, log_frames, checkpointed_frames))) => {
+                            if db::wal_checkpoint_complete(busy, log_frames, checkpointed_frames) {
                                 tracing::debug!(
                                     busy,
                                     log_frames,
                                     checkpointed_frames,
                                     "Periodic WAL checkpoint completed"
                                 );
+                            } else {
+                                tracing::warn!(
+                                    busy,
+                                    log_frames,
+                                    checkpointed_frames,
+                                    "Periodic WAL checkpoint incomplete"
+                                );
                             }
                         }
+                        Ok(None) => tracing::debug!("Periodic WAL checkpoint skipped"),
                         Err(e) => {
                             tracing::warn!(
                                 error = %e,

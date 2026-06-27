@@ -82,6 +82,41 @@ pub(crate) fn print_db_status_response(
     );
     println!(
         "{}: {}",
+        muted("sqlite_page_cache_mb"),
+        cyan(&status.sqlite_page_cache_mb.to_string())
+    );
+    println!(
+        "{}: {}",
+        muted("sqlite_page_cache_kib_per_connection"),
+        cyan(&status.sqlite_page_cache_kib_per_connection.to_string())
+    );
+    println!(
+        "{}: {}",
+        muted("sqlite_mmap_mb"),
+        cyan(&status.sqlite_mmap_mb.to_string())
+    );
+    println!(
+        "{}: {}",
+        muted("sqlite_mmap_bytes"),
+        cyan(&status.sqlite_mmap_bytes.to_string())
+    );
+    println!(
+        "{}: {}",
+        muted("heavy_read_concurrency"),
+        cyan(&status.heavy_read_concurrency.to_string())
+    );
+    println!(
+        "{}: {}",
+        muted("wal_checkpoint_threshold_bytes"),
+        cyan(&status.wal_checkpoint_threshold_bytes.to_string())
+    );
+    println!(
+        "{}: {}",
+        muted("cgroup_memory_status"),
+        primary(&status.cgroup_memory_status)
+    );
+    println!(
+        "{}: {}",
         muted("auto_vacuum"),
         cyan(&status.auto_vacuum.to_string())
     );

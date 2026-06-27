@@ -69,14 +69,19 @@ impl CortexService {
         let include_ok = req.include_ok.unwrap_or(true);
         let sort = req.sort.clone().unwrap_or_else(|| "pressure".into());
 
-        let entries = self
-            .run_db("fleet_state.latest", db::heartbeat_latest_all)
-            .await?;
+        let (entries, metrics_map) = self
+            .with_heavy_read_permit("fleet_state", || async move {
+                let entries = self
+                    .run_db("fleet_state.latest", db::heartbeat_latest_all)
+                    .await?;
 
-        let hb_ids: Vec<i64> = entries.iter().map(|e| e.heartbeat_id).collect();
-        let metrics_map = self
-            .run_db("fleet_state.metrics", move |pool| {
-                db::heartbeat_metric_snapshot_batch(pool, &hb_ids)
+                let hb_ids: Vec<i64> = entries.iter().map(|e| e.heartbeat_id).collect();
+                let metrics_map = self
+                    .run_db("fleet_state.metrics", move |pool| {
+                        db::heartbeat_metric_snapshot_batch(pool, &hb_ids)
+                    })
+                    .await?;
+                Ok((entries, metrics_map))
             })
             .await?;
 
@@ -215,7 +220,7 @@ impl CortexService {
         let to2 = to.clone();
         let hid = host_id.clone();
         let heartbeat_summaries = self
-            .run_db("correlate_state.heartbeats", move |pool| {
+            .run_heavy_db("correlate_state.heartbeats", move |pool| {
                 db::heartbeat_window_summaries(pool, &from2, &to2, hid.as_deref())
             })
             .await?;
@@ -231,7 +236,7 @@ impl CortexService {
             let sev_levels = correlate::severity_at_or_above(&severity_min)?;
             let fetch_limit = limit + 1;
             let logs = self
-                .run_db("correlate_state.logs", move |pool| {
+                .run_heavy_db("correlate_state.logs", move |pool| {
                     db::search_logs(
                         pool,
                         &db::SearchParams {

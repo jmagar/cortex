@@ -147,6 +147,10 @@ CORTEX_ALLOWED_ORIGINS=https://app  # optional; comma-separated extra Origin all
 # Storage
 CORTEX_DB_PATH=data/cortex.db
 CORTEX_POOL_SIZE=8                # MCP reads get pool_size - 1 permits (1 reserved for writer)
+CORTEX_SQLITE_PAGE_CACHE_MB=128   # total SQLite page-cache budget across pool
+CORTEX_SQLITE_MMAP_MB=256         # bounded mmap; resident mapped pages may count toward cgroup memory
+CORTEX_HEAVY_READ_CONCURRENCY=1   # shared service-layer limiter for expensive reads
+CORTEX_WAL_CHECKPOINT_MB=256      # WAL size threshold for bounded PASSIVE checkpoint attempts
 CORTEX_GRAPH_REFRESH_INTERVAL_SECS=300  # in-server graph projection scheduler; 0 disables (CLI rebuild still works)
 CORTEX_RETENTION_DAYS=90     # 0 = keep forever; hourly purge, err+ exempt (see Retention)
 CORTEX_MAX_DB_SIZE_MB=1024        # 0 = disable logical DB size guard (breach deletes oldest)

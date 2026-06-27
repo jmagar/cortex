@@ -234,7 +234,7 @@ impl CortexService {
         let from = parse_optional_timestamp(req.since.as_deref(), "since")?;
         let to = parse_optional_timestamp(req.until.as_deref(), "until")?;
         let result = self
-            .run_db("investigate_ai_incidents", move |pool| {
+            .run_heavy_db("investigate_ai_incidents", move |pool| {
                 db::investigate_ai_incidents(
                     pool,
                     &db::AiInvestigateParams {
@@ -454,7 +454,7 @@ impl CortexService {
             limit: req.limit,
         };
         let result = self
-            .run_db("project_context", move |pool| {
+            .run_heavy_db("project_context", move |pool| {
                 db::get_ai_project_context(pool, &params)
             })
             .await?;
@@ -535,7 +535,7 @@ impl CortexService {
             exclude_ai: false,
         };
         let mut rows = self
-            .run_db("correlate_events", move |pool| {
+            .run_heavy_db("correlate_events", move |pool| {
                 db::search_logs(pool, &params)
             })
             .await?;

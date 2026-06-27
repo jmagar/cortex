@@ -46,8 +46,8 @@ The guardrail can override the time-based exemption for high-severity rows
 | `storage.retention_days` | **90 days** | `src/config.rs::default_retention_days()` |
 | `storage.max_db_size_mb` | 1024 MB (1 GiB) | `src/config.rs::default_max_db_size_mb()` |
 | `storage.recovery_db_size_mb` | 900 MB | `src/config.rs::default_recovery_db_size_mb()` |
-| `storage.min_free_disk_mb` | 512 MB | `src/config.rs::default_min_free_disk_mb()` |
-| `storage.recovery_free_disk_mb` | 768 MB | `src/config.rs::default_recovery_free_disk_mb()` |
+| `storage.min_free_disk_mb` | 0 MB (disabled) | `src/config.rs::default_min_free_disk_mb()` |
+| `storage.recovery_free_disk_mb` | 0 MB (disabled) | `src/config.rs::default_recovery_free_disk_mb()` |
 | `storage.cleanup_interval_secs` | 60 s (guardrail tick) | `src/config.rs::default_cleanup_interval_secs()` |
 | `storage.cleanup_chunk_size` | 2000 rows / chunk | `src/config.rs::default_cleanup_chunk_size()` |
 | AdGuard tag retention (hardcoded) | **7 days** | `src/runtime.rs::ADGUARD_RETENTION_DAYS` |

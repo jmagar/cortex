@@ -66,6 +66,50 @@ fn test_init_pool_applies_busy_timeout_to_each_pooled_connection() {
 }
 
 #[test]
+fn init_pool_applies_sqlite_cache_budget_to_each_pooled_connection() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut config = test_storage_config(dir.path().join("cache-budget.db"));
+    config.pool_size = 2;
+    config.sqlite_page_cache_mb = 128;
+
+    let pool = init_pool(&config).unwrap();
+    let conn1 = pool.get().unwrap();
+    let conn2 = pool.get().unwrap();
+
+    let cache_1: i64 = conn1
+        .query_row("PRAGMA cache_size", [], |row| row.get(0))
+        .unwrap();
+    let cache_2: i64 = conn2
+        .query_row("PRAGMA cache_size", [], |row| row.get(0))
+        .unwrap();
+
+    assert_eq!(cache_1, -65_536);
+    assert_eq!(cache_2, -65_536);
+}
+
+#[test]
+fn init_pool_applies_sqlite_mmap_to_each_pooled_connection() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut config = test_storage_config(dir.path().join("mmap.db"));
+    config.pool_size = 2;
+    config.sqlite_mmap_mb = 32;
+
+    let pool = init_pool(&config).unwrap();
+    let conn1 = pool.get().unwrap();
+    let conn2 = pool.get().unwrap();
+
+    let mmap_1: i64 = conn1
+        .query_row("PRAGMA mmap_size", [], |row| row.get(0))
+        .unwrap();
+    let mmap_2: i64 = conn2
+        .query_row("PRAGMA mmap_size", [], |row| row.get(0))
+        .unwrap();
+
+    assert_eq!(mmap_1, 32 * 1024 * 1024);
+    assert_eq!(mmap_2, 32 * 1024 * 1024);
+}
+
+#[test]
 fn init_db_creates_heartbeat_schema_migration_15() {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("heartbeat.db");

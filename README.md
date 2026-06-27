@@ -862,7 +862,11 @@ reopens files on rename/create rotation or truncation. Lines are bounded by
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `CORTEX_DB_PATH` | no | `/data/cortex.db` | SQLite database path |
-| `CORTEX_POOL_SIZE` | no | `4` | SQLite connection pool size. MCP/REST reads get `pool_size - 1` permits; one connection is reserved for the ingest writer. |
+| `CORTEX_POOL_SIZE` | no | `8` | SQLite connection pool size. MCP/REST reads get `pool_size - 1` permits; one connection is reserved for the ingest writer. |
+| `CORTEX_SQLITE_PAGE_CACHE_MB` | no | `128` | Total SQLite page-cache budget across the pool; divided by `pool_size` before `PRAGMA cache_size`. |
+| `CORTEX_SQLITE_MMAP_MB` | no | `256` | Bounded SQLite mmap size. Resident mapped pages may still count toward cgroup memory. |
+| `CORTEX_HEAVY_READ_CONCURRENCY` | no | `1` | Shared service-layer limiter for expensive read actions. |
+| `CORTEX_WAL_CHECKPOINT_MB` | no | `256` | WAL size threshold for bounded PASSIVE checkpoint attempts. |
 | `CORTEX_RETENTION_DAYS` | no | `90` | Days to retain logs. `0` = keep forever. Purge runs hourly; err+ severities are exempt (see [Retention Policy](#retention-policy)). |
 | `CORTEX_MAX_DB_SIZE_MB` | no | `1024` | Logical DB size trigger: breach deletes oldest logs. `0` = disabled. |
 | `CORTEX_RECOVERY_DB_SIZE_MB` | no | `900` | Cleanup target after DB size trigger. Must be less than max. |
@@ -900,7 +904,11 @@ tcp_idle_timeout_secs = 300
 
 [storage]
 db_path = "data/cortex.db"
-pool_size = 4
+pool_size = 8
+sqlite_page_cache_mb = 128
+sqlite_mmap_mb = 256
+heavy_read_concurrency = 1
+wal_checkpoint_mb = 256
 retention_days = 90   # 0 = keep forever
 wal_mode = true
 max_db_size_mb = 1024
@@ -1281,7 +1289,7 @@ The internal write channel holds up to `CORTEX_WRITE_CHANNEL_CAPACITY` parsed me
 Point multiple hosts at the same cortex instance. Each sender's `hostname` field (from the syslog message) is recorded and indexed. Use `cortex hosts` to see all senders. Filter by `hostname` in `cortex search` and `cortex tail`. Use `cortex correlate` to find related events across hosts within a time window.
 
 For large fleets, consider:
-- Increasing `CORTEX_POOL_SIZE` (default 4) for higher read concurrency
+- Increasing `CORTEX_POOL_SIZE` (default 8) for higher read concurrency
 - Increasing `CORTEX_BATCH_SIZE` and `CORTEX_FLUSH_INTERVAL` to reduce write overhead
 - Setting `CORTEX_RETENTION_DAYS` to balance history depth against disk cost
 
@@ -1422,7 +1430,7 @@ At typical homelab scale (1–20 hosts, thousands of messages per day):
 - FTS5 with porter stemming adds minimal overhead over plain SQL queries
 - `PRAGMA cache_size=-64000` allocates ~64 MB page cache per connection
 - `PRAGMA synchronous=NORMAL` balances durability and throughput
-- Connection pool (default 4) satisfies concurrent MCP requests without blocking
+- Connection pool (default 8) satisfies concurrent MCP requests without blocking
 
 For higher ingest rates (IoT, high-traffic network devices):
 
