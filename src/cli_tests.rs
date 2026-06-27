@@ -97,9 +97,9 @@ fn parse_tail_binds_positional_to_host_with_explicit_count() {
 }
 
 #[test]
-fn parse_service_logs_accepts_time_range_and_json() {
+fn parse_compose_service_logs_accepts_time_range_and_json() {
     let parsed = CliCommand::parse(strings(&[
-        "service",
+        "compose",
         "logs",
         "cortex-sessions-watch",
         "--since",
@@ -113,13 +113,22 @@ fn parse_service_logs_accepts_time_range_and_json() {
 
     assert_eq!(
         parsed,
-        CliCommand::Service(ServiceCommand::Logs(ServiceLogsArgs {
+        CliCommand::Compose(ComposeCommand::ServiceLogs(ServiceLogsArgs {
             service: "cortex-sessions-watch".into(),
             since: Some("2026-05-19 19:55:00".into()),
             until: Some("2026-05-19 20:05:00".into()),
             tail: Some(50),
             json: true,
         }))
+    );
+}
+
+#[test]
+fn parse_old_service_top_level_command_is_removed() {
+    let err = CliCommand::parse(strings(&["service", "logs", "cortex"])).unwrap_err();
+    assert!(
+        err.to_string().contains("unknown CLI command"),
+        "expected service to be rejected, got: {err}"
     );
 }
 
@@ -199,23 +208,14 @@ fn parse_unknown_option_errors() {
     assert!(err.to_string().contains("unknown stats option"));
 }
 
-#[test]
-fn run_compose_rejects_non_compose_commands_before_live_probes() {
-    let error = run_compose(CliCommand::Stats(OutputArgs::default()))
-        .unwrap_err()
-        .to_string();
-
-    assert!(error.contains("non-compose command"));
-}
-
 #[tokio::test]
-async fn run_service_no_db_rejects_non_service_commands_before_db_access() {
-    let error = run_service_no_db(CliCommand::Stats(OutputArgs::default()))
+async fn run_compose_rejects_non_compose_commands_before_live_probes() {
+    let error = run_compose(CliCommand::Stats(OutputArgs::default()))
         .await
         .unwrap_err()
         .to_string();
 
-    assert!(error.contains("non-service command"));
+    assert!(error.contains("non-compose command"));
 }
 
 #[tokio::test]
@@ -895,7 +895,7 @@ fn ai_watch_coordination_skipped_when_unit_missing() {
     let env_path = std::path::PathBuf::from("/nonexistent-env-9f3e");
     let mut cache = DoctorCache::default();
     let phase = sessions_watch_coordination_phase(&env_path, &mut cache);
-    assert_eq!(phase.name, "ai-watch-coord");
+    assert_eq!(phase.name, "sessions-watch-coord");
     assert!(
         matches!(phase.status, SetupStatus::Skipped | SetupStatus::Warn),
         "expected Skipped or Warn, got {:?} (detail={})",
@@ -1467,20 +1467,53 @@ fn parse_sessions_assess_filter_flags_forwarded() {
 // ── Surface parity gap closure (2026-05-22) ─────────────────────────────────
 
 #[test]
-fn parse_silent_hosts_with_minutes_and_json() {
+fn parse_hosts_silent_with_minutes_and_json() {
     let cmd = CliCommand::parse(strings(&[
-        "silent-hosts",
+        "hosts",
+        "silent",
         "--silent-minutes",
         "120",
         "--json",
     ]))
-    .expect("parse silent-hosts");
+    .expect("parse hosts silent");
     match cmd {
-        CliCommand::SilentHosts(args) => {
+        CliCommand::Hosts(HostsCommand::Silent(args)) => {
             assert_eq!(args.silent_minutes, Some(120));
             assert!(args.json);
         }
-        other => panic!("expected SilentHosts, got {other:?}"),
+        other => panic!("expected Hosts::Silent, got {other:?}"),
+    }
+}
+
+#[test]
+fn parse_hosts_sources_with_limit_offset_and_json() {
+    let cmd = CliCommand::parse(strings(&[
+        "hosts",
+        "sources",
+        "--limit",
+        "10",
+        "--offset=5",
+        "--json",
+    ]))
+    .expect("parse hosts sources");
+    match cmd {
+        CliCommand::Hosts(HostsCommand::Sources(args)) => {
+            assert_eq!(args.limit, Some(10));
+            assert_eq!(args.offset, Some(5));
+            assert!(args.json);
+        }
+        other => panic!("expected Hosts::Sources, got {other:?}"),
+    }
+}
+
+#[test]
+fn parse_old_host_inventory_top_level_commands_are_removed() {
+    for command in ["source-ips", "silent-hosts"] {
+        let err = CliCommand::parse(strings(&[command])).unwrap_err();
+        assert!(
+            err.to_string().contains("unknown CLI command"),
+            "expected {command} to be rejected, got: {err}"
+        );
     }
 }
 

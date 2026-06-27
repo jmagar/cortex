@@ -1,4 +1,4 @@
-//! CLI dispatch for log-analytics commands (silent-hosts, clock-skew,
+//! CLI dispatch for log-analytics commands (hosts silent, clock-skew,
 //! anomalies, compare, apps). Split out of `dispatch_surface_gap` to keep each
 //! module under the production module-size budget; the heartbeat/graph state
 //! commands remain in `dispatch_surface_gap`.

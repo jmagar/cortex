@@ -50,7 +50,11 @@ pub(crate) async fn run(mode: CliMode, command: CliCommand) -> Result<()> {
         CliCommand::Filter(args) => dispatch::run_filter(&mode, args).await,
         CliCommand::Tail(args) => dispatch::run_tail(&mode, args).await,
         CliCommand::Errors(args) => dispatch::run_errors(&mode, args).await,
-        CliCommand::Hosts(args) => dispatch::run_hosts(&mode, args).await,
+        CliCommand::Hosts(command) => match command {
+            super::HostsCommand::List(args) => dispatch::run_hosts(&mode, args).await,
+            super::HostsCommand::Sources(args) => dispatch::run_source_ips(&mode, args).await,
+            super::HostsCommand::Silent(args) => dispatch::run_silent_hosts(&mode, args).await,
+        },
         CliCommand::Incident(args) => dispatch::run_incident(&mode, args).await,
         CliCommand::Correlate(args) => dispatch::run_correlate(&mode, args).await,
         CliCommand::Stats(args) => dispatch::run_stats(&mode, args).await,
@@ -134,7 +138,6 @@ pub(crate) async fn run(mode: CliMode, command: CliCommand) -> Result<()> {
         // Compose/Setup/Config are local-only and main::run_cli reroutes them BEFORE
         // calling run(). If we reach here, the front door was bypassed —
         // bail with a clear internal-error message rather than a placeholder.
-        CliCommand::SourceIps(args) => dispatch::run_source_ips(&mode, args).await,
         CliCommand::Timeline(args) => dispatch::run_timeline(&mode, args).await,
         CliCommand::Patterns(args) => dispatch::run_patterns(&mode, args).await,
         CliCommand::IngestRate(args) => dispatch::run_ingest_rate(&mode, args).await,
@@ -148,7 +151,6 @@ pub(crate) async fn run(mode: CliMode, command: CliCommand) -> Result<()> {
             NotifyCommand::Test(args) => dispatch::run_notify_test(&mode, args).await,
         },
         // Surface parity gap closure (2026-05-22)
-        CliCommand::SilentHosts(args) => dispatch::run_silent_hosts(&mode, args).await,
         CliCommand::ClockSkew(args) => dispatch::run_clock_skew(&mode, args).await,
         CliCommand::Anomalies(args) => dispatch::run_anomalies(&mode, args).await,
         CliCommand::Compare(args) => dispatch::run_compare(&mode, args).await,
@@ -166,9 +168,9 @@ pub(crate) async fn run(mode: CliMode, command: CliCommand) -> Result<()> {
             GraphCommand::Status(args) => dispatch::run_graph_status(&mode, args).await,
             GraphCommand::Rebuild(args) => dispatch::run_graph_rebuild(&mode, args).await,
         },
-        CliCommand::Compose(_) | CliCommand::Service(_) | CliCommand::Setup(_) => {
+        CliCommand::Compose(_) | CliCommand::Setup(_) => {
             bail!(
-                "internal: compose/service/setup must be dispatched by main::run_cli before reaching cli::run()"
+                "internal: compose/setup must be dispatched by main::run_cli before reaching cli::run()"
             )
         }
         CliCommand::Config(_) => {

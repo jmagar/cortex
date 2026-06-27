@@ -39,7 +39,7 @@ fn per_command_help_shows_detailed_flags() {
 }
 
 #[test]
-fn ai_cli_add_and_query_commands_emit_json() {
+fn sessions_cli_add_and_query_commands_emit_json() {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("cli-ai.db");
     let transcript = dir.path().join("session.jsonl");
@@ -54,29 +54,32 @@ fn ai_cli_add_and_query_commands_emit_json() {
 
     let add = run_command(
         &db_path,
-        &["ai", "add", "--file", transcript_path, "--json"],
+        &["sessions", "add", "--file", transcript_path, "--json"],
     );
-    assert!(add.status.success(), "ai add failed: {add:?}");
+    assert!(add.status.success(), "sessions add failed: {add:?}");
     let add_json: serde_json::Value = serde_json::from_slice(&add.stdout).unwrap();
     assert_eq!(add_json["ingested"], 1);
 
     let index = run_command(
         &db_path,
-        &["ai", "index", "--path", transcript_path, "--json"],
+        &["sessions", "index", "--path", transcript_path, "--json"],
     );
-    assert!(index.status.success(), "ai index failed: {index:?}");
+    assert!(index.status.success(), "sessions index failed: {index:?}");
     let index_json: serde_json::Value = serde_json::from_slice(&index.stdout).unwrap();
     assert_eq!(index_json["skipped_dupes"], 1);
 
-    let search = run_command(&db_path, &["ai", "search", "hello", "--json"]);
-    assert!(search.status.success(), "ai search failed: {search:?}");
+    let search = run_command(&db_path, &["sessions", "search", "hello", "--json"]);
+    assert!(
+        search.status.success(),
+        "sessions search failed: {search:?}"
+    );
     let search_json: serde_json::Value = serde_json::from_slice(&search.stdout).unwrap();
     assert_eq!(search_json["sessions"].as_array().unwrap().len(), 1);
 
     for args in [
-        &["ai", "blocks", "--json"][..],
-        &["ai", "tools", "--json"][..],
-        &["ai", "projects", "--json"][..],
+        &["sessions", "blocks", "--json"][..],
+        &["sessions", "tools", "--json"][..],
+        &["sessions", "projects", "--json"][..],
         &["sessions", "--json"][..],
     ] {
         let output = run_command(&db_path, args);
@@ -88,19 +91,22 @@ fn ai_cli_add_and_query_commands_emit_json() {
     let context = run_command(
         &db_path,
         &[
-            "ai",
+            "sessions",
             "context",
             "--project",
             cwd.to_str().unwrap(),
             "--json",
         ],
     );
-    assert!(context.status.success(), "ai context failed: {context:?}");
+    assert!(
+        context.status.success(),
+        "sessions context failed: {context:?}"
+    );
     serde_json::from_slice::<serde_json::Value>(&context.stdout).unwrap();
 }
 
 #[test]
-fn ai_transcript_tail_uses_human_transcript_layout() {
+fn sessions_transcript_tail_uses_human_transcript_layout() {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("cli-ai-human.db");
     let transcript = dir.path().join("session.jsonl");
@@ -113,8 +119,8 @@ fn ai_transcript_tail_uses_human_transcript_layout() {
         .to_str()
         .expect("transcript path should be UTF-8");
 
-    let add = run_command(&db_path, &["ai", "add", "--file", transcript_path]);
-    assert!(add.status.success(), "ai add failed: {add:?}");
+    let add = run_command(&db_path, &["sessions", "add", "--file", transcript_path]);
+    assert!(add.status.success(), "sessions add failed: {add:?}");
 
     let tail = run_command(&db_path, &["tail", "-n", "1"]);
     assert!(tail.status.success(), "tail failed: {tail:?}");
@@ -139,7 +145,7 @@ fn ai_transcript_tail_uses_human_transcript_layout() {
 }
 
 #[test]
-fn ai_cli_add_reports_parse_errors_and_exits_nonzero() {
+fn sessions_cli_add_reports_parse_errors_and_exits_nonzero() {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("cli-ai-bad.db");
     let transcript = dir.path().join("bad.jsonl");
@@ -154,9 +160,9 @@ fn ai_cli_add_reports_parse_errors_and_exits_nonzero() {
 
     let output = run_command(
         &db_path,
-        &["ai", "add", "--file", transcript_path, "--json"],
+        &["sessions", "add", "--file", transcript_path, "--json"],
     );
-    assert!(!output.status.success(), "ai add unexpectedly passed");
+    assert!(!output.status.success(), "sessions add unexpectedly passed");
     let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(json["ingested"], 1);
     assert_eq!(json["parse_errors"], 1);

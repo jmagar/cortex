@@ -19,12 +19,10 @@ const PARSER_TOKENS: &[&str] = &[
     "correlate",
     "stats",
     "compose",
-    "service",
     "setup",
     "db",
     "config",
     "inventory",
-    "source-ips",
     "entity",
     "graph",
     "timeline",
@@ -32,7 +30,6 @@ const PARSER_TOKENS: &[&str] = &[
     "ingest-rate",
     "sig",
     "notify",
-    "silent-hosts",
     "clock-skew",
     "anomalies",
     "compare",
@@ -45,7 +42,6 @@ const PARSER_TOKENS: &[&str] = &[
     "serve",
     "mcp",
     "doctor",
-    "deploy",
 ];
 
 #[test]
@@ -93,7 +89,7 @@ fn top_level_help_plain_lists_sections_and_commands() {
     assert!(out.contains("Quick Start"));
     assert!(out.contains("Commands"));
     assert!(out.contains("Search & Logs"));
-    assert!(out.contains("source-ips"));
+    assert!(out.contains("hosts"));
     assert!(out.contains("file-tail"));
     assert!(out.contains("→ Run cortex <command> --help"));
 }
@@ -189,7 +185,7 @@ fn classify_help_distinguishes_top_level_command_and_none() {
     );
     assert_eq!(
         classify_help(&v(&["sessions", "search", "--help"])),
-        HelpRequest::Command("ai search".to_string())
+        HelpRequest::Command("sessions".to_string())
     );
     assert_eq!(
         classify_help(&v(&["search", "--help"])),

@@ -386,7 +386,7 @@ pub(super) const ACTION_SPECS: &[ActionSpec] = &[
         Cheap,
         ListSourceIps,
         flags: &[],
-        examples: &["cortex source-ips"]
+        examples: &["cortex hosts sources"]
     ),
     action_spec!(
         "timeline",

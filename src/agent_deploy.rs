@@ -485,7 +485,7 @@ fn parse_env_file(contents: &str) -> Vec<(String, String)> {
 /// **flag > persisted > default** for each managed key, then carry every other
 /// key from the persisted env through unchanged (e.g. `CORTEX_AGENT_FILE_TAILS`).
 ///
-/// This makes an upgrade config-preserving: running `cortex deploy agent` with no
+/// This makes an upgrade config-preserving: running `cortex setup deploy agent` with no
 /// flags keeps the host's existing target, token, docker/journald settings, and
 /// custom additions, instead of resetting them to defaults. Output order is
 /// deterministic (managed block in a fixed order, then custom keys sorted).

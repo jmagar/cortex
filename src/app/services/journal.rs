@@ -76,7 +76,7 @@ fn journal_realtime_timestamp(micros: &str) -> Option<String> {
 }
 
 /// callers can invoke it without standing up a [`CortexService`] (and the
-/// SQLite pool that backs it) — `cortex service logs` is a self-debugging
+/// SQLite pool that backs it) — `cortex compose logs SERVICE` is a self-debugging
 /// surface that must work when the DB is corrupted, locked, or full.
 ///
 /// The `os` parameter is the `OsAdapter` to use for the journalctl shell-out.

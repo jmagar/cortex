@@ -12,16 +12,17 @@ pub(crate) use args::{
     DbCheckpointArgs, DbCommand, DbIntegrityArgs, DbIntegrityStatusArgs, DbStatusArgs,
     DbVacuumArgs, EntityArgs, FileTailAddArgs, FileTailCommand, FileTailIdArgs, FileTailListArgs,
     FilterArgs, GraphAroundArgs, GraphCommand, GraphEvidenceArgs, GraphExplainArgs,
-    GraphRebuildArgs, GraphStatusArgs, HeartbeatAgentArgs, HeartbeatCommand, IncidentArgs,
-    IngestRateArgs, InventoryArgs, InventoryCommand, NotifyRecentArgs, NotifyTestArgs, OutputArgs,
-    PatternsArgs, PluginHookArgs, SearchArgs, ServiceCommand, ServiceLogsArgs, SessionsAbuseArgs,
-    SessionsAddArgs, SessionsArgs, SessionsAskHistoryArgs, SessionsAssessArgs, SessionsBlocksArgs,
-    SessionsCheckpointsArgs, SessionsCommand, SessionsContextArgs, SessionsCorrelateArgs,
-    SessionsDoctorArgs, SessionsErrorsArgs, SessionsIncidentContextArgs, SessionsIncidentsArgs,
-    SessionsIndexArgs, SessionsInvestigateArgs, SessionsListArgs, SessionsOutputDetail,
-    SessionsPruneCheckpointsArgs, SessionsSearchArgs, SessionsSimilarArgs, SessionsWatchArgs,
-    SetupArgs, SetupCommand, ShellAtuinIndexArgs, ShellCommand, ShellIndexArgs, SigAckArgs,
-    SigListArgs, SigUnackArgs, SourceIpsArgs, TailArgs, TimeRangeArgs, TimelineArgs,
+    GraphRebuildArgs, GraphStatusArgs, HeartbeatAgentArgs, HeartbeatCommand, HostsCommand,
+    IncidentArgs, IngestRateArgs, InventoryArgs, InventoryCommand, NotifyRecentArgs,
+    NotifyTestArgs, OutputArgs, PatternsArgs, PluginHookArgs, SearchArgs, ServiceLogsArgs,
+    SessionsAbuseArgs, SessionsAddArgs, SessionsArgs, SessionsAskHistoryArgs, SessionsAssessArgs,
+    SessionsBlocksArgs, SessionsCheckpointsArgs, SessionsCommand, SessionsContextArgs,
+    SessionsCorrelateArgs, SessionsDoctorArgs, SessionsErrorsArgs, SessionsIncidentContextArgs,
+    SessionsIncidentsArgs, SessionsIndexArgs, SessionsInvestigateArgs, SessionsListArgs,
+    SessionsOutputDetail, SessionsPruneCheckpointsArgs, SessionsSearchArgs, SessionsSimilarArgs,
+    SessionsWatchArgs, SetupArgs, SetupCommand, ShellAtuinIndexArgs, ShellCommand, ShellIndexArgs,
+    SigAckArgs, SigListArgs, SigUnackArgs, SilentHostsArgs, SourceIpsArgs, TailArgs, TimeRangeArgs,
+    TimelineArgs,
 };
 pub(crate) use args_config::{
     ConfigCommand, ConfigGetArgs, ConfigListArgs, ConfigSetArgs, ConfigTarget, ConfigUnsetArgs,
@@ -131,7 +132,7 @@ pub(crate) fn run_completions(args: &[String]) -> Result<()> {
     completions::print_completions(shell)
 }
 
-pub(crate) fn run_compose(command: CliCommand) -> Result<()> {
+pub(crate) async fn run_compose(command: CliCommand) -> Result<()> {
     let CliCommand::Compose(command) = command else {
         bail!("run_compose called with non-compose command");
     };
@@ -173,6 +174,20 @@ pub(crate) fn run_compose(command: CliCommand) -> Result<()> {
                 eprint!("{}", output.stderr);
             }
             output_ops::ensure_command_success(&output)
+        }
+        ComposeCommand::ServiceLogs(args) => {
+            let json = args.json;
+            let report = cortex::app::run_service_logs(
+                ServiceLogsRequest {
+                    service: args.service,
+                    since: args.since,
+                    until: args.until,
+                    tail: args.tail,
+                },
+                &cortex::app::SystemOsAdapter,
+            )
+            .await?;
+            output_sessions::print_service_logs_response(&report, json)
         }
     }
 }
@@ -216,30 +231,6 @@ pub(crate) async fn run_inventory(command: InventoryCommand) -> Result<()> {
                 }
                 Ok(())
             }
-        }
-    }
-}
-
-/// DB-free entry point for `cortex service ...` — avoids opening the SQLite
-/// pool so this command remains usable when the DB is corrupted/locked/full.
-pub(crate) async fn run_service_no_db(command: CliCommand) -> Result<()> {
-    let CliCommand::Service(command) = command else {
-        bail!("internal: run_service_no_db called with non-service command");
-    };
-    match command {
-        ServiceCommand::Logs(args) => {
-            let json = args.json;
-            let report = cortex::app::run_service_logs(
-                ServiceLogsRequest {
-                    service: args.service,
-                    since: args.since,
-                    until: args.until,
-                    tail: args.tail,
-                },
-                &cortex::app::SystemOsAdapter,
-            )
-            .await?;
-            output_sessions::print_service_logs_response(&report, json)
         }
     }
 }

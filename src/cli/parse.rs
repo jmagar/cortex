@@ -1,10 +1,10 @@
 use anyhow::{Result, anyhow, bail};
 
-use super::parse_admin::{parse_compose, parse_db, parse_service, parse_setup, parse_stats};
+use super::parse_admin::{parse_compose, parse_db, parse_setup, parse_stats};
 use super::parse_command_log::{parse_agent_command, parse_shell};
 use super::parse_logs::{
     parse_correlate, parse_errors, parse_filter, parse_hosts, parse_incident, parse_ingest_rate,
-    parse_patterns, parse_search, parse_source_ips, parse_tail, parse_timeline,
+    parse_patterns, parse_search, parse_tail, parse_timeline,
 };
 use super::parse_sessions::parse_sessions_command;
 use super::{CliCommand, commands, parse_config, suggest};
@@ -23,18 +23,15 @@ pub(crate) const TOP_LEVEL_COMMANDS: &[&str] = &[
     "correlate",
     "stats",
     "compose",
-    "service",
     "setup",
     "db",
     "config",
     "inventory",
-    "source-ips",
     "timeline",
     "patterns",
     "ingest-rate",
     "sig",
     "notify",
-    "silent-hosts",
     "clock-skew",
     "anomalies",
     "compare",
@@ -65,12 +62,10 @@ pub(crate) fn parse_command(args: Vec<String>) -> Result<CliCommand> {
         "correlate" => parse_correlate(rest),
         "stats" => parse_stats(rest),
         "compose" => parse_compose(rest),
-        "service" => parse_service(rest),
         "setup" => parse_setup(rest),
         "db" => parse_db(rest),
         "config" => parse_config::parse_config(rest),
         "inventory" => parse_inventory(rest),
-        "source-ips" => parse_source_ips(rest),
         "timeline" => parse_timeline(rest),
         "patterns" => parse_patterns(rest),
         "ingest-rate" => parse_ingest_rate(rest),
@@ -79,7 +74,6 @@ pub(crate) fn parse_command(args: Vec<String>) -> Result<CliCommand> {
         "sig" => commands::sig::parse_sig(rest),
         "notify" => commands::notify::parse_notify(rest),
         // Surface parity gap closure (2026-05-22)
-        "silent-hosts" => commands::silent_hosts::parse_silent_hosts(rest),
         "clock-skew" => commands::clock_skew::parse_clock_skew(rest),
         "anomalies" => commands::anomalies::parse_anomalies(rest),
         "compare" => commands::compare::parse_compare(rest),

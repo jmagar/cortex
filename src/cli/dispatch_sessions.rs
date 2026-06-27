@@ -316,13 +316,11 @@ pub(crate) async fn run_ai_prune_checkpoints(
     print_prune_checkpoints_response(&response, json)
 }
 
-// ─── LOCAL-only AI commands (6) — error in HTTP mode ────────────────────────
+// ─── LOCAL-only session commands (6) — error in HTTP mode ───────────────────
 
 pub(crate) async fn run_ai_index(mode: &CliMode, args: SessionsIndexArgs) -> Result<()> {
     let service = match mode {
-        CliMode::Http(_) => {
-            bail!("ai index reads host ~/.claude/projects; omit --http")
-        }
+        CliMode::Http(_) => bail!("sessions index reads host ~/.claude/projects; omit --http"),
         CliMode::Local(service) => service,
     };
     let response = service
@@ -334,7 +332,7 @@ pub(crate) async fn run_ai_index(mode: &CliMode, args: SessionsIndexArgs) -> Res
 
 pub(crate) async fn run_ai_add(mode: &CliMode, args: SessionsAddArgs) -> Result<()> {
     let service = match mode {
-        CliMode::Http(_) => bail!("ai add reads a host file path; omit --http"),
+        CliMode::Http(_) => bail!("sessions add reads a host file path; omit --http"),
         CliMode::Local(service) => service,
     };
     let response = service.add_ai_file(args.file, args.force).await?;
@@ -345,7 +343,7 @@ pub(crate) async fn run_ai_add(mode: &CliMode, args: SessionsAddArgs) -> Result<
 pub(crate) async fn run_ai_doctor(mode: &CliMode, args: SessionsDoctorArgs) -> Result<()> {
     let service = match mode {
         CliMode::Http(_) => {
-            bail!("ai doctor checks host filesystem permissions; omit --http")
+            bail!("sessions doctor checks host filesystem permissions; omit --http")
         }
         CliMode::Local(service) => service,
     };

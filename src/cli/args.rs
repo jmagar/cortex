@@ -23,18 +23,16 @@ pub(crate) enum CliCommand {
     Filter(FilterArgs),
     Tail(TailArgs),
     Errors(TimeRangeArgs),
-    Hosts(OutputArgs),
+    Hosts(HostsCommand),
     Sessions(SessionsCommand),
     Incident(IncidentArgs),
     Correlate(CorrelateArgs),
     Stats(OutputArgs),
     Compose(ComposeCommand),
-    Service(ServiceCommand),
     Setup(SetupCommand),
     Db(DbCommand),
     Config(ConfigCommand),
     Inventory(InventoryCommand),
-    SourceIps(SourceIpsArgs),
     Timeline(TimelineArgs),
     Patterns(PatternsArgs),
     IngestRate(IngestRateArgs),
@@ -43,7 +41,6 @@ pub(crate) enum CliCommand {
     Shell(ShellCommand),
     AgentCommand(AgentCommandCommand),
     Heartbeat(HeartbeatCommand),
-    SilentHosts(SilentHostsArgs),
     ClockSkew(ClockSkewArgs),
     Anomalies(AnomaliesArgs),
     Compare(CompareArgs),
@@ -59,6 +56,13 @@ pub(crate) enum CliCommand {
     Complete(Vec<String>),
     /// Emit a shell completion script (`cortex completions <shell>`).
     Completions(Vec<String>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum HostsCommand {
+    List(OutputArgs),
+    Sources(SourceIpsArgs),
+    Silent(SilentHostsArgs),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -196,11 +200,7 @@ pub(crate) enum ComposeCommand {
     Restart(ComposeMutationArgs),
     Pull(ComposeMutationArgs),
     Logs(ComposeLogsArgs),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum ServiceCommand {
-    Logs(ServiceLogsArgs),
+    ServiceLogs(ServiceLogsArgs),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

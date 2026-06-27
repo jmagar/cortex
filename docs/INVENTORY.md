@@ -80,6 +80,8 @@ methods as the MCP actions.
 | `cortex tail` | `tail` | Recent log entries |
 | `cortex errors` | `errors` | Error/warning summary |
 | `cortex hosts` | `hosts` | Known host list |
+| `cortex hosts sources` | `source_ips` | Source identifiers with hostname breakdown |
+| `cortex hosts silent` | `silent_hosts` | Hosts older than a staleness threshold |
 | `cortex inventory refresh` | -- | Native refresh into `~/.cortex/inventory` |
 | `cortex inventory status` | -- | Cache freshness, collector status, warnings, and artifact paths |
 | `cortex filter` | `filter` | Structured filter-only log retrieval |

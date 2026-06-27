@@ -88,14 +88,6 @@ fn mode_parse_keeps_runtime_status_mcp_only() {
 }
 
 #[test]
-fn mode_parse_accepts_ai_namespace() {
-    assert!(matches!(
-        Mode::parse(vec!["ai".into(), "tools".into(), "--json".into()]).unwrap(),
-        Mode::Cli(_)
-    ));
-}
-
-#[test]
 fn mode_parse_accepts_graph_cli_commands() {
     assert!(matches!(
         Mode::parse(vec![
@@ -347,13 +339,20 @@ fn mode_parse_accepts_setup_doctor_namespace() {
 }
 
 #[test]
-fn mode_parse_accepts_deploy_namespace() {
+fn mode_parse_accepts_setup_deploy_namespace() {
     assert!(matches!(
-        Mode::parse(vec!["deploy".into(), "preflight".into(), "--json".into()]).unwrap(),
+        Mode::parse(vec![
+            "setup".into(),
+            "deploy".into(),
+            "preflight".into(),
+            "--json".into()
+        ])
+        .unwrap(),
         Mode::Deploy(_)
     ));
     assert!(matches!(
         Mode::parse(vec![
+            "setup".into(),
             "deploy".into(),
             "local".into(),
             "--dry-run".into(),
@@ -364,6 +363,7 @@ fn mode_parse_accepts_deploy_namespace() {
     ));
     assert!(matches!(
         Mode::parse(vec![
+            "setup".into(),
             "deploy".into(),
             "remote".into(),
             "tootie".into(),
@@ -375,6 +375,7 @@ fn mode_parse_accepts_deploy_namespace() {
     ));
     assert!(matches!(
         Mode::parse(vec![
+            "setup".into(),
             "deploy".into(),
             "agent".into(),
             "--hosts".into(),
@@ -395,20 +396,27 @@ fn mode_parse_accepts_deploy_namespace() {
 }
 
 #[test]
+fn mode_parse_rejects_top_level_deploy_namespace() {
+    let err = Mode::parse(vec!["deploy".into(), "preflight".into()]).unwrap_err();
+    assert!(err.to_string().contains("unknown CLI command"));
+}
+
+#[test]
 fn mode_parse_rejects_unknown_deploy_subcommand() {
-    let err = Mode::parse(vec!["deploy".into(), "bogus".into()]).unwrap_err();
+    let err = Mode::parse(vec!["setup".into(), "deploy".into(), "bogus".into()]).unwrap_err();
     assert!(err.to_string().contains("unknown deploy subcommand: bogus"));
 }
 
 #[test]
 fn mode_parse_rejects_remote_deploy_without_host() {
-    let err = Mode::parse(vec!["deploy".into(), "remote".into()]).unwrap_err();
+    let err = Mode::parse(vec!["setup".into(), "deploy".into(), "remote".into()]).unwrap_err();
     assert!(err.to_string().contains("deploy remote requires a host"));
 }
 
 #[test]
 fn mode_parse_rejects_remote_deploy_with_multiple_hosts() {
     let err = Mode::parse(vec![
+        "setup".into(),
         "deploy".into(),
         "remote".into(),
         "host-a".into(),
@@ -830,8 +838,8 @@ fn mode_parse_rejects_http_flag_on_deploy() {
     let err = Mode::parse(vec!["--http".into(), "deploy".into(), "local".into()]).unwrap_err();
     let msg = err.to_string();
     assert!(
-        msg.contains("Local-only commands") && msg.contains("reject HTTP flags"),
-        "expected local-only guard message, got: {msg}"
+        msg.contains("HTTP flags") && msg.contains("query CLI"),
+        "expected HTTP flag guard message, got: {msg}"
     );
 }
 
@@ -842,9 +850,19 @@ fn mode_parse_accepts_new_surface_parity_subcommands() {
     // `CompareArgs::into_request()`, not the top-level parser, so a bare
     // `compare` is accepted by `Mode::parse` even though running it would
     // later bail.
-    for cmd in &["silent-hosts", "clock-skew", "anomalies", "compare", "apps"] {
-        let result = Mode::parse(vec![(*cmd).to_string()]);
-        assert!(result.is_ok(), "Mode::parse rejected '{cmd}': {result:?}");
+    let cases: &[&[&str]] = &[
+        &["hosts", "silent"],
+        &["clock-skew"],
+        &["anomalies"],
+        &["compare"],
+        &["apps"],
+    ];
+    for args in cases {
+        let result = Mode::parse(args.iter().map(|arg| (*arg).to_string()).collect());
+        assert!(
+            result.is_ok(),
+            "Mode::parse rejected '{args:?}': {result:?}"
+        );
     }
 }
 

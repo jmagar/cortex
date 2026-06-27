@@ -644,9 +644,9 @@ Useful setup commands:
 cortex setup          # first-run or normal repair
 cortex setup check    # inspect only; does not mutate files or start services
 cortex setup repair   # repair env/assets and restart the Docker stack
-cortex deploy preflight       # clearer alias for setup check
-cortex deploy local           # clearer local Compose deploy/reconcile command
-cortex deploy local --dry-run # run the deploy preflight without mutating Docker
+cortex setup deploy preflight       # deployment preflight using setup assets
+cortex setup deploy local           # local Compose deploy/reconcile command
+cortex setup deploy local --dry-run # run the deploy preflight without mutating Docker
 cortex setup sessions-watch-service install  # host-local real-time transcript watcher
 cortex doctor binary  # check host/container binary freshness
 ```
@@ -696,9 +696,9 @@ The plugin deploys the server with Docker Compose through the same `cortex setup
 path as the one-line installer. You can still build and run the binary locally
 for development, but automated deployment is Compose-only.
 
-`cortex deploy local` is the operator-facing name for the same local
-Compose-backed reconcile path. It exists so deploy workflows do not need to call
-a command named `setup repair` directly.
+`cortex setup deploy local` is the operator-facing name for the same local
+Compose-backed reconcile path. It exists so deploy workflows stay under the
+setup namespace without calling a command named `setup repair` directly.
 
 ### Docker
 
@@ -976,8 +976,8 @@ Provision a least-privilege deploy key instead: generate a dedicated keypair in 
 cortex serve mcp  # UDP/TCP syslog ingest plus HTTP MCP on /mcp
 cortex mcp        # query-only MCP stdio transport
 cortex setup      # install/repair shared ~/.cortex Docker Compose setup
-cortex deploy preflight  # check deploy prerequisites without mutating Docker
-cortex deploy local      # reconcile local Compose deployment
+cortex setup deploy preflight  # check deploy prerequisites without mutating Docker
+cortex setup deploy local      # reconcile local Compose deployment
 cortex stats      # query the SQLite DB directly from the CLI
 cortex db status  # inspect SQLite maintenance state
 cortex db backup  # create a WAL-safe SQLite backup
@@ -1010,9 +1010,11 @@ cortex compose pull            # pull image for resolved Compose project
 cortex compose up              # run docker compose up -d for resolved service
 cortex compose restart         # restart resolved service
 cortex compose logs --tail 20  # bounded compose logs
+cortex compose logs cortex --tail 20  # bounded logs for one service
 
 # Surface parity (2026-05-22) — each is also a REST GET on /api/<command>
-cortex silent-hosts --silent-minutes 60
+cortex hosts sources --limit 50
+cortex hosts silent --silent-minutes 60
 cortex clock-skew   --since 2026-05-20T00:00:00Z
 cortex anomalies    --recent-minutes 30 --baseline-minutes 720
 cortex compare      --a-from 2026-05-20T00:00:00Z --a-to 2026-05-20T23:59:59Z \

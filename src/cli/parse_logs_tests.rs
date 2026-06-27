@@ -25,13 +25,13 @@ fn parse_timeline_collects_bucket_group_and_filters() {
 }
 
 #[test]
-fn parse_source_ips_accepts_limit_and_offset() {
+fn parse_hosts_sources_accepts_limit_and_offset() {
     let args = strings(&["--limit", "10", "--offset=5"]);
 
-    let command = parse_source_ips(&args).unwrap();
+    let command = parse_hosts_sources(&args).unwrap();
 
     match command {
-        crate::cli::CliCommand::SourceIps(args) => {
+        crate::cli::CliCommand::Hosts(crate::cli::HostsCommand::Sources(args)) => {
             assert_eq!(args.limit, Some(10));
             assert_eq!(args.offset, Some(5));
         }
@@ -220,9 +220,9 @@ fn parse_log_commands_report_help_and_unknown_argument_errors() {
             "requires --reference-time",
         ),
         (
-            parse_source_ips,
+            parse_hosts_sources,
             vec!["--bogus"],
-            "unknown source-ips option",
+            "unknown hosts sources option",
         ),
         (parse_timeline, vec!["--bogus"], "unknown timeline option"),
         (parse_patterns, vec!["--bogus"], "unknown patterns option"),

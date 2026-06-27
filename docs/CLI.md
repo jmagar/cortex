@@ -598,25 +598,25 @@ the debug Compose override, transcript-root permissions, disabled legacy index
 timer state, active/enabled watcher state, and container freshness via
 `scripts/check-runtime-current.sh --allow-local-image`.
 
-### `cortex deploy`
+### `cortex setup deploy`
 
 Run the Compose-backed deployment workflow using operator-facing names.
 `preflight` and `local` call the same setup engine as `cortex setup check`
 and `cortex setup repair`; `remote` uses SSH plus the shared setup assets.
 
 ```bash
-cortex deploy preflight
-cortex deploy preflight --json
-cortex deploy local
-cortex deploy local --dry-run --json
-cortex deploy remote tootie --dry-run
-cortex deploy remote tootie --json
+cortex setup deploy preflight
+cortex setup deploy preflight --json
+cortex setup deploy local
+cortex setup deploy local --dry-run --json
+cortex setup deploy remote tootie --dry-run
+cortex setup deploy remote tootie --json
 ```
 
-`deploy preflight` and `deploy local --dry-run` do not mutate Docker state.
-`deploy local` repairs `~/.cortex/.env`, rewrites managed Compose assets,
+`setup deploy preflight` and `setup deploy local --dry-run` do not mutate Docker state.
+`setup deploy local` repairs `~/.cortex/.env`, rewrites managed Compose assets,
 pulls the configured image, starts the stack, and checks `/health`.
-`deploy remote` uses SSH and Docker Compose on the target host. Non-dry-run
+`setup deploy remote` uses SSH and Docker Compose on the target host. Non-dry-run
 remote deploy writes/replaces `~/.cortex/.env`, the managed Compose YAML,
 and `config/Dockerfile` on the target; set token/env values in the local
 environment before running it when you need to preserve specific values. It is
@@ -1009,13 +1009,13 @@ models.
 | `cortex fleet-state` | `cortex` with `action="fleet_state"` |
 | `cortex correlate-state` | `cortex` with `action="correlate_state"` |
 | `cortex apps` | `cortex` with `action="apps"` |
-| `cortex source-ips` | `cortex` with `action="source_ips"` |
+| `cortex hosts sources` | `cortex` with `action="source_ips"` |
 | `cortex timeline` | `cortex` with `action="timeline"` |
 | `cortex patterns` | `cortex` with `action="patterns"` |
 | `cortex context` | `cortex` with `action="context"` |
 | `cortex get` | `cortex` with `action="get"` |
 | `cortex ingest-rate` | `cortex` with `action="ingest_rate"` |
-| `cortex silent-hosts` | `cortex` with `action="silent_hosts"` |
+| `cortex hosts silent` | `cortex` with `action="silent_hosts"` |
 | `cortex clock-skew` | `cortex` with `action="clock_skew"` |
 | `cortex anomalies` | `cortex` with `action="anomalies"` |
 | `cortex compare` | `cortex` with `action="compare"` |

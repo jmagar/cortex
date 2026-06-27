@@ -18,8 +18,8 @@ fn parse_db_vacuum_collects_full_force_pages_and_json() {
 }
 
 #[test]
-fn parse_service_and_db_commands_dispatch_expected_subcommands() {
-    let service = parse_service(&strings(&[
+fn parse_compose_service_logs_and_db_commands_dispatch_expected_subcommands() {
+    let service = parse_compose(&strings(&[
         "logs",
         "cortex",
         "--since=t0",
@@ -29,7 +29,7 @@ fn parse_service_and_db_commands_dispatch_expected_subcommands() {
     ]))
     .unwrap();
     match service {
-        crate::cli::CliCommand::Service(crate::cli::ServiceCommand::Logs(args)) => {
+        crate::cli::CliCommand::Compose(crate::cli::ComposeCommand::ServiceLogs(args)) => {
             assert_eq!(args.service, "cortex");
             assert_eq!(args.since.as_deref(), Some("t0"));
             assert_eq!(args.until.as_deref(), Some("t1"));
@@ -162,15 +162,9 @@ fn parse_setup_and_plugin_hook_commands_accept_json_flags() {
 fn parse_admin_commands_report_validation_errors() {
     for (parser, args, expected) in [
         (
-            parse_service as fn(&[String]) -> anyhow::Result<crate::cli::CliCommand>,
-            vec![],
-            "service requires a subcommand",
-        ),
-        (parse_service, vec!["bogus"], "unknown service subcommand"),
-        (
-            parse_service_logs,
-            vec!["--json"],
-            "requires a service name",
+            parse_compose as fn(&[String]) -> anyhow::Result<crate::cli::CliCommand>,
+            vec!["bogus"],
+            "unknown compose subcommand",
         ),
         (parse_db, vec!["bogus"], "unknown db subcommand"),
         (parse_db_integrity_status, vec![], "requires a job id"),

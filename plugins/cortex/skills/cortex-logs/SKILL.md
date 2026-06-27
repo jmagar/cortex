@@ -23,14 +23,14 @@ Show recent cortex service logs. These are the binary's stdout/stderr, not syslo
    - `--follow` or `-f`: last 50 lines, then stream
    - integer plus follow flag: that many lines, then stream
 
-3. Run Docker Compose logs:
+3. Run consolidated Cortex Compose logs:
 
    ```bash
-   CORTEX_HOME="${CORTEX_HOME:-$HOME/.cortex}"
-   docker compose --env-file "${CORTEX_HOME}/.env" -f "${CORTEX_HOME}/compose/docker-compose.yml" logs cortex --tail <N> --no-color
+   cortex compose logs cortex --tail <N>
    ```
 
-   For follow mode, add `-f` and omit `--no-color`.
+   For follow mode, use Docker Compose directly until Cortex grows a follow
+   flag on the consolidated command.
 
    If the plugin compose project has no container, report that Docker mode is
    configured but no plugin-managed container is running. Do not guess a source

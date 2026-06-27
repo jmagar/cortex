@@ -41,16 +41,7 @@ const SECTIONS: &[(&str, &[&str])] = &[
     (
         "Search & Logs",
         &[
-            "search",
-            "filter",
-            "tail",
-            "errors",
-            "hosts",
-            "sessions",
-            "incident",
-            "source-ips",
-            "entity",
-            "graph",
+            "search", "filter", "tail", "errors", "hosts", "incident", "entity", "graph",
         ],
     ),
     (
@@ -66,7 +57,6 @@ const SECTIONS: &[(&str, &[&str])] = &[
             "fleet-state",
             "correlate-state",
             "topic-correlate",
-            "silent-hosts",
             "clock-skew",
             "anomalies",
             "compare",
@@ -86,9 +76,7 @@ const SECTIONS: &[(&str, &[&str])] = &[
     ),
     (
         "Runtime & Setup",
-        &[
-            "serve", "mcp", "doctor", "db", "compose", "service", "setup", "deploy", "config",
-        ],
+        &["serve", "mcp", "doctor", "db", "compose", "setup", "config"],
     ),
 ];
 
@@ -120,8 +108,12 @@ const CATALOG: &[CommandDoc] = &[
     },
     CommandDoc {
         name: "hosts",
-        summary: "List all hosts that have sent logs",
-        usage: &["cortex hosts [--json]"],
+        summary: "List hosts, source identities, and silent hosts",
+        usage: &[
+            "cortex hosts [--json]",
+            "cortex hosts sources [--limit N] [--offset N] [--json]",
+            "cortex hosts silent [--silent-minutes N] [--json]",
+        ],
     },
     CommandDoc {
         name: "sessions",
@@ -136,11 +128,6 @@ const CATALOG: &[CommandDoc] = &[
         usage: &[
             "cortex incident --around TIME [--minutes N] [--service SERVICE] [--host HOST] [--limit N] [--json]",
         ],
-    },
-    CommandDoc {
-        name: "source-ips",
-        summary: "List unique source IPs with log counts",
-        usage: &["cortex source-ips [--limit N] [--offset N] [--json]"],
     },
     CommandDoc {
         name: "entity",
@@ -232,11 +219,6 @@ const CATALOG: &[CommandDoc] = &[
         usage: &[
             "cortex topic-correlate TOPIC [--since TIME] [--until TIME] [--depth N] [--source-kinds KINDS] [--limit N] [--json]",
         ],
-    },
-    CommandDoc {
-        name: "silent-hosts",
-        summary: "Hosts that have gone quiet",
-        usage: &["cortex silent-hosts [--silent-minutes N] [--json]"],
     },
     CommandDoc {
         name: "clock-skew",
@@ -376,13 +358,8 @@ const CATALOG: &[CommandDoc] = &[
             "cortex compose status [--compose-file FILE] [--project-dir DIR] [--project-name NAME] [--json]",
             "cortex compose pull|up|restart [--dry-run] [--allow-cwd-target] [--json]",
             "cortex compose down --yes [--dry-run] [--allow-cwd-target] [--json]",
-            "cortex compose logs [--tail N] [--json]",
+            "cortex compose logs [SERVICE] [--since TIME] [--until TIME] [--tail N] [--json]",
         ],
-    },
-    CommandDoc {
-        name: "service",
-        summary: "Inspect container service logs",
-        usage: &["cortex service logs SERVICE [--since TIME] [--until TIME] [--tail N] [--json]"],
     },
     CommandDoc {
         name: "setup",
@@ -395,18 +372,9 @@ const CATALOG: &[CommandDoc] = &[
             "cortex setup heartbeat-agent install|remove|check [--json]",
             "cortex setup debug-wrapper install|remove|check [--json]",
             "cortex setup debug-compose install|remove|check [--json]",
+            "cortex setup deploy preflight|local|remote|agent [OPTIONS]",
             "cortex setup plugin-hook [--no-repair] [--json]",
             "cortex setup doctor [--json]",
-        ],
-    },
-    CommandDoc {
-        name: "deploy",
-        summary: "Provision cortex locally or on remote hosts",
-        usage: &[
-            "cortex deploy preflight [--json]",
-            "cortex deploy local [--dry-run] [--json]",
-            "cortex deploy remote HOST [--dry-run] [--json]",
-            "cortex deploy agent [--hosts h1,h2] [--target URL] [--heartbeat-token TOKEN] [--docker] [--journald] [--binary PATH]",
         ],
     },
     CommandDoc {
@@ -627,8 +595,11 @@ const NESTED_CATALOG: &[NestedCommandDoc] = &[
     },
     NestedCommandDoc {
         path: "compose logs",
-        summary: "Show bounded Docker Compose logs",
-        usage: &["cortex compose logs [--tail N] [--json]"],
+        summary: "Show bounded stack logs or one service's logs",
+        usage: &[
+            "cortex compose logs [--tail N] [--json]",
+            "cortex compose logs SERVICE [--since TIME] [--until TIME] [--tail N] [--json]",
+        ],
     },
     NestedCommandDoc {
         path: "setup check",
@@ -649,6 +620,16 @@ const NESTED_CATALOG: &[NestedCommandDoc] = &[
         path: "setup plugin-hook",
         summary: "Run plugin setup hook repair or audit mode",
         usage: &["cortex setup plugin-hook [--no-repair] [--json]"],
+    },
+    NestedCommandDoc {
+        path: "setup deploy",
+        summary: "Provision cortex locally or on remote hosts",
+        usage: &[
+            "cortex setup deploy preflight [--json]",
+            "cortex setup deploy local [--dry-run] [--json]",
+            "cortex setup deploy remote HOST [--dry-run] [--json]",
+            "cortex setup deploy agent [--hosts h1,h2] [--target URL] [--heartbeat-token TOKEN] [--docker] [--journald] [--binary PATH]",
+        ],
     },
     NestedCommandDoc {
         path: "setup doctor",

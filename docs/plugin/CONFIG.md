@@ -39,7 +39,7 @@ installer:
 ```text
 plugin userConfig
   --> bin/cortex setup plugin-hook exports CORTEX_* overrides
-    --> cortex setup repair (same engine as cortex deploy local)
+    --> cortex setup repair (same engine as cortex setup deploy local)
       --> ~/.cortex/.env + ~/.cortex/compose/docker-compose.yml
         --> Docker Compose cortex container
 ```
@@ -70,7 +70,7 @@ ingestion and query surfaces attached to the same running service.
 
 The plugin does not maintain a separate deployment model. Server mode delegates
 to `cortex setup repair` (the same local reconcile path exposed as
-`cortex deploy local`), and the generated Compose assets live under
+`cortex setup deploy local`), and the generated Compose assets live under
 `~/.cortex/compose`. Stale user-level `cortex.service` units/drop-ins
 from older releases are disabled and removed during repair.
 

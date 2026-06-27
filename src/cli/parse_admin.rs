@@ -5,31 +5,18 @@ use super::parse_common::{FlagCursor, parse_output_args, parse_u32_flag, value_a
 use super::{
     CliCommand, ComposeArgs, ComposeCommand, ComposeLogsArgs, ComposeMutationArgs, DbBackupArgs,
     DbCheckpointArgs, DbCommand, DbIntegrityArgs, DbIntegrityStatusArgs, DbStatusArgs,
-    DbVacuumArgs, PluginHookArgs, ServiceCommand, ServiceLogsArgs, SetupArgs, SetupCommand,
+    DbVacuumArgs, PluginHookArgs, ServiceLogsArgs, SetupArgs, SetupCommand,
 };
 pub(crate) fn parse_stats(args: &[String]) -> Result<CliCommand> {
     Ok(CliCommand::Stats(parse_output_args("stats", args)?))
 }
 
-pub(crate) fn parse_service(args: &[String]) -> Result<CliCommand> {
-    let (subcommand, rest) = args
-        .split_first()
-        .ok_or_else(|| anyhow!("service requires a subcommand"))?;
-    match subcommand.as_str() {
-        "logs" => parse_service_logs(rest),
-        _ => bail!(
-            "{}",
-            super::suggest::unknown_command("service subcommand", subcommand, &["logs"])
-        ),
-    }
-}
-
-pub(crate) fn parse_service_logs(args: &[String]) -> Result<CliCommand> {
+fn parse_service_logs_args(context: &str, args: &[String]) -> Result<ServiceLogsArgs> {
     let (service, rest) = args
         .split_first()
-        .ok_or_else(|| anyhow!("service logs requires a service name"))?;
+        .ok_or_else(|| anyhow!("{context} requires a service name"))?;
     if service.starts_with('-') {
-        bail!("service logs requires a service name");
+        bail!("{context} requires a service name");
     }
     let mut parsed = ServiceLogsArgs {
         service: service.clone(),
@@ -57,11 +44,11 @@ pub(crate) fn parse_service_logs(args: &[String]) -> Result<CliCommand> {
             _ if arg.starts_with("-n=") => {
                 parsed.tail = Some(parse_u32_flag("-n", value_after_equals(arg, "-n")?)?)
             }
-            _ if arg.starts_with('-') => bail!("unknown service logs option: {arg}"),
-            _ => bail!("unexpected service logs argument: {arg}"),
+            _ if arg.starts_with('-') => bail!("unknown {context} option: {arg}"),
+            _ => bail!("unexpected {context} argument: {arg}"),
         }
     }
-    Ok(CliCommand::Service(ServiceCommand::Logs(parsed)))
+    Ok(parsed)
 }
 
 pub(crate) fn parse_db(args: &[String]) -> Result<CliCommand> {
@@ -218,9 +205,7 @@ pub(crate) fn parse_compose(args: &[String]) -> Result<CliCommand> {
         "pull" => Ok(CliCommand::Compose(ComposeCommand::Pull(
             parse_compose_mutation(rest, false)?,
         ))),
-        "logs" => Ok(CliCommand::Compose(ComposeCommand::Logs(
-            parse_compose_logs(rest)?,
-        ))),
+        "logs" => parse_compose_logs_command(rest),
         "config" => bail!("cortex compose config is deferred from the first pass"),
         "upgrade" => bail!(
             "cortex compose upgrade is deferred; run `cortex compose pull` then `cortex compose up`"
@@ -342,6 +327,17 @@ pub(crate) fn parse_compose_logs(args: &[String]) -> Result<ComposeLogsArgs> {
         }
     }
     Ok(parsed)
+}
+
+fn parse_compose_logs_command(args: &[String]) -> Result<CliCommand> {
+    if matches!(args.first(), Some(first) if !first.starts_with('-')) {
+        return Ok(CliCommand::Compose(ComposeCommand::ServiceLogs(
+            parse_service_logs_args("compose logs", args)?,
+        )));
+    }
+    Ok(CliCommand::Compose(ComposeCommand::Logs(
+        parse_compose_logs(args)?,
+    )))
 }
 
 pub(crate) fn parse_compose_common(

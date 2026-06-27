@@ -14,7 +14,7 @@ use super::{
     SigListArgs, SigUnackArgs, SourceIpsArgs, TimelineArgs,
 };
 
-// ─── Surface parity (source-ips, timeline, patterns, ingest-rate, sig, notify) ─
+// ─── Surface parity (hosts sources, timeline, patterns, ingest-rate, sig, notify) ─
 
 impl SourceIpsArgs {
     pub(crate) fn into_request(self) -> ListSourceIpsRequest {
