@@ -1,7 +1,6 @@
 use anyhow::{Result, anyhow, bail};
 
 use super::parse_admin::{parse_compose, parse_db, parse_setup, parse_stats};
-use super::parse_command_log::{parse_agent_command, parse_shell};
 use super::parse_logs::{
     parse_correlate, parse_errors, parse_filter, parse_hosts, parse_incident, parse_patterns,
     parse_search, parse_tail, parse_timeline,
@@ -21,17 +20,15 @@ pub(crate) fn parse_command(args: Vec<String>) -> Result<CliCommand> {
         "hosts" => parse_hosts(rest),
         "sessions" => parse_sessions_command(rest),
         "incident" => parse_incident(rest),
-        "shell" => parse_shell(rest),
-        "agent-command" => parse_agent_command(rest),
         "heartbeat" => parse_heartbeat(rest),
         "correlate" => parse_correlate(rest),
         "state" => commands::state::parse_state(rest),
+        "ingest" => commands::ingest::parse_ingest(rest),
         "stats" => parse_stats(rest),
         "compose" => parse_compose(rest),
         "setup" => parse_setup(rest),
         "db" => parse_db(rest),
         "config" => parse_config::parse_config(rest),
-        "inventory" => parse_inventory(rest),
         "timeline" => parse_timeline(rest),
         "patterns" => parse_patterns(rest),
         "entity" => commands::graph::parse_entity(rest),
@@ -44,7 +41,6 @@ pub(crate) fn parse_command(args: Vec<String>) -> Result<CliCommand> {
         // Heartbeat fleet state parity (cxih.4)
         "correlate-state" => commands::correlate_state::parse_correlate_state(rest),
         "topic-correlate" => commands::topic_correlate::parse_topic_correlate(rest),
-        "file-tail" => commands::file_tails::parse_file_tail(rest),
         "__complete" => Ok(CliCommand::Complete(rest.to_vec())),
         "completions" => Ok(CliCommand::Completions(rest.to_vec())),
         _ => bail!(
@@ -56,42 +52,6 @@ pub(crate) fn parse_command(args: Vec<String>) -> Result<CliCommand> {
             )
         ),
     }
-}
-
-fn parse_inventory(args: &[String]) -> Result<CliCommand> {
-    let (command, rest) = args
-        .split_first()
-        .ok_or_else(|| anyhow!("inventory subcommand is required: refresh or status"))?;
-    if matches!(command.as_str(), "--help" | "-h" | "help") {
-        bail!("{}", inventory_usage());
-    }
-    let mut json = false;
-    for arg in rest {
-        match arg.as_str() {
-            "--json" => json = true,
-            "--help" | "-h" => bail!("{}", inventory_usage()),
-            other => bail!(
-                "{}",
-                suggest::unknown_option("inventory", other, &["--json"])
-            ),
-        }
-    }
-    match command.as_str() {
-        "refresh" => Ok(CliCommand::Inventory(super::InventoryCommand::Refresh(
-            super::InventoryArgs { json },
-        ))),
-        "status" => Ok(CliCommand::Inventory(super::InventoryCommand::Status(
-            super::InventoryArgs { json },
-        ))),
-        _ => bail!(
-            "{}",
-            suggest::unknown_command("inventory subcommand", command, &["refresh", "status"])
-        ),
-    }
-}
-
-fn inventory_usage() -> &'static str {
-    "Usage: cortex inventory refresh [--json]\n       cortex inventory status [--json]"
 }
 
 fn parse_heartbeat(args: &[String]) -> Result<CliCommand> {

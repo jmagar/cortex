@@ -219,6 +219,7 @@ fn mode_parse_accepts_heartbeat_agent_setup_namespace() {
 fn mode_parse_accepts_command_ingest_namespace() {
     assert!(matches!(
         Mode::parse(vec![
+            "ingest".into(),
             "shell".into(),
             "index".into(),
             "--path".into(),
@@ -244,6 +245,7 @@ fn mode_parse_accepts_command_ingest_namespace() {
     ));
     assert!(matches!(
         Mode::parse(vec![
+            "ingest".into(),
             "agent-command".into(),
             "ingest-spool".into(),
             "--path".into(),
@@ -255,6 +257,7 @@ fn mode_parse_accepts_command_ingest_namespace() {
     ));
     assert!(matches!(
         Mode::parse(vec![
+            "ingest".into(),
             "agent-command".into(),
             "wrap".into(),
             "--spool".into(),
@@ -270,6 +273,7 @@ fn mode_parse_accepts_command_ingest_namespace() {
 #[test]
 fn mode_parse_preserves_wrapped_command_http_like_flags() {
     let mode = Mode::parse(vec![
+        "ingest".into(),
         "agent-command".into(),
         "wrap".into(),
         "--spool".into(),
@@ -287,9 +291,11 @@ fn mode_parse_preserves_wrapped_command_http_like_flags() {
         panic!("expected CLI mode");
     };
     assert_eq!(invocation.flags, cli::GlobalFlags::default());
-    let cli::CliCommand::AgentCommand(cli::AgentCommandCommand::Wrap(args)) = invocation.command
+    let cli::CliCommand::Ingest(cli::IngestCommand::AgentCommand(cli::AgentCommandCommand::Wrap(
+        args,
+    ))) = invocation.command
     else {
-        panic!("expected agent-command wrap");
+        panic!("expected ingest agent-command wrap");
     };
     assert_eq!(
         args.command,
@@ -888,8 +894,8 @@ async fn run_cli_rejects_http_flags_for_local_only_compose_setup_and_inventory()
             "`setup` (local-only command)",
         ),
         (
-            &["inventory", "--token", "secret", "refresh"][..],
-            "`inventory` (local-only command)",
+            &["ingest", "inventory", "--token", "secret", "refresh"][..],
+            "`ingest inventory` (local-only command)",
         ),
     ] {
         let err = super::run_cli(cli_invocation(args)).await.unwrap_err();
@@ -910,6 +916,7 @@ async fn run_cli_rejects_http_flags_for_agent_local_surfaces() {
         ),
         (
             &[
+                "ingest",
                 "agent-command",
                 "wrap",
                 "--server",
@@ -919,10 +926,11 @@ async fn run_cli_rejects_http_flags_for_agent_local_surfaces() {
                 "--",
                 "true",
             ][..],
-            "`agent-command wrap` (wrapper command)",
+            "`ingest agent-command wrap` (wrapper command)",
         ),
         (
             &[
+                "ingest",
                 "shell",
                 "index",
                 "--path",

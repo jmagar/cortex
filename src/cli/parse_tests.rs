@@ -1,4 +1,6 @@
-use super::super::args::{FleetStateArgs, HostStateArgs, StateCommand, StatsCommand};
+use super::super::args::{
+    FleetStateArgs, HostStateArgs, IngestCommand, StateCommand, StatsCommand,
+};
 use super::super::{
     FileTailAddArgs, FileTailCommand, FileTailListArgs, HeartbeatAgentArgs, HeartbeatCommand,
     InventoryArgs, InventoryCommand, OutputArgs, SessionsCommand,
@@ -77,6 +79,7 @@ fn parse_routes_stats_ingest_rate() {
 #[test]
 fn parses_file_tail_add() {
     let command = parse_command(vec![
+        "ingest".into(),
         "file-tail".into(),
         "add".into(),
         "--id".into(),
@@ -98,22 +101,25 @@ fn parses_file_tail_add() {
 
     assert_eq!(
         command,
-        CliCommand::FileTail(FileTailCommand::Add(FileTailAddArgs {
-            id: "swag-access".into(),
-            path: "/mnt/appdata/swag/log/nginx/access.log".into(),
-            tag: "swag-access".into(),
-            host: Some("squirts".into()),
-            facility: Some("local4".into()),
-            severity: Some("info".into()),
-            start_at_end: false,
-            json: true,
-        }))
+        CliCommand::Ingest(IngestCommand::FileTail(FileTailCommand::Add(
+            FileTailAddArgs {
+                id: "swag-access".into(),
+                path: "/mnt/appdata/swag/log/nginx/access.log".into(),
+                tag: "swag-access".into(),
+                host: Some("squirts".into()),
+                facility: Some("local4".into()),
+                severity: Some("info".into()),
+                start_at_end: false,
+                json: true,
+            },
+        )))
     );
 }
 
 #[test]
 fn file_tail_add_requires_hostname() {
     let err = parse_command(vec![
+        "ingest".into(),
         "file-tail".into(),
         "add".into(),
         "--id".into(),
@@ -130,10 +136,18 @@ fn file_tail_add_requires_hostname() {
 
 #[test]
 fn parses_file_tail_list() {
-    let command = parse_command(vec!["file-tail".into(), "list".into(), "--json".into()]).unwrap();
+    let command = parse_command(vec![
+        "ingest".into(),
+        "file-tail".into(),
+        "list".into(),
+        "--json".into(),
+    ])
+    .unwrap();
     assert_eq!(
         command,
-        CliCommand::FileTail(FileTailCommand::List(FileTailListArgs { json: true }))
+        CliCommand::Ingest(IngestCommand::FileTail(FileTailCommand::List(
+            FileTailListArgs { json: true }
+        )))
     );
 }
 
@@ -233,6 +247,10 @@ fn parse_removed_commands_report_matrix_replacements() {
         ("fleet-state", "cortex state fleet"),
         ("clock-skew", "cortex state clock-skew"),
         ("ingest-rate", "cortex stats ingest-rate"),
+        ("shell", "cortex ingest shell"),
+        ("agent-command", "cortex ingest agent-command"),
+        ("inventory", "cortex ingest inventory"),
+        ("file-tail", "cortex ingest file-tail"),
     ] {
         let err = parse_command(vec![command.to_string()])
             .unwrap_err()
@@ -247,35 +265,42 @@ fn parse_removed_commands_report_matrix_replacements() {
 fn parse_routes_inventory_refresh_json() {
     assert_eq!(
         parse_command(vec![
+            "ingest".to_string(),
             "inventory".to_string(),
             "refresh".to_string(),
             "--json".to_string(),
         ])
         .unwrap(),
-        CliCommand::Inventory(InventoryCommand::Refresh(InventoryArgs { json: true }))
+        CliCommand::Ingest(IngestCommand::Inventory(InventoryCommand::Refresh(
+            InventoryArgs { json: true }
+        )))
     );
 }
 
 #[test]
 fn parse_inventory_requires_subcommand() {
-    let err = parse_command(vec!["inventory".to_string()])
+    let err = parse_command(vec!["ingest".to_string(), "inventory".to_string()])
         .unwrap_err()
         .to_string();
 
     assert!(
-        err.contains("inventory subcommand is required"),
+        err.contains("ingest inventory subcommand is required"),
         "got: {err}"
     );
 }
 
 #[test]
 fn parse_inventory_unknown_subcommand_suggests() {
-    let err = parse_command(vec!["inventory".to_string(), "stats".to_string()])
-        .unwrap_err()
-        .to_string();
+    let err = parse_command(vec![
+        "ingest".to_string(),
+        "inventory".to_string(),
+        "stats".to_string(),
+    ])
+    .unwrap_err()
+    .to_string();
 
     assert!(
-        err.contains("unknown inventory subcommand: stats"),
+        err.contains("unknown ingest inventory subcommand: stats"),
         "got: {err}"
     );
     assert!(
@@ -287,6 +312,7 @@ fn parse_inventory_unknown_subcommand_suggests() {
 #[test]
 fn parse_inventory_rejects_unknown_flag() {
     let err = parse_command(vec![
+        "ingest".to_string(),
         "inventory".to_string(),
         "refresh".to_string(),
         "--wat".to_string(),
@@ -295,22 +321,27 @@ fn parse_inventory_rejects_unknown_flag() {
     .to_string();
 
     assert!(
-        err.contains("unknown inventory option: --wat"),
+        err.contains("unknown ingest inventory option: --wat"),
         "got: {err}"
     );
 }
 
 #[test]
 fn parse_inventory_help_does_not_execute_subcommand() {
-    let err = parse_command(vec!["inventory".to_string(), "--help".to_string()])
-        .unwrap_err()
-        .to_string();
+    let err = parse_command(vec![
+        "ingest".to_string(),
+        "inventory".to_string(),
+        "--help".to_string(),
+    ])
+    .unwrap_err()
+    .to_string();
     assert!(
-        err.contains("Usage: cortex inventory refresh"),
+        err.contains("Usage: cortex ingest inventory refresh"),
         "got: {err}"
     );
 
     let err = parse_command(vec![
+        "ingest".to_string(),
         "inventory".to_string(),
         "refresh".to_string(),
         "--help".to_string(),
@@ -318,7 +349,7 @@ fn parse_inventory_help_does_not_execute_subcommand() {
     .unwrap_err()
     .to_string();
     assert!(
-        err.contains("Usage: cortex inventory refresh"),
+        err.contains("Usage: cortex ingest inventory refresh"),
         "got: {err}"
     );
 }

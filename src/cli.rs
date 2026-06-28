@@ -13,7 +13,7 @@ pub(crate) use args::{
     DbVacuumArgs, EntityArgs, FileTailAddArgs, FileTailCommand, FileTailIdArgs, FileTailListArgs,
     FilterArgs, GraphAroundArgs, GraphCommand, GraphEvidenceArgs, GraphExplainArgs,
     GraphRebuildArgs, GraphStatusArgs, HeartbeatAgentArgs, HeartbeatCommand, HostsCommand,
-    IncidentArgs, IngestRateArgs, InventoryArgs, InventoryCommand, NotifyRecentArgs,
+    IncidentArgs, IngestCommand, IngestRateArgs, InventoryArgs, InventoryCommand, NotifyRecentArgs,
     NotifyTestArgs, OutputArgs, PatternsArgs, PluginHookArgs, SearchArgs, ServiceLogsArgs,
     SessionsAbuseArgs, SessionsAddArgs, SessionsArgs, SessionsAskHistoryArgs, SessionsAssessArgs,
     SessionsBlocksArgs, SessionsCheckpointsArgs, SessionsCommand, SessionsContextArgs,
@@ -232,6 +232,119 @@ pub(crate) async fn run_inventory(command: InventoryCommand) -> Result<()> {
                 Ok(())
             }
         }
+    }
+}
+
+#[derive(Debug, serde::Serialize)]
+struct IngestSyslogStatus {
+    bind_addr: String,
+    host: String,
+    port: u16,
+    max_message_size: usize,
+    batch_size: usize,
+    flush_interval_ms: u64,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct IngestDockerStatus {
+    legacy_central_pull_enabled: bool,
+    configured_sources: usize,
+    excluded_containers: usize,
+    reconnect_initial_ms: u64,
+    reconnect_max_ms: u64,
+    host_local_agent_note: &'static str,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct IngestDockerSource {
+    name: String,
+    endpoint_configured: bool,
+    allow_insecure_http: bool,
+    excluded_containers: usize,
+}
+
+pub(crate) async fn run_ingest_syslog_status(args: OutputArgs) -> Result<()> {
+    let runtime = cortex::runtime::RuntimeCore::load_query_only().await?;
+    let receiver = &runtime.config.receiver;
+    let status = IngestSyslogStatus {
+        bind_addr: receiver.bind_addr(),
+        host: receiver.host.clone(),
+        port: receiver.port,
+        max_message_size: receiver.max_message_size,
+        batch_size: receiver.batch_size,
+        flush_interval_ms: receiver.flush_interval,
+    };
+    if args.json {
+        output_common::print_json(&status)
+    } else {
+        println!("syslog ingest: {}", status.bind_addr);
+        println!("max_message_size: {}", status.max_message_size);
+        println!("batch_size: {}", status.batch_size);
+        println!("flush_interval_ms: {}", status.flush_interval_ms);
+        Ok(())
+    }
+}
+
+pub(crate) async fn run_ingest_docker_status(args: OutputArgs) -> Result<()> {
+    let runtime = cortex::runtime::RuntimeCore::load_query_only().await?;
+    let docker = &runtime.config.docker_ingest;
+    let status = IngestDockerStatus {
+        legacy_central_pull_enabled: docker.enabled,
+        configured_sources: docker.hosts.len(),
+        excluded_containers: docker.excluded_containers.len(),
+        reconnect_initial_ms: docker.reconnect_initial_ms,
+        reconnect_max_ms: docker.reconnect_max_ms,
+        host_local_agent_note: "host-local cortex agents stream Docker logs from each host when enabled there",
+    };
+    if args.json {
+        output_common::print_json(&status)
+    } else {
+        println!(
+            "docker ingest: legacy_central_pull_enabled={}",
+            status.legacy_central_pull_enabled
+        );
+        println!("configured_sources: {}", status.configured_sources);
+        println!("excluded_containers: {}", status.excluded_containers);
+        println!(
+            "reconnect_ms: {}..{}",
+            status.reconnect_initial_ms, status.reconnect_max_ms
+        );
+        println!("{}", status.host_local_agent_note);
+        Ok(())
+    }
+}
+
+pub(crate) async fn run_ingest_docker_sources(args: OutputArgs) -> Result<()> {
+    let runtime = cortex::runtime::RuntimeCore::load_query_only().await?;
+    let sources = runtime
+        .config
+        .docker_ingest
+        .hosts
+        .iter()
+        .map(|host| IngestDockerSource {
+            name: host.name.clone(),
+            endpoint_configured: !host.base_url.trim().is_empty(),
+            allow_insecure_http: host.allow_insecure_http,
+            excluded_containers: host.excluded_containers.len(),
+        })
+        .collect::<Vec<_>>();
+    if args.json {
+        output_common::print_json(&sources)
+    } else {
+        if sources.is_empty() {
+            println!("No legacy central-pull Docker sources configured.");
+            return Ok(());
+        }
+        for source in &sources {
+            println!(
+                "{} endpoint_configured={} allow_insecure_http={} excluded_containers={}",
+                source.name,
+                source.endpoint_configured,
+                source.allow_insecure_http,
+                source.excluded_containers
+            );
+        }
+        Ok(())
     }
 }
 

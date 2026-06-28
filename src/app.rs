@@ -127,6 +127,8 @@ pub use models::{
     IncidentResponse,
     IngestRateRequest,
     IngestRateResponse,
+    IngestRequest,
+    IngestResponse,
     InvestigationBudget,
     InvestigationBudgetUsed,
     InvestigationClaim,

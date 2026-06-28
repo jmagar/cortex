@@ -13,17 +13,15 @@ const PARSER_TOKENS: &[&str] = &[
     "sessions",
     "incident",
     "sessions",
-    "shell",
-    "agent-command",
     "heartbeat",
     "correlate",
     "state",
+    "ingest",
     "stats",
     "compose",
     "setup",
     "db",
     "config",
-    "inventory",
     "entity",
     "graph",
     "timeline",
@@ -33,7 +31,6 @@ const PARSER_TOKENS: &[&str] = &[
     "compare",
     "apps",
     "correlate-state",
-    "file-tail",
     // Mode-level (src/main.rs)
     "serve",
     "mcp",
@@ -116,21 +113,29 @@ fn nested_help_shows_subcommand_specific_usage() {
     assert!(out.contains("--detail compact|full"), "got: {out}");
     assert!(out.contains("--include-transcript"), "got: {out}");
 
-    let out = render_command("inventory refresh", false).expect("inventory refresh is known");
+    let out = render_command("ingest inventory refresh", false)
+        .expect("ingest inventory refresh is known");
     assert!(
-        out.contains("cortex inventory refresh [--json]"),
+        out.contains("cortex ingest inventory refresh [--json]"),
         "got: {out}"
     );
-    assert!(!out.contains("cortex inventory status"), "got: {out}");
-
-    let out = render_command("inventory status", false).expect("inventory status is known");
     assert!(
-        out.contains("cortex inventory status [--json]"),
+        !out.contains("cortex ingest inventory status"),
         "got: {out}"
     );
 
-    let out = render_command("file-tail add", false).expect("file-tail add is known");
-    assert!(out.contains("cortex file-tail add --id ID"), "got: {out}");
+    let out =
+        render_command("ingest inventory status", false).expect("ingest inventory status is known");
+    assert!(
+        out.contains("cortex ingest inventory status [--json]"),
+        "got: {out}"
+    );
+
+    let out = render_command("ingest file-tail", false).expect("ingest file-tail is known");
+    assert!(
+        out.contains("cortex ingest file-tail add --id ID"),
+        "got: {out}"
+    );
     assert!(out.contains("--from-start"), "got: {out}");
 }
 

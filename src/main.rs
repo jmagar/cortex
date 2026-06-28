@@ -107,20 +107,23 @@ async fn run_cli(invocation: CliInvocation) -> Result<()> {
         return cli::run_complete(&args);
     }
 
-    if let cli::CliCommand::Inventory(command) = command {
+    if let cli::CliCommand::Ingest(cli::IngestCommand::Inventory(command)) = command {
         if let Some(trigger) = flags.http_flag_trigger() {
             anyhow::bail!(
-                "{} has no effect on `inventory` (local-only command); remove --http / --server / --token",
+                "{} has no effect on `ingest inventory` (local-only command); remove --http / --server / --token",
                 trigger
             );
         }
         return cli::run_inventory(command).await;
     }
 
-    if let cli::CliCommand::AgentCommand(cli::AgentCommandCommand::Wrap(args)) = command {
+    if let cli::CliCommand::Ingest(cli::IngestCommand::AgentCommand(
+        cli::AgentCommandCommand::Wrap(args),
+    )) = command
+    {
         if let Some(trigger) = flags.http_flag_trigger() {
             anyhow::bail!(
-                "{} has no effect on `agent-command wrap` (wrapper command); remove --http / --server / --token",
+                "{} has no effect on `ingest agent-command wrap` (wrapper command); remove --http / --server / --token",
                 trigger
             );
         }
@@ -149,8 +152,10 @@ async fn run_cli(invocation: CliInvocation) -> Result<()> {
 
     if matches!(
         command,
-        cli::CliCommand::Shell(_)
-            | cli::CliCommand::AgentCommand(cli::AgentCommandCommand::IngestSpool(_))
+        cli::CliCommand::Ingest(cli::IngestCommand::Shell(_))
+            | cli::CliCommand::Ingest(cli::IngestCommand::AgentCommand(
+                cli::AgentCommandCommand::IngestSpool(_)
+            ))
     ) {
         if let Some(trigger) = flags.http_flag_trigger() {
             anyhow::bail!(

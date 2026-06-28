@@ -38,12 +38,10 @@ pub(crate) enum CliCommand {
     Setup(SetupCommand),
     Db(DbCommand),
     Config(ConfigCommand),
-    Inventory(InventoryCommand),
+    Ingest(IngestCommand),
     Timeline(TimelineArgs),
     Patterns(PatternsArgs),
     Alerts(AlertsCommand),
-    Shell(ShellCommand),
-    AgentCommand(AgentCommandCommand),
     Heartbeat(HeartbeatCommand),
     Anomalies(AnomaliesArgs),
     Compare(CompareArgs),
@@ -52,7 +50,6 @@ pub(crate) enum CliCommand {
     TopicCorrelate(TopicCorrelateArgs),
     Entity(EntityArgs),
     Graph(GraphCommand),
-    FileTail(FileTailCommand),
     /// Hidden: emit shell-completion candidates (`cortex __complete <ctx> ...`).
     Complete(Vec<String>),
     /// Emit a shell completion script (`cortex completions <shell>`).
@@ -87,6 +84,17 @@ pub(crate) enum FileTailCommand {
     Remove(FileTailIdArgs),
     Enable(FileTailIdArgs),
     Disable(FileTailIdArgs),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum IngestCommand {
+    Shell(ShellCommand),
+    AgentCommand(AgentCommandCommand),
+    Inventory(InventoryCommand),
+    FileTail(FileTailCommand),
+    SyslogStatus(OutputArgs),
+    DockerStatus(OutputArgs),
+    DockerSources(OutputArgs),
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

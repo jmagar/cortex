@@ -61,16 +61,7 @@ const SECTIONS: &[(&str, &[&str])] = &[
     ),
     ("AI Transcripts", &["sessions"]),
     ("Signals & Alerts", &["alerts"]),
-    (
-        "Ingestion",
-        &[
-            "shell",
-            "agent-command",
-            "heartbeat",
-            "inventory",
-            "file-tail",
-        ],
-    ),
+    ("Ingestion", &["ingest", "heartbeat"]),
     (
         "Runtime & Setup",
         &["serve", "mcp", "doctor", "db", "compose", "setup", "config"],
@@ -260,19 +251,19 @@ const CATALOG: &[CommandDoc] = &[
     },
     // ── Ingestion ──────────────────────────────────────────────────────────
     CommandDoc {
-        name: "shell",
-        summary: "Index shell history (zsh, atuin)",
+        name: "ingest",
+        summary: "Ingest shell, command, inventory, file-tail, Docker, and syslog sources",
         usage: &[
-            "cortex shell index --path PATH [--shell zsh] [--json]",
-            "cortex shell atuin-index --path PATH [--json]",
-        ],
-    },
-    CommandDoc {
-        name: "agent-command",
-        summary: "Ingest and wrap agent command spools",
-        usage: &[
-            "cortex agent-command ingest-spool --path PATH [--json]",
-            "cortex agent-command wrap --spool PATH -- COMMAND...",
+            "cortex ingest shell index --path PATH [--shell zsh] [--json]",
+            "cortex ingest shell atuin-index --path PATH [--json]",
+            "cortex ingest agent-command ingest-spool --path PATH [--json]",
+            "cortex ingest agent-command wrap --spool PATH -- COMMAND...",
+            "cortex ingest inventory refresh|status [--json]",
+            "cortex ingest file-tail list|status [--json]",
+            "cortex ingest file-tail add --id ID --path PATH --tag TAG --host HOST [--facility FACILITY] [--severity SEVERITY] [--from-start] [--json]",
+            "cortex ingest file-tail remove|enable|disable --id ID [--json]",
+            "cortex ingest syslog status [--json]",
+            "cortex ingest docker status|sources [--json]",
         ],
     },
     CommandDoc {
@@ -280,26 +271,6 @@ const CATALOG: &[CommandDoc] = &[
         summary: "Run the host heartbeat agent",
         usage: &[
             "cortex heartbeat agent [--target URL] [--token TOKEN] [--interval-secs N] [--probe-deadline-ms N] [--collection-deadline-ms N] [--retry-buffer N] [--host-id-path PATH] [--once|--emit] [--json]",
-        ],
-    },
-    CommandDoc {
-        name: "inventory",
-        summary: "Refresh and inspect the private homelab inventory cache",
-        usage: &[
-            "cortex inventory refresh [--json]",
-            "cortex inventory status [--json]",
-        ],
-    },
-    CommandDoc {
-        name: "file-tail",
-        summary: "Manage file-tail log ingest sources",
-        usage: &[
-            "cortex file-tail list [--json]",
-            "cortex file-tail status [--json]",
-            "cortex file-tail add --id ID --path PATH --tag TAG --host HOST [--facility FACILITY] [--severity SEVERITY] [--from-start] [--json]",
-            "cortex file-tail remove --id ID [--json]",
-            "cortex file-tail enable --id ID [--json]",
-            "cortex file-tail disable --id ID [--json]",
         ],
     },
     // ── Runtime & Setup ────────────────────────────────────────────────────
@@ -370,6 +341,58 @@ const CATALOG: &[CommandDoc] = &[
 
 const NESTED_CATALOG: &[NestedCommandDoc] = &[
     NestedCommandDoc {
+        path: "ingest shell",
+        summary: "Index shell history sources",
+        usage: &[
+            "cortex ingest shell index --path PATH [--shell zsh] [--json]",
+            "cortex ingest shell atuin-index --path PATH [--json]",
+        ],
+    },
+    NestedCommandDoc {
+        path: "ingest agent-command",
+        summary: "Ingest and wrap agent command spools",
+        usage: &[
+            "cortex ingest agent-command ingest-spool --path PATH [--json]",
+            "cortex ingest agent-command wrap --spool PATH -- COMMAND...",
+        ],
+    },
+    NestedCommandDoc {
+        path: "ingest inventory",
+        summary: "Refresh and inspect the private homelab inventory cache",
+        usage: &[
+            "cortex ingest inventory refresh [--json]",
+            "cortex ingest inventory status [--json]",
+        ],
+    },
+    NestedCommandDoc {
+        path: "ingest file-tail",
+        summary: "Manage file-tail log ingest sources",
+        usage: &[
+            "cortex ingest file-tail list [--json]",
+            "cortex ingest file-tail status [--json]",
+            "cortex ingest file-tail add --id ID --path PATH --tag TAG --host HOST [--facility FACILITY] [--severity SEVERITY] [--from-start] [--json]",
+            "cortex ingest file-tail remove --id ID [--json]",
+            "cortex ingest file-tail enable --id ID [--json]",
+            "cortex ingest file-tail disable --id ID [--json]",
+        ],
+    },
+    NestedCommandDoc {
+        path: "ingest syslog",
+        summary: "Inspect syslog ingest listener configuration",
+        usage: &[
+            "cortex ingest syslog status [--json]",
+            "cortex ingest syslog test   (deferred; does not send frames yet)",
+        ],
+    },
+    NestedCommandDoc {
+        path: "ingest docker",
+        summary: "Inspect Docker ingest configuration without exposing endpoints",
+        usage: &[
+            "cortex ingest docker status [--json]",
+            "cortex ingest docker sources [--json]",
+        ],
+    },
+    NestedCommandDoc {
         path: "state host",
         summary: "Per-host health and pressure snapshot",
         usage: &[
@@ -394,14 +417,14 @@ const NESTED_CATALOG: &[NestedCommandDoc] = &[
         usage: &["cortex stats ingest-rate [--by-host] [--json]"],
     },
     NestedCommandDoc {
-        path: "inventory refresh",
+        path: "ingest inventory refresh",
         summary: "Collect native homelab inventory into the private filesystem cache",
-        usage: &["cortex inventory refresh [--json]"],
+        usage: &["cortex ingest inventory refresh [--json]"],
     },
     NestedCommandDoc {
-        path: "inventory status",
+        path: "ingest inventory status",
         summary: "Inspect cache freshness, warnings, and artifact paths without refreshing",
-        usage: &["cortex inventory status [--json]"],
+        usage: &["cortex ingest inventory status [--json]"],
     },
     NestedCommandDoc {
         path: "sessions search",
@@ -667,63 +690,11 @@ const NESTED_CATALOG: &[NestedCommandDoc] = &[
         usage: &["cortex alerts notifications test [--body TEXT] [--json]   (requires --http)"],
     },
     NestedCommandDoc {
-        path: "shell index",
-        summary: "Index shell history",
-        usage: &["cortex shell index --path PATH [--shell zsh] [--json]"],
-    },
-    NestedCommandDoc {
-        path: "shell atuin-index",
-        summary: "Index Atuin shell history",
-        usage: &["cortex shell atuin-index --path PATH [--json]"],
-    },
-    NestedCommandDoc {
-        path: "agent-command ingest-spool",
-        summary: "Ingest agent command spool files",
-        usage: &["cortex agent-command ingest-spool --path PATH [--json]"],
-    },
-    NestedCommandDoc {
-        path: "agent-command wrap",
-        summary: "Wrap a command and spool execution metadata",
-        usage: &["cortex agent-command wrap --spool PATH -- COMMAND..."],
-    },
-    NestedCommandDoc {
         path: "heartbeat agent",
         summary: "Run the host heartbeat agent",
         usage: &[
             "cortex heartbeat agent [--target URL] [--token TOKEN] [--interval-secs N] [--probe-deadline-ms N] [--collection-deadline-ms N] [--retry-buffer N] [--host-id-path PATH] [--once|--emit] [--json]",
         ],
-    },
-    NestedCommandDoc {
-        path: "file-tail list",
-        summary: "List configured file-tail sources",
-        usage: &["cortex file-tail list [--json]"],
-    },
-    NestedCommandDoc {
-        path: "file-tail status",
-        summary: "List configured file-tail sources with runtime state",
-        usage: &["cortex file-tail status [--json]"],
-    },
-    NestedCommandDoc {
-        path: "file-tail add",
-        summary: "Add or update a managed file-tail source",
-        usage: &[
-            "cortex file-tail add --id ID --path PATH --tag TAG --host HOST [--facility FACILITY] [--severity SEVERITY] [--from-start] [--json]",
-        ],
-    },
-    NestedCommandDoc {
-        path: "file-tail remove",
-        summary: "Remove a managed file-tail source",
-        usage: &["cortex file-tail remove --id ID [--json]"],
-    },
-    NestedCommandDoc {
-        path: "file-tail enable",
-        summary: "Enable a managed file-tail source",
-        usage: &["cortex file-tail enable --id ID [--json]"],
-    },
-    NestedCommandDoc {
-        path: "file-tail disable",
-        summary: "Disable a managed file-tail source",
-        usage: &["cortex file-tail disable --id ID [--json]"],
     },
 ];
 

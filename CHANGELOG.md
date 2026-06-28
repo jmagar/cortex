@@ -24,6 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `cortex stats ingest-rate`.
 - **Breaking CLI consolidation:** move error signature and notification
   commands under `cortex alerts signatures|notifications`.
+- **Breaking CLI consolidation:** move shell history, agent-command spool,
+  inventory cache, and file-tail management under `cortex ingest ...`; add
+  read-only `cortex ingest syslog status` and
+  `cortex ingest docker status|sources`.
 
 ## [2.0.0] - 2026-06-27
 

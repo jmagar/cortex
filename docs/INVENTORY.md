@@ -82,12 +82,12 @@ methods as the MCP actions.
 | `cortex hosts` | `hosts` | Known host list |
 | `cortex hosts sources` | `source_ips` | Source identifiers with hostname breakdown |
 | `cortex hosts silent` | `silent_hosts` | Hosts older than a staleness threshold |
-| `cortex inventory refresh` | -- | Native refresh into `~/.cortex/inventory` |
-| `cortex inventory status` | -- | Cache freshness, collector status, warnings, and artifact paths |
+| `cortex ingest inventory refresh` | -- | Native refresh into `~/.cortex/inventory` |
+| `cortex ingest inventory status` | -- | Cache freshness, collector status, warnings, and artifact paths |
 | `cortex filter` | `filter` | Structured filter-only log retrieval |
 | `cortex correlate` | `correlate` | Cross-host event correlation |
-| `cortex host-state` | `host_state` | Latest bounded heartbeat state for one host |
-| `cortex fleet-state` | `fleet_state` | Fleet-wide heartbeat snapshot with pressure flags |
+| `cortex state host` | `host_state` | Latest bounded heartbeat state for one host |
+| `cortex state fleet` | `fleet_state` | Fleet-wide heartbeat snapshot with pressure flags |
 | `cortex correlate-state` | `correlate_state` | Logs plus heartbeat summaries around a reference time |
 | `cortex entity` | `graph` | Resolve a graph entity by canonical key or alias |
 | `cortex graph status` | `graph` | Inspect graph projection status, freshness, counts, and rebuild progress |
@@ -102,6 +102,7 @@ methods as the MCP actions.
 | `cortex sessions ask-history` | `ask_history` | AI transcript history search |
 | `cortex sessions incident-context` | `incident_context` | Full context bundle for a time window |
 | `cortex stats` | `stats` | Database and storage metrics |
+| `cortex stats ingest-rate` | `ingest_rate` | Recent ingest throughput and write-block state |
 
 ## MCP resources
 

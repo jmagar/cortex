@@ -28,6 +28,10 @@ with replacement guidance instead of dispatching through compatibility aliases.
 | `cortex fleet-state ...` | `cortex state fleet ...` |
 | `cortex clock-skew ...` | `cortex state clock-skew ...` |
 | `cortex ingest-rate ...` | `cortex stats ingest-rate ...` |
+| `cortex shell ...` | `cortex ingest shell ...` |
+| `cortex agent-command ...` | `cortex ingest agent-command ...` |
+| `cortex inventory ...` | `cortex ingest inventory ...` |
+| `cortex file-tail ...` | `cortex ingest file-tail ...` |
 
 The REST `/api/ai/*` namespace is also intentionally removed; use
 `/api/sessions/*`.
@@ -48,19 +52,25 @@ CORTEX_DB_PATH=/data/cortex.db
 `CORTEX_TOKEN` is not used by direct CLI mode because it is local database
 access, not HTTP access.
 
-## `cortex file-tail`
+## `cortex ingest`
+
+Ingestion commands group local shell history, agent command spools, the private
+inventory cache, managed file-tail sources, and read-only Docker/syslog ingest
+status checks.
+
+### `cortex ingest file-tail`
 
 Manage Cortex-owned file-tail ingest sources. Sources are persisted beside the
 configured database in `file-tails.json` and reconciled by the running
 `cortex serve mcp` process.
 
 ```bash
-cortex file-tail list [--json]
-cortex file-tail status [--json]
-cortex file-tail add --id ID --path PATH --tag TAG --host HOST [--facility FACILITY] [--severity SEVERITY] [--from-start] [--json]
-cortex file-tail remove --id ID [--json]
-cortex file-tail enable --id ID [--json]
-cortex file-tail disable --id ID [--json]
+cortex ingest file-tail list [--json]
+cortex ingest file-tail status [--json]
+cortex ingest file-tail add --id ID --path PATH --tag TAG --host HOST [--facility FACILITY] [--severity SEVERITY] [--from-start] [--json]
+cortex ingest file-tail remove --id ID [--json]
+cortex ingest file-tail enable --id ID [--json]
+cortex ingest file-tail disable --id ID [--json]
 ```
 
 The command maps to MCP action `file_tails` and REST `POST /api/file-tails`.
@@ -69,6 +79,28 @@ and `CORTEX_API_ADMIN_TOKEN`; the client sends the latter as
 `X-Cortex-Admin-Token`.
 By default `add` starts tailing at EOF; pass `--from-start` to ingest existing
 file contents.
+
+### `cortex ingest syslog`
+
+Inspect syslog listener configuration without starting listeners or sending test
+frames.
+
+```bash
+cortex ingest syslog status [--json]
+cortex ingest syslog test
+```
+
+`test` is reserved for a future safe local frame sender and currently exits with
+an explicit deferred error.
+
+### `cortex ingest docker`
+
+Inspect Docker ingest configuration without exposing remote Docker endpoints.
+
+```bash
+cortex ingest docker status [--json]
+cortex ingest docker sources [--json]
+```
 
 ## Output
 
@@ -161,14 +193,14 @@ cortex hosts
 cortex hosts --json
 ```
 
-### `cortex inventory`
+### `cortex ingest inventory`
 
 Refresh and inspect the private homelab inventory cache under
 `~/.cortex/inventory`.
 
 ```bash
-cortex inventory refresh --json
-cortex inventory status --json
+cortex ingest inventory refresh --json
+cortex ingest inventory status --json
 ```
 
 `refresh` runs native Rust collectors for local host facts, Docker endpoints,
@@ -479,13 +511,14 @@ cortex sessions smoke-watch --json
 This is a live command. It requires `syslog-sessions-watch.service` to be running and
 writing to the same `CORTEX_DB_PATH` used by the CLI process.
 
-### `cortex shell index`
+### `cortex ingest shell`
 
 Backfill local shell history into the main log corpus.
 
 ```bash
-cortex shell index --path ~/.zsh_history
-cortex shell index --path ~/.zsh_history --shell zsh --json
+cortex ingest shell index --path ~/.zsh_history
+cortex ingest shell index --path ~/.zsh_history --shell zsh --json
+cortex ingest shell atuin-index --path ~/.local/share/atuin/history.db --json
 ```
 
 The importer currently supports zsh extended history lines in the
@@ -497,7 +530,7 @@ Rows are deduped by source identity, timestamp, and scrubbed command text, and
 the importer records a private byte-offset cursor under the cortex state
 directory so repeated imports only read newly appended history.
 
-### `cortex agent-command`
+### `cortex ingest agent-command`
 
 Capture shell commands launched by agent tools, then ingest the private JSONL
 spool into SQLite.
@@ -506,8 +539,8 @@ spool into SQLite.
 cortex setup agent-command install
 export CLAUDE_CODE_SHELL_PREFIX="$HOME/.local/bin/cortex-agent-command-wrapper"
 
-cortex agent-command ingest-spool --path ~/.local/state/cortex/agent-command.jsonl
-cortex agent-command wrap --spool ~/.local/state/cortex/agent-command.jsonl -- cargo test
+cortex ingest agent-command ingest-spool --path ~/.local/state/cortex/agent-command.jsonl
+cortex ingest agent-command wrap --spool ~/.local/state/cortex/agent-command.jsonl -- cargo test
 ```
 
 `CLAUDE_CODE_SHELL_PREFIX` is the Claude Code hook point for commands spawned by

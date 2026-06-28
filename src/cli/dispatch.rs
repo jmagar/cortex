@@ -21,8 +21,8 @@
 use anyhow::{Result, bail};
 use cortex::app::{
     CorrelateEventsRequest, FileTailAddRequest, FileTailOp, FileTailRequest, FileTailResponse,
-    FilterLogsRequest, GetErrorsRequest, IncidentRequest, ListSessionsRequest, SearchLogsRequest,
-    StatsRequest, StatsResponse, TailLogsRequest,
+    FilterLogsRequest, GetErrorsRequest, IncidentRequest, IngestRequest, IngestResponse,
+    ListSessionsRequest, SearchLogsRequest, StatsRequest, StatsResponse, TailLogsRequest,
 };
 use std::future::Future;
 
@@ -316,7 +316,11 @@ pub(crate) async fn run_file_tail(mode: &CliMode, command: FileTailCommand) -> R
         FileTailCommand::Disable(args) => id_request(FileTailOp::Disable, args),
     };
     let response = match mode {
-        CliMode::Local(service) => service.file_tails(req).await?,
+        CliMode::Local(service) => {
+            let IngestResponse::FileTails(response) =
+                service.ingest(IngestRequest::FileTails(req)).await?;
+            response
+        }
         CliMode::Http(client) => http_or_cancel(client.file_tails(&req)).await?,
     };
     if json {

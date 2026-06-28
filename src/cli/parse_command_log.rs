@@ -1,11 +1,11 @@
 use anyhow::{Result, bail};
 
 use super::{
-    AgentCommandCommand, AgentCommandIngestSpoolArgs, AgentCommandWrapArgs, CliCommand,
-    ShellAtuinIndexArgs, ShellCommand, ShellIndexArgs,
+    AgentCommandCommand, AgentCommandIngestSpoolArgs, AgentCommandWrapArgs, ShellAtuinIndexArgs,
+    ShellCommand, ShellIndexArgs,
 };
 
-pub(crate) fn parse_shell(args: &[String]) -> Result<CliCommand> {
+pub(crate) fn parse_shell_command(args: &[String]) -> Result<ShellCommand> {
     let (command, rest) = args
         .split_first()
         .ok_or_else(|| anyhow::anyhow!("shell subcommand is required"))?;
@@ -19,7 +19,7 @@ pub(crate) fn parse_shell(args: &[String]) -> Result<CliCommand> {
     }
 }
 
-pub(crate) fn parse_agent_command(args: &[String]) -> Result<CliCommand> {
+pub(crate) fn parse_agent_command_command(args: &[String]) -> Result<AgentCommandCommand> {
     let (command, rest) = args
         .split_first()
         .ok_or_else(|| anyhow::anyhow!("agent-command subcommand is required"))?;
@@ -37,7 +37,7 @@ pub(crate) fn parse_agent_command(args: &[String]) -> Result<CliCommand> {
     }
 }
 
-fn parse_shell_index(args: &[String]) -> Result<CliCommand> {
+fn parse_shell_index(args: &[String]) -> Result<ShellCommand> {
     let mut path = None;
     let mut shell = "zsh".to_string();
     let mut json = false;
@@ -61,14 +61,10 @@ fn parse_shell_index(args: &[String]) -> Result<CliCommand> {
     if shell != "zsh" {
         bail!("shell index currently supports only --shell zsh");
     }
-    Ok(CliCommand::Shell(ShellCommand::Index(ShellIndexArgs {
-        path,
-        shell,
-        json,
-    })))
+    Ok(ShellCommand::Index(ShellIndexArgs { path, shell, json }))
 }
 
-fn parse_shell_atuin_index(args: &[String]) -> Result<CliCommand> {
+fn parse_shell_atuin_index(args: &[String]) -> Result<ShellCommand> {
     let mut path = None;
     let mut json = false;
     let mut i = 0usize;
@@ -84,12 +80,10 @@ fn parse_shell_atuin_index(args: &[String]) -> Result<CliCommand> {
         i += 1;
     }
     let path = path.ok_or_else(|| anyhow::anyhow!("shell atuin-index requires --path PATH"))?;
-    Ok(CliCommand::Shell(ShellCommand::AtuinIndex(
-        ShellAtuinIndexArgs { path, json },
-    )))
+    Ok(ShellCommand::AtuinIndex(ShellAtuinIndexArgs { path, json }))
 }
 
-fn parse_agent_command_ingest_spool(args: &[String]) -> Result<CliCommand> {
+fn parse_agent_command_ingest_spool(args: &[String]) -> Result<AgentCommandCommand> {
     let mut path = None;
     let mut json = false;
     let mut i = 0usize;
@@ -106,12 +100,12 @@ fn parse_agent_command_ingest_spool(args: &[String]) -> Result<CliCommand> {
     }
     let path =
         path.ok_or_else(|| anyhow::anyhow!("agent-command ingest-spool requires --path PATH"))?;
-    Ok(CliCommand::AgentCommand(AgentCommandCommand::IngestSpool(
+    Ok(AgentCommandCommand::IngestSpool(
         AgentCommandIngestSpoolArgs { path, json },
-    )))
+    ))
 }
 
-fn parse_agent_command_wrap(args: &[String]) -> Result<CliCommand> {
+fn parse_agent_command_wrap(args: &[String]) -> Result<AgentCommandCommand> {
     let mut spool = None;
     let mut command_start = None;
     let mut i = 0usize;
@@ -136,9 +130,10 @@ fn parse_agent_command_wrap(args: &[String]) -> Result<CliCommand> {
     if command.is_empty() {
         bail!("agent-command wrap requires COMMAND after --");
     }
-    Ok(CliCommand::AgentCommand(AgentCommandCommand::Wrap(
-        AgentCommandWrapArgs { spool, command },
-    )))
+    Ok(AgentCommandCommand::Wrap(AgentCommandWrapArgs {
+        spool,
+        command,
+    }))
 }
 
 fn required_value(args: &[String], index: usize, flag: &str) -> Result<String> {

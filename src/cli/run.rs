@@ -2,8 +2,8 @@ use anyhow::{Result, anyhow, bail};
 use cortex::app::CortexService;
 
 use super::args::{
-    AgentCommandCommand, AlertsCommand, CliCommand, DbCommand, GraphCommand, NotifyCommand,
-    ShellCommand, SigCommand, StateCommand, StatsCommand,
+    AgentCommandCommand, AlertsCommand, CliCommand, DbCommand, GraphCommand, IngestCommand,
+    NotifyCommand, ShellCommand, SigCommand, StateCommand, StatsCommand,
 };
 use super::dispatch;
 
@@ -66,7 +66,35 @@ pub(crate) async fn run(mode: CliMode, command: CliCommand) -> Result<()> {
             StatsCommand::Summary(args) => dispatch::run_stats(&mode, args).await,
             StatsCommand::IngestRate(args) => dispatch::run_ingest_rate(&mode, args).await,
         },
-        CliCommand::FileTail(command) => dispatch::run_file_tail(&mode, command).await,
+        CliCommand::Ingest(command) => match command {
+            IngestCommand::Shell(shell) => match shell {
+                ShellCommand::Index(args) => {
+                    super::dispatch_command_log::run_shell_index(&mode, args).await
+                }
+                ShellCommand::AtuinIndex(args) => {
+                    super::dispatch_command_log::run_shell_atuin_index(&mode, args).await
+                }
+            },
+            IngestCommand::AgentCommand(command) => match command {
+                AgentCommandCommand::IngestSpool(args) => {
+                    super::dispatch_command_log::run_agent_command_ingest_spool(&mode, args).await
+                }
+                AgentCommandCommand::Wrap(_) => {
+                    bail!(
+                        "internal: ingest agent-command wrap must be dispatched before CliMode creation"
+                    )
+                }
+            },
+            IngestCommand::Inventory(_) => {
+                bail!(
+                    "internal: ingest inventory must be dispatched by main::run_cli before reaching cli::run()"
+                )
+            }
+            IngestCommand::FileTail(command) => dispatch::run_file_tail(&mode, command).await,
+            IngestCommand::SyslogStatus(args) => super::run_ingest_syslog_status(args).await,
+            IngestCommand::DockerStatus(args) => super::run_ingest_docker_status(args).await,
+            IngestCommand::DockerSources(args) => super::run_ingest_docker_sources(args).await,
+        },
         CliCommand::Sessions(command) => match command {
             super::SessionsCommand::List(args) => dispatch::run_sessions(&mode, args).await,
             super::SessionsCommand::Search(args) => dispatch::run_ai_search(&mode, args).await,
@@ -111,22 +139,6 @@ pub(crate) async fn run(mode: CliMode, command: CliCommand) -> Result<()> {
                 dispatch::run_ai_investigate(&mode, args).await
             }
             super::SessionsCommand::Assess(args) => dispatch::run_ai_assess(&mode, args).await,
-        },
-        CliCommand::Shell(shell) => match shell {
-            ShellCommand::Index(args) => {
-                super::dispatch_command_log::run_shell_index(&mode, args).await
-            }
-            ShellCommand::AtuinIndex(args) => {
-                super::dispatch_command_log::run_shell_atuin_index(&mode, args).await
-            }
-        },
-        CliCommand::AgentCommand(command) => match command {
-            AgentCommandCommand::IngestSpool(args) => {
-                super::dispatch_command_log::run_agent_command_ingest_spool(&mode, args).await
-            }
-            AgentCommandCommand::Wrap(_) => {
-                bail!("internal: agent-command wrap must be dispatched before CliMode creation")
-            }
         },
         CliCommand::Heartbeat(command) => {
             super::heartbeat_agent::run_heartbeat_no_db(command).await
@@ -182,11 +194,6 @@ pub(crate) async fn run(mode: CliMode, command: CliCommand) -> Result<()> {
         CliCommand::Config(_) => {
             bail!(
                 "internal: config commands must be dispatched by main::run_cli before reaching cli::run()"
-            )
-        }
-        CliCommand::Inventory(_) => {
-            bail!(
-                "internal: inventory commands must be dispatched by main::run_cli before reaching cli::run()"
             )
         }
         CliCommand::Complete(_) | CliCommand::Completions(_) => {
