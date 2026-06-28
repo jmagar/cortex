@@ -14,6 +14,8 @@ use super::{
     should_skip_ai_watch_systemd_enable, skipped_phase,
 };
 
+const LEGACY_AI_SYSTEMD_UNITS: &[&str] = &["cortex-ai-watch.service", "cortex-ai-index.timer"];
+
 pub async fn run_sessions_watch_service_setup(
     action: SessionsWatchServiceAction,
 ) -> io::Result<SetupReport> {
@@ -70,6 +72,13 @@ pub async fn run_sessions_watch_service_setup(
             phases.push(systemctl_user_phase(&[
                 "disable",
                 "--now",
+                "cortex-ai-watch.service",
+                "cortex-ai-index.timer",
+            ]));
+            phases.push(legacy_ai_systemd_units_absent_phase());
+            phases.push(systemctl_user_phase(&[
+                "disable",
+                "--now",
                 "cortex-sessions-index.timer",
             ]));
             phases.push(ai_index_timer_disabled_phase());
@@ -92,6 +101,12 @@ pub async fn run_sessions_watch_service_setup(
             ));
         }
         SessionsWatchServiceAction::Remove => {
+            phases.push(systemctl_user_phase(&[
+                "disable",
+                "--now",
+                "cortex-ai-watch.service",
+                "cortex-ai-index.timer",
+            ]));
             phases.push(systemctl_user_phase(&[
                 "disable",
                 "--now",
@@ -125,6 +140,7 @@ pub async fn run_sessions_watch_service_setup(
                 &user_home,
             ));
             phases.push(transcript_root_permissions_phase(&user_home));
+            phases.push(legacy_ai_systemd_units_absent_phase());
             phases.push(ai_index_timer_disabled_phase());
             phases.push(systemctl_user_required_named_phase(
                 AI_WATCH_SERVICE_ENABLED_PHASE,
@@ -149,6 +165,35 @@ pub async fn run_sessions_watch_service_setup(
         ),
         phases,
     ))
+}
+
+pub(super) fn legacy_ai_systemd_units_absent_phase() -> SetupPhase {
+    let timer = PhaseTimer::start("legacy-ai-systemd-units-absent");
+    let stale = LEGACY_AI_SYSTEMD_UNITS
+        .iter()
+        .filter_map(|unit| {
+            let active = systemctl_user_state("is-active", unit);
+            let enabled = systemctl_user_state("is-enabled", unit);
+            let active_stale = active.as_deref() == Some("active");
+            let enabled_stale = enabled.as_deref() == Some("enabled");
+            (active_stale || enabled_stale)
+                .then(|| format!("{unit} active={active:?} enabled={enabled:?}"))
+        })
+        .collect::<Vec<_>>();
+    if stale.is_empty() {
+        return timer.finish(
+            SetupStatus::Ok,
+            "legacy cortex-ai systemd units inactive or absent",
+        );
+    }
+    timer.finish(
+        SetupStatus::Error,
+        format!(
+            "legacy cortex-ai systemd units still active/enabled: {}; run `systemctl --user disable --now {}`",
+            stale.join("; "),
+            LEGACY_AI_SYSTEMD_UNITS.join(" ")
+        ),
+    )
 }
 
 pub(super) fn ai_index_timer_disabled_phase() -> SetupPhase {

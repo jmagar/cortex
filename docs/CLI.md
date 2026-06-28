@@ -10,6 +10,22 @@ Direct query CLI mode does not start syslog listeners, the HTTP MCP server, the
 REST API, OTLP routes, retention purge, Docker ingest, or storage-budget cleanup
 tasks. Keep `cortex serve mcp` running somewhere for ingestion.
 
+## Breaking command migrations
+
+The command-domain cleanup is a hard break. Old top-level spellings fail fast
+with replacement guidance instead of dispatching through compatibility aliases.
+
+| Removed command | Replacement |
+| --- | --- |
+| `cortex ai ...` | `cortex sessions ...` |
+| `cortex source-ips ...` | `cortex hosts sources ...` |
+| `cortex silent-hosts ...` | `cortex hosts silent ...` |
+| `cortex service logs SERVICE ...` | `cortex compose logs SERVICE ...` |
+| `cortex deploy ...` | `cortex setup deploy ...` |
+
+The REST `/api/ai/*` namespace is also intentionally removed; use
+`/api/sessions/*`.
+
 ## Configuration
 
 CLI commands use the normal config loader:

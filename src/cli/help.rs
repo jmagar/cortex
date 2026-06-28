@@ -29,7 +29,7 @@ struct CommandDoc {
 }
 
 struct NestedCommandDoc {
-    /// Full path after `cortex`, e.g. `ai search`.
+    /// Full path after `cortex`, e.g. `sessions search`.
     path: &'static str,
     summary: &'static str,
     usage: &'static [&'static str],
@@ -401,28 +401,28 @@ const NESTED_CATALOG: &[NestedCommandDoc] = &[
         usage: &["cortex inventory status [--json]"],
     },
     NestedCommandDoc {
-        path: "ai search",
+        path: "sessions search",
         summary: "Full-text search over indexed AI transcript sessions",
         usage: &[
             "cortex sessions search QUERY [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--json]",
         ],
     },
     NestedCommandDoc {
-        path: "ai abuse",
+        path: "sessions abuse",
         summary: "Find risky or failure-related transcript messages",
         usage: &[
             "cortex sessions abuse [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--before N] [--after N] [--term WORD] [--json]",
         ],
     },
     NestedCommandDoc {
-        path: "ai incidents",
+        path: "sessions incidents",
         summary: "Cluster AI transcript abuse matches into incidents",
         usage: &[
             "cortex sessions incidents [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--window-minutes N] [--term WORD] [--json]",
         ],
     },
     NestedCommandDoc {
-        path: "ai investigate",
+        path: "sessions investigate",
         summary: "Expand AI incidents into evidence bundles",
         usage: &[
             "cortex sessions investigate [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--window-minutes N] [--correlation-window-minutes N] [--term WORD] [--detail compact|full] [--include-transcript] [--max-bytes N] [--json]",
@@ -430,21 +430,21 @@ const NESTED_CATALOG: &[NestedCommandDoc] = &[
         ],
     },
     NestedCommandDoc {
-        path: "ai assess",
+        path: "sessions assess",
         summary: "Assess one AI incident with optional model context",
         usage: &[
             "cortex sessions assess INCIDENT_ID [--model MODEL] [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--window-minutes N] [--correlation-window-minutes N] [--term WORD] [--json]",
         ],
     },
     NestedCommandDoc {
-        path: "ai correlate",
+        path: "sessions correlate",
         summary: "Correlate AI transcript anchors with non-AI logs",
         usage: &[
             "cortex sessions correlate [--project PATH] [--tool TOOL] [--session-id ID] [--ai-query FTS] [--log-query FTS] [--host HOST] [--source SOURCE] [--app APP] [--since TIME] [--until TIME] [--window-minutes N] [--severity-min LEVEL] [--limit N] [--events-per-anchor N] [--json]",
         ],
     },
     NestedCommandDoc {
-        path: "ai blocks",
+        path: "sessions blocks",
         summary: "AI transcript activity grouped into 5-hour UTC blocks",
         usage: &[
             "cortex sessions blocks [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--detail compact|full] [--json]",
@@ -452,83 +452,83 @@ const NESTED_CATALOG: &[NestedCommandDoc] = &[
         ],
     },
     NestedCommandDoc {
-        path: "ai context",
+        path: "sessions context",
         summary: "Recent AI transcript context for one project",
         usage: &["cortex sessions context --project PATH [--tool TOOL] [--limit N] [--json]"],
     },
     NestedCommandDoc {
-        path: "ai tools",
+        path: "sessions tools",
         summary: "List AI tools present in transcript metadata",
         usage: &["cortex sessions tools [--project PATH] [--since TIME] [--until TIME] [--json]"],
     },
     NestedCommandDoc {
-        path: "ai projects",
+        path: "sessions projects",
         summary: "List AI projects present in transcript metadata",
         usage: &["cortex sessions projects [--tool TOOL] [--since TIME] [--until TIME] [--json]"],
     },
     NestedCommandDoc {
-        path: "ai index",
+        path: "sessions index",
         summary: "Index local AI transcript roots",
         usage: &["cortex sessions index [--path PATH] [--since TIME] [--force] [--json]"],
     },
     NestedCommandDoc {
-        path: "ai add",
+        path: "sessions add",
         summary: "Index one AI transcript file",
         usage: &["cortex sessions add --file FILE [--force] [--json]"],
     },
     NestedCommandDoc {
-        path: "ai watch",
+        path: "sessions watch",
         summary: "Run the local transcript watch daemon",
         usage: &[
             "cortex sessions watch [--path PATH] [--debounce-ms N] [--settle-ms N] [--max-retries N] [--no-initial-scan] [--json]",
         ],
     },
     NestedCommandDoc {
-        path: "ai checkpoints",
+        path: "sessions checkpoints",
         summary: "List AI transcript indexing checkpoints",
         usage: &["cortex sessions checkpoints [--errors] [--missing] [--limit N] [--json]"],
     },
     NestedCommandDoc {
-        path: "ai errors",
+        path: "sessions errors",
         summary: "List AI transcript parse errors",
         usage: &["cortex sessions errors [--limit N] [--json]"],
     },
     NestedCommandDoc {
-        path: "ai prune-checkpoints",
+        path: "sessions prune-checkpoints",
         summary: "Prune stale AI indexing checkpoints",
         usage: &["cortex sessions prune-checkpoints --missing [--dry-run] [--limit N] [--json]"],
     },
     NestedCommandDoc {
-        path: "ai doctor",
+        path: "sessions doctor",
         summary: "Check local AI transcript indexing prerequisites",
         usage: &["cortex sessions doctor [--strict-permissions] [--json]"],
     },
     NestedCommandDoc {
-        path: "ai watch-status",
+        path: "sessions watch-status",
         summary: "Inspect the local AI transcript watch service",
         usage: &["cortex sessions watch-status [--json]"],
     },
     NestedCommandDoc {
-        path: "ai smoke-watch",
+        path: "sessions smoke-watch",
         summary: "Run a local AI transcript watch smoke test",
         usage: &["cortex sessions smoke-watch [--json]"],
     },
     NestedCommandDoc {
-        path: "ai similar",
+        path: "sessions similar",
         summary: "Find incidents similar to a free-text query",
         usage: &[
             "cortex sessions similar QUERY [--host HOST] [--app APP] [--severity-min LEVEL] [--since TIME] [--until TIME] [--window-minutes N] [--limit N] [--json]",
         ],
     },
     NestedCommandDoc {
-        path: "ai ask-history",
+        path: "sessions ask-history",
         summary: "Search historical AI sessions and nearby system logs",
         usage: &[
             "cortex sessions ask-history QUERY [--host HOST] [--app APP] [--since TIME] [--until TIME] [--limit N] [--json]",
         ],
     },
     NestedCommandDoc {
-        path: "ai incident-context",
+        path: "sessions incident-context",
         summary: "Build incident context from an explicit time window",
         usage: &[
             "cortex sessions incident-context --since TIME --until TIME [--host HOST] [--app APP] [--query FTS] [--severity-min LEVEL] [--limit N] [--json]",

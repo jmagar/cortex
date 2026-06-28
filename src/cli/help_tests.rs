@@ -112,11 +112,11 @@ fn command_help_shows_detailed_flags() {
 
 #[test]
 fn nested_help_shows_subcommand_specific_usage() {
-    let out = render_command("ai search", false).expect("ai search is known");
+    let out = render_command("sessions search", false).expect("sessions search is known");
     assert!(out.contains("cortex sessions search QUERY"), "got: {out}");
     assert!(!out.contains("cortex sessions investigate"), "got: {out}");
 
-    let out = render_command("ai investigate", false).expect("ai investigate is known");
+    let out = render_command("sessions investigate", false).expect("sessions investigate is known");
     assert!(out.contains("--detail compact|full"), "got: {out}");
     assert!(out.contains("--include-transcript"), "got: {out}");
 
@@ -136,6 +136,29 @@ fn nested_help_shows_subcommand_specific_usage() {
     let out = render_command("file-tail add", false).expect("file-tail add is known");
     assert!(out.contains("cortex file-tail add --id ID"), "got: {out}");
     assert!(out.contains("--from-start"), "got: {out}");
+}
+
+#[test]
+fn every_nested_help_path_classifies_and_renders() {
+    let v = |xs: Vec<&str>| xs.into_iter().map(str::to_string).collect::<Vec<_>>();
+
+    for doc in NESTED_CATALOG {
+        let mut args = doc.path.split_whitespace().collect::<Vec<_>>();
+        args.push("--help");
+        assert_eq!(
+            classify_help(&v(args)),
+            HelpRequest::Command(doc.path.to_string()),
+            "nested help path should classify: {}",
+            doc.path
+        );
+        let body = render_command(doc.path, false)
+            .unwrap_or_else(|| panic!("nested help path should render: {}", doc.path));
+        assert!(
+            body.contains(doc.usage[0]),
+            "nested help for `{}` should include its primary usage, got: {body}",
+            doc.path
+        );
+    }
 }
 
 #[test]
@@ -185,7 +208,7 @@ fn classify_help_distinguishes_top_level_command_and_none() {
     );
     assert_eq!(
         classify_help(&v(&["sessions", "search", "--help"])),
-        HelpRequest::Command("sessions".to_string())
+        HelpRequest::Command("sessions search".to_string())
     );
     assert_eq!(
         classify_help(&v(&["search", "--help"])),

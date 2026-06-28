@@ -56,6 +56,27 @@ fn path_with_prepended(dir: &std::path::Path) -> std::ffi::OsString {
 }
 
 #[cfg(unix)]
+#[test]
+#[serial]
+fn legacy_ai_systemd_units_absent_phase_reports_stale_units() {
+    let dir = tempfile::tempdir().unwrap();
+    let bin_dir = dir.path().join("bin");
+    std::fs::create_dir_all(&bin_dir).unwrap();
+    write_executable(
+        &bin_dir.join("systemctl"),
+        "#!/bin/sh\ncase \"$*\" in\n  *is-active*cortex-ai-watch.service*) printf 'active\\n' ;;\n  *is-enabled*cortex-ai-watch.service*) printf 'enabled\\n' ;;\n  *is-active*cortex-ai-index.timer*) printf 'inactive\\n' ;;\n  *is-enabled*cortex-ai-index.timer*) printf 'disabled\\n' ;;\n  *) printf 'inactive\\n' ;;\nesac\nexit 0\n",
+    );
+    let _path = EnvGuard::set("PATH", path_with_prepended(&bin_dir));
+
+    let phase = legacy_ai_systemd_units_absent_phase();
+
+    assert_eq!(phase.name, "legacy-ai-systemd-units-absent");
+    assert_eq!(phase.status, SetupStatus::Error);
+    assert!(phase.detail.contains("cortex-ai-watch.service"));
+    assert!(phase.detail.contains("systemctl --user disable --now"));
+}
+
+#[cfg(unix)]
 #[tokio::test]
 #[serial]
 async fn run_ai_watch_service_setup_install_check_and_remove_round_trip() {

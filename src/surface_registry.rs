@@ -386,6 +386,49 @@ mod tests {
     }
 
     #[test]
+    fn prior_consolidations_are_classified_in_matrix() {
+        for (name, domain, class, local_cli, http_cli) in [
+            (
+                "sessions",
+                SurfaceDomain::Sessions,
+                SurfaceClass::Canonical,
+                true,
+                true,
+            ),
+            (
+                "hosts",
+                SurfaceDomain::Hosts,
+                SurfaceClass::Canonical,
+                true,
+                true,
+            ),
+            (
+                "compose",
+                SurfaceDomain::Runtime,
+                SurfaceClass::Operational,
+                true,
+                false,
+            ),
+            (
+                "setup",
+                SurfaceDomain::Setup,
+                SurfaceClass::Operational,
+                true,
+                false,
+            ),
+        ] {
+            let surface = CLI_SURFACES
+                .iter()
+                .find(|surface| surface.name == name)
+                .unwrap_or_else(|| panic!("{name} missing from CLI_SURFACES"));
+            assert_eq!(surface.domain, domain);
+            assert_eq!(surface.class, class);
+            assert_eq!(surface.local_cli, local_cli);
+            assert_eq!(surface.http_cli, http_cli);
+        }
+    }
+
+    #[test]
     fn api_ai_is_recorded_as_clean_break() {
         let api_ai = API_SURFACES
             .iter()
