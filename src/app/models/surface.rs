@@ -51,7 +51,7 @@ pub enum StateRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "mode", content = "response", rename_all = "snake_case")]
 pub enum StateResponse {
-    Host(HostStateResponse),
+    Host(Box<HostStateResponse>),
     Fleet(FleetStateResponse),
     ClockSkew(ClockSkewResponse),
 }

@@ -121,7 +121,7 @@ pub(crate) async fn run_host_state(mode: &CliMode, args: HostStateArgs) -> Resul
     let req = args.into_request();
     let response = match mode {
         CliMode::Local(service) => match service.state(StateRequest::Host(req)).await? {
-            StateResponse::Host(response) => response,
+            StateResponse::Host(response) => *response,
             StateResponse::Fleet(_) | StateResponse::ClockSkew(_) => {
                 anyhow::bail!("internal: state host returned wrong response")
             }

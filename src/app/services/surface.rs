@@ -55,7 +55,11 @@ impl CortexService {
 
     pub async fn state(&self, req: StateRequest) -> ServiceResult<StateResponse> {
         match req {
-            StateRequest::Host(req) => self.host_state(req).await.map(StateResponse::Host),
+            StateRequest::Host(req) => self
+                .host_state(req)
+                .await
+                .map(Box::new)
+                .map(StateResponse::Host),
             StateRequest::Fleet(req) => self.fleet_state(req).await.map(StateResponse::Fleet),
             StateRequest::ClockSkew(req) => {
                 self.clock_skew(req).await.map(StateResponse::ClockSkew)
