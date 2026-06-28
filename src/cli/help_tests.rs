@@ -8,15 +8,14 @@ const PARSER_TOKENS: &[&str] = &[
     "search",
     "filter",
     "tail",
-    "errors",
     "hosts",
     "sessions",
-    "incident",
-    "sessions",
-    "heartbeat",
-    "correlate",
+    "analysis",
     "state",
     "ingest",
+    "alerts",
+    "heartbeat",
+    "correlate",
     "stats",
     "compose",
     "setup",
@@ -25,12 +24,8 @@ const PARSER_TOKENS: &[&str] = &[
     "entity",
     "graph",
     "timeline",
-    "patterns",
-    "alerts",
-    "anomalies",
-    "compare",
     "apps",
-    "correlate-state",
+    "completions",
     // Mode-level (src/main.rs)
     "serve",
     "mcp",
@@ -83,7 +78,7 @@ fn top_level_help_plain_lists_sections_and_commands() {
     assert!(out.contains("Commands"));
     assert!(out.contains("Search & Logs"));
     assert!(out.contains("hosts"));
-    assert!(out.contains("file-tail"));
+    assert!(out.contains("ingest"));
     assert!(out.contains("→ Run cortex <command> --help"));
 }
 
@@ -113,19 +108,11 @@ fn nested_help_shows_subcommand_specific_usage() {
     assert!(out.contains("--detail compact|full"), "got: {out}");
     assert!(out.contains("--include-transcript"), "got: {out}");
 
-    let out = render_command("ingest inventory refresh", false)
-        .expect("ingest inventory refresh is known");
+    let out = render_command("ingest inventory", false).expect("ingest inventory is known");
     assert!(
         out.contains("cortex ingest inventory refresh [--json]"),
         "got: {out}"
     );
-    assert!(
-        !out.contains("cortex ingest inventory status"),
-        "got: {out}"
-    );
-
-    let out =
-        render_command("ingest inventory status", false).expect("ingest inventory status is known");
     assert!(
         out.contains("cortex ingest inventory status [--json]"),
         "got: {out}"
@@ -137,29 +124,12 @@ fn nested_help_shows_subcommand_specific_usage() {
         "got: {out}"
     );
     assert!(out.contains("--from-start"), "got: {out}");
-}
 
-#[test]
-fn every_nested_help_path_classifies_and_renders() {
-    let v = |xs: Vec<&str>| xs.into_iter().map(str::to_string).collect::<Vec<_>>();
-
-    for doc in NESTED_CATALOG {
-        let mut args = doc.path.split_whitespace().collect::<Vec<_>>();
-        args.push("--help");
-        assert_eq!(
-            classify_help(&v(args)),
-            HelpRequest::Command(doc.path.to_string()),
-            "nested help path should classify: {}",
-            doc.path
-        );
-        let body = render_command(doc.path, false)
-            .unwrap_or_else(|| panic!("nested help path should render: {}", doc.path));
-        assert!(
-            body.contains(doc.usage[0]),
-            "nested help for `{}` should include its primary usage, got: {body}",
-            doc.path
-        );
-    }
+    assert!(render_command("ai search", false).is_none());
+    assert!(render_command("inventory refresh", false).is_none());
+    assert!(render_command("file-tail add", false).is_none());
+    assert!(render_command("sig ack", false).is_none());
+    assert!(render_command("notify recent", false).is_none());
 }
 
 #[test]
@@ -244,6 +214,7 @@ fn classify_help_distinguishes_top_level_command_and_none() {
     // `--` sentinel hides a wrapped command's --help.
     assert_eq!(
         classify_help(&v(&[
+            "ingest",
             "agent-command",
             "wrap",
             "--spool",

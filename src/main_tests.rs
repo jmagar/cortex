@@ -21,7 +21,7 @@ fn mode_parse_accepts_single_binary_transport_commands() {
 
 #[test]
 fn mode_parse_accepts_heartbeat_state_commands() {
-    // Regression: state host/state fleet/correlate-state are routed in
+    // Regression: state/correlate state are routed in
     // parse.rs + run.rs, but were missing from Mode::parse's top-level command
     // gate, so they fell through to print_usage()+exit 1 (bd syslog-mcp-8fww).
     assert!(matches!(
@@ -41,7 +41,8 @@ fn mode_parse_accepts_heartbeat_state_commands() {
     ));
     assert!(matches!(
         Mode::parse(vec![
-            "correlate-state".into(),
+            "correlate".into(),
+            "state".into(),
             "--reference-time".into(),
             "2026-01-01T00:00:00Z".into(),
             "--json".into(),
@@ -53,18 +54,19 @@ fn mode_parse_accepts_heartbeat_state_commands() {
 
 #[test]
 fn mode_parse_accepts_topic_correlate() {
-    // Regression: topic-correlate is in TOP_LEVEL_COMMANDS + parse_command but was
-    // missing from Mode::parse's top-level command gate, so `cortex topic-correlate
+    // Regression: correlate topic is in TOP_LEVEL_COMMANDS + parse_command but was
+    // missing from Mode::parse's top-level command gate, so `cortex correlate topic
     // <topic>` parsed successfully and then hit the `unreachable!()` fallthrough →
     // panic. Both the single-term and the multi-term (screenshot) forms must route
     // cleanly to a CLI invocation.
     assert!(matches!(
-        Mode::parse(vec!["topic-correlate".into(), "axon".into()]).unwrap(),
+        Mode::parse(vec!["correlate".into(), "topic".into(), "axon".into()]).unwrap(),
         Mode::Cli(_)
     ));
     assert!(matches!(
         Mode::parse(vec![
-            "topic-correlate".into(),
+            "correlate".into(),
+            "topic".into(),
             "squirts".into(),
             "dockersocket".into(),
         ])
@@ -291,11 +293,9 @@ fn mode_parse_preserves_wrapped_command_http_like_flags() {
         panic!("expected CLI mode");
     };
     assert_eq!(invocation.flags, cli::GlobalFlags::default());
-    let cli::CliCommand::Ingest(cli::IngestCommand::AgentCommand(cli::AgentCommandCommand::Wrap(
-        args,
-    ))) = invocation.command
+    let cli::CliCommand::AgentCommand(cli::AgentCommandCommand::Wrap(args)) = invocation.command
     else {
-        panic!("expected ingest agent-command wrap");
+        panic!("expected agent-command wrap");
     };
     assert_eq!(
         args.command,
@@ -405,8 +405,10 @@ fn mode_parse_accepts_setup_deploy_namespace() {
 #[test]
 fn mode_parse_rejects_top_level_deploy_namespace() {
     let err = Mode::parse(vec!["deploy".into(), "preflight".into()]).unwrap_err();
-    assert!(err.to_string().contains("removed CLI command: deploy"));
-    assert!(err.to_string().contains("cortex setup deploy"));
+    assert!(
+        err.to_string()
+            .contains("removed CLI command: deploy\n\nUse `cortex setup deploy`.")
+    );
 }
 
 #[test]
@@ -861,8 +863,8 @@ fn mode_parse_accepts_new_surface_parity_subcommands() {
     let cases: &[&[&str]] = &[
         &["hosts", "silent"],
         &["state", "clock-skew"],
-        &["anomalies"],
-        &["compare"],
+        &["analysis", "anomalies"],
+        &["analysis", "compare"],
         &["apps"],
     ];
     for args in cases {

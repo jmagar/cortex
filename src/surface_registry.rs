@@ -179,6 +179,10 @@ pub const SURFACE_SPECS: &[SurfaceSpec] = &[
     cli!("hosts", Hosts, Canonical, Read),
     cli!("apps", Search, Canonical, Read),
     cli!("sessions", Sessions, Canonical, Read),
+    cli!("analysis", Analysis, Canonical, Read),
+    cli!("state", State, Canonical, Read),
+    cli!("ingest", Ingest, Canonical, Admin),
+    cli!("alerts", Alerts, Canonical, Admin),
     cli!("entity", Graph, Canonical, Read),
     cli!("graph", Graph, Canonical, Read),
     cli!("errors", Analysis, MovedIntoGroupedDomain, Read, replace: "analysis errors", reason: "analysis owns error, incident, pattern, and anomaly views"),
@@ -327,9 +331,7 @@ pub fn canonical_cli_roots() -> impl Iterator<Item = &'static SurfaceSpec> {
     specs_for(SurfaceKind::Cli).filter(|spec| {
         matches!(
             spec.disposition,
-            SurfaceDisposition::Canonical
-                | SurfaceDisposition::MovedIntoGroupedDomain
-                | SurfaceDisposition::RetainedTopLevelOperational
+            SurfaceDisposition::Canonical | SurfaceDisposition::RetainedTopLevelOperational
         )
     })
 }
