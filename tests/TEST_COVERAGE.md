@@ -466,9 +466,9 @@ No write operations exist in the cortex tool surface (it is a read-only server),
 |---|---|
 | `cortex search` | Yes — two invocations |
 | `cortex tail` | Yes |
-| `cortex errors` | Yes |
+| `cortex analysis errors` | Yes |
 | `cortex hosts` | Yes |
-| `cortex correlate` | Yes |
+| `cortex correlate events` | Yes |
 | `cortex stats` | Yes |
 | `cortex status` | Yes |
 | `cortex help` | Yes |
@@ -484,7 +484,7 @@ No write operations exist in the cortex tool surface (it is a read-only server),
 | `cortex stats` | All numeric fields are present AND `>= 0` — proves the DB query ran and returned sensible (not negative) values; `write_blocked` is proven non-null (may be `false`) |
 | `cortex hosts` | `.hosts` is a JSON array (not an object or string); if populated, each entry has `hostname`, `log_count`, `first_seen`, `last_seen` — proves the host aggregation query produced correctly shaped rows |
 | `cortex search` | `.count` is numeric `>= 0` and `.logs` is an array; if populated, entries have all four log fields — proves the full-text search plumbing returns correctly shaped log rows |
-| `cortex errors` | `.summary` is an array; if populated, entries have `hostname`, `severity`, and `count` — proves the severity-filtered aggregation returns the correct schema |
+| `cortex action=errors` | `.summary` is an array; if populated, entries have `hostname`, `severity`, and `count` — proves the severity-filtered aggregation returns the correct schema |
 | `syslog tail` | `.count >= 0` and `.logs` is an array; if populated, entries have all four log fields — proves the recency ordering query returns correct log rows |
 | `syslog correlate` | All seven fields (`reference_time`, `window_minutes`, `window_from`, `window_to`, `hosts`, `total_events`, `truncated`) are present — proves the temporal windowing logic computed bounds and populated all metadata even on an empty window |
 | `syslog ai_correlate` | `.anchors` is an array and `.total_related_events` plus `.related_limit_per_anchor` are present — proves AI transcript anchors can be joined to nearby non-AI log context without requiring matches |

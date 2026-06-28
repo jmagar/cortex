@@ -58,7 +58,7 @@ with:
 
 ```bash
 cortex compose doctor
-cortex inventory refresh --json
+cortex ingest inventory refresh --json
 ```
 
 Then use the `cortex-deploy-dropins` plugin skill or the documented deploy

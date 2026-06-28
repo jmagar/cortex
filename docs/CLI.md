@@ -10,10 +10,11 @@ Direct query CLI mode does not start syslog listeners, the HTTP MCP server, the
 REST API, OTLP routes, retention purge, Docker ingest, or storage-budget cleanup
 tasks. Keep `cortex serve mcp` running somewhere for ingestion.
 
-## Breaking command migrations
+## Breaking Command Migration
 
-The command-domain cleanup is a hard break. Old top-level spellings fail fast
-with replacement guidance instead of dispatching through compatibility aliases.
+Version 3.0 intentionally removes the old implementation-shaped top-level CLI
+commands. They fail fast with replacement guidance; there are no aliases or
+compatibility shims.
 
 | Removed command | Replacement |
 | --- | --- |
@@ -22,12 +23,20 @@ with replacement guidance instead of dispatching through compatibility aliases.
 | `cortex silent-hosts ...` | `cortex hosts silent ...` |
 | `cortex service logs SERVICE ...` | `cortex compose logs SERVICE ...` |
 | `cortex deploy ...` | `cortex setup deploy ...` |
-| `cortex sig ...` | `cortex alerts signatures ...` |
-| `cortex notify ...` | `cortex alerts notifications ...` |
+| `cortex errors ...` | `cortex analysis errors ...` |
+| `cortex incident ...` | `cortex analysis incident ...` |
+| `cortex patterns ...` | `cortex analysis patterns ...` |
+| `cortex anomalies ...` | `cortex analysis anomalies ...` |
+| `cortex compare ...` | `cortex analysis compare ...` |
+| `cortex correlate --reference-time ...` | `cortex correlate events --reference-time ...` |
+| `cortex correlate-state ...` | `cortex correlate state ...` |
+| `cortex topic-correlate ...` | `cortex correlate topic ...` |
 | `cortex host-state ...` | `cortex state host ...` |
 | `cortex fleet-state ...` | `cortex state fleet ...` |
 | `cortex clock-skew ...` | `cortex state clock-skew ...` |
 | `cortex ingest-rate ...` | `cortex stats ingest-rate ...` |
+| `cortex sig ...` | `cortex alerts signatures ...` |
+| `cortex notify ...` | `cortex alerts notifications ...` |
 | `cortex shell ...` | `cortex ingest shell ...` |
 | `cortex agent-command ...` | `cortex ingest agent-command ...` |
 | `cortex inventory ...` | `cortex ingest inventory ...` |
@@ -165,15 +174,15 @@ Flags:
 | `--app APP` | Application/process name filter |
 | `--json` | Print JSON response |
 
-### `cortex errors`
+### `cortex analysis errors`
 
 Summarize error and warning counts by host and severity. With no `--since` the
 window defaults to the **last hour**.
 
 ```bash
-cortex errors                     # last hour
-cortex errors --since 6h --limit 50
-cortex errors --since 2026-01-01T00:00:00Z --until 2026-01-02T00:00:00Z --json
+cortex analysis errors                     # last hour
+cortex analysis errors --since 6h --limit 50
+cortex analysis errors --since 2026-01-01T00:00:00Z --until 2026-01-02T00:00:00Z --json
 ```
 
 Flags:
@@ -727,13 +736,13 @@ can still expose scrubbed AI messages and local `ai_transcript_path` values, so
 do not expose the database or MCP endpoint to clients that should not see local
 AI session content.
 
-### `cortex correlate`
+### `cortex correlate events`
 
 Find related events around a reference timestamp. Results are grouped by host.
 
 ```bash
-cortex correlate --reference-time 2026-01-01T12:00:00Z --window-minutes 10
-cortex correlate 2026-01-01T12:00:00Z --severity-min err --query timeout --limit 50
+cortex correlate events --reference-time 2026-01-01T12:00:00Z --window-minutes 10
+cortex correlate events 2026-01-01T12:00:00Z --severity-min err --query timeout --limit 50
 ```
 
 Flags:
@@ -750,14 +759,14 @@ Flags:
 | `--limit N` | Maximum total events |
 | `--json` | Print JSON response |
 
-### `cortex host-state`
+### `cortex state host`
 
 Return the latest bounded heartbeat state for one host. A bare positional
 argument is a hostname (shorthand for `--host`).
 
 ```bash
-cortex host-state tootie          # bare positional → --host tootie
-cortex host-state --host-id host-a --limit 5 --json
+cortex state host tootie          # bare positional → --host tootie
+cortex state host --host-id host-a --limit 5 --json
 ```
 
 Flags:
@@ -771,13 +780,13 @@ Flags:
 | `--limit N` | Number of samples (default 1, max 100) |
 | `--json` | Print JSON response |
 
-### `cortex fleet-state`
+### `cortex state fleet`
 
 Print a fleet-wide heartbeat snapshot with pressure flags and summary counts.
 
 ```bash
-cortex fleet-state
-cortex fleet-state --exclude-ok --sort freshness --json
+cortex state fleet
+cortex state fleet --exclude-ok --sort freshness --json
 ```
 
 Flags:
@@ -789,14 +798,14 @@ Flags:
 | `--sort ORDER` | `pressure` (default), `freshness`, or `hostname` |
 | `--json` | Print JSON response |
 
-### `cortex correlate-state`
+### `cortex correlate state`
 
 Correlate non-AI logs with per-host heartbeat window summaries around a
 reference time. Bounded by default; never performs a full-history scan.
 
 ```bash
-cortex correlate-state --reference-time 2026-01-01T12:00:00Z --window-minutes 10
-cortex correlate-state --reference-time 2026-01-01T12:00:00Z --host tootie --severity-min warning --json
+cortex correlate state --reference-time 2026-01-01T12:00:00Z --window-minutes 10
+cortex correlate state --reference-time 2026-01-01T12:00:00Z --host tootie --severity-min warning --json
 ```
 
 Flags:
@@ -1044,7 +1053,7 @@ models.
 | `cortex search` | `cortex` with `action="search"` |
 | `cortex filter` | `cortex` with `action="filter"` |
 | `cortex tail` | `cortex` with `action="tail"` |
-| `cortex errors` | `cortex` with `action="errors"` |
+| `cortex analysis errors` | `cortex` with `action="errors"` |
 | `cortex hosts` | `cortex` with `action="hosts"` |
 | `cortex sessions` | `cortex` with `action="sessions"` |
 | `cortex sessions search` | `cortex` with `action="search_sessions"` |
@@ -1059,25 +1068,25 @@ models.
 | `cortex sessions similar` | `cortex` with `action="similar_incidents"` |
 | `cortex sessions ask-history` | `cortex` with `action="ask_history"` |
 | `cortex sessions incident-context` | `cortex` with `action="incident_context"` |
-| `cortex correlate` | `cortex` with `action="correlate"` |
-| `cortex host-state` | `cortex` with `action="host_state"` |
-| `cortex fleet-state` | `cortex` with `action="fleet_state"` |
-| `cortex correlate-state` | `cortex` with `action="correlate_state"` |
+| `cortex correlate events` | `cortex` with `action="correlate"` |
+| `cortex state host` | `cortex` with `action="host_state"` |
+| `cortex state fleet` | `cortex` with `action="fleet_state"` |
+| `cortex correlate state` | `cortex` with `action="correlate_state"` |
 | `cortex apps` | `cortex` with `action="apps"` |
 | `cortex hosts sources` | `cortex` with `action="source_ips"` |
 | `cortex timeline` | `cortex` with `action="timeline"` |
-| `cortex patterns` | `cortex` with `action="patterns"` |
+| `cortex analysis patterns` | `cortex` with `action="patterns"` |
 | `cortex context` | `cortex` with `action="context"` |
 | `cortex get` | `cortex` with `action="get"` |
-| `cortex ingest-rate` | `cortex` with `action="ingest_rate"` |
+| `cortex stats ingest-rate` | `cortex` with `action="ingest_rate"` |
 | `cortex hosts silent` | `cortex` with `action="silent_hosts"` |
-| `cortex clock-skew` | `cortex` with `action="clock_skew"` |
-| `cortex anomalies` | `cortex` with `action="anomalies"` |
-| `cortex compare` | `cortex` with `action="compare"` |
-| `cortex alerts signatures list` | `cortex` with `action="unaddressed_errors"` |
+| `cortex state clock-skew` | `cortex` with `action="clock_skew"` |
+| `cortex analysis anomalies` | `cortex` with `action="anomalies"` |
+| `cortex analysis compare` | `cortex` with `action="compare"` |
+| `cortex alerts signatures` | `cortex` with `action="unaddressed_errors"` |
 | `cortex alerts signatures ack` | `cortex` with `action="ack_error"` |
 | `cortex alerts signatures unack` | `cortex` with `action="unack_error"` |
-| `cortex alerts notifications recent` | `cortex` with `action="notifications_recent"` |
+| `cortex alerts notifications` | `cortex` with `action="notifications_recent"` |
 | `cortex alerts notifications test` | `cortex` with `action="notifications_test"` |
 | `cortex stats` | `cortex` with `action="stats"` |
 | `cortex compose status` | `cortex` with `action="compose_status"` (redacted read-only projection only) |

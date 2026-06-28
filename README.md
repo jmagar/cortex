@@ -86,14 +86,14 @@ For the complete action-specific parameter reference, see [`docs/mcp/SCHEMA.md`]
 
 ## Homelab Inventory
 
-`cortex inventory refresh --json` collects native Rust inventory into
+`cortex ingest inventory refresh --json` collects native Rust inventory into
 `~/.cortex/inventory` and writes:
 
 - `normalized/homelab.json` — typed `cortex.homelab_inventory.v1` cache
 - `collection-state.json` — per-collector status, warnings, timings, and artifact refs
 - `raw/<run_id>/*.txt` — raw-but-redacted Compose and reverse proxy artifacts
 
-`cortex inventory status --json` reports cache freshness and warnings without
+`cortex ingest inventory status --json` reports cache freshness and warnings without
 opening SQLite. The MCP `map` action is read-only: it reads the normalized cache
 and overlays bounded live Cortex host/heartbeat data, but never triggers refresh
 or returns raw artifact bodies.
@@ -124,8 +124,8 @@ Docker `events` streams over SSH are opt-in via
 `CORTEX_INVENTORY_REMOTE_DOCKER_EVENTS=true`.
 
 On first run, before `normalized/homelab.json` exists, `map` and
-`cortex inventory status --json` report `cache_status: "missing"`. Run
-`cortex inventory refresh --json` to seed `~/.cortex/inventory` and clear that
+`cortex ingest inventory status --json` report `cache_status: "missing"`. Run
+`cortex ingest inventory refresh --json` to seed `~/.cortex/inventory` and clear that
 missing-cache state.
 
 ## Prompts
@@ -261,7 +261,7 @@ Same structure as `cortex search`: `{ "count": N, "logs": [...] }`.
 
 ---
 
-### `cortex errors`
+### `cortex analysis errors`
 
 Summarize warnings and errors across all hosts in a time window. Groups by hostname and severity, showing counts. Use this for quick health assessments.
 
@@ -347,7 +347,7 @@ List AI transcript sessions grouped by project, tool, session, and host.
 
 ---
 
-### `cortex correlate`
+### `cortex correlate events`
 
 Search for related events across multiple hosts within a ±N minute window around a reference timestamp. Useful for debugging cascading failures. Results are grouped by host and ordered by time.
 
@@ -385,7 +385,7 @@ Search for related events across multiple hosts within a ±N minute window aroun
 }
 ```
 
-**Note on clock skew:** `cortex correlate` uses the `timestamp` field from the syslog message, which reflects the sending device's clock. If a device clock is skewed, events may fall outside the correlation window. See [Time synchronization](#time-synchronization).
+**Note on clock skew:** `cortex correlate events` uses the `timestamp` field from the syslog message, which reflects the sending device's clock. If a device clock is skewed, events may fall outside the correlation window. See [Time synchronization](#time-synchronization).
 
 ---
 
@@ -559,13 +559,13 @@ Local command history can be correlated with system logs without introducing a
 separate table:
 
 ```bash
-cortex shell index --path ~/.zsh_history --shell zsh
+cortex ingest shell index --path ~/.zsh_history --shell zsh
 cortex setup agent-command install
 export CLAUDE_CODE_SHELL_PREFIX="$HOME/.local/bin/cortex-agent-command-wrapper"
-cortex agent-command ingest-spool --path ~/.local/state/cortex/agent-command.jsonl
+cortex ingest agent-command ingest-spool --path ~/.local/state/cortex/agent-command.jsonl
 ```
 
-`cortex shell index` imports zsh extended history lines with timestamps and
+`cortex ingest shell index` imports zsh extended history lines with timestamps and
 durations as `source_kind="shell-history"` rows. Plain untimestamped history is
 skipped because it cannot support time-window correlation.
 
@@ -574,7 +574,7 @@ Code's `CLAUDE_CODE_SHELL_PREFIX`. Claude Code invokes that prefix for spawned
 shell commands, including Bash tool calls, hook commands, and stdio MCP server
 startup commands. The wrapper preserves stdio and exit code, appends one
 scrubbed JSONL record under `~/.local/state/cortex/`, and
-`cortex agent-command ingest-spool` imports those records as
+`cortex ingest agent-command ingest-spool` imports those records as
 `source_kind="agent-command"` rows, then truncates the locked spool after a
 successful import so repeated runs only process new commands. The wrapper
 records command text, cwd, duration, exit status, agent name, PID, host/user, and
@@ -824,7 +824,7 @@ Cortex can tail local files directly without rsyslog `imfile` drop-ins. In
 Docker, mount the host log tree read-only at `/file-tail-root` with
 `CORTEX_FILE_TAIL_LOG_VOLUME` and register paths inside that mount. Sources are
 stored next to the SQLite database in `file-tails.json`, managed through
-`cortex file-tail ...`, REST `POST /api/file-tails` (requires
+`cortex ingest file-tail ...`, REST `POST /api/file-tails` (requires
 `Authorization: Bearer $CORTEX_API_TOKEN` plus
 `X-Cortex-Admin-Token: $CORTEX_API_ADMIN_TOKEN`), or MCP action `file_tails`,
 and emitted as `source_kind="file-tail"` rows. Row metadata includes
@@ -834,19 +834,19 @@ Set `CORTEX_FILE_TAIL_ALLOWED_ROOTS` explicitly only when an operator has
 mounted and reviewed broader read-only roots such as `/var/log` or `/logs`.
 
 ```bash
-cortex file-tail add --id swag-access \
+cortex ingest file-tail add --id swag-access \
   --path /file-tail-root/swag/log/nginx/access.log \
   --tag swag-access --host squirts --facility local4
-cortex file-tail add --id swag-error \
+cortex ingest file-tail add --id swag-error \
   --path /file-tail-root/swag/log/nginx/error.log \
   --tag swag-error --host squirts --facility local4 --severity warning
-cortex file-tail add --id fail2ban \
+cortex ingest file-tail add --id fail2ban \
   --path /file-tail-root/swag/log/fail2ban/fail2ban.log \
   --tag fail2ban --host squirts --facility local5
-cortex file-tail add --id authelia \
+cortex ingest file-tail add --id authelia \
   --path /file-tail-root/authelia/logs/authelia.log \
   --tag authelia --host squirts --facility local5
-cortex file-tail add --id adguard-query \
+cortex ingest file-tail add --id adguard-query \
   --path /file-tail-root/adguard/var/data/querylog.json \
   --tag adguard-query --host squirts --facility local6
 ```
@@ -992,13 +992,13 @@ The direct CLI uses the same shared service layer as the MCP tool, so results an
 ```bash
 cortex search "oom killer"                 # bare query; default limit 50
 cortex tail dookie                         # bare positional → --host; default n=50
-cortex errors                              # defaults to the last hour
-cortex host-state tootie                   # bare positional → --host
+cortex analysis errors                     # defaults to the last hour
+cortex state host tootie                   # bare positional → --host
 cortex search 'error AND nginx' --host proxy --limit 10
 cortex tail -n 20 --app kernel
-cortex errors --since 2026-01-01T00:00:00Z
+cortex analysis errors --since 2026-01-01T00:00:00Z
 cortex hosts
-cortex correlate --reference-time 2026-01-01T12:00:00Z --window-minutes 10 --severity-min warning
+cortex correlate events --reference-time 2026-01-01T12:00:00Z --window-minutes 10 --severity-min warning
 cortex entity host tootie
 cortex graph around host tootie --limit 25
 cortex graph explain host tootie --depth 2
@@ -1015,10 +1015,10 @@ cortex compose logs cortex --tail 20  # bounded logs for one service
 # Surface parity (2026-05-22) — each is also a REST GET on /api/<command>
 cortex hosts sources --limit 50
 cortex hosts silent --silent-minutes 60
-cortex clock-skew   --since 2026-05-20T00:00:00Z
-cortex anomalies    --recent-minutes 30 --baseline-minutes 720
-cortex compare      --a-from 2026-05-20T00:00:00Z --a-to 2026-05-20T23:59:59Z \
-                    --b-from 2026-05-21T00:00:00Z --b-to 2026-05-21T23:59:59Z
+cortex state clock-skew     --since 2026-05-20T00:00:00Z
+cortex analysis anomalies   --recent-minutes 30 --baseline-minutes 720
+cortex analysis compare     --a-from 2026-05-20T00:00:00Z --a-to 2026-05-20T23:59:59Z \
+                            --b-from 2026-05-21T00:00:00Z --b-to 2026-05-21T23:59:59Z
 cortex apps         --host dookie --limit 50
 ```
 
@@ -1288,7 +1288,7 @@ The internal write channel holds up to `CORTEX_WRITE_CHANNEL_CAPACITY` parsed me
 
 ## Multi-Host Deployment
 
-Point multiple hosts at the same cortex instance. Each sender's `hostname` field (from the syslog message) is recorded and indexed. Use `cortex hosts` to see all senders. Filter by `hostname` in `cortex search` and `cortex tail`. Use `cortex correlate` to find related events across hosts within a time window.
+Point multiple hosts at the same cortex instance. Each sender's `hostname` field (from the syslog message) is recorded and indexed. Use `cortex hosts` to see all senders. Filter by `hostname` in `cortex search` and `cortex tail`. Use `cortex correlate events` to find related events across hosts within a time window.
 
 For large fleets, consider:
 - Increasing `CORTEX_POOL_SIZE` (default 8) for higher read concurrency
@@ -1299,7 +1299,7 @@ For large fleets, consider:
 
 ## Time Synchronization
 
-All timestamps are stored in UTC. `cortex correlate` uses the `timestamp` field from the syslog message, which reflects the sending device's clock. Devices with drifted clocks will have their events shifted relative to the correlation window. Run NTP on all senders to minimize skew. `received_at` (the server-side ingestion time) is unaffected by sender clock drift and is used for retention.
+All timestamps are stored in UTC. `cortex correlate events` uses the `timestamp` field from the syslog message, which reflects the sending device's clock. Devices with drifted clocks will have their events shifted relative to the correlation window. Run NTP on all senders to minimize skew. `received_at` (the server-side ingestion time) is unaffected by sender clock drift and is used for retention.
 
 ---
 

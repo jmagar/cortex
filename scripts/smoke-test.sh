@@ -223,7 +223,7 @@ run_cortex_ai_add() {
         fi
     fi
 
-    CORTEX_DB_PATH="$db_path" "$cortex_bin" ai add --file "$fixture" --json
+    CORTEX_DB_PATH="$db_path" "$cortex_bin" sessions add --file "$fixture" --json
 }
 
 # Resolve the cortex CLI binary (env CORTEX_BIN, PATH, or debug build), echoing
@@ -1223,11 +1223,11 @@ print(hostnames[0] if hostnames else "")
         skip "cli: tail positional host (no known hostname to target)"
     fi
 
-    # `cortex errors` — no flags; default 1h window applied.
-    if "$CLI_BIN" errors >/dev/null 2>&1; then
-        pass "cli: errors default window (cortex errors)"
+    # `cortex analysis errors` — no flags; default 1h window applied.
+    if "$CLI_BIN" analysis errors >/dev/null 2>&1; then
+        pass "cli: errors default window (cortex analysis errors)"
     else
-        fail "cli: errors default window (cortex errors)"
+        fail "cli: errors default window (cortex analysis errors)"
     fi
 else
     skip "cli: positional/default checks require the cortex binary (set CORTEX_BIN or build it)"

@@ -121,24 +121,24 @@ CORTEX_SMOKE_REFTIME="${CORTEX_SMOKE_REFTIME:-$(date -u +"%Y-%m-%dT%H:%M:%SZ")}"
 
 assert_json "http: search (limit 1)"     http search --json --limit 1
 assert_json "http: tail (limit 1)"       http tail --json --limit 1
-assert_json "http: errors"               http errors --json
+assert_json "http: analysis errors"      http analysis errors --json
 assert_json "http: hosts"                http hosts --json
-assert_json "http: correlate (1m, h=_)"  http correlate --json --reference-time "$CORTEX_SMOKE_REFTIME" --host _smoke_ --window-minutes 1
+assert_json "http: correlate events"     http correlate events --json --reference-time "$CORTEX_SMOKE_REFTIME" --host _smoke_ --window-minutes 1
 assert_json "http: stats"                http stats --json
 assert_json "http: sessions (limit 1)"   http sessions --json --limit 1
 
-# ─── HTTP-supported AI commands (10) ────────────────────────────────────────
+# ─── HTTP-supported session commands (10) ───────────────────────────────────
 
-assert_json "http: ai search"            http ai search --json --query smoke --limit 1
-assert_json "http: ai abuse"             http ai abuse --json --limit 1
-assert_json "http: ai correlate"         http ai correlate --json --window-minutes 1 --limit 1
-assert_json "http: ai blocks"            http ai blocks --json
-assert_json "http: ai context"           http ai context --json --project / --limit 1
-assert_json "http: ai tools"             http ai tools --json
-assert_json "http: ai projects"          http ai projects --json
-assert_json "http: ai checkpoints"       http ai checkpoints --json --limit 1
-assert_json "http: ai errors"            http ai errors --json --limit 1
-assert_json "http: ai prune-checkpoints" http ai prune-checkpoints --json --missing --dry-run --limit 1
+assert_json "http: sessions search"            http sessions search --json --query smoke --limit 1
+assert_json "http: sessions abuse"             http sessions abuse --json --limit 1
+assert_json "http: sessions correlate"         http sessions correlate --json --window-minutes 1 --limit 1
+assert_json "http: sessions blocks"            http sessions blocks --json
+assert_json "http: sessions context"           http sessions context --json --project / --limit 1
+assert_json "http: sessions tools"             http sessions tools --json
+assert_json "http: sessions projects"          http sessions projects --json
+assert_json "http: sessions checkpoints"       http sessions checkpoints --json --limit 1
+assert_json "http: sessions errors"            http sessions errors --json --limit 1
+assert_json "http: sessions prune-checkpoints" http sessions prune-checkpoints --json --missing --dry-run --limit 1
 
 # ─── HTTP-supported DB commands (4) ─────────────────────────────────────────
 
@@ -151,35 +151,35 @@ assert_json "http: db checkpoint"        http db checkpoint --json --mode passiv
 # HTTP timeout on large DBs (see docs/rollout.md Notes).
 assert_json "http: db vacuum (pages=1)"  http db vacuum --json --pages 1
 
-# ─── LOCAL-only AI commands (6) — must succeed in default mode ──────────────
+# ─── LOCAL-only session commands (6) — must succeed in default mode ─────────
 # These all read host filesystem or run host-side processes. They are
 # expected to bail with a descriptive error if invoked with --http (and
 # bead .8 wired that bail in). Here we only assert the DEFAULT (no-flag)
 # path returns JSON or, for daemon commands, runs briefly without crashing.
 
-assert_json "local: ai doctor"           local_mode ai doctor --json
-assert_json "local: ai watch-status"     local_mode ai watch-status --json
-# `ai index` writes to the DB; keep it side-effect-light by indexing an
+assert_json "local: sessions doctor"       local_mode sessions doctor --json
+assert_json "local: sessions watch-status" local_mode sessions watch-status --json
+# `sessions index` writes to the DB; keep it side-effect-light by indexing an
 # empty tempdir if CORTEX_SMOKE_AI_INDEX_PATH is set, else skip the index
-# side-effect and just exercise `ai add` against /dev/null which bails
-# cleanly. We assert the default `ai index --help` path produces help
+# side-effect and just exercise `sessions add` against /dev/null which bails
+# cleanly. We assert the default `sessions index --help` path produces help
 # output (still part of the CLI surface) rather than mutating DB state.
 CORTEX_SMOKE_AI_TMP="$(mktemp -d)"
 trap 'rm -rf "$CORTEX_SMOKE_AI_TMP"' EXIT
-assert_json "local: ai index (empty dir)" local_mode ai index --path "$CORTEX_SMOKE_AI_TMP" --json
-# `ai add` requires a real file path; create a minimal stub.
+assert_json "local: sessions index (empty dir)" local_mode sessions index --path "$CORTEX_SMOKE_AI_TMP" --json
+# `sessions add` requires a real file path; create a minimal stub.
 printf '{}\n' >"$CORTEX_SMOKE_AI_TMP/empty.jsonl"
-assert_json "local: ai add (stub)"       local_mode ai add --file "$CORTEX_SMOKE_AI_TMP/empty.jsonl" --json
-# `ai smoke-watch` writes a synthetic transcript and runs ai-watch briefly.
+assert_json "local: sessions add (stub)" local_mode sessions add --file "$CORTEX_SMOKE_AI_TMP/empty.jsonl" --json
+# `sessions smoke-watch` writes a synthetic transcript and runs ai-watch briefly.
 # Gate behind a flag — it's slower (~30s) and not appropriate for every
 # CI run. Operators opt in via CORTEX_SMOKE_RUN_AI_WATCH=1.
 if [[ "${CORTEX_SMOKE_RUN_AI_WATCH:-0}" == "1" ]]; then
-  assert_json "local: ai smoke-watch"    local_mode ai smoke-watch --json
+  assert_json "local: sessions smoke-watch" local_mode sessions smoke-watch --json
 else
-  info "skip: ai smoke-watch (set CORTEX_SMOKE_RUN_AI_WATCH=1 to include)"
+  info "skip: sessions smoke-watch (set CORTEX_SMOKE_RUN_AI_WATCH=1 to include)"
 fi
-# `ai watch` is a daemon — we do NOT run it from a smoke test.
-info "skip: ai watch (long-running daemon; tested by systemd unit healthchecks)"
+# `sessions watch` is a daemon — we do NOT run it from a smoke test.
+info "skip: sessions watch (long-running daemon; tested by systemd unit healthchecks)"
 
 # ─── LOCAL-only DB: backup ──────────────────────────────────────────────────
 

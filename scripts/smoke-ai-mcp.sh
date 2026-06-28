@@ -123,7 +123,7 @@ printf 'cortex: %s\n' "$("$CORTEX_BIN" --version)"
 printf 'db:     %s\n' "$DB_PATH"
 printf 'mcp:    %s\n' "$MCP_URL"
 
-run_cortex ai add --file "$FIXTURE" --force --json >/dev/null
+run_cortex sessions add --file "$FIXTURE" --force --json >/dev/null
 pass "seeded AI transcript fixture"
 
 search_response="$(mcp_call 1 "$(tool_args --arg q "$QUERY" --arg project "$PROJECT" '{"action":"search_sessions","query":$q,"tool":"claude","project":$project,"limit":5}')")"

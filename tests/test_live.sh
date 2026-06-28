@@ -236,9 +236,9 @@ run_local_syslog_ai_add() {
   local db_path="$1"
   local fixture="$2"
   if [[ -x "target/debug/syslog" ]]; then
-    CORTEX_DB_PATH="${db_path}" target/debug/cortex ai add --file "${fixture}" --json
+    CORTEX_DB_PATH="${db_path}" target/debug/cortex sessions add --file "${fixture}" --json
   else
-    CORTEX_DB_PATH="${db_path}" cargo run --quiet -- ai add --file "${fixture}" --json
+    CORTEX_DB_PATH="${db_path}" cargo run --quiet -- sessions add --file "${fixture}" --json
   fi
 }
 
@@ -253,7 +253,7 @@ seed_ai_fixture_container() {
   local project_dir="$1"
   local container_fixture="/tmp/ai-session-smoke.jsonl"
   docker cp "${project_dir}/${AI_SMOKE_FIXTURE}" "${CONTAINER_NAME}:${container_fixture}" >/dev/null || return $?
-  docker exec "${CONTAINER_NAME}" cortex ai add --file "${container_fixture}" --json >/dev/null || return $?
+  docker exec "${CONTAINER_NAME}" cortex sessions add --file "${container_fixture}" --json >/dev/null || return $?
   AI_SEEDED=true
 }
 
@@ -986,12 +986,12 @@ phase_cli_parity() {
     "sessions --limit 1|sessions --limit 1"
     "db status|db status"
     # Surface parity (2026-05-21)
-    "source-ips --limit 3|source-ips --limit 3"
+    "hosts sources --limit 3|hosts sources --limit 3"
     "timeline --bucket hour|timeline --bucket hour"
-    "patterns --top-n 5|patterns --top-n 5"
-    "ingest-rate|ingest-rate"
-    "sig list --limit 5|sig list --limit 5"
-    "notify recent --limit 5|notify recent --limit 5"
+    "analysis patterns --top-n 5|analysis patterns --top-n 5"
+    "stats ingest-rate|stats ingest-rate"
+    "alerts signatures --limit 5|alerts signatures --limit 5"
+    "alerts notifications --limit 5|alerts notifications --limit 5"
   )
 
   local pair label args local_out http_out filtered_local filtered_http diff
@@ -1076,9 +1076,9 @@ phase_surface_parity_rest() {
     "GET /api/apps?limit=10|apps"
     "GET /api/similar-incidents?query=test&window_minutes=30|clusters"
     "GET /api/incident-context?since=2026-01-01T00:00:00Z&until=2026-12-31T23:59:59Z|error_logs"
-    "GET /api/ai/ask-history?query=test|sessions"
-    "GET /api/ai/incidents?limit=5|incidents"
-    "GET /api/ai/investigate?limit=5|evidence"
+    "GET /api/sessions/ask-history?query=test|sessions"
+    "GET /api/sessions/incidents?limit=5|incidents"
+    "GET /api/sessions/investigate?limit=5|evidence"
   )
 
   local route_pair label path field response
@@ -1099,6 +1099,19 @@ phase_surface_parity_rest() {
     else
       # /api/notifications/recent returns a JSON array directly
       assert_jq "${label} — response is array" "${response}" 'type' "array"
+    fi
+  done
+
+  local removed_path status
+  for removed_path in \
+    "/api/ai/ask-history?query=test" \
+    "/api/ai/incidents?limit=5" \
+    "/api/ai/investigate?limit=5"; do
+    status="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "${AUTH_ARGS[@]+"${AUTH_ARGS[@]}"}" "${BASE_URL}${removed_path}" 2>/dev/null || true)"
+    if [[ "${status}" == "404" ]]; then
+      _pass "clean break: ${removed_path} returns 404"
+    else
+      _fail "clean break: ${removed_path} returns 404" "got HTTP ${status}"
     fi
   done
 
