@@ -60,7 +60,7 @@ pub(crate) fn parse_command(args: Vec<String>) -> Result<CliCommand> {
         "apps" => commands::apps::parse_apps(rest),
         "__complete" => Ok(CliCommand::Complete(rest.to_vec())),
         "completions" => Ok(CliCommand::Completions(rest.to_vec())),
-        _ if removed_command_replacement(command).is_some() => {
+        _ if cortex::surface_registry::removed_cli_surface(command).is_some() => {
             bail!("{}", removed_command_message(command))
         }
         _ => bail!(
@@ -167,37 +167,13 @@ fn parse_stats_domain(args: &[String]) -> Result<CliCommand> {
     }
 }
 
-fn removed_command_replacement(command: &str) -> Option<&'static str> {
-    match command {
-        "ai" => Some("cortex sessions"),
-        "source-ips" => Some("cortex hosts sources"),
-        "silent-hosts" => Some("cortex hosts silent"),
-        "service" => Some("cortex compose logs SERVICE"),
-        "deploy" => Some("cortex setup deploy"),
-        "host-state" => Some("cortex state host"),
-        "fleet-state" => Some("cortex state fleet"),
-        "clock-skew" => Some("cortex state clock-skew"),
-        "ingest-rate" => Some("cortex stats ingest-rate"),
-        "sig" => Some("cortex alerts signatures"),
-        "notify" => Some("cortex alerts notifications"),
-        "file-tail" => Some("cortex ingest file-tail"),
-        "shell" => Some("cortex ingest shell"),
-        "agent-command" => Some("cortex ingest agent-command"),
-        "inventory" => Some("cortex ingest inventory"),
-        "errors" => Some("cortex analysis errors"),
-        "incident" => Some("cortex analysis incident"),
-        "patterns" => Some("cortex analysis patterns"),
-        "anomalies" => Some("cortex analysis anomalies"),
-        "compare" => Some("cortex analysis compare"),
-        "correlate-state" => Some("cortex correlate state"),
-        "topic-correlate" => Some("cortex correlate topic"),
-        _ => None,
-    }
-}
-
 fn removed_command_message(command: &str) -> String {
-    let replacement = removed_command_replacement(command).expect("checked by caller");
-    format!("removed CLI command: {command}\n\nUse `{replacement}`.")
+    let surface =
+        cortex::surface_registry::removed_cli_surface(command).expect("checked by caller");
+    let replacement = surface
+        .replacement
+        .expect("removed CLI surfaces must carry replacement");
+    format!("removed CLI command: {command}\n\nUse `cortex {replacement}`.")
 }
 
 fn parse_heartbeat(args: &[String]) -> Result<CliCommand> {

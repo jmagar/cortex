@@ -366,7 +366,11 @@ pub fn is_cli_mode_command(name: &str) -> bool {
 
 pub fn removed_cli_surface(name: &str) -> Option<&'static SurfaceSpec> {
     specs_for(SurfaceKind::Cli).find(|spec| {
-        spec.spelling == name && spec.disposition == SurfaceDisposition::RemovedCleanBreak
+        spec.spelling == name
+            && matches!(
+                spec.disposition,
+                SurfaceDisposition::MovedIntoGroupedDomain | SurfaceDisposition::RemovedCleanBreak
+            )
     })
 }
 

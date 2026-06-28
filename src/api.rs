@@ -1296,8 +1296,13 @@ async fn ai_parse_errors(
 async fn ai_prune_checkpoints(
     State(state): State<ApiState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     body: axum::body::Bytes,
 ) -> axum::response::Response {
+    if let Some(resp) = require_api_admin_token(&state, &headers) {
+        return resp;
+    }
+
     // Step 1+2: parse as Value, require `dry_run` key explicitly.
     let value: serde_json::Value = match serde_json::from_slice(&body) {
         Ok(v) => v,
@@ -1500,8 +1505,12 @@ async fn db_integrity(
 /// outcome. Reuses the `quick` query param of the sync endpoint.
 async fn db_integrity_background(
     State(state): State<ApiState>,
+    headers: HeaderMap,
     Query(req): Query<DbIntegrityRequest>,
 ) -> impl IntoResponse {
+    if let Some(resp) = require_api_admin_token(&state, &headers) {
+        return resp;
+    }
     respond(state.service.db_integrity_start_background(req.quick).await)
 }
 
@@ -1517,8 +1526,13 @@ async fn db_integrity_job(State(state): State<ApiState>, Path(id): Path<i64>) ->
 async fn db_checkpoint(
     State(state): State<ApiState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     body: axum::body::Bytes,
 ) -> axum::response::Response {
+    if let Some(resp) = require_api_admin_token(&state, &headers) {
+        return resp;
+    }
+
     let req: DbCheckpointRequest = match serde_json::from_slice(&body) {
         Ok(req) => req,
         Err(err) => {
@@ -1574,8 +1588,13 @@ async fn db_checkpoint(
 async fn db_vacuum(
     State(state): State<ApiState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     body: axum::body::Bytes,
 ) -> axum::response::Response {
+    if let Some(resp) = require_api_admin_token(&state, &headers) {
+        return resp;
+    }
+
     let req: DbVacuumRequest = match serde_json::from_slice(&body) {
         Ok(req) => req,
         Err(err) => {
@@ -1635,8 +1654,13 @@ async fn db_vacuum(
 async fn db_backup(
     State(state): State<ApiState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     body: axum::body::Bytes,
 ) -> axum::response::Response {
+    if let Some(resp) = require_api_admin_token(&state, &headers) {
+        return resp;
+    }
+
     let req: DbBackupRequest = if body.is_empty() {
         DbBackupRequest::default()
     } else {

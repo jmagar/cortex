@@ -235,7 +235,7 @@ build_auth_args() {
 run_local_syslog_ai_add() {
   local db_path="$1"
   local fixture="$2"
-  if [[ -x "target/debug/syslog" ]]; then
+  if [[ -x "target/debug/cortex" ]]; then
     CORTEX_DB_PATH="${db_path}" target/debug/cortex sessions add --file "${fixture}" --json
   else
     CORTEX_DB_PATH="${db_path}" cargo run --quiet -- sessions add --file "${fixture}" --json
@@ -981,7 +981,7 @@ phase_cli_parity() {
     "hosts|hosts"
     "stats|stats"
     "tail -n 1|tail -n 1"
-    "errors|errors"
+    "analysis errors|analysis errors"
     "search --limit 1|search --limit 1"
     "sessions --limit 1|sessions --limit 1"
     "db status|db status"

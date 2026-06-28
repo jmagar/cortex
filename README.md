@@ -1012,7 +1012,7 @@ cortex compose restart         # restart resolved service
 cortex compose logs --tail 20  # bounded compose logs
 cortex compose logs cortex --tail 20  # bounded logs for one service
 
-# Surface parity (2026-05-22) — each is also a REST GET on /api/<command>
+# Surface parity (2026-05-22) — each has a matching REST route documented below
 cortex hosts sources --limit 50
 cortex hosts silent --silent-minutes 60
 cortex state clock-skew     --since 2026-05-20T00:00:00Z

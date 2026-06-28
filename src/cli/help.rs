@@ -20,7 +20,7 @@ const TAGLINE: &str = "Syslog intelligence for homelabs";
 
 /// One documented top-level command (or namespace root).
 struct CommandDoc {
-    /// Top-level token as typed, e.g. `search`, `ai`, `db`.
+    /// Top-level token as typed, e.g. `search`, `sessions`, `db`.
     name: &'static str,
     /// One-line description for the grouped top-level listing.
     summary: &'static str,
@@ -29,7 +29,7 @@ struct CommandDoc {
 }
 
 struct NestedCommandDoc {
-    /// Full path after `cortex`, e.g. `ai search`.
+    /// Full path after `cortex`, e.g. `sessions search`.
     path: &'static str,
     summary: &'static str,
     usage: &'static [&'static str],
@@ -124,7 +124,10 @@ const CATALOG: &[CommandDoc] = &[
     CommandDoc {
         name: "stats",
         summary: "Database and ingest statistics",
-        usage: &["cortex stats [--json]"],
+        usage: &[
+            "cortex stats [--json]",
+            "cortex stats ingest-rate [--window-seconds N] [--json]",
+        ],
     },
     CommandDoc {
         name: "timeline",
@@ -144,7 +147,7 @@ const CATALOG: &[CommandDoc] = &[
         name: "correlate",
         summary: "Correlate events around a reference time",
         usage: &[
-            "cortex correlate --reference-time TIME [--window-minutes N] [--severity-min LEVEL] [--host HOST] [--source SOURCE] [--query FTS] [--limit N] [--json]",
+            "cortex correlate events --reference-time TIME [--window-minutes N] [--severity-min LEVEL] [--host HOST] [--source SOURCE] [--query FTS] [--limit N] [--json]",
         ],
     },
     CommandDoc {

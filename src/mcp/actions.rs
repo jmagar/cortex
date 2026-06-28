@@ -257,7 +257,7 @@ pub(super) const ACTION_SPECS: &[ActionSpec] = &[
         Moderate,
         CorrelateEvents,
         flags: &[],
-        examples: &["cortex correlate --reference-time 2026-06-16T04:00:00Z --window-minutes 15"]
+        examples: &["cortex correlate events --reference-time 2026-06-16T04:00:00Z --window-minutes 15"]
     ),
     action_spec!(
         "correlate_state",

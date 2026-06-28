@@ -214,7 +214,7 @@ The plain JSON API is **always on**: it is mounted under `/api/*` on the same HT
 | Variable | Required | Default | Sensitive | Description |
 | --- | --- | --- | --- | --- |
 | `CORTEX_API_TOKEN` | yes | (none) | **yes** | Bearer token for `/api/*` routes — required at startup |
-| `CORTEX_API_ADMIN_TOKEN` | for REST file-tail management | (none) | **yes** | Extra token sent as `X-Cortex-Admin-Token` for `/api/file-tails` management. The normal API bearer is still required. |
+| `CORTEX_API_ADMIN_TOKEN` | for REST admin mutations | (none) | **yes** | Extra token sent as `X-Cortex-Admin-Token` for admin REST mutations, including `/api/file-tails`, `/api/sessions/prune-checkpoints`, `/api/db/integrity/background`, `/api/db/checkpoint`, `/api/db/vacuum`, and `/api/db/backup`. The normal API bearer is still required. |
 
 ### Headless Gemini assessment (`CORTEX_HEADLESS_*`, `CORTEX_LLM_*`)
 
