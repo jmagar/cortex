@@ -180,9 +180,9 @@ run_local_syslog_ai_add() {
   local db_path="$1"
   local fixture="$2"
   if [[ -x "${PROJECT_DIR}/target/debug/syslog" ]]; then
-    CORTEX_DB_PATH="${db_path}" "${PROJECT_DIR}/target/debug/syslog" ai add --file "${fixture}" --json
+    CORTEX_DB_PATH="${db_path}" "${PROJECT_DIR}/target/debug/syslog" sessions add --file "${fixture}" --json
   else
-    (cd "${PROJECT_DIR}" && CORTEX_DB_PATH="${db_path}" cargo run --quiet -- ai add --file "${fixture}" --json)
+    (cd "${PROJECT_DIR}" && CORTEX_DB_PATH="${db_path}" cargo run --quiet -- sessions add --file "${fixture}" --json)
   fi
 }
 

@@ -9,7 +9,6 @@ use super::output_common::print_json;
 use anyhow::Result;
 use cortex::app::{
     AnomaliesRequest, ClockSkewRequest, CompareRequest, ListAppsRequest, SilentHostsRequest,
-    StateRequest, StateResponse,
 };
 
 use super::CliMode;
@@ -76,7 +75,7 @@ pub(crate) async fn run_silent_hosts(mode: &CliMode, args: SilentHostsArgs) -> R
     let json = args.json;
     let req = args.into_request();
     let response = match mode {
-        CliMode::Local(service) => service.silent_hosts(req).await?,
+        CliMode::Local(service) => service.hosts().silent(req).await?,
         CliMode::Http(client) => http_or_cancel(client.silent_hosts(&req)).await?,
     };
     if json {
@@ -100,12 +99,7 @@ pub(crate) async fn run_clock_skew(mode: &CliMode, args: ClockSkewArgs) -> Resul
     let json = args.json;
     let req = args.into_request();
     let response = match mode {
-        CliMode::Local(service) => match service.state(StateRequest::ClockSkew(req)).await? {
-            StateResponse::ClockSkew(response) => response,
-            StateResponse::Host(_) | StateResponse::Fleet(_) => {
-                anyhow::bail!("internal: state clock-skew returned wrong response")
-            }
-        },
+        CliMode::Local(service) => service.state().clock_skew(req).await?,
         CliMode::Http(client) => http_or_cancel(client.clock_skew(&req)).await?,
     };
     if json {
@@ -126,7 +120,7 @@ pub(crate) async fn run_anomalies(mode: &CliMode, args: AnomaliesArgs) -> Result
     let json = args.json;
     let req = args.into_request();
     let response = match mode {
-        CliMode::Local(service) => service.anomalies(req).await?,
+        CliMode::Local(service) => service.analysis().anomalies(req).await?,
         CliMode::Http(client) => http_or_cancel(client.anomalies(&req)).await?,
     };
     if json {
@@ -163,7 +157,7 @@ pub(crate) async fn run_compare(mode: &CliMode, args: CompareArgs) -> Result<()>
     let json = args.json;
     let req = args.into_request()?;
     let response = match mode {
-        CliMode::Local(service) => service.compare(req).await?,
+        CliMode::Local(service) => service.analysis().compare(req).await?,
         CliMode::Http(client) => http_or_cancel(client.compare(&req)).await?,
     };
     if json {

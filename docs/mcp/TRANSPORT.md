@@ -152,9 +152,9 @@ database without speaking MCP:
 ```bash
 cortex search 'error AND nginx' --limit 10
 cortex tail -n 20
-cortex errors --since 2026-01-01T00:00:00Z
+cortex analysis errors --since 2026-01-01T00:00:00Z
 cortex hosts
-cortex correlate --reference-time 2026-01-01T12:00:00Z --window-minutes 10
+cortex correlate events --reference-time 2026-01-01T12:00:00Z --window-minutes 10
 cortex stats --json
 ```
 

@@ -224,7 +224,7 @@ pub(crate) async fn run_ai_correlate(mode: &CliMode, args: SessionsCorrelateArgs
     let json = args.json;
     let req = args.into_request();
     let response = match mode {
-        CliMode::Local(service) => service.correlate_ai_logs(req).await?,
+        CliMode::Local(service) => service.correlate().ai(req).await?,
         CliMode::Http(client) => http_or_cancel(client.ai_correlate(&req)).await?,
     };
     print_ai_correlate_response(&response, json)

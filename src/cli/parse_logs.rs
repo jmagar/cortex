@@ -433,8 +433,8 @@ pub(crate) fn parse_correlate(args: &[String]) -> Result<CliCommand> {
                 // that actually correlates by entity.
                 parsed.reference_time = norm_time(arg.clone()).map_err(|_| {
                     anyhow::anyhow!(
-                        "correlate's positional argument is a reference time (e.g. `1h`, `2026-06-01`, or an RFC3339 timestamp), but got `{arg}`. \
-To correlate everything related to a host, app, or topic, use `cortex topic-correlate {arg}`; \
+                        "correlate events' positional argument is a reference time (e.g. `1h`, `2026-06-01`, or an RFC3339 timestamp), but got `{arg}`. \
+To correlate everything related to a host, app, or topic, use `cortex correlate topic {arg}`; \
 to anchor correlate on a time and filter by host, pass `--reference-time <time> --host {arg}`."
                     )
                 })?;

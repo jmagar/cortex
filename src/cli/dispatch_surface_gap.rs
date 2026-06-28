@@ -9,8 +9,7 @@ use super::output_graph::{
 use anyhow::Result;
 use cortex::app::{
     CorrelateStateRequest, FleetStateRequest, GraphAroundRequest, GraphEntityLookupRequest,
-    GraphEvidenceLookupRequest, GraphExplainRequest, HostStateRequest, StateRequest, StateResponse,
-    TopicCorrelateRequest,
+    GraphEvidenceLookupRequest, GraphExplainRequest, HostStateRequest, TopicCorrelateRequest,
 };
 
 use super::CliMode;
@@ -120,12 +119,7 @@ pub(crate) async fn run_host_state(mode: &CliMode, args: HostStateArgs) -> Resul
     let json = args.json;
     let req = args.into_request();
     let response = match mode {
-        CliMode::Local(service) => match service.state(StateRequest::Host(req)).await? {
-            StateResponse::Host(response) => *response,
-            StateResponse::Fleet(_) | StateResponse::ClockSkew(_) => {
-                anyhow::bail!("internal: state host returned wrong response")
-            }
-        },
+        CliMode::Local(service) => service.state().host(req).await?,
         CliMode::Http(client) => http_or_cancel(client.host_state(&req)).await?,
     };
     if json {
@@ -168,12 +162,7 @@ pub(crate) async fn run_fleet_state(mode: &CliMode, args: FleetStateArgs) -> Res
     let json = args.json;
     let req = args.into_request();
     let response = match mode {
-        CliMode::Local(service) => match service.state(StateRequest::Fleet(req)).await? {
-            StateResponse::Fleet(response) => response,
-            StateResponse::Host(_) | StateResponse::ClockSkew(_) => {
-                anyhow::bail!("internal: state fleet returned wrong response")
-            }
-        },
+        CliMode::Local(service) => service.state().fleet(req).await?,
         CliMode::Http(client) => http_or_cancel(client.fleet_state(&req)).await?,
     };
     if json {
@@ -202,7 +191,7 @@ pub(crate) async fn run_correlate_state(mode: &CliMode, args: CorrelateStateArgs
     let json = args.json;
     let req = args.into_request()?;
     let response = match mode {
-        CliMode::Local(service) => service.correlate_state(req).await?,
+        CliMode::Local(service) => service.correlate().state(req).await?,
         CliMode::Http(client) => http_or_cancel(client.correlate_state(&req)).await?,
     };
     if json {
@@ -252,7 +241,7 @@ pub(crate) async fn run_topic_correlate(mode: &CliMode, args: TopicCorrelateArgs
     let json = args.json;
     let req = args.into_request()?;
     let response = match mode {
-        CliMode::Local(service) => service.topic_correlate(req).await?,
+        CliMode::Local(service) => service.correlate().topic(req).await?,
         CliMode::Http(client) => http_or_cancel(client.topic_correlate(&req)).await?,
     };
     if json {

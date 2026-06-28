@@ -579,7 +579,8 @@ impl HttpClient {
         &self,
         req: &AiPruneCheckpointsRequest,
     ) -> Result<PruneCheckpointsResult> {
-        self.post_json("/api/sessions/prune-checkpoints", req).await
+        self.post_json_with_admin_no_retry("/api/sessions/prune-checkpoints", req)
+            .await
     }
 
     pub async fn file_tails(&self, req: &FileTailRequest) -> Result<FileTailResponse> {
@@ -603,7 +604,8 @@ impl HttpClient {
         req: &DbIntegrityRequest,
     ) -> Result<DbIntegrityJobStarted> {
         let path = format!("/api/db/integrity/background?quick={}", req.quick);
-        self.post_json::<(), _>(&path, &()).await
+        self.post_json_with_admin_no_retry::<(), _>(&path, &())
+            .await
     }
 
     /// Poll a background integrity job by id.
@@ -613,15 +615,18 @@ impl HttpClient {
     }
 
     pub async fn db_checkpoint(&self, req: &DbCheckpointRequest) -> Result<DbCheckpointResult> {
-        self.post_json("/api/db/checkpoint", req).await
+        self.post_json_with_admin_no_retry("/api/db/checkpoint", req)
+            .await
     }
 
     pub async fn db_vacuum(&self, req: &DbVacuumRequest) -> Result<DbVacuumResult> {
-        self.post_json("/api/db/vacuum", req).await
+        self.post_json_with_admin_no_retry("/api/db/vacuum", req)
+            .await
     }
 
     pub async fn db_backup(&self, req: &DbBackupRequest) -> Result<DbBackupResult> {
-        self.post_json("/api/db/backup", req).await
+        self.post_json_with_admin_no_retry("/api/db/backup", req)
+            .await
     }
 
     // ─── REST surface: surface parity ───────────────────────────────────────

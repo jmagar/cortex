@@ -21,8 +21,8 @@
 use anyhow::{Result, bail};
 use cortex::app::{
     CorrelateEventsRequest, FileTailAddRequest, FileTailOp, FileTailRequest, FileTailResponse,
-    FilterLogsRequest, GetErrorsRequest, IncidentRequest, IngestRequest, IngestResponse,
-    ListSessionsRequest, SearchLogsRequest, StatsRequest, StatsResponse, TailLogsRequest,
+    FilterLogsRequest, GetErrorsRequest, IncidentRequest, ListSessionsRequest, SearchLogsRequest,
+    TailLogsRequest,
 };
 use std::future::Future;
 
@@ -237,7 +237,7 @@ pub(crate) async fn run_errors(mode: &CliMode, args: TimeRangeArgs) -> Result<()
     let json = args.json;
     let req = args.into_errors_request();
     let response = match mode {
-        CliMode::Local(service) => service.get_errors(req).await?,
+        CliMode::Local(service) => service.analysis().errors(req).await?,
         CliMode::Http(client) => http_or_cancel(client.errors(&req)).await?,
     };
     print_errors_response(&response, json)
@@ -245,7 +245,7 @@ pub(crate) async fn run_errors(mode: &CliMode, args: TimeRangeArgs) -> Result<()
 
 pub(crate) async fn run_hosts(mode: &CliMode, args: super::OutputArgs) -> Result<()> {
     let response = match mode {
-        CliMode::Local(service) => service.list_hosts().await?,
+        CliMode::Local(service) => service.hosts().list().await?,
         CliMode::Http(client) => http_or_cancel(client.hosts()).await?,
     };
     print_hosts_response(&response, args.json)
@@ -256,7 +256,7 @@ pub(crate) async fn run_incident(mode: &CliMode, args: IncidentArgs) -> Result<(
     match mode {
         CliMode::Http(_) => bail!("incident reads host-local service logs; omit --http"),
         CliMode::Local(service) => {
-            let response = service.incident(args.into_request()).await?;
+            let response = service.analysis().incident(args.into_request()).await?;
             print_incident_response(&response, json)
         }
     }
@@ -266,7 +266,7 @@ pub(crate) async fn run_correlate(mode: &CliMode, args: CorrelateArgs) -> Result
     let json = args.json;
     let req = args.into_request();
     let response = match mode {
-        CliMode::Local(service) => service.correlate_events(req).await?,
+        CliMode::Local(service) => service.correlate().events(req).await?,
         CliMode::Http(client) => http_or_cancel(client.correlate(&req)).await?,
     };
     print_correlate_response(&response, json)
@@ -274,12 +274,7 @@ pub(crate) async fn run_correlate(mode: &CliMode, args: CorrelateArgs) -> Result
 
 pub(crate) async fn run_stats(mode: &CliMode, args: super::OutputArgs) -> Result<()> {
     let response = match mode {
-        CliMode::Local(service) => match service.stats_domain(StatsRequest::Summary).await? {
-            StatsResponse::Summary(response) => response,
-            StatsResponse::IngestRate(_) => {
-                bail!("internal: stats summary returned ingest-rate response")
-            }
-        },
+        CliMode::Local(service) => service.stats().summary().await?,
         CliMode::Http(client) => http_or_cancel(client.stats()).await?,
     };
     print_stats_response(&response, args.json)
@@ -316,11 +311,7 @@ pub(crate) async fn run_file_tail(mode: &CliMode, command: FileTailCommand) -> R
         FileTailCommand::Disable(args) => id_request(FileTailOp::Disable, args),
     };
     let response = match mode {
-        CliMode::Local(service) => {
-            let IngestResponse::FileTails(response) =
-                service.ingest(IngestRequest::FileTails(req)).await?;
-            response
-        }
+        CliMode::Local(service) => service.ingest().file_tails(req).await?,
         CliMode::Http(client) => http_or_cancel(client.file_tails(&req)).await?,
     };
     if json {

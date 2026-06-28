@@ -24,6 +24,8 @@ pub(crate) use args::{
     SigAckArgs, SigListArgs, SigUnackArgs, SilentHostsArgs, SourceIpsArgs, TailArgs, TimeRangeArgs,
     TimelineArgs,
 };
+#[cfg(test)]
+pub(crate) use args::{StateCommand, StatsCommand};
 pub(crate) use args_config::{
     ConfigCommand, ConfigGetArgs, ConfigListArgs, ConfigSetArgs, ConfigTarget, ConfigUnsetArgs,
 };
@@ -88,9 +90,9 @@ impl CliCommand {
 /// All CLI command names paired with their one-line description (empty when the
 /// command has no `ACTION_SPECS` entry, e.g. grouping commands like `sessions`).
 pub(crate) fn registry_actions() -> Vec<(&'static str, &'static str)> {
-    cortex::surface_registry::TOP_LEVEL_COMMANDS
-        .iter()
-        .map(|&cmd| {
+    cortex::surface_registry::canonical_cli_roots()
+        .map(|spec| {
+            let cmd = spec.spelling;
             let desc = cortex::mcp::description_for(&cmd.replace('-', "_")).unwrap_or("");
             (cmd, desc)
         })
