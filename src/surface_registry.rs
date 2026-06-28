@@ -1,517 +1,339 @@
-//! Executable command/API surface matrix.
-//!
-//! This is the control-plane registry for the public surface consolidation
-//! work. It records which spellings are canonical today, which old spellings
-//! are intentional clean breaks, and which routes are intentionally removed.
+//! Shared command/API/action surface registry and decision matrix.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SurfaceClass {
+pub enum SurfaceKind {
+    Cli,
+    McpAction,
+    ApiRoute,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SurfaceDisposition {
     Canonical,
-    Operational,
-    Hidden,
+    MovedIntoGroupedDomain,
+    RetainedTopLevelOperational,
+    RetainedProtocolCompatibility,
     RemovedCleanBreak,
     OutOfScope,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SurfaceDomain {
-    Logs,
+    Search,
     Hosts,
     Sessions,
+    Graph,
     Analysis,
     Correlate,
     State,
     Stats,
     Ingest,
     Alerts,
-    Graph,
-    Runtime,
+    Compose,
     Setup,
-    Database,
+    Db,
     Config,
+    Runtime,
+    Protocol,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct CliSurface {
-    pub name: &'static str,
-    pub class: SurfaceClass,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SurfaceAccess {
+    Read,
+    Admin,
+    Info,
+    LocalOnly,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SurfaceTransport(u8);
+
+impl SurfaceTransport {
+    pub const LOCAL_CLI: Self = Self(1 << 0);
+    pub const HTTP_CLI: Self = Self(1 << 1);
+    pub const MCP: Self = Self(1 << 2);
+    pub const REST: Self = Self(1 << 3);
+    pub const LOCAL_ONLY: Self = Self(1 << 4);
+
+    pub const fn union(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
+
+    pub const fn contains(self, other: Self) -> bool {
+        self.0 & other.0 == other.0
+    }
+}
+
+#[derive(Debug)]
+pub struct SurfaceSpec {
+    pub kind: SurfaceKind,
+    pub spelling: &'static str,
     pub domain: SurfaceDomain,
-    pub local_cli: bool,
-    pub http_cli: bool,
+    pub disposition: SurfaceDisposition,
+    pub access: SurfaceAccess,
+    pub transports: SurfaceTransport,
     pub replacement: Option<&'static str>,
-    pub reason: &'static str,
+    pub reason: Option<&'static str>,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct ApiSurface {
-    pub path: &'static str,
-    pub class: SurfaceClass,
-    pub domain: SurfaceDomain,
-    pub replacement: Option<&'static str>,
-    pub reason: &'static str,
+macro_rules! cli {
+    ($spelling:literal, $domain:ident, $disposition:ident, $access:ident) => {
+        SurfaceSpec {
+            kind: SurfaceKind::Cli,
+            spelling: $spelling,
+            domain: SurfaceDomain::$domain,
+            disposition: SurfaceDisposition::$disposition,
+            access: SurfaceAccess::$access,
+            transports: SurfaceTransport::LOCAL_CLI.union(SurfaceTransport::HTTP_CLI),
+            replacement: None,
+            reason: None,
+        }
+    };
+    ($spelling:literal, $domain:ident, $disposition:ident, $access:ident, replace: $replacement:literal, reason: $reason:literal) => {
+        SurfaceSpec {
+            kind: SurfaceKind::Cli,
+            spelling: $spelling,
+            domain: SurfaceDomain::$domain,
+            disposition: SurfaceDisposition::$disposition,
+            access: SurfaceAccess::$access,
+            transports: SurfaceTransport::LOCAL_CLI.union(SurfaceTransport::HTTP_CLI),
+            replacement: Some($replacement),
+            reason: Some($reason),
+        }
+    };
 }
 
-pub const TOP_LEVEL_COMMANDS: &[&str] = &[
-    "search",
-    "filter",
-    "tail",
-    "errors",
-    "hosts",
-    "sessions",
-    "incident",
-    "heartbeat",
-    "correlate",
-    "state",
-    "ingest",
-    "stats",
-    "compose",
-    "setup",
-    "db",
-    "config",
-    "timeline",
-    "patterns",
-    "alerts",
-    "anomalies",
-    "compare",
-    "apps",
-    "correlate-state",
-    "topic-correlate",
-    "entity",
-    "graph",
-    "completions",
-];
-
-pub const CLI_MODE_COMMANDS: &[&str] = &[
-    "search",
-    "filter",
-    "tail",
-    "errors",
-    "hosts",
-    "sessions",
-    "incident",
-    "entity",
-    "graph",
-    "heartbeat",
-    "correlate",
-    "state",
-    "ingest",
-    "stats",
-    "db",
-    "compose",
-    "setup",
-    "config",
-    "timeline",
-    "patterns",
-    "alerts",
-    "anomalies",
-    "compare",
-    "apps",
-    "correlate-state",
-    "topic-correlate",
-    "__complete",
-    "completions",
-];
-
-pub const CLI_SURFACES: &[CliSurface] = &[
-    cli("search", SurfaceDomain::Logs, true),
-    cli("filter", SurfaceDomain::Logs, true),
-    cli("tail", SurfaceDomain::Logs, true),
-    cli("errors", SurfaceDomain::Logs, true),
-    cli("hosts", SurfaceDomain::Hosts, true),
-    cli("sessions", SurfaceDomain::Sessions, true),
-    cli("incident", SurfaceDomain::Analysis, true),
-    cli("correlate", SurfaceDomain::Correlate, true),
-    cli("state", SurfaceDomain::State, true),
-    cli("ingest", SurfaceDomain::Ingest, true),
-    cli("stats", SurfaceDomain::Stats, true),
-    cli("timeline", SurfaceDomain::Analysis, true),
-    cli("patterns", SurfaceDomain::Analysis, true),
-    cli("anomalies", SurfaceDomain::Analysis, true),
-    cli("compare", SurfaceDomain::Analysis, true),
-    cli("apps", SurfaceDomain::Logs, true),
-    cli("correlate-state", SurfaceDomain::Correlate, true),
-    cli("topic-correlate", SurfaceDomain::Correlate, true),
-    cli("entity", SurfaceDomain::Graph, true),
-    cli("graph", SurfaceDomain::Graph, true),
-    operational("heartbeat", SurfaceDomain::Ingest, false),
-    cli("alerts", SurfaceDomain::Alerts, true),
-    operational("compose", SurfaceDomain::Runtime, false),
-    operational("setup", SurfaceDomain::Setup, false),
-    operational("db", SurfaceDomain::Database, false),
-    operational("config", SurfaceDomain::Config, false),
-    hidden("__complete", SurfaceDomain::Config),
-    hidden("completions", SurfaceDomain::Config),
-    removed(
-        "ai",
-        SurfaceDomain::Sessions,
-        "sessions",
-        "AI transcript operations moved under sessions",
-    ),
-    removed(
-        "source-ips",
-        SurfaceDomain::Hosts,
-        "hosts sources",
-        "source identities moved under hosts",
-    ),
-    removed(
-        "silent-hosts",
-        SurfaceDomain::Hosts,
-        "hosts silent",
-        "silent host detection moved under hosts",
-    ),
-    removed(
-        "service",
-        SurfaceDomain::Runtime,
-        "compose logs SERVICE",
-        "container service logs moved under compose logs",
-    ),
-    removed(
-        "deploy",
-        SurfaceDomain::Setup,
-        "setup deploy",
-        "deployment workflows moved under setup deploy",
-    ),
-    removed(
-        "sig",
-        SurfaceDomain::Alerts,
-        "alerts signatures",
-        "error-signature operations moved under alerts signatures",
-    ),
-    removed(
-        "notify",
-        SurfaceDomain::Alerts,
-        "alerts notifications",
-        "notification operations moved under alerts notifications",
-    ),
-    removed(
-        "host-state",
-        SurfaceDomain::State,
-        "state host",
-        "host state moved under state",
-    ),
-    removed(
-        "fleet-state",
-        SurfaceDomain::State,
-        "state fleet",
-        "fleet state moved under state",
-    ),
-    removed(
-        "clock-skew",
-        SurfaceDomain::State,
-        "state clock-skew",
-        "clock skew moved under state",
-    ),
-    removed(
-        "ingest-rate",
-        SurfaceDomain::Stats,
-        "stats ingest-rate",
-        "ingest throughput moved under stats",
-    ),
-    removed(
-        "shell",
-        SurfaceDomain::Ingest,
-        "ingest shell",
-        "shell-history ingestion moved under ingest",
-    ),
-    removed(
-        "agent-command",
-        SurfaceDomain::Ingest,
-        "ingest agent-command",
-        "agent command ingestion moved under ingest",
-    ),
-    removed(
-        "inventory",
-        SurfaceDomain::Ingest,
-        "ingest inventory",
-        "inventory ingestion moved under ingest",
-    ),
-    removed(
-        "file-tail",
-        SurfaceDomain::Ingest,
-        "ingest file-tail",
-        "file-tail ingestion moved under ingest",
-    ),
-];
-
-pub const API_SURFACES: &[ApiSurface] = &[
-    api("/api/search", SurfaceDomain::Logs),
-    api("/api/filter", SurfaceDomain::Logs),
-    api("/api/tail", SurfaceDomain::Logs),
-    api("/api/errors", SurfaceDomain::Logs),
-    api("/api/hosts", SurfaceDomain::Hosts),
-    api("/api/source-ips", SurfaceDomain::Hosts),
-    api("/api/silent-hosts", SurfaceDomain::Hosts),
-    api("/api/correlate", SurfaceDomain::Correlate),
-    api("/api/correlate-state", SurfaceDomain::Correlate),
-    api("/api/topic-correlate", SurfaceDomain::Correlate),
-    api("/api/stats", SurfaceDomain::Stats),
-    api("/api/ingest-rate", SurfaceDomain::Stats),
-    api("/api/timeline", SurfaceDomain::Analysis),
-    api("/api/patterns", SurfaceDomain::Analysis),
-    api("/api/anomalies", SurfaceDomain::Analysis),
-    api("/api/compare", SurfaceDomain::Analysis),
-    api("/api/similar-incidents", SurfaceDomain::Analysis),
-    api("/api/incident-context", SurfaceDomain::Analysis),
-    api("/api/host-state", SurfaceDomain::State),
-    api("/api/fleet-state", SurfaceDomain::State),
-    api("/api/clock-skew", SurfaceDomain::State),
-    api("/api/apps", SurfaceDomain::Logs),
-    api("/api/context", SurfaceDomain::Logs),
-    api("/api/get", SurfaceDomain::Logs),
-    api("/api/version", SurfaceDomain::Runtime),
-    api("/api/compose/status", SurfaceDomain::Runtime),
-    api("/api/compose/doctor", SurfaceDomain::Runtime),
-    api("/api/errors/unaddressed", SurfaceDomain::Alerts),
-    api("/api/errors/ack", SurfaceDomain::Alerts),
-    api("/api/errors/unack", SurfaceDomain::Alerts),
-    api("/api/notifications/recent", SurfaceDomain::Alerts),
-    api("/api/notifications/test", SurfaceDomain::Alerts),
-    api("/api/file-tails", SurfaceDomain::Ingest),
-    api("/api/db/status", SurfaceDomain::Database),
-    api("/api/db/integrity", SurfaceDomain::Database),
-    api("/api/db/integrity/background", SurfaceDomain::Database),
-    api("/api/db/integrity/jobs/{id}", SurfaceDomain::Database),
-    api("/api/db/checkpoint", SurfaceDomain::Database),
-    api("/api/db/vacuum", SurfaceDomain::Database),
-    api("/api/db/backup", SurfaceDomain::Database),
-    api("/api/graph/entity", SurfaceDomain::Graph),
-    api("/api/graph/around", SurfaceDomain::Graph),
-    api("/api/graph/explain", SurfaceDomain::Graph),
-    api("/api/graph/evidence", SurfaceDomain::Graph),
-    api("/api/sessions", SurfaceDomain::Sessions),
-    api("/api/sessions/search", SurfaceDomain::Sessions),
-    api("/api/sessions/abuse", SurfaceDomain::Sessions),
-    api("/api/sessions/correlate", SurfaceDomain::Sessions),
-    api("/api/sessions/blocks", SurfaceDomain::Sessions),
-    api("/api/sessions/context", SurfaceDomain::Sessions),
-    api("/api/sessions/tools", SurfaceDomain::Sessions),
-    api("/api/sessions/projects", SurfaceDomain::Sessions),
-    api("/api/sessions/ask-history", SurfaceDomain::Sessions),
-    api("/api/sessions/incidents", SurfaceDomain::Sessions),
-    api("/api/sessions/investigate", SurfaceDomain::Sessions),
-    removed_api(
-        "/api/ai/*",
-        SurfaceDomain::Sessions,
-        "/api/sessions/*",
-        "clean protocol break",
-    ),
-];
-
-pub fn is_cli_mode_command(name: &str) -> bool {
-    CLI_MODE_COMMANDS.contains(&name)
+macro_rules! local_cli {
+    ($spelling:literal, $domain:ident, $disposition:ident) => {
+        SurfaceSpec {
+            kind: SurfaceKind::Cli,
+            spelling: $spelling,
+            domain: SurfaceDomain::$domain,
+            disposition: SurfaceDisposition::$disposition,
+            access: SurfaceAccess::LocalOnly,
+            transports: SurfaceTransport::LOCAL_CLI.union(SurfaceTransport::LOCAL_ONLY),
+            replacement: None,
+            reason: None,
+        }
+    };
+    ($spelling:literal, $domain:ident, $disposition:ident, replace: $replacement:literal, reason: $reason:literal) => {
+        SurfaceSpec {
+            kind: SurfaceKind::Cli,
+            spelling: $spelling,
+            domain: SurfaceDomain::$domain,
+            disposition: SurfaceDisposition::$disposition,
+            access: SurfaceAccess::LocalOnly,
+            transports: SurfaceTransport::LOCAL_CLI.union(SurfaceTransport::LOCAL_ONLY),
+            replacement: Some($replacement),
+            reason: Some($reason),
+        }
+    };
 }
 
-pub fn removed_cli_surface(name: &str) -> Option<&'static CliSurface> {
-    CLI_SURFACES
+macro_rules! mcp {
+    ($spelling:literal, $domain:ident, $disposition:ident, $access:ident) => {
+        SurfaceSpec {
+            kind: SurfaceKind::McpAction,
+            spelling: $spelling,
+            domain: SurfaceDomain::$domain,
+            disposition: SurfaceDisposition::$disposition,
+            access: SurfaceAccess::$access,
+            transports: SurfaceTransport::MCP,
+            replacement: None,
+            reason: None,
+        }
+    };
+}
+
+macro_rules! api {
+    ($spelling:literal, $domain:ident, $disposition:ident, $access:ident) => {
+        SurfaceSpec {
+            kind: SurfaceKind::ApiRoute,
+            spelling: $spelling,
+            domain: SurfaceDomain::$domain,
+            disposition: SurfaceDisposition::$disposition,
+            access: SurfaceAccess::$access,
+            transports: SurfaceTransport::REST.union(SurfaceTransport::HTTP_CLI),
+            replacement: None,
+            reason: None,
+        }
+    };
+    ($spelling:literal, $domain:ident, $disposition:ident, $access:ident, replace: $replacement:literal, reason: $reason:literal) => {
+        SurfaceSpec {
+            kind: SurfaceKind::ApiRoute,
+            spelling: $spelling,
+            domain: SurfaceDomain::$domain,
+            disposition: SurfaceDisposition::$disposition,
+            access: SurfaceAccess::$access,
+            transports: SurfaceTransport::REST.union(SurfaceTransport::HTTP_CLI),
+            replacement: Some($replacement),
+            reason: Some($reason),
+        }
+    };
+}
+
+pub const SURFACE_SPECS: &[SurfaceSpec] = &[
+    cli!("search", Search, Canonical, Read),
+    cli!("filter", Search, Canonical, Read),
+    cli!("tail", Search, Canonical, Read),
+    cli!("hosts", Hosts, Canonical, Read),
+    cli!("apps", Search, Canonical, Read),
+    cli!("sessions", Sessions, Canonical, Read),
+    cli!("entity", Graph, Canonical, Read),
+    cli!("graph", Graph, Canonical, Read),
+    cli!("errors", Analysis, MovedIntoGroupedDomain, Read, replace: "analysis errors", reason: "analysis owns error, incident, pattern, and anomaly views"),
+    cli!("incident", Analysis, MovedIntoGroupedDomain, Read, replace: "analysis incident", reason: "incident context belongs to analysis"),
+    cli!("timeline", Analysis, MovedIntoGroupedDomain, Read, replace: "analysis timeline", reason: "matrix records timeline as analysis unless a later bead keeps it baseline"),
+    cli!("patterns", Analysis, MovedIntoGroupedDomain, Read, replace: "analysis patterns", reason: "recurring patterns are analysis output"),
+    cli!("anomalies", Analysis, MovedIntoGroupedDomain, Read, replace: "analysis anomalies", reason: "volume anomalies are analysis output"),
+    cli!("compare", Analysis, MovedIntoGroupedDomain, Read, replace: "analysis compare", reason: "window comparisons are analysis output"),
+    cli!("correlate", Correlate, MovedIntoGroupedDomain, Read, replace: "correlate events", reason: "correlate uses explicit modes"),
+    cli!("correlate-state", Correlate, MovedIntoGroupedDomain, Read, replace: "correlate state", reason: "state correlation is a correlate mode"),
+    cli!("topic-correlate", Correlate, MovedIntoGroupedDomain, Read, replace: "correlate topic", reason: "topic correlation is a correlate mode"),
+    cli!("host-state", State, MovedIntoGroupedDomain, Read, replace: "state host", reason: "host state belongs under state"),
+    cli!("fleet-state", State, MovedIntoGroupedDomain, Read, replace: "state fleet", reason: "fleet state belongs under state"),
+    cli!("clock-skew", State, MovedIntoGroupedDomain, Read, replace: "state clock-skew", reason: "clock skew is a host-state health view"),
+    cli!("stats", Stats, Canonical, Read),
+    cli!("ingest-rate", Stats, MovedIntoGroupedDomain, Read, replace: "stats ingest-rate", reason: "ingest throughput is a stats mode"),
+    cli!("shell", Ingest, MovedIntoGroupedDomain, Admin, replace: "ingest shell", reason: "manual ingestion commands live under ingest"),
+    cli!("agent-command", Ingest, MovedIntoGroupedDomain, Admin, replace: "ingest agent-command", reason: "agent command ingestion lives under ingest"),
+    local_cli!("heartbeat", Ingest, MovedIntoGroupedDomain, replace: "ingest heartbeat", reason: "host-local heartbeat agent remains local-only but belongs under ingest"),
+    cli!("inventory", Ingest, MovedIntoGroupedDomain, Read, replace: "ingest inventory", reason: "inventory refresh/status is an ingest-adjacent cache operation"),
+    cli!("file-tail", Ingest, MovedIntoGroupedDomain, Admin, replace: "ingest file-tail", reason: "file-tail management lives under ingest"),
+    cli!("sig", Alerts, MovedIntoGroupedDomain, Admin, replace: "alerts signatures", reason: "signatures are alert inputs"),
+    cli!("notify", Alerts, MovedIntoGroupedDomain, Admin, replace: "alerts notifications", reason: "notification firings and test sends live under alerts"),
+    local_cli!("serve", Runtime, RetainedTopLevelOperational),
+    local_cli!("mcp", Runtime, RetainedTopLevelOperational),
+    local_cli!("doctor", Runtime, RetainedTopLevelOperational),
+    local_cli!("db", Db, RetainedTopLevelOperational),
+    local_cli!("compose", Compose, RetainedTopLevelOperational),
+    local_cli!("setup", Setup, RetainedTopLevelOperational),
+    local_cli!("config", Config, RetainedTopLevelOperational),
+    local_cli!("completions", Runtime, RetainedTopLevelOperational),
+    cli!("ai", Sessions, RemovedCleanBreak, Read, replace: "sessions", reason: "AI transcript operations were moved under sessions"),
+    cli!("source-ips", Hosts, RemovedCleanBreak, Read, replace: "hosts sources", reason: "source identities are a hosts mode"),
+    cli!("silent-hosts", Hosts, RemovedCleanBreak, Read, replace: "hosts silent", reason: "host silence is a hosts mode"),
+    cli!("service", Compose, RemovedCleanBreak, Read, replace: "compose logs SERVICE", reason: "service log inspection is a compose mode"),
+    cli!("deploy", Setup, RemovedCleanBreak, Admin, replace: "setup deploy", reason: "deployment workflows are setup operations"),
+    mcp!("search", Search, Canonical, Read),
+    mcp!("filter", Search, Canonical, Read),
+    mcp!("tail", Search, Canonical, Read),
+    mcp!("errors", Analysis, RetainedProtocolCompatibility, Read),
+    mcp!("hosts", Hosts, Canonical, Read),
+    mcp!("map", Graph, Canonical, Read),
+    mcp!("host_state", State, RetainedProtocolCompatibility, Read),
+    mcp!("fleet_state", State, RetainedProtocolCompatibility, Read),
+    mcp!("correlate", Correlate, RetainedProtocolCompatibility, Read),
+    mcp!(
+        "correlate_state",
+        Correlate,
+        RetainedProtocolCompatibility,
+        Read
+    ),
+    mcp!("stats", Stats, Canonical, Read),
+    mcp!("status", Runtime, Canonical, Read),
+    mcp!("apps", Search, Canonical, Read),
+    mcp!("sessions", Sessions, Canonical, Read),
+    mcp!("search_sessions", Sessions, Canonical, Read),
+    mcp!("abuse", Sessions, Canonical, Read),
+    mcp!("abuse_incidents", Sessions, Canonical, Read),
+    mcp!("abuse_investigate", Sessions, Canonical, Read),
+    mcp!("ai_correlate", Sessions, Canonical, Read),
+    mcp!(
+        "topic_correlate",
+        Correlate,
+        RetainedProtocolCompatibility,
+        Read
+    ),
+    mcp!("usage_blocks", Sessions, Canonical, Read),
+    mcp!("project_context", Sessions, Canonical, Read),
+    mcp!("list_ai_tools", Sessions, Canonical, Read),
+    mcp!("list_ai_projects", Sessions, Canonical, Read),
+    mcp!("source_ips", Hosts, RetainedProtocolCompatibility, Read),
+    mcp!("timeline", Analysis, RetainedProtocolCompatibility, Read),
+    mcp!("patterns", Analysis, RetainedProtocolCompatibility, Read),
+    mcp!("context", Search, Canonical, Read),
+    mcp!("get", Search, Canonical, Read),
+    mcp!("ingest_rate", Stats, RetainedProtocolCompatibility, Read),
+    mcp!("silent_hosts", Hosts, RetainedProtocolCompatibility, Read),
+    mcp!("clock_skew", State, RetainedProtocolCompatibility, Read),
+    mcp!("anomalies", Analysis, RetainedProtocolCompatibility, Read),
+    mcp!("compare", Analysis, RetainedProtocolCompatibility, Read),
+    mcp!(
+        "compose_status",
+        Compose,
+        RetainedProtocolCompatibility,
+        Read
+    ),
+    mcp!(
+        "compose_doctor",
+        Compose,
+        RetainedProtocolCompatibility,
+        Read
+    ),
+    mcp!(
+        "unaddressed_errors",
+        Alerts,
+        RetainedProtocolCompatibility,
+        Read
+    ),
+    mcp!("ack_error", Alerts, RetainedProtocolCompatibility, Admin),
+    mcp!("unack_error", Alerts, RetainedProtocolCompatibility, Admin),
+    mcp!(
+        "notifications_recent",
+        Alerts,
+        RetainedProtocolCompatibility,
+        Read
+    ),
+    mcp!("file_tails", Ingest, RetainedProtocolCompatibility, Admin),
+    mcp!(
+        "notifications_test",
+        Alerts,
+        RetainedProtocolCompatibility,
+        Admin
+    ),
+    mcp!(
+        "similar_incidents",
+        Analysis,
+        RetainedProtocolCompatibility,
+        Read
+    ),
+    mcp!("ask_history", Sessions, Canonical, Read),
+    mcp!(
+        "incident_context",
+        Analysis,
+        RetainedProtocolCompatibility,
+        Read
+    ),
+    mcp!("graph", Graph, Canonical, Read),
+    mcp!("help", Protocol, Canonical, Info),
+];
+
+#[path = "surface_registry_api.rs"]
+mod api_specs;
+
+pub fn specs_for(kind: SurfaceKind) -> impl Iterator<Item = &'static SurfaceSpec> {
+    SURFACE_SPECS
         .iter()
-        .find(|surface| surface.name == name && surface.class == SurfaceClass::RemovedCleanBreak)
+        .chain(api_specs::API_SURFACE_SPECS.iter())
+        .filter(move |spec| spec.kind == kind)
 }
 
-const fn cli(name: &'static str, domain: SurfaceDomain, http_cli: bool) -> CliSurface {
-    CliSurface {
-        name,
-        class: SurfaceClass::Canonical,
-        domain,
-        local_cli: true,
-        http_cli,
-        replacement: None,
-        reason: "",
-    }
+pub fn find(kind: SurfaceKind, spelling: &str) -> Option<&'static SurfaceSpec> {
+    specs_for(kind).find(|spec| spec.spelling == spelling)
 }
 
-const fn operational(name: &'static str, domain: SurfaceDomain, http_cli: bool) -> CliSurface {
-    CliSurface {
-        name,
-        class: SurfaceClass::Operational,
-        domain,
-        local_cli: true,
-        http_cli,
-        replacement: None,
-        reason: "",
-    }
-}
-
-const fn hidden(name: &'static str, domain: SurfaceDomain) -> CliSurface {
-    CliSurface {
-        name,
-        class: SurfaceClass::Hidden,
-        domain,
-        local_cli: true,
-        http_cli: false,
-        replacement: None,
-        reason: "",
-    }
-}
-
-const fn removed(
-    name: &'static str,
-    domain: SurfaceDomain,
-    replacement: &'static str,
-    reason: &'static str,
-) -> CliSurface {
-    CliSurface {
-        name,
-        class: SurfaceClass::RemovedCleanBreak,
-        domain,
-        local_cli: false,
-        http_cli: false,
-        replacement: Some(replacement),
-        reason,
-    }
-}
-
-const fn api(path: &'static str, domain: SurfaceDomain) -> ApiSurface {
-    ApiSurface {
-        path,
-        class: SurfaceClass::Canonical,
-        domain,
-        replacement: None,
-        reason: "",
-    }
-}
-
-const fn removed_api(
-    path: &'static str,
-    domain: SurfaceDomain,
-    replacement: &'static str,
-    reason: &'static str,
-) -> ApiSurface {
-    ApiSurface {
-        path,
-        class: SurfaceClass::RemovedCleanBreak,
-        domain,
-        replacement: Some(replacement),
-        reason,
-    }
+pub fn canonical_cli_roots() -> impl Iterator<Item = &'static SurfaceSpec> {
+    specs_for(SurfaceKind::Cli).filter(|spec| {
+        matches!(
+            spec.disposition,
+            SurfaceDisposition::Canonical
+                | SurfaceDisposition::MovedIntoGroupedDomain
+                | SurfaceDisposition::RetainedTopLevelOperational
+        )
+    })
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn top_level_commands_are_registered_surfaces() {
-        for command in TOP_LEVEL_COMMANDS {
-            assert!(
-                CLI_SURFACES.iter().any(|surface| surface.name == *command
-                    && !matches!(surface.class, SurfaceClass::RemovedCleanBreak)),
-                "{command} is in TOP_LEVEL_COMMANDS but not CLI_SURFACES"
-            );
-        }
-    }
-
-    #[test]
-    fn parser_mode_commands_are_registered_surfaces() {
-        for command in CLI_MODE_COMMANDS {
-            assert!(
-                CLI_SURFACES.iter().any(|surface| surface.name == *command
-                    && !matches!(surface.class, SurfaceClass::RemovedCleanBreak)),
-                "{command} is accepted by Mode but not CLI_SURFACES"
-            );
-        }
-    }
-
-    #[test]
-    fn clean_break_cli_surfaces_have_replacements() {
-        for command in [
-            "ai",
-            "source-ips",
-            "silent-hosts",
-            "service",
-            "deploy",
-            "sig",
-            "notify",
-            "host-state",
-            "fleet-state",
-            "clock-skew",
-            "ingest-rate",
-            "shell",
-            "agent-command",
-            "inventory",
-            "file-tail",
-        ] {
-            let surface = removed_cli_surface(command)
-                .unwrap_or_else(|| panic!("{command} is missing removed surface metadata"));
-            assert!(
-                surface.replacement.is_some(),
-                "{command} needs replacement guidance"
-            );
-            assert!(!surface.reason.is_empty(), "{command} needs a break reason");
-        }
-    }
-
-    #[test]
-    fn prior_consolidations_are_classified_in_matrix() {
-        for (name, domain, class, local_cli, http_cli) in [
-            (
-                "sessions",
-                SurfaceDomain::Sessions,
-                SurfaceClass::Canonical,
-                true,
-                true,
-            ),
-            (
-                "hosts",
-                SurfaceDomain::Hosts,
-                SurfaceClass::Canonical,
-                true,
-                true,
-            ),
-            (
-                "compose",
-                SurfaceDomain::Runtime,
-                SurfaceClass::Operational,
-                true,
-                false,
-            ),
-            (
-                "setup",
-                SurfaceDomain::Setup,
-                SurfaceClass::Operational,
-                true,
-                false,
-            ),
-        ] {
-            let surface = CLI_SURFACES
-                .iter()
-                .find(|surface| surface.name == name)
-                .unwrap_or_else(|| panic!("{name} missing from CLI_SURFACES"));
-            assert_eq!(surface.domain, domain);
-            assert_eq!(surface.class, class);
-            assert_eq!(surface.local_cli, local_cli);
-            assert_eq!(surface.http_cli, http_cli);
-        }
-    }
-
-    #[test]
-    fn api_ai_is_recorded_as_clean_break() {
-        let api_ai = API_SURFACES
-            .iter()
-            .find(|surface| surface.path == "/api/ai/*")
-            .expect("/api/ai/* clean break row");
-        assert_eq!(api_ai.class, SurfaceClass::RemovedCleanBreak);
-        assert_eq!(api_ai.replacement, Some("/api/sessions/*"));
-    }
-
-    #[test]
-    fn api_matrix_covers_current_route_families() {
-        for path in [
-            "/api/search",
-            "/api/source-ips",
-            "/api/sessions/search",
-            "/api/correlate-state",
-            "/api/host-state",
-            "/api/compose/status",
-            "/api/errors/ack",
-            "/api/file-tails",
-            "/api/db/status",
-            "/api/graph/entity",
-        ] {
-            assert!(
-                API_SURFACES.iter().any(|surface| surface.path == path
-                    && surface.class != SurfaceClass::RemovedCleanBreak),
-                "{path} is an active route missing from API_SURFACES"
-            );
-        }
-    }
-}
+#[path = "surface_registry_tests.rs"]
+mod tests;

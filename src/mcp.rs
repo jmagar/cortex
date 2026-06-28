@@ -16,7 +16,11 @@ mod schemas;
 mod tools;
 
 pub use action_flags::{Defaults, FlagSpec, ValueKind};
-pub use actions::{defaults_for, description_for, examples_for, flags_for, positional_for};
+#[cfg(test)]
+pub(crate) use actions::required_scope_for;
+pub use actions::{
+    action_names, defaults_for, description_for, examples_for, flags_for, positional_for,
+};
 pub use rmcp_server::{
     CortexRmcpServer, rmcp_server, streamable_http_config, streamable_http_service,
 };

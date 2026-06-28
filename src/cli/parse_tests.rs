@@ -8,6 +8,20 @@ use super::super::{
 use super::*;
 
 #[test]
+fn parser_top_level_commands_are_classified_in_surface_registry() {
+    for command in TOP_LEVEL_COMMANDS {
+        let spec =
+            cortex::surface_registry::find(cortex::surface_registry::SurfaceKind::Cli, command)
+                .unwrap_or_else(|| panic!("{command} missing from surface registry"));
+        assert_ne!(
+            spec.disposition,
+            cortex::surface_registry::SurfaceDisposition::RemovedCleanBreak,
+            "{command} is still accepted by the parser and cannot be marked removed"
+        );
+    }
+}
+
+#[test]
 fn parse_routes_stats() {
     assert_eq!(
         parse_command(vec!["stats".to_string()]).unwrap(),

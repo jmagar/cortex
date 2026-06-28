@@ -2443,14 +2443,23 @@ async fn ai_api_namespace_is_removed() {
     let (state, _pool, _dir) = test_state(Some("secret".into()));
     let app = test_router(state);
 
-    let (status, _value) = get_json(
-        app,
+    for route in [
+        "/api/ai",
         "/api/ai/search?query=ssh%20key%20rotation",
-        Some("secret"),
-    )
-    .await;
-
-    assert_eq!(status, axum::http::StatusCode::NOT_FOUND);
+        "/api/ai/abuse",
+        "/api/ai/correlate",
+        "/api/ai/blocks",
+        "/api/ai/context?project=foo",
+        "/api/ai/tools",
+        "/api/ai/projects",
+    ] {
+        let (status, _value) = get_json(app.clone(), route, Some("secret")).await;
+        assert_eq!(
+            status,
+            axum::http::StatusCode::NOT_FOUND,
+            "{route} must stay unmounted as a clean protocol break"
+        );
+    }
 }
 
 #[tokio::test]

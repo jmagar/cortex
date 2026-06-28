@@ -64,7 +64,16 @@ const SECTIONS: &[(&str, &[&str])] = &[
     ("Ingestion", &["ingest", "heartbeat"]),
     (
         "Runtime & Setup",
-        &["serve", "mcp", "doctor", "db", "compose", "setup", "config"],
+        &[
+            "serve",
+            "mcp",
+            "doctor",
+            "db",
+            "compose",
+            "setup",
+            "config",
+            "completions",
+        ],
     ),
 ];
 
@@ -336,6 +345,11 @@ const CATALOG: &[CommandDoc] = &[
             "cortex config unset KEY [--env|--toml] [--toml-path PATH] [--json]",
             "cortex config list [--env|--toml] [--toml-path PATH] [--json]",
         ],
+    },
+    CommandDoc {
+        name: "completions",
+        summary: "Print a shell completion script",
+        usage: &["cortex completions zsh"],
     },
 ];
 

@@ -547,7 +547,7 @@ pub(super) const ACTION_SPECS: &[ActionSpec] = &[
 /// All action names in registration order. Used to populate the JSON schema
 /// `enum` in `tool_definitions()` — derives from `ACTION_SPECS` so the schema
 /// and scope table cannot drift.
-pub(super) fn action_names() -> Vec<&'static str> {
+pub fn action_names() -> Vec<&'static str> {
     ACTION_SPECS.iter().map(|s| s.name).collect()
 }
 
@@ -618,7 +618,7 @@ pub fn defaults_for(action: &str) -> Defaults {
 /// - `Some("cortex:__deny__")` for unknown actions — a sentinel scope that is
 ///   never granted, so unknown actions are denied at the auth layer rather than
 ///   falling through to the dispatcher. Fail-closed.
-pub(super) fn required_scope_for(action: &str) -> Option<&'static str> {
+pub(crate) fn required_scope_for(action: &str) -> Option<&'static str> {
     match ACTION_SPECS.iter().find(|s| s.name == action) {
         Some(spec) => match spec.scope {
             Scope::InfoOnly => None,
