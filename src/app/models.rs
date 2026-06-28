@@ -15,6 +15,7 @@ mod log_query;
 mod ops;
 mod rag;
 mod stats;
+mod surface;
 
 pub use ai_incidents::*;
 pub use ai_inventory::*;
@@ -27,6 +28,7 @@ pub use log_query::*;
 pub use ops::*;
 pub use rag::*;
 pub use stats::*;
+pub use surface::*;
 
 #[cfg(test)]
 #[path = "models_tests.rs"]
