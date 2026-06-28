@@ -1508,11 +1508,18 @@ fn parse_hosts_sources_with_limit_offset_and_json() {
 
 #[test]
 fn parse_old_host_inventory_top_level_commands_are_removed() {
-    for command in ["source-ips", "silent-hosts"] {
+    for (command, replacement) in [
+        ("source-ips", "cortex hosts sources"),
+        ("silent-hosts", "cortex hosts silent"),
+    ] {
         let err = CliCommand::parse(strings(&[command])).unwrap_err();
         assert!(
-            err.to_string().contains("unknown CLI command"),
-            "expected {command} to be rejected, got: {err}"
+            err.to_string().contains("removed CLI command"),
+            "expected {command} to be rejected as removed, got: {err}"
+        );
+        assert!(
+            err.to_string().contains(replacement),
+            "expected {command} replacement {replacement}, got: {err}"
         );
     }
 }

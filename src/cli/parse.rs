@@ -9,41 +9,6 @@ use super::parse_logs::{
 use super::parse_sessions::parse_sessions_command;
 use super::{CliCommand, commands, parse_config, suggest};
 
-pub(crate) const TOP_LEVEL_COMMANDS: &[&str] = &[
-    "search",
-    "filter",
-    "tail",
-    "errors",
-    "hosts",
-    "sessions",
-    "incident",
-    "shell",
-    "agent-command",
-    "heartbeat",
-    "correlate",
-    "stats",
-    "compose",
-    "setup",
-    "db",
-    "config",
-    "inventory",
-    "timeline",
-    "patterns",
-    "ingest-rate",
-    "sig",
-    "notify",
-    "clock-skew",
-    "anomalies",
-    "compare",
-    "apps",
-    "host-state",
-    "fleet-state",
-    "correlate-state",
-    "topic-correlate",
-    "file-tail",
-    "completions",
-];
-
 pub(crate) fn parse_command(args: Vec<String>) -> Result<CliCommand> {
     let (command, rest) = args
         .split_first()
@@ -88,7 +53,11 @@ pub(crate) fn parse_command(args: Vec<String>) -> Result<CliCommand> {
         "completions" => Ok(CliCommand::Completions(rest.to_vec())),
         _ => bail!(
             "{}",
-            suggest::unknown_command("CLI command", command, TOP_LEVEL_COMMANDS)
+            suggest::unknown_command(
+                "CLI command",
+                command,
+                cortex::surface_registry::TOP_LEVEL_COMMANDS
+            )
         ),
     }
 }

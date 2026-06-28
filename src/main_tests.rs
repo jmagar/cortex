@@ -398,7 +398,8 @@ fn mode_parse_accepts_setup_deploy_namespace() {
 #[test]
 fn mode_parse_rejects_top_level_deploy_namespace() {
     let err = Mode::parse(vec!["deploy".into(), "preflight".into()]).unwrap_err();
-    assert!(err.to_string().contains("unknown CLI command"));
+    assert!(err.to_string().contains("removed CLI command: deploy"));
+    assert!(err.to_string().contains("cortex setup deploy"));
 }
 
 #[test]

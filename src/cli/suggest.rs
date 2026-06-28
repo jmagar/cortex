@@ -18,6 +18,15 @@ pub(crate) fn did_you_mean<'a>(input: &str, candidates: &'a [&'a str]) -> Option
 }
 
 pub(crate) fn unknown_command(kind: &str, input: &str, candidates: &[&str]) -> String {
+    if kind == "CLI command"
+        && let Some(surface) = cortex::surface_registry::removed_cli_surface(input)
+        && let Some(replacement) = surface.replacement
+    {
+        return format!(
+            "removed {kind}: {input}\n\nUse `cortex {replacement}` instead. {}.",
+            surface.reason
+        );
+    }
     match did_you_mean(input, candidates) {
         Some(candidate) => {
             format!("unknown {kind}: {input}\n\nDid you mean `{candidate}`?")

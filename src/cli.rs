@@ -86,9 +86,9 @@ impl CliCommand {
 // (MCP action names are underscored). Used by completion + discoverability help.
 
 /// All CLI command names paired with their one-line description (empty when the
-/// command has no `ACTION_SPECS` entry, e.g. grouping commands like `ai`).
+/// command has no `ACTION_SPECS` entry, e.g. grouping commands like `sessions`).
 pub(crate) fn registry_actions() -> Vec<(&'static str, &'static str)> {
-    parse::TOP_LEVEL_COMMANDS
+    cortex::surface_registry::TOP_LEVEL_COMMANDS
         .iter()
         .map(|&cmd| {
             let desc = cortex::mcp::description_for(&cmd.replace('-', "_")).unwrap_or("");

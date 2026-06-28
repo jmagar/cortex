@@ -158,6 +158,24 @@ fn parse_rejects_unknown_command() {
 }
 
 #[test]
+fn parse_removed_commands_report_matrix_replacements() {
+    for (command, replacement) in [
+        ("ai", "cortex sessions"),
+        ("source-ips", "cortex hosts sources"),
+        ("silent-hosts", "cortex hosts silent"),
+        ("service", "cortex compose logs SERVICE"),
+        ("deploy", "cortex setup deploy"),
+    ] {
+        let err = parse_command(vec![command.to_string()])
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("removed CLI command: "), "got: {err}");
+        assert!(err.contains(replacement), "got: {err}");
+    }
+}
+
+#[test]
 fn parse_routes_inventory_refresh_json() {
     assert_eq!(
         parse_command(vec![

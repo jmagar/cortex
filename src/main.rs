@@ -616,46 +616,7 @@ impl Mode {
                     Ok(Self::DoctorFull(parse_doctor_full_command(rest)?))
                 }
             }
-            [command, rest @ ..]
-                if matches!(
-                    command.as_str(),
-                    "search"
-                        | "filter"
-                        | "tail"
-                        | "errors"
-                        | "hosts"
-                        | "sessions"
-                        | "incident"
-                        | "entity"
-                        | "graph"
-                        | "shell"
-                        | "agent-command"
-                        | "heartbeat"
-                        | "correlate"
-                        | "stats"
-                        | "db"
-                        | "compose"
-                        | "setup"
-                        | "config"
-                        | "inventory"
-                        | "timeline"
-                        | "patterns"
-                        | "ingest-rate"
-                        | "sig"
-                        | "notify"
-                        | "clock-skew"
-                        | "anomalies"
-                        | "compare"
-                        | "apps"
-                        | "host-state"
-                        | "fleet-state"
-                        | "correlate-state"
-                        | "topic-correlate"
-                        | "file-tail"
-                        | "__complete"
-                        | "completions"
-                ) =>
-            {
+            [command, rest @ ..] if cortex::surface_registry::is_cli_mode_command(command) => {
                 let mut cli_args = Vec::with_capacity(rest.len() + 1);
                 cli_args.push(command.clone());
                 cli_args.extend(rest.iter().cloned());
