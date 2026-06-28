@@ -2,8 +2,8 @@ use anyhow::{Result, anyhow, bail};
 use cortex::app::CortexService;
 
 use super::args::{
-    AgentCommandCommand, CliCommand, DbCommand, GraphCommand, NotifyCommand, ShellCommand,
-    SigCommand,
+    AgentCommandCommand, AlertsCommand, CliCommand, DbCommand, GraphCommand, NotifyCommand,
+    ShellCommand, SigCommand,
 };
 use super::dispatch;
 
@@ -141,14 +141,16 @@ pub(crate) async fn run(mode: CliMode, command: CliCommand) -> Result<()> {
         CliCommand::Timeline(args) => dispatch::run_timeline(&mode, args).await,
         CliCommand::Patterns(args) => dispatch::run_patterns(&mode, args).await,
         CliCommand::IngestRate(args) => dispatch::run_ingest_rate(&mode, args).await,
-        CliCommand::Sig(sig) => match sig {
-            SigCommand::List(args) => dispatch::run_sig_list(&mode, args).await,
-            SigCommand::Ack(args) => dispatch::run_sig_ack(&mode, args).await,
-            SigCommand::Unack(args) => dispatch::run_sig_unack(&mode, args).await,
-        },
-        CliCommand::Notify(notify) => match notify {
-            NotifyCommand::Recent(args) => dispatch::run_notify_recent(&mode, args).await,
-            NotifyCommand::Test(args) => dispatch::run_notify_test(&mode, args).await,
+        CliCommand::Alerts(alerts) => match alerts {
+            AlertsCommand::Signatures(sig) => match sig {
+                SigCommand::List(args) => dispatch::run_sig_list(&mode, args).await,
+                SigCommand::Ack(args) => dispatch::run_sig_ack(&mode, args).await,
+                SigCommand::Unack(args) => dispatch::run_sig_unack(&mode, args).await,
+            },
+            AlertsCommand::Notifications(notify) => match notify {
+                NotifyCommand::Recent(args) => dispatch::run_notify_recent(&mode, args).await,
+                NotifyCommand::Test(args) => dispatch::run_notify_test(&mode, args).await,
+            },
         },
         // Surface parity gap closure (2026-05-22)
         CliCommand::ClockSkew(args) => dispatch::run_clock_skew(&mode, args).await,

@@ -72,8 +72,7 @@ pub const TOP_LEVEL_COMMANDS: &[&str] = &[
     "timeline",
     "patterns",
     "ingest-rate",
-    "sig",
-    "notify",
+    "alerts",
     "clock-skew",
     "anomalies",
     "compare",
@@ -111,8 +110,7 @@ pub const CLI_MODE_COMMANDS: &[&str] = &[
     "timeline",
     "patterns",
     "ingest-rate",
-    "sig",
-    "notify",
+    "alerts",
     "clock-skew",
     "anomalies",
     "compare",
@@ -154,8 +152,7 @@ pub const CLI_SURFACES: &[CliSurface] = &[
     operational("heartbeat", SurfaceDomain::Ingest, false),
     operational("inventory", SurfaceDomain::Ingest, false),
     operational("file-tail", SurfaceDomain::Ingest, false),
-    operational("sig", SurfaceDomain::Alerts, true),
-    operational("notify", SurfaceDomain::Alerts, true),
+    cli("alerts", SurfaceDomain::Alerts, true),
     operational("compose", SurfaceDomain::Runtime, false),
     operational("setup", SurfaceDomain::Setup, false),
     operational("db", SurfaceDomain::Database, false),
@@ -191,6 +188,18 @@ pub const CLI_SURFACES: &[CliSurface] = &[
         SurfaceDomain::Setup,
         "setup deploy",
         "deployment workflows moved under setup deploy",
+    ),
+    removed(
+        "sig",
+        SurfaceDomain::Alerts,
+        "alerts signatures",
+        "error-signature operations moved under alerts signatures",
+    ),
+    removed(
+        "notify",
+        SurfaceDomain::Alerts,
+        "alerts notifications",
+        "notification operations moved under alerts notifications",
     ),
 ];
 
@@ -374,7 +383,15 @@ mod tests {
 
     #[test]
     fn clean_break_cli_surfaces_have_replacements() {
-        for command in ["ai", "source-ips", "silent-hosts", "service", "deploy"] {
+        for command in [
+            "ai",
+            "source-ips",
+            "silent-hosts",
+            "service",
+            "deploy",
+            "sig",
+            "notify",
+        ] {
             let surface = removed_cli_surface(command)
                 .unwrap_or_else(|| panic!("{command} is missing removed surface metadata"));
             assert!(

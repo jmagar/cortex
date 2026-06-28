@@ -355,7 +355,7 @@ fn require_api_admin_token(
         return Some(
             (
                 StatusCode::FORBIDDEN,
-                Json(json!({"error": "CORTEX_API_ADMIN_TOKEN required for file-tail management"})),
+                Json(json!({"error": "CORTEX_API_ADMIN_TOKEN required for admin API actions"})),
             )
                 .into_response(),
         );
@@ -370,7 +370,7 @@ fn require_api_admin_token(
         Some(
             (
                 StatusCode::FORBIDDEN,
-                Json(json!({"error": "X-Cortex-Admin-Token required for file-tail management"})),
+                Json(json!({"error": "X-Cortex-Admin-Token required for admin API actions"})),
             )
                 .into_response(),
         )
@@ -727,8 +727,14 @@ struct AckErrorBody {
 
 async fn ack_error(
     State(state): State<ApiState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     Json(body): Json<AckErrorBody>,
 ) -> impl IntoResponse {
+    if let Some(resp) = require_api_admin_token(&state, &headers) {
+        return resp;
+    }
+    tracing::warn!(caller_ip = %peer.ip(), signature_hash = %body.signature_hash, "admin: ack_error invoked");
     respond(
         state
             .service
@@ -751,8 +757,14 @@ struct UnackErrorBody {
 
 async fn unack_error(
     State(state): State<ApiState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     Json(body): Json<UnackErrorBody>,
 ) -> impl IntoResponse {
+    if let Some(resp) = require_api_admin_token(&state, &headers) {
+        return resp;
+    }
+    tracing::warn!(caller_ip = %peer.ip(), signature_hash = %body.signature_hash, "admin: unack_error invoked");
     respond(
         state
             .service

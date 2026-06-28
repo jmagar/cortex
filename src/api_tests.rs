@@ -230,7 +230,7 @@ async fn file_tails_route_rejects_when_server_admin_token_unconfigured() {
     assert_eq!(status, axum::http::StatusCode::FORBIDDEN);
     assert_eq!(
         value["error"],
-        "CORTEX_API_ADMIN_TOKEN required for file-tail management"
+        "CORTEX_API_ADMIN_TOKEN required for admin API actions"
     );
 }
 
@@ -252,7 +252,7 @@ async fn file_tails_route_rejects_blank_server_admin_token() {
     assert_eq!(status, axum::http::StatusCode::FORBIDDEN);
     assert_eq!(
         value["error"],
-        "CORTEX_API_ADMIN_TOKEN required for file-tail management"
+        "CORTEX_API_ADMIN_TOKEN required for admin API actions"
     );
 }
 
@@ -274,8 +274,35 @@ async fn file_tails_route_rejects_wrong_admin_token() {
     assert_eq!(status, axum::http::StatusCode::FORBIDDEN);
     assert_eq!(
         value["error"],
-        "X-Cortex-Admin-Token required for file-tail management"
+        "X-Cortex-Admin-Token required for admin API actions"
     );
+}
+
+#[tokio::test]
+async fn error_ack_routes_reject_normal_bearer_without_admin_token() {
+    let (mut state, _pool, _dir) = test_state(Some("secret".into()));
+    state.config.admin_token = crate::config::Secret(Some("admin-secret".into()));
+    let app = test_router(state);
+    let hash = "0".repeat(64);
+
+    for (path, body) in [
+        (
+            "/api/errors/ack",
+            serde_json::json!({ "signature_hash": hash, "notes": "handled" }),
+        ),
+        (
+            "/api/errors/unack",
+            serde_json::json!({ "signature_hash": hash, "reason": "regressed" }),
+        ),
+    ] {
+        let (status, value) = post_json(app.clone(), path, body, Some("secret")).await;
+
+        assert_eq!(status, axum::http::StatusCode::FORBIDDEN, "{path}: {value}");
+        assert_eq!(
+            value["error"],
+            "X-Cortex-Admin-Token required for admin API actions"
+        );
+    }
 }
 
 #[tokio::test]

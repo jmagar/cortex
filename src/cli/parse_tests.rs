@@ -165,6 +165,8 @@ fn parse_removed_commands_report_matrix_replacements() {
         ("silent-hosts", "cortex hosts silent"),
         ("service", "cortex compose logs SERVICE"),
         ("deploy", "cortex setup deploy"),
+        ("sig", "cortex alerts signatures"),
+        ("notify", "cortex alerts notifications"),
     ] {
         let err = parse_command(vec![command.to_string()])
             .unwrap_err()

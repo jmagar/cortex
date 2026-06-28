@@ -22,6 +22,8 @@ with replacement guidance instead of dispatching through compatibility aliases.
 | `cortex silent-hosts ...` | `cortex hosts silent ...` |
 | `cortex service logs SERVICE ...` | `cortex compose logs SERVICE ...` |
 | `cortex deploy ...` | `cortex setup deploy ...` |
+| `cortex sig ...` | `cortex alerts signatures ...` |
+| `cortex notify ...` | `cortex alerts notifications ...` |
 
 The REST `/api/ai/*` namespace is also intentionally removed; use
 `/api/sessions/*`.
@@ -1035,11 +1037,11 @@ models.
 | `cortex clock-skew` | `cortex` with `action="clock_skew"` |
 | `cortex anomalies` | `cortex` with `action="anomalies"` |
 | `cortex compare` | `cortex` with `action="compare"` |
-| `cortex sig list` | `cortex` with `action="unaddressed_errors"` |
-| `cortex sig ack` | `cortex` with `action="ack_error"` |
-| `cortex sig unack` | `cortex` with `action="unack_error"` |
-| `cortex notify recent` | `cortex` with `action="notifications_recent"` |
-| `cortex notify test` | `cortex` with `action="notifications_test"` |
+| `cortex alerts signatures list` | `cortex` with `action="unaddressed_errors"` |
+| `cortex alerts signatures ack` | `cortex` with `action="ack_error"` |
+| `cortex alerts signatures unack` | `cortex` with `action="unack_error"` |
+| `cortex alerts notifications recent` | `cortex` with `action="notifications_recent"` |
+| `cortex alerts notifications test` | `cortex` with `action="notifications_test"` |
 | `cortex stats` | `cortex` with `action="stats"` |
 | `cortex compose status` | `cortex` with `action="compose_status"` (redacted read-only projection only) |
 | `cortex compose doctor` | `cortex` with `action="compose_doctor"` (redacted read-only projection only) |

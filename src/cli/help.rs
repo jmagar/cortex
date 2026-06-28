@@ -63,7 +63,7 @@ const SECTIONS: &[(&str, &[&str])] = &[
         ],
     ),
     ("AI Transcripts", &["sessions"]),
-    ("Signals & Alerts", &["sig", "notify"]),
+    ("Signals & Alerts", &["alerts"]),
     (
         "Ingestion",
         &[
@@ -263,20 +263,14 @@ const CATALOG: &[CommandDoc] = &[
     },
     // ── Signals & Alerts ───────────────────────────────────────────────────
     CommandDoc {
-        name: "sig",
-        summary: "Manage error signatures (list/ack/unack)",
+        name: "alerts",
+        summary: "Manage error signatures and notifications",
         usage: &[
-            "cortex sig list [--include-acknowledged] [--limit N] [--json]",
-            "cortex sig ack HASH [--notes TEXT] [--json]",
-            "cortex sig unack HASH [--reason TEXT] [--json]",
-        ],
-    },
-    CommandDoc {
-        name: "notify",
-        summary: "Notification firings and test sends",
-        usage: &[
-            "cortex notify recent [--rule-id ID] [--since TIME] [--limit N] [--json]",
-            "cortex notify test [--body TEXT] [--json]   (requires --http)",
+            "cortex alerts signatures list [--include-acknowledged] [--limit N] [--json]",
+            "cortex alerts signatures ack HASH [--notes TEXT] [--json]",
+            "cortex alerts signatures unack HASH [--reason TEXT] [--json]",
+            "cortex alerts notifications recent [--rule-id ID] [--since TIME] [--limit N] [--json]",
+            "cortex alerts notifications test [--body TEXT] [--json]   (requires --http)",
         ],
     },
     // ── Ingestion ──────────────────────────────────────────────────────────
@@ -637,29 +631,31 @@ const NESTED_CATALOG: &[NestedCommandDoc] = &[
         usage: &["cortex setup doctor [--json]"],
     },
     NestedCommandDoc {
-        path: "sig list",
+        path: "alerts signatures list",
         summary: "List error signatures",
-        usage: &["cortex sig list [--include-acknowledged] [--limit N] [--json]"],
+        usage: &["cortex alerts signatures list [--include-acknowledged] [--limit N] [--json]"],
     },
     NestedCommandDoc {
-        path: "sig ack",
+        path: "alerts signatures ack",
         summary: "Acknowledge an error signature",
-        usage: &["cortex sig ack HASH [--notes TEXT] [--json]"],
+        usage: &["cortex alerts signatures ack HASH [--notes TEXT] [--json]"],
     },
     NestedCommandDoc {
-        path: "sig unack",
+        path: "alerts signatures unack",
         summary: "Unacknowledge an error signature",
-        usage: &["cortex sig unack HASH [--reason TEXT] [--json]"],
+        usage: &["cortex alerts signatures unack HASH [--reason TEXT] [--json]"],
     },
     NestedCommandDoc {
-        path: "notify recent",
+        path: "alerts notifications recent",
         summary: "List recent notification firings",
-        usage: &["cortex notify recent [--rule-id ID] [--since TIME] [--limit N] [--json]"],
+        usage: &[
+            "cortex alerts notifications recent [--rule-id ID] [--since TIME] [--limit N] [--json]",
+        ],
     },
     NestedCommandDoc {
-        path: "notify test",
+        path: "alerts notifications test",
         summary: "Send a test notification",
-        usage: &["cortex notify test [--body TEXT] [--json]   (requires --http)"],
+        usage: &["cortex alerts notifications test [--body TEXT] [--json]   (requires --http)"],
     },
     NestedCommandDoc {
         path: "shell index",
@@ -996,8 +992,8 @@ pub(crate) fn classify_help(args: &[String]) -> HelpRequest {
             positionals.push(a);
         }
     }
-    if positionals.len() >= 2 {
-        let nested = format!("{} {}", positionals[0], positionals[1]);
+    for len in (2..=positionals.len()).rev() {
+        let nested = positionals[..len].join(" ");
         if nested_lookup(&nested).is_some() {
             return HelpRequest::Command(nested);
         }
