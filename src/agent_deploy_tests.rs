@@ -368,7 +368,7 @@ fn env_get<'a>(env: &'a [(String, String)], key: &str) -> Option<&'a str> {
 
 #[test]
 fn resolve_agent_env_flagless_upgrade_preserves_everything() {
-    // The whole point: `cortex deploy agent` with NO flags keeps the host's
+    // The whole point: `cortex setup deploy agent` with NO flags keeps the host's
     // existing token, target, docker setting, and custom Plex file-tail.
     let persisted = vec![
         (

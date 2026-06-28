@@ -1,37 +1,38 @@
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum AiCommand {
-    Search(AiSearchArgs),
-    Abuse(AiAbuseArgs),
-    Correlate(AiCorrelateArgs),
-    Blocks(AiBlocksArgs),
-    Context(AiContextArgs),
-    Tools(AiListArgs),
-    Projects(AiListArgs),
-    Index(AiIndexArgs),
-    Add(AiAddArgs),
-    Watch(AiWatchArgs),
-    Checkpoints(AiCheckpointsArgs),
-    Errors(AiErrorsArgs),
-    PruneCheckpoints(AiPruneCheckpointsArgs),
-    Doctor(AiDoctorArgs),
+pub(crate) enum SessionsCommand {
+    List(super::SessionsArgs),
+    Search(SessionsSearchArgs),
+    Abuse(SessionsAbuseArgs),
+    Correlate(SessionsCorrelateArgs),
+    Blocks(SessionsBlocksArgs),
+    Context(SessionsContextArgs),
+    Tools(SessionsListArgs),
+    Projects(SessionsListArgs),
+    Index(SessionsIndexArgs),
+    Add(SessionsAddArgs),
+    Watch(SessionsWatchArgs),
+    Checkpoints(SessionsCheckpointsArgs),
+    Errors(SessionsErrorsArgs),
+    PruneCheckpoints(SessionsPruneCheckpointsArgs),
+    Doctor(SessionsDoctorArgs),
     WatchStatus(super::OutputArgs),
     SmokeWatch(super::OutputArgs),
-    SimilarIncidents(AiSimilarArgs),
-    AskHistory(AiAskHistoryArgs),
-    IncidentContext(AiIncidentContextArgs),
-    Incidents(AiIncidentsArgs),
-    Investigate(AiInvestigateArgs),
-    Assess(AiAssessArgs),
+    SimilarIncidents(SessionsSimilarArgs),
+    AskHistory(SessionsAskHistoryArgs),
+    IncidentContext(SessionsIncidentContextArgs),
+    Incidents(SessionsIncidentsArgs),
+    Investigate(SessionsInvestigateArgs),
+    Assess(SessionsAssessArgs),
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct AiDoctorArgs {
+pub(crate) struct SessionsDoctorArgs {
     pub json: bool,
     pub strict_permissions: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct AiSearchArgs {
+pub(crate) struct SessionsSearchArgs {
     pub query: String,
     pub project: Option<String>,
     pub tool: Option<String>,
@@ -42,7 +43,7 @@ pub(crate) struct AiSearchArgs {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct AiAbuseArgs {
+pub(crate) struct SessionsAbuseArgs {
     pub project: Option<String>,
     pub tool: Option<String>,
     pub since: Option<String>,
@@ -55,7 +56,7 @@ pub(crate) struct AiAbuseArgs {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct AiCorrelateArgs {
+pub(crate) struct SessionsCorrelateArgs {
     pub project: Option<String>,
     pub tool: Option<String>,
     pub session_id: Option<String>,
@@ -74,24 +75,24 @@ pub(crate) struct AiCorrelateArgs {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct AiBlocksArgs {
+pub(crate) struct SessionsBlocksArgs {
     pub project: Option<String>,
     pub tool: Option<String>,
     pub since: Option<String>,
     pub until: Option<String>,
     pub limit: Option<usize>,
-    pub detail: AiOutputDetail,
+    pub detail: SessionsOutputDetail,
     pub json: bool,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) enum AiOutputDetail {
+pub(crate) enum SessionsOutputDetail {
     #[default]
     Compact,
     Full,
 }
 
-impl AiOutputDetail {
+impl SessionsOutputDetail {
     pub(crate) fn parse(value: &str, flag: &str) -> anyhow::Result<Self> {
         match value {
             "compact" => Ok(Self::Compact),
@@ -106,7 +107,7 @@ impl AiOutputDetail {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct AiContextArgs {
+pub(crate) struct SessionsContextArgs {
     pub project: String,
     pub tool: Option<String>,
     pub limit: Option<u32>,
@@ -114,7 +115,7 @@ pub(crate) struct AiContextArgs {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct AiListArgs {
+pub(crate) struct SessionsListArgs {
     pub project: Option<String>,
     pub tool: Option<String>,
     pub since: Option<String>,
@@ -123,7 +124,7 @@ pub(crate) struct AiListArgs {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct AiIndexArgs {
+pub(crate) struct SessionsIndexArgs {
     pub path: Option<String>,
     pub force: bool,
     pub since: Option<String>,
@@ -131,14 +132,14 @@ pub(crate) struct AiIndexArgs {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct AiAddArgs {
+pub(crate) struct SessionsAddArgs {
     pub file: String,
     pub force: bool,
     pub json: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct AiWatchArgs {
+pub(crate) struct SessionsWatchArgs {
     pub path: Option<String>,
     pub debounce_ms: u64,
     pub settle_ms: u64,
@@ -147,7 +148,7 @@ pub(crate) struct AiWatchArgs {
     pub json: bool,
 }
 
-impl Default for AiWatchArgs {
+impl Default for SessionsWatchArgs {
     fn default() -> Self {
         Self {
             path: None,
@@ -161,7 +162,7 @@ impl Default for AiWatchArgs {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct AiCheckpointsArgs {
+pub(crate) struct SessionsCheckpointsArgs {
     pub errors_only: bool,
     pub missing_only: bool,
     pub limit: Option<u32>,
@@ -169,13 +170,13 @@ pub(crate) struct AiCheckpointsArgs {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct AiErrorsArgs {
+pub(crate) struct SessionsErrorsArgs {
     pub limit: Option<u32>,
     pub json: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct AiPruneCheckpointsArgs {
+pub(crate) struct SessionsPruneCheckpointsArgs {
     pub missing_only: bool,
     pub dry_run: bool,
     pub limit: Option<u32>,
@@ -183,7 +184,7 @@ pub(crate) struct AiPruneCheckpointsArgs {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct AiSimilarArgs {
+pub(crate) struct SessionsSimilarArgs {
     pub query: String,
     pub host: Option<String>,
     pub app: Option<String>,
@@ -196,7 +197,7 @@ pub(crate) struct AiSimilarArgs {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct AiAskHistoryArgs {
+pub(crate) struct SessionsAskHistoryArgs {
     pub query: String,
     pub host: Option<String>,
     pub app: Option<String>,
@@ -207,7 +208,7 @@ pub(crate) struct AiAskHistoryArgs {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct AiIncidentContextArgs {
+pub(crate) struct SessionsIncidentContextArgs {
     pub since: String,
     pub until: String,
     pub host: Option<String>,
@@ -219,7 +220,7 @@ pub(crate) struct AiIncidentContextArgs {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct AiIncidentsArgs {
+pub(crate) struct SessionsIncidentsArgs {
     pub project: Option<String>,
     pub tool: Option<String>,
     pub since: Option<String>,
@@ -231,7 +232,7 @@ pub(crate) struct AiIncidentsArgs {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct AiInvestigateArgs {
+pub(crate) struct SessionsInvestigateArgs {
     pub project: Option<String>,
     pub tool: Option<String>,
     pub since: Option<String>,
@@ -240,14 +241,14 @@ pub(crate) struct AiInvestigateArgs {
     pub window_minutes: Option<u32>,
     pub correlation_window_minutes: Option<u32>,
     pub terms: Vec<String>,
-    pub detail: AiOutputDetail,
+    pub detail: SessionsOutputDetail,
     pub include_transcript: bool,
     pub max_bytes: Option<usize>,
     pub json: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct AiAssessArgs {
+pub(crate) struct SessionsAssessArgs {
     pub incident_id: String,
     pub model: Option<String>,
     pub json: bool,

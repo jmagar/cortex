@@ -9,10 +9,10 @@ fn parses_shell_index() {
         "--json".to_string(),
     ];
 
-    let command = parse_shell(&args).unwrap();
+    let command = parse_shell_command(&args).unwrap();
 
     match command {
-        CliCommand::Shell(ShellCommand::Index(args)) => {
+        ShellCommand::Index(args) => {
             assert_eq!(args.path, "/tmp/.zsh_history");
             assert_eq!(args.shell, "zsh");
             assert!(args.json);
@@ -30,10 +30,10 @@ fn parses_shell_atuin_index() {
         "--json".to_string(),
     ];
 
-    let command = parse_shell(&args).unwrap();
+    let command = parse_shell_command(&args).unwrap();
 
     match command {
-        CliCommand::Shell(ShellCommand::AtuinIndex(args)) => {
+        ShellCommand::AtuinIndex(args) => {
             assert_eq!(args.path, "/tmp/atuin/history.db");
             assert!(args.json);
         }
@@ -49,10 +49,10 @@ fn parses_agent_command_ingest_spool() {
         "/tmp/commands.jsonl".to_string(),
     ];
 
-    let command = parse_agent_command(&args).unwrap();
+    let command = parse_agent_command_command(&args).unwrap();
 
     match command {
-        CliCommand::AgentCommand(AgentCommandCommand::IngestSpool(args)) => {
+        AgentCommandCommand::IngestSpool(args) => {
             assert_eq!(args.path, "/tmp/commands.jsonl");
             assert!(!args.json);
         }
@@ -71,10 +71,10 @@ fn parses_agent_command_wrap_after_separator() {
         "hello".to_string(),
     ];
 
-    let command = parse_agent_command(&args).unwrap();
+    let command = parse_agent_command_command(&args).unwrap();
 
     match command {
-        CliCommand::AgentCommand(AgentCommandCommand::Wrap(args)) => {
+        AgentCommandCommand::Wrap(args) => {
             assert_eq!(args.spool, "/tmp/commands.jsonl");
             assert_eq!(args.command, vec!["echo", "hello"]);
         }

@@ -1,14 +1,21 @@
 use super::args_config::ConfigCommand;
 use cortex::compose::{ComposeTarget, MutationOptions};
 
-mod ai;
+mod alerts;
+mod sessions;
 mod surface;
 
-pub(crate) use ai::{
-    AiAbuseArgs, AiAddArgs, AiAskHistoryArgs, AiAssessArgs, AiBlocksArgs, AiCheckpointsArgs,
-    AiCommand, AiContextArgs, AiCorrelateArgs, AiDoctorArgs, AiErrorsArgs, AiIncidentContextArgs,
-    AiIncidentsArgs, AiIndexArgs, AiInvestigateArgs, AiListArgs, AiOutputDetail,
-    AiPruneCheckpointsArgs, AiSearchArgs, AiSimilarArgs, AiWatchArgs,
+pub(crate) use alerts::{
+    AlertsCommand, NotifyCommand, NotifyRecentArgs, NotifyTestArgs, SigAckArgs, SigCommand,
+    SigListArgs, SigUnackArgs,
+};
+pub(crate) use sessions::{
+    SessionsAbuseArgs, SessionsAddArgs, SessionsAskHistoryArgs, SessionsAssessArgs,
+    SessionsBlocksArgs, SessionsCheckpointsArgs, SessionsCommand, SessionsContextArgs,
+    SessionsCorrelateArgs, SessionsDoctorArgs, SessionsErrorsArgs, SessionsIncidentContextArgs,
+    SessionsIncidentsArgs, SessionsIndexArgs, SessionsInvestigateArgs, SessionsListArgs,
+    SessionsOutputDetail, SessionsPruneCheckpointsArgs, SessionsSearchArgs, SessionsSimilarArgs,
+    SessionsWatchArgs,
 };
 pub(crate) use surface::{
     AnomaliesArgs, AppsArgs, ClockSkewArgs, CompareArgs, CorrelateStateArgs, FleetStateArgs,
@@ -21,43 +28,52 @@ pub(crate) enum CliCommand {
     Filter(FilterArgs),
     Tail(TailArgs),
     Errors(TimeRangeArgs),
-    Hosts(OutputArgs),
-    Sessions(SessionsArgs),
+    Hosts(HostsCommand),
+    Sessions(SessionsCommand),
     Incident(IncidentArgs),
-    Ai(AiCommand),
     Correlate(CorrelateArgs),
-    Stats(OutputArgs),
+    State(StateCommand),
+    Stats(StatsCommand),
     Compose(ComposeCommand),
-    Service(ServiceCommand),
     Setup(SetupCommand),
     Db(DbCommand),
     Config(ConfigCommand),
-    Inventory(InventoryCommand),
-    SourceIps(SourceIpsArgs),
+    Ingest(IngestCommand),
     Timeline(TimelineArgs),
     Patterns(PatternsArgs),
-    IngestRate(IngestRateArgs),
-    Sig(SigCommand),
-    Notify(NotifyCommand),
-    Shell(ShellCommand),
-    AgentCommand(AgentCommandCommand),
+    Alerts(AlertsCommand),
     Heartbeat(HeartbeatCommand),
-    SilentHosts(SilentHostsArgs),
-    ClockSkew(ClockSkewArgs),
     Anomalies(AnomaliesArgs),
     Compare(CompareArgs),
     Apps(AppsArgs),
-    HostState(HostStateArgs),
-    FleetState(FleetStateArgs),
     CorrelateState(CorrelateStateArgs),
     TopicCorrelate(TopicCorrelateArgs),
     Entity(EntityArgs),
     Graph(GraphCommand),
-    FileTail(FileTailCommand),
     /// Hidden: emit shell-completion candidates (`cortex __complete <ctx> ...`).
     Complete(Vec<String>),
     /// Emit a shell completion script (`cortex completions <shell>`).
     Completions(Vec<String>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum HostsCommand {
+    List(OutputArgs),
+    Sources(SourceIpsArgs),
+    Silent(SilentHostsArgs),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum StateCommand {
+    Host(HostStateArgs),
+    Fleet(FleetStateArgs),
+    ClockSkew(ClockSkewArgs),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum StatsCommand {
+    Summary(OutputArgs),
+    IngestRate(IngestRateArgs),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -68,6 +84,17 @@ pub(crate) enum FileTailCommand {
     Remove(FileTailIdArgs),
     Enable(FileTailIdArgs),
     Disable(FileTailIdArgs),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum IngestCommand {
+    Shell(ShellCommand),
+    AgentCommand(AgentCommandCommand),
+    Inventory(InventoryCommand),
+    FileTail(FileTailCommand),
+    SyslogStatus(OutputArgs),
+    DockerStatus(OutputArgs),
+    DockerSources(OutputArgs),
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -111,19 +138,6 @@ pub(crate) enum InventoryCommand {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct InventoryArgs {
     pub json: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum SigCommand {
-    List(SigListArgs),
-    Ack(SigAckArgs),
-    Unack(SigUnackArgs),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum NotifyCommand {
-    Recent(NotifyRecentArgs),
-    Test(NotifyTestArgs),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -195,11 +209,7 @@ pub(crate) enum ComposeCommand {
     Restart(ComposeMutationArgs),
     Pull(ComposeMutationArgs),
     Logs(ComposeLogsArgs),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum ServiceCommand {
-    Logs(ServiceLogsArgs),
+    ServiceLogs(ServiceLogsArgs),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -525,40 +535,5 @@ pub(crate) struct GraphStatusArgs {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct GraphRebuildArgs {
-    pub json: bool,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct SigListArgs {
-    pub limit: Option<u32>,
-    pub include_acknowledged: bool,
-    pub json: bool,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct SigAckArgs {
-    pub signature_hash: String,
-    pub notes: Option<String>,
-    pub json: bool,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct SigUnackArgs {
-    pub signature_hash: String,
-    pub reason: Option<String>,
-    pub json: bool,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct NotifyRecentArgs {
-    pub limit: Option<i64>,
-    pub rule_id: Option<String>,
-    pub since: Option<String>,
-    pub json: bool,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct NotifyTestArgs {
-    pub body: Option<String>,
     pub json: bool,
 }

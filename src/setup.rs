@@ -10,17 +10,15 @@ const COMPOSE_ASSET: &str = include_str!("../docker-compose.prod.yml");
 const DOCKERFILE_ASSET: &str = include_str!("../config/Dockerfile");
 
 mod agent_command;
-mod ai_index;
-mod ai_watch;
 mod debug_wrapper;
 mod doctor;
 mod firstrun;
 mod heartbeat_agent;
+mod sessions_index;
+mod sessions_watch;
 mod systemd;
 
 pub use agent_command::run_agent_command_setup;
-pub use ai_index::run_ai_index_timer_setup;
-pub use ai_watch::run_ai_watch_service_setup;
 pub use debug_wrapper::{run_debug_compose_setup, run_debug_wrapper_setup};
 pub use doctor::run_setup_doctor;
 pub use firstrun::run_setup;
@@ -28,16 +26,10 @@ pub(crate) use firstrun::{
     default_env_for_data_dir, dockerfile_asset, installed_compose_asset, render_env,
 };
 pub use heartbeat_agent::run_heartbeat_agent_setup;
+pub use sessions_index::run_sessions_index_timer_setup;
+pub use sessions_watch::run_sessions_watch_service_setup;
 
 // Test-only re-exports of private items accessed via `use super::*` in setup_tests.rs.
-#[cfg(test)]
-pub(crate) use ai_index::{ai_index_script, ai_index_service_unit, ai_index_timer_unit};
-#[cfg(test)]
-pub(crate) use ai_watch::{
-    ai_index_output_status, ai_watch_env_file, ai_watch_service_unit,
-    check_ai_watch_service_content_phase, run_ai_watch_initial_index_phase,
-    summarize_ai_index_output, transcript_root_permissions_phase,
-};
 #[cfg(test)]
 pub(crate) use debug_wrapper::{
     check_debug_compose_content_phase, check_debug_wrapper_content_phase, debug_compose_override,
@@ -47,6 +39,14 @@ pub(crate) use debug_wrapper::{
 pub(crate) use firstrun::{
     cleanup_legacy_systemd, command_phase, ensure_env_file, ensure_network_phase, filesystem_phase,
     health_phase, parse_env, run_compose_phase, write_compose_assets, write_env,
+};
+#[cfg(test)]
+pub(crate) use sessions_index::{ai_index_script, ai_index_service_unit, ai_index_timer_unit};
+#[cfg(test)]
+pub(crate) use sessions_watch::{
+    ai_index_output_status, ai_watch_env_file, ai_watch_service_unit,
+    check_ai_watch_service_content_phase, run_ai_watch_initial_index_phase,
+    summarize_ai_index_output, transcript_root_permissions_phase,
 };
 #[cfg(test)]
 pub(crate) use systemd::{
@@ -66,14 +66,14 @@ pub enum SetupMode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AiIndexTimerAction {
+pub enum SessionsIndexTimerAction {
     Install,
     Remove,
     Check,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AiWatchServiceAction {
+pub enum SessionsWatchServiceAction {
     Install,
     Remove,
     Check,
@@ -127,12 +127,12 @@ impl DebugWrapperAction {
     }
 }
 
-impl AiWatchServiceAction {
+impl SessionsWatchServiceAction {
     fn as_str(self) -> &'static str {
         match self {
-            Self::Install => "ai-watch-service-install",
-            Self::Remove => "ai-watch-service-remove",
-            Self::Check => "ai-watch-service-check",
+            Self::Install => "sessions-watch-service-install",
+            Self::Remove => "sessions-watch-service-remove",
+            Self::Check => "sessions-watch-service-check",
         }
     }
 }
@@ -157,12 +157,12 @@ impl HeartbeatAgentAction {
     }
 }
 
-impl AiIndexTimerAction {
+impl SessionsIndexTimerAction {
     fn as_str(self) -> &'static str {
         match self {
-            Self::Install => "ai-index-timer-install",
-            Self::Remove => "ai-index-timer-remove",
-            Self::Check => "ai-index-timer-check",
+            Self::Install => "sessions-index-timer-install",
+            Self::Remove => "sessions-index-timer-remove",
+            Self::Check => "sessions-index-timer-check",
         }
     }
 }
@@ -328,8 +328,8 @@ fn skipped_phase(name: &'static str, detail: impl Into<String>) -> SetupPhase {
     }
 }
 
-const AI_WATCH_SERVICE_ENABLED_PHASE: &str = "ai-watch-service-enabled";
-const AI_WATCH_SERVICE_ACTIVE_PHASE: &str = "ai-watch-service-active";
+const AI_WATCH_SERVICE_ENABLED_PHASE: &str = "sessions-watch-service-enabled";
+const AI_WATCH_SERVICE_ACTIVE_PHASE: &str = "sessions-watch-service-active";
 
 fn setup_report(input: SetupReportInput, phases: Vec<SetupPhase>) -> SetupReport {
     let (has_errors, blocking_errors, data_quality_warnings) = report_summary(&phases);

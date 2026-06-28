@@ -7,20 +7,22 @@ use cortex::compose::{
 mod args;
 mod args_config;
 pub(crate) use args::{
-    AgentCommandCommand, AgentCommandIngestSpoolArgs, AgentCommandWrapArgs, AiAbuseArgs, AiAddArgs,
-    AiAskHistoryArgs, AiAssessArgs, AiBlocksArgs, AiCheckpointsArgs, AiCommand, AiContextArgs,
-    AiCorrelateArgs, AiDoctorArgs, AiErrorsArgs, AiIncidentContextArgs, AiIncidentsArgs,
-    AiIndexArgs, AiInvestigateArgs, AiListArgs, AiOutputDetail, AiPruneCheckpointsArgs,
-    AiSearchArgs, AiSimilarArgs, AiWatchArgs, CliCommand, ComposeArgs, ComposeCommand,
-    ComposeLogsArgs, ComposeMutationArgs, CorrelateArgs, DbBackupArgs, DbCheckpointArgs, DbCommand,
-    DbIntegrityArgs, DbIntegrityStatusArgs, DbStatusArgs, DbVacuumArgs, EntityArgs,
-    FileTailAddArgs, FileTailCommand, FileTailIdArgs, FileTailListArgs, FilterArgs,
-    GraphAroundArgs, GraphCommand, GraphEvidenceArgs, GraphExplainArgs, GraphRebuildArgs,
-    GraphStatusArgs, HeartbeatAgentArgs, HeartbeatCommand, IncidentArgs, IngestRateArgs,
-    InventoryArgs, InventoryCommand, NotifyRecentArgs, NotifyTestArgs, OutputArgs, PatternsArgs,
-    PluginHookArgs, SearchArgs, ServiceCommand, ServiceLogsArgs, SessionsArgs, SetupArgs,
-    SetupCommand, ShellAtuinIndexArgs, ShellCommand, ShellIndexArgs, SigAckArgs, SigListArgs,
-    SigUnackArgs, SourceIpsArgs, TailArgs, TimeRangeArgs, TimelineArgs,
+    AgentCommandCommand, AgentCommandIngestSpoolArgs, AgentCommandWrapArgs, CliCommand,
+    ComposeArgs, ComposeCommand, ComposeLogsArgs, ComposeMutationArgs, CorrelateArgs, DbBackupArgs,
+    DbCheckpointArgs, DbCommand, DbIntegrityArgs, DbIntegrityStatusArgs, DbStatusArgs,
+    DbVacuumArgs, EntityArgs, FileTailAddArgs, FileTailCommand, FileTailIdArgs, FileTailListArgs,
+    FilterArgs, GraphAroundArgs, GraphCommand, GraphEvidenceArgs, GraphExplainArgs,
+    GraphRebuildArgs, GraphStatusArgs, HeartbeatAgentArgs, HeartbeatCommand, HostsCommand,
+    IncidentArgs, IngestCommand, IngestRateArgs, InventoryArgs, InventoryCommand, NotifyRecentArgs,
+    NotifyTestArgs, OutputArgs, PatternsArgs, PluginHookArgs, SearchArgs, ServiceLogsArgs,
+    SessionsAbuseArgs, SessionsAddArgs, SessionsArgs, SessionsAskHistoryArgs, SessionsAssessArgs,
+    SessionsBlocksArgs, SessionsCheckpointsArgs, SessionsCommand, SessionsContextArgs,
+    SessionsCorrelateArgs, SessionsDoctorArgs, SessionsErrorsArgs, SessionsIncidentContextArgs,
+    SessionsIncidentsArgs, SessionsIndexArgs, SessionsInvestigateArgs, SessionsListArgs,
+    SessionsOutputDetail, SessionsPruneCheckpointsArgs, SessionsSearchArgs, SessionsSimilarArgs,
+    SessionsWatchArgs, SetupArgs, SetupCommand, ShellAtuinIndexArgs, ShellCommand, ShellIndexArgs,
+    SigAckArgs, SigListArgs, SigUnackArgs, SilentHostsArgs, SourceIpsArgs, TailArgs, TimeRangeArgs,
+    TimelineArgs,
 };
 pub(crate) use args_config::{
     ConfigCommand, ConfigGetArgs, ConfigListArgs, ConfigSetArgs, ConfigTarget, ConfigUnsetArgs,
@@ -34,7 +36,6 @@ pub(crate) use dispatch_command_log::run_agent_command_wrap;
 pub(crate) use run::ENV_USE_HTTP;
 pub(crate) use run::{CliMode, GlobalFlags, run};
 
-mod ai_watch;
 mod argdefaults;
 pub(crate) mod color;
 mod complete;
@@ -47,21 +48,23 @@ mod format;
 mod heartbeat_agent;
 pub(crate) mod help;
 mod hyperlinks;
-mod output_ai;
-mod output_ai_more;
 mod output_common;
 mod output_graph;
 mod output_logs;
 mod output_ops;
+mod output_sessions;
+mod output_sessions_more;
 mod panel;
 mod parse;
 mod parse_admin;
-mod parse_ai;
-mod parse_ai_more;
 mod parse_command_log;
 mod parse_common;
 mod parse_config;
 mod parse_logs;
+mod parse_sessions;
+mod parse_sessions_more;
+mod parse_sessions_ops;
+mod sessions_watch;
 mod setup;
 mod sparkline;
 mod suggest;
@@ -83,9 +86,9 @@ impl CliCommand {
 // (MCP action names are underscored). Used by completion + discoverability help.
 
 /// All CLI command names paired with their one-line description (empty when the
-/// command has no `ACTION_SPECS` entry, e.g. grouping commands like `ai`).
+/// command has no `ACTION_SPECS` entry, e.g. grouping commands like `sessions`).
 pub(crate) fn registry_actions() -> Vec<(&'static str, &'static str)> {
-    parse::TOP_LEVEL_COMMANDS
+    cortex::surface_registry::TOP_LEVEL_COMMANDS
         .iter()
         .map(|&cmd| {
             let desc = cortex::mcp::description_for(&cmd.replace('-', "_")).unwrap_or("");
@@ -129,7 +132,7 @@ pub(crate) fn run_completions(args: &[String]) -> Result<()> {
     completions::print_completions(shell)
 }
 
-pub(crate) fn run_compose(command: CliCommand) -> Result<()> {
+pub(crate) async fn run_compose(command: CliCommand) -> Result<()> {
     let CliCommand::Compose(command) = command else {
         bail!("run_compose called with non-compose command");
     };
@@ -171,6 +174,20 @@ pub(crate) fn run_compose(command: CliCommand) -> Result<()> {
                 eprint!("{}", output.stderr);
             }
             output_ops::ensure_command_success(&output)
+        }
+        ComposeCommand::ServiceLogs(args) => {
+            let json = args.json;
+            let report = cortex::app::run_service_logs(
+                ServiceLogsRequest {
+                    service: args.service,
+                    since: args.since,
+                    until: args.until,
+                    tail: args.tail,
+                },
+                &cortex::app::SystemOsAdapter,
+            )
+            .await?;
+            output_sessions::print_service_logs_response(&report, json)
         }
     }
 }
@@ -218,51 +235,140 @@ pub(crate) async fn run_inventory(command: InventoryCommand) -> Result<()> {
     }
 }
 
-/// DB-free entry point for `cortex service ...` — avoids opening the SQLite
-/// pool so this command remains usable when the DB is corrupted/locked/full.
-pub(crate) async fn run_service_no_db(command: CliCommand) -> Result<()> {
-    let CliCommand::Service(command) = command else {
-        bail!("internal: run_service_no_db called with non-service command");
+#[derive(Debug, serde::Serialize)]
+struct IngestSyslogStatus {
+    bind_addr: String,
+    host: String,
+    port: u16,
+    max_message_size: usize,
+    batch_size: usize,
+    flush_interval_ms: u64,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct IngestDockerStatus {
+    legacy_central_pull_enabled: bool,
+    configured_sources: usize,
+    excluded_containers: usize,
+    reconnect_initial_ms: u64,
+    reconnect_max_ms: u64,
+    host_local_agent_note: &'static str,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct IngestDockerSource {
+    name: String,
+    endpoint_configured: bool,
+    allow_insecure_http: bool,
+    excluded_containers: usize,
+}
+
+pub(crate) async fn run_ingest_syslog_status(args: OutputArgs) -> Result<()> {
+    let runtime = cortex::runtime::RuntimeCore::load_query_only().await?;
+    let receiver = &runtime.config.receiver;
+    let status = IngestSyslogStatus {
+        bind_addr: receiver.bind_addr(),
+        host: receiver.host.clone(),
+        port: receiver.port,
+        max_message_size: receiver.max_message_size,
+        batch_size: receiver.batch_size,
+        flush_interval_ms: receiver.flush_interval,
     };
-    match command {
-        ServiceCommand::Logs(args) => {
-            let json = args.json;
-            let report = cortex::app::run_service_logs(
-                ServiceLogsRequest {
-                    service: args.service,
-                    since: args.since,
-                    until: args.until,
-                    tail: args.tail,
-                },
-                &cortex::app::SystemOsAdapter,
-            )
-            .await?;
-            output_ai::print_service_logs_response(&report, json)
+    if args.json {
+        output_common::print_json(&status)
+    } else {
+        println!("syslog ingest: {}", status.bind_addr);
+        println!("max_message_size: {}", status.max_message_size);
+        println!("batch_size: {}", status.batch_size);
+        println!("flush_interval_ms: {}", status.flush_interval_ms);
+        Ok(())
+    }
+}
+
+pub(crate) async fn run_ingest_docker_status(args: OutputArgs) -> Result<()> {
+    let runtime = cortex::runtime::RuntimeCore::load_query_only().await?;
+    let docker = &runtime.config.docker_ingest;
+    let status = IngestDockerStatus {
+        legacy_central_pull_enabled: docker.enabled,
+        configured_sources: docker.hosts.len(),
+        excluded_containers: docker.excluded_containers.len(),
+        reconnect_initial_ms: docker.reconnect_initial_ms,
+        reconnect_max_ms: docker.reconnect_max_ms,
+        host_local_agent_note: "host-local cortex agents stream Docker logs from each host when enabled there",
+    };
+    if args.json {
+        output_common::print_json(&status)
+    } else {
+        println!(
+            "docker ingest: legacy_central_pull_enabled={}",
+            status.legacy_central_pull_enabled
+        );
+        println!("configured_sources: {}", status.configured_sources);
+        println!("excluded_containers: {}", status.excluded_containers);
+        println!(
+            "reconnect_ms: {}..{}",
+            status.reconnect_initial_ms, status.reconnect_max_ms
+        );
+        println!("{}", status.host_local_agent_note);
+        Ok(())
+    }
+}
+
+pub(crate) async fn run_ingest_docker_sources(args: OutputArgs) -> Result<()> {
+    let runtime = cortex::runtime::RuntimeCore::load_query_only().await?;
+    let sources = runtime
+        .config
+        .docker_ingest
+        .hosts
+        .iter()
+        .map(|host| IngestDockerSource {
+            name: host.name.clone(),
+            endpoint_configured: !host.base_url.trim().is_empty(),
+            allow_insecure_http: host.allow_insecure_http,
+            excluded_containers: host.excluded_containers.len(),
+        })
+        .collect::<Vec<_>>();
+    if args.json {
+        output_common::print_json(&sources)
+    } else {
+        if sources.is_empty() {
+            println!("No legacy central-pull Docker sources configured.");
+            return Ok(());
         }
+        for source in &sources {
+            println!(
+                "{} endpoint_configured={} allow_insecure_http={} excluded_containers={}",
+                source.name,
+                source.endpoint_configured,
+                source.allow_insecure_http,
+                source.excluded_containers
+            );
+        }
+        Ok(())
     }
 }
 
 #[cfg(test)]
-use ai_watch::smoke_watch_target;
-#[cfg(test)]
 use coordination::{
-    DoctorCache, SystemctlEnv, ai_watch_coordination_phase, canonicalize_with_warning,
-    lookup_systemd_db_path, parse_systemctl_env_output,
+    DoctorCache, SystemctlEnv, canonicalize_with_warning, lookup_systemd_db_path,
+    parse_systemctl_env_output, sessions_watch_coordination_phase,
 };
 #[cfg(test)]
 use cortex::scanner::AiDoctorReport;
-#[cfg(test)]
-use output_ai::ensure_ai_doctor_success;
 #[cfg(test)]
 use output_common::truncate;
 #[cfg(test)]
 use output_ops::ensure_doctor_coordination_ok;
 #[cfg(test)]
+use output_sessions::ensure_ai_doctor_success;
+#[cfg(test)]
+use sessions_watch::smoke_watch_target;
+#[cfg(test)]
 use setup::{SetupPhase, SetupStatus};
 
 mod dispatch;
-mod dispatch_ai;
 mod dispatch_db;
+mod dispatch_sessions;
 mod dispatch_surface;
 mod dispatch_surface_analytics;
 mod dispatch_surface_gap;

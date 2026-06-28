@@ -65,7 +65,7 @@ async fn serve_stdio_mcp() -> Result<()> {
 async fn run_cli(invocation: CliInvocation) -> Result<()> {
     let CliInvocation { command, flags } = invocation;
 
-    // `compose`, `setup`, and `service` stay on the local-only path: they
+    // `compose` and `setup` stay on the local-only path: they
     // manage local host state (systemd units, Docker compose stacks, on-disk
     // config, user journal logs) that has no HTTP analogue. Reject explicit
     // HTTP-mode FLAGS up front, but
@@ -74,13 +74,12 @@ async fn run_cli(invocation: CliInvocation) -> Result<()> {
     // bailing on it would break the very command operators run to repair.
     if matches!(
         command,
-        cli::CliCommand::Compose(_) | cli::CliCommand::Setup(_) | cli::CliCommand::Service(_)
+        cli::CliCommand::Compose(_) | cli::CliCommand::Setup(_)
     ) {
         if let Some(trigger) = flags.http_flag_trigger() {
             let command_name = match command {
                 cli::CliCommand::Compose(_) => "compose",
                 cli::CliCommand::Setup(_) => "setup",
-                cli::CliCommand::Service(_) => "service",
                 _ => unreachable!("guarded by matches! above"),
             };
             anyhow::bail!(
@@ -90,10 +89,7 @@ async fn run_cli(invocation: CliInvocation) -> Result<()> {
             );
         }
         return match command {
-            cli::CliCommand::Compose(_) => cli::run_compose(command),
-            // `service` is a pure-journal surface — don't open SQLite for it.
-            // The watcher/DB might be the very thing the operator is debugging.
-            cli::CliCommand::Service(_) => cli::run_service_no_db(command).await,
+            cli::CliCommand::Compose(_) => cli::run_compose(command).await,
             cli::CliCommand::Setup(cmd) => cli::run_setup(cmd),
             _ => unreachable!("guarded by matches! above"),
         };
@@ -111,20 +107,23 @@ async fn run_cli(invocation: CliInvocation) -> Result<()> {
         return cli::run_complete(&args);
     }
 
-    if let cli::CliCommand::Inventory(command) = command {
+    if let cli::CliCommand::Ingest(cli::IngestCommand::Inventory(command)) = command {
         if let Some(trigger) = flags.http_flag_trigger() {
             anyhow::bail!(
-                "{} has no effect on `inventory` (local-only command); remove --http / --server / --token",
+                "{} has no effect on `ingest inventory` (local-only command); remove --http / --server / --token",
                 trigger
             );
         }
         return cli::run_inventory(command).await;
     }
 
-    if let cli::CliCommand::AgentCommand(cli::AgentCommandCommand::Wrap(args)) = command {
+    if let cli::CliCommand::Ingest(cli::IngestCommand::AgentCommand(
+        cli::AgentCommandCommand::Wrap(args),
+    )) = command
+    {
         if let Some(trigger) = flags.http_flag_trigger() {
             anyhow::bail!(
-                "{} has no effect on `agent-command wrap` (wrapper command); remove --http / --server / --token",
+                "{} has no effect on `ingest agent-command wrap` (wrapper command); remove --http / --server / --token",
                 trigger
             );
         }
@@ -153,8 +152,10 @@ async fn run_cli(invocation: CliInvocation) -> Result<()> {
 
     if matches!(
         command,
-        cli::CliCommand::Shell(_)
-            | cli::CliCommand::AgentCommand(cli::AgentCommandCommand::IngestSpool(_))
+        cli::CliCommand::Ingest(cli::IngestCommand::Shell(_))
+            | cli::CliCommand::Ingest(cli::IngestCommand::AgentCommand(
+                cli::AgentCommandCommand::IngestSpool(_)
+            ))
     ) {
         if let Some(trigger) = flags.http_flag_trigger() {
             anyhow::bail!(
@@ -191,7 +192,7 @@ async fn run_deploy(command: DeployCommand) -> Result<()> {
             if command.json {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             } else {
-                println!("cortex deploy remote {host}");
+                println!("cortex setup deploy remote {host}");
                 println!("mode: {}", report.mode);
                 println!("host: {}", report.host);
                 println!("home: {}", report.home);
@@ -208,7 +209,7 @@ async fn run_deploy(command: DeployCommand) -> Result<()> {
                 }
             }
             if report.has_errors {
-                anyhow::bail!("cortex deploy remote {host} completed with failed phases");
+                anyhow::bail!("cortex setup deploy remote {host} completed with failed phases");
             }
             return Ok(());
         }
@@ -228,7 +229,7 @@ async fn run_deploy(command: DeployCommand) -> Result<()> {
     if command.json {
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
-        println!("cortex deploy {label}");
+        println!("cortex setup deploy {label}");
         println!("mode: {}", report.mode);
         println!("home: {}", report.home.display());
         println!("env: {}", report.env_path.display());
@@ -244,7 +245,7 @@ async fn run_deploy(command: DeployCommand) -> Result<()> {
         }
     }
     if report.has_errors {
-        anyhow::bail!("cortex deploy {label} completed with failed phases");
+        anyhow::bail!("cortex setup deploy {label} completed with failed phases");
     }
     Ok(())
 }
@@ -318,11 +319,11 @@ fn run_deploy_agent(
 async fn run_setup(command: SetupCommand) -> Result<()> {
     let report = match command.kind {
         SetupCommandKind::Main(mode) => cortex::setup::run_setup(mode).await?,
-        SetupCommandKind::AiIndexTimer(action) => {
-            cortex::setup::run_ai_index_timer_setup(action).await?
+        SetupCommandKind::SessionsIndexTimer(action) => {
+            cortex::setup::run_sessions_index_timer_setup(action).await?
         }
-        SetupCommandKind::AiWatchService(action) => {
-            cortex::setup::run_ai_watch_service_setup(action).await?
+        SetupCommandKind::SessionsWatchService(action) => {
+            cortex::setup::run_sessions_watch_service_setup(action).await?
         }
         SetupCommandKind::AgentCommand(action) => {
             cortex::setup::run_agent_command_setup(action).await?
@@ -549,8 +550,8 @@ enum DeployCommandKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum SetupCommandKind {
     Main(cortex::setup::SetupMode),
-    AiIndexTimer(cortex::setup::AiIndexTimerAction),
-    AiWatchService(cortex::setup::AiWatchServiceAction),
+    SessionsIndexTimer(cortex::setup::SessionsIndexTimerAction),
+    SessionsWatchService(cortex::setup::SessionsWatchServiceAction),
     AgentCommand(cortex::setup::AgentCommandAction),
     HeartbeatAgent(cortex::setup::HeartbeatAgentAction),
     DebugWrapper(cortex::setup::DebugWrapperAction),
@@ -580,7 +581,7 @@ impl Mode {
         // Strip CLI-only global flags (`--http`, `--server`, `--token`) from
         // the arg list before subcommand dispatch so they work in any
         // position: `cortex --http search foo` AND `cortex search --http foo`.
-        // Non-CLI modes (serve/mcp/setup/deploy/doctor) reject them below — the
+        // Non-CLI modes (serve/mcp/setup/doctor) reject them below — the
         // flags imply HTTP transport, which only applies to the query CLI.
         let mut remaining = args.clone();
         let global = cli::GlobalFlags::extract(&mut remaining)?;
@@ -597,17 +598,19 @@ impl Mode {
             {
                 Ok(Self::ServeMcp)
             }
+            [command, deploy, rest @ ..]
+                if command == "setup"
+                    && deploy == "deploy"
+                    && global == cli::GlobalFlags::default() =>
+            {
+                Ok(Self::Deploy(parse_deploy_command(rest)?))
+            }
             [command, rest @ ..]
                 if command == "setup"
                     && rest.first().map(String::as_str) != Some("plugin-hook")
                     && global == cli::GlobalFlags::default() =>
             {
                 Ok(Self::Setup(parse_setup_command(rest)?))
-            }
-            [command, rest @ ..]
-                if command == "deploy" && global == cli::GlobalFlags::default() =>
-            {
-                Ok(Self::Deploy(parse_deploy_command(rest)?))
             }
             [command, rest @ ..]
                 if command == "doctor" && global == cli::GlobalFlags::default() =>
@@ -618,50 +621,7 @@ impl Mode {
                     Ok(Self::DoctorFull(parse_doctor_full_command(rest)?))
                 }
             }
-            [command, rest @ ..]
-                if matches!(
-                    command.as_str(),
-                    "search"
-                        | "filter"
-                        | "tail"
-                        | "errors"
-                        | "hosts"
-                        | "sessions"
-                        | "incident"
-                        | "entity"
-                        | "graph"
-                        | "ai"
-                        | "shell"
-                        | "agent-command"
-                        | "heartbeat"
-                        | "correlate"
-                        | "stats"
-                        | "db"
-                        | "compose"
-                        | "service"
-                        | "setup"
-                        | "config"
-                        | "inventory"
-                        | "source-ips"
-                        | "timeline"
-                        | "patterns"
-                        | "ingest-rate"
-                        | "sig"
-                        | "notify"
-                        | "silent-hosts"
-                        | "clock-skew"
-                        | "anomalies"
-                        | "compare"
-                        | "apps"
-                        | "host-state"
-                        | "fleet-state"
-                        | "correlate-state"
-                        | "topic-correlate"
-                        | "file-tail"
-                        | "__complete"
-                        | "completions"
-                ) =>
-            {
+            [command, rest @ ..] if cortex::surface_registry::is_cli_mode_command(command) => {
                 let mut cli_args = Vec::with_capacity(rest.len() + 1);
                 cli_args.push(command.clone());
                 cli_args.extend(rest.iter().cloned());
@@ -683,7 +643,7 @@ impl Mode {
                     "global HTTP flags (--http, --server <url>, --token <token>) apply only to the query CLI, \
                      but `{leftover}` is not a recognized query command. \
                      To point at a server use `--server <url>` or `--http=<url>` (bare `--http` takes no value). \
-                     Local-only commands (compose, service, setup, deploy, inventory) reject HTTP flags."
+                     Local-only commands (compose, setup, inventory) reject HTTP flags."
                 );
             }
             _ => match cli::CliCommand::parse(args.clone()) {
@@ -736,30 +696,30 @@ fn parse_setup_command(args: &[String]) -> Result<SetupCommand> {
     }
     if matches!(
         iter.clone().next().map(String::as_str),
-        Some("ai-index-timer")
+        Some("sessions-index-timer")
     ) {
         let _ = iter.next();
-        let (action, json) = parse_setup_subcommand_args("ai-index-timer", iter)?;
+        let (action, json) = parse_setup_subcommand_args("sessions-index-timer", iter)?;
         return Ok(SetupCommand {
-            kind: SetupCommandKind::AiIndexTimer(match action {
-                "install" => cortex::setup::AiIndexTimerAction::Install,
-                "remove" => cortex::setup::AiIndexTimerAction::Remove,
-                _ => cortex::setup::AiIndexTimerAction::Check,
+            kind: SetupCommandKind::SessionsIndexTimer(match action {
+                "install" => cortex::setup::SessionsIndexTimerAction::Install,
+                "remove" => cortex::setup::SessionsIndexTimerAction::Remove,
+                _ => cortex::setup::SessionsIndexTimerAction::Check,
             }),
             json,
         });
     }
     if matches!(
         iter.clone().next().map(String::as_str),
-        Some("ai-watch-service")
+        Some("sessions-watch-service")
     ) {
         let _ = iter.next();
-        let (action, json) = parse_setup_subcommand_args("ai-watch-service", iter)?;
+        let (action, json) = parse_setup_subcommand_args("sessions-watch-service", iter)?;
         return Ok(SetupCommand {
-            kind: SetupCommandKind::AiWatchService(match action {
-                "install" => cortex::setup::AiWatchServiceAction::Install,
-                "remove" => cortex::setup::AiWatchServiceAction::Remove,
-                _ => cortex::setup::AiWatchServiceAction::Check,
+            kind: SetupCommandKind::SessionsWatchService(match action {
+                "install" => cortex::setup::SessionsWatchServiceAction::Install,
+                "remove" => cortex::setup::SessionsWatchServiceAction::Remove,
+                _ => cortex::setup::SessionsWatchServiceAction::Check,
             }),
             json,
         });

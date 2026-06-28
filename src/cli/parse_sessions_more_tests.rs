@@ -1,13 +1,13 @@
 use super::*;
 
 #[test]
-fn parse_ai_similar_collects_query_and_filters() {
+fn parse_sessions_similar_collects_query_and_filters() {
     let args = strings(&["disk", "full", "--host", "host1", "--limit=7", "--json"]);
 
-    let command = parse_ai_similar(&args).unwrap();
+    let command = parse_sessions_similar(&args).unwrap();
 
     match command {
-        crate::cli::CliCommand::Ai(crate::cli::AiCommand::SimilarIncidents(args)) => {
+        crate::cli::CliCommand::Sessions(crate::cli::SessionsCommand::SimilarIncidents(args)) => {
             assert_eq!(args.query, "disk full");
             assert_eq!(args.host.as_deref(), Some("host1"));
             assert_eq!(args.limit, Some(7));
@@ -18,8 +18,8 @@ fn parse_ai_similar_collects_query_and_filters() {
 }
 
 #[test]
-fn parse_ai_similar_and_ask_history_accept_all_filters() {
-    let similar = parse_ai_similar(&strings(&[
+fn parse_sessions_similar_and_ask_history_accept_all_filters() {
+    let similar = parse_sessions_similar(&strings(&[
         "--host=host1",
         "--app=cortex",
         "--severity-min=err",
@@ -31,7 +31,7 @@ fn parse_ai_similar_and_ask_history_accept_all_filters() {
     ]))
     .unwrap();
     match similar {
-        crate::cli::CliCommand::Ai(crate::cli::AiCommand::SimilarIncidents(args)) => {
+        crate::cli::CliCommand::Sessions(crate::cli::SessionsCommand::SimilarIncidents(args)) => {
             assert_eq!(args.app.as_deref(), Some("cortex"));
             assert_eq!(args.severity_min.as_deref(), Some("err"));
             assert_eq!(args.window_minutes, Some(45));
@@ -40,7 +40,7 @@ fn parse_ai_similar_and_ask_history_accept_all_filters() {
         other => panic!("unexpected command: {other:?}"),
     }
 
-    let ask = parse_ai_ask_history(&strings(&[
+    let ask = parse_sessions_ask_history(&strings(&[
         "--host=host1",
         "--app=cortex",
         "--since=2026-01-01T00:00:00Z",
@@ -52,7 +52,7 @@ fn parse_ai_similar_and_ask_history_accept_all_filters() {
     ]))
     .unwrap();
     match ask {
-        crate::cli::CliCommand::Ai(crate::cli::AiCommand::AskHistory(args)) => {
+        crate::cli::CliCommand::Sessions(crate::cli::SessionsCommand::AskHistory(args)) => {
             assert_eq!(args.query, "why failed");
             assert_eq!(args.host.as_deref(), Some("host1"));
             assert_eq!(args.limit, Some(5));
@@ -63,17 +63,19 @@ fn parse_ai_similar_and_ask_history_accept_all_filters() {
 }
 
 #[test]
-fn parse_ai_incident_context_requires_from_and_to() {
+fn parse_sessions_incident_context_requires_from_and_to() {
     let args = strings(&["--since", "2026-01-01T00:00:00Z"]);
 
-    let err = parse_ai_incident_context(&args).unwrap_err().to_string();
+    let err = parse_sessions_incident_context(&args)
+        .unwrap_err()
+        .to_string();
 
     assert!(err.contains("requires --until"));
 }
 
 #[test]
-fn parse_ai_incident_context_accepts_full_filter_set() {
-    let command = parse_ai_incident_context(&strings(&[
+fn parse_sessions_incident_context_accepts_full_filter_set() {
+    let command = parse_sessions_incident_context(&strings(&[
         "--since=2026-01-01T00:00:00Z",
         "--until=2026-01-01T00:10:00Z",
         "--host=host1",
@@ -86,7 +88,7 @@ fn parse_ai_incident_context_accepts_full_filter_set() {
     .unwrap();
 
     match command {
-        crate::cli::CliCommand::Ai(crate::cli::AiCommand::IncidentContext(args)) => {
+        crate::cli::CliCommand::Sessions(crate::cli::SessionsCommand::IncidentContext(args)) => {
             assert_eq!(args.since, "2026-01-01T00:00:00+00:00");
             assert_eq!(args.until, "2026-01-01T00:10:00+00:00");
             assert_eq!(args.query.as_deref(), Some("panic"));
@@ -98,8 +100,8 @@ fn parse_ai_incident_context_accepts_full_filter_set() {
 }
 
 #[test]
-fn parse_ai_incidents_accepts_terms_and_window_filters() {
-    let command = parse_ai_incidents(&strings(&[
+fn parse_sessions_incidents_accepts_terms_and_window_filters() {
+    let command = parse_sessions_incidents(&strings(&[
         "--project=/repo",
         "--tool=Bash",
         "--since=2026-01-01T00:00:00Z",
@@ -114,7 +116,7 @@ fn parse_ai_incidents_accepts_terms_and_window_filters() {
     .unwrap();
 
     match command {
-        crate::cli::CliCommand::Ai(crate::cli::AiCommand::Incidents(args)) => {
+        crate::cli::CliCommand::Sessions(crate::cli::SessionsCommand::Incidents(args)) => {
             assert_eq!(args.project.as_deref(), Some("/repo"));
             assert_eq!(args.tool.as_deref(), Some("Bash"));
             assert_eq!(args.window_minutes, Some(60));
@@ -126,7 +128,7 @@ fn parse_ai_incidents_accepts_terms_and_window_filters() {
 }
 
 #[test]
-fn parse_ai_investigate_accepts_compact_output_controls() {
+fn parse_sessions_investigate_accepts_compact_output_controls() {
     let args = strings(&[
         "--detail=full",
         "--include-transcript",
@@ -135,11 +137,11 @@ fn parse_ai_investigate_accepts_compact_output_controls() {
         "--json",
     ]);
 
-    let command = parse_ai_investigate(&args).unwrap();
+    let command = parse_sessions_investigate(&args).unwrap();
 
     match command {
-        crate::cli::CliCommand::Ai(crate::cli::AiCommand::Investigate(args)) => {
-            assert_eq!(args.detail, crate::cli::AiOutputDetail::Full);
+        crate::cli::CliCommand::Sessions(crate::cli::SessionsCommand::Investigate(args)) => {
+            assert_eq!(args.detail, crate::cli::SessionsOutputDetail::Full);
             assert!(args.include_transcript);
             assert_eq!(args.max_bytes, Some(80));
             assert!(args.json);
@@ -149,8 +151,8 @@ fn parse_ai_investigate_accepts_compact_output_controls() {
 }
 
 #[test]
-fn parse_ai_investigate_accepts_incident_filters_and_limits() {
-    let command = parse_ai_investigate(&strings(&[
+fn parse_sessions_investigate_accepts_incident_filters_and_limits() {
+    let command = parse_sessions_investigate(&strings(&[
         "--project=/repo",
         "--tool=Edit",
         "--since=2026-01-01T00:00:00Z",
@@ -165,13 +167,13 @@ fn parse_ai_investigate_accepts_incident_filters_and_limits() {
     .unwrap();
 
     match command {
-        crate::cli::CliCommand::Ai(crate::cli::AiCommand::Investigate(args)) => {
+        crate::cli::CliCommand::Sessions(crate::cli::SessionsCommand::Investigate(args)) => {
             assert_eq!(args.project.as_deref(), Some("/repo"));
             assert_eq!(args.limit, Some(21));
             assert_eq!(args.window_minutes, Some(30));
             assert_eq!(args.correlation_window_minutes, Some(7));
             assert_eq!(args.terms, vec!["panic"]);
-            assert_eq!(args.detail, crate::cli::AiOutputDetail::Compact);
+            assert_eq!(args.detail, crate::cli::SessionsOutputDetail::Compact);
             assert_eq!(args.max_bytes, Some(1024));
         }
         other => panic!("unexpected command: {other:?}"),
@@ -179,8 +181,8 @@ fn parse_ai_investigate_accepts_incident_filters_and_limits() {
 }
 
 #[test]
-fn parse_ai_assess_accepts_incident_and_investigation_filters() {
-    let command = parse_ai_assess(&strings(&[
+fn parse_sessions_assess_accepts_incident_and_investigation_filters() {
+    let command = parse_sessions_assess(&strings(&[
         "incident-1",
         "--model=gemini-test",
         "--project=/repo",
@@ -196,7 +198,7 @@ fn parse_ai_assess_accepts_incident_and_investigation_filters() {
     .unwrap();
 
     match command {
-        crate::cli::CliCommand::Ai(crate::cli::AiCommand::Assess(args)) => {
+        crate::cli::CliCommand::Sessions(crate::cli::SessionsCommand::Assess(args)) => {
             assert_eq!(args.incident_id, "incident-1");
             assert_eq!(args.model.as_deref(), Some("gemini-test"));
             assert_eq!(args.project.as_deref(), Some("/repo"));
@@ -211,16 +213,20 @@ fn parse_ai_assess_accepts_incident_and_investigation_filters() {
 }
 
 #[test]
-fn parse_ai_more_reports_required_query_and_unexpected_argument_errors() {
+fn parse_sessions_more_reports_required_query_and_unexpected_argument_errors() {
     for (parser, args, expected) in [
         (
-            parse_ai_similar as fn(&[String]) -> anyhow::Result<crate::cli::CliCommand>,
+            parse_sessions_similar as fn(&[String]) -> anyhow::Result<crate::cli::CliCommand>,
             vec!["--limit=1"],
             "requires a query",
         ),
-        (parse_ai_ask_history, vec!["--limit=1"], "requires a query"),
         (
-            parse_ai_incident_context,
+            parse_sessions_ask_history,
+            vec!["--limit=1"],
+            "requires a query",
+        ),
+        (
+            parse_sessions_incident_context,
             vec![
                 "--since=2026-01-01T00:00:00Z",
                 "--until=2026-01-01T00:10:00Z",
@@ -229,17 +235,17 @@ fn parse_ai_more_reports_required_query_and_unexpected_argument_errors() {
             "unexpected positional argument",
         ),
         (
-            parse_ai_incidents,
+            parse_sessions_incidents,
             vec!["extra"],
-            "unexpected ai incidents argument",
+            "unexpected sessions incidents argument",
         ),
         (
-            parse_ai_investigate,
+            parse_sessions_investigate,
             vec!["extra"],
-            "unexpected ai investigate argument",
+            "unexpected sessions investigate argument",
         ),
         (
-            parse_ai_assess,
+            parse_sessions_assess,
             vec!["id1", "id2"],
             "unexpected extra argument",
         ),
@@ -248,7 +254,7 @@ fn parse_ai_more_reports_required_query_and_unexpected_argument_errors() {
         assert!(err.contains(expected), "expected {expected:?}, got {err:?}");
     }
 
-    let err = parse_ai_assess(&[]).unwrap_err().to_string();
+    let err = parse_sessions_assess(&[]).unwrap_err().to_string();
     assert!(err.contains("requires an <incident_id>"));
 }
 

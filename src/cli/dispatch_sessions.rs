@@ -9,32 +9,33 @@ use cortex::app::{
 };
 use std::io::Write;
 
-use super::ai_watch::ai_smoke_watch;
-use super::output_ai::{
-    ensure_ai_doctor_success, ensure_index_success, print_ai_doctor_response,
-    print_ai_parse_errors_response, print_ai_smoke_watch_response, print_ai_watch_status_response,
-    print_checkpoints_response, print_index_response, print_prune_checkpoints_response,
-};
-use super::output_ai_more::{
-    AiInvestigatePrintOptions, print_ai_incidents_response,
-    print_ai_investigate_response_with_options, print_ask_history_response,
-    print_incident_context_response, print_similar_incidents_response,
-};
 use super::output_logs::{
     UsageBlocksPrintOptions, print_abuse_search_response, print_ai_correlate_response,
     print_ai_projects_response, print_ai_tools_response, print_project_context_response,
     print_search_sessions_response, print_usage_blocks_response_with_options,
 };
+use super::output_sessions::{
+    ensure_ai_doctor_success, ensure_index_success, print_ai_doctor_response,
+    print_ai_parse_errors_response, print_ai_smoke_watch_response, print_checkpoints_response,
+    print_index_response, print_prune_checkpoints_response, print_sessions_watch_status_response,
+};
+use super::output_sessions_more::{
+    AiInvestigatePrintOptions, print_ai_incidents_response,
+    print_ai_investigate_response_with_options, print_ask_history_response,
+    print_incident_context_response, print_similar_incidents_response,
+};
+use super::sessions_watch::ai_smoke_watch;
 use super::{
-    AiAbuseArgs, AiAddArgs, AiAskHistoryArgs, AiAssessArgs, AiBlocksArgs, AiCheckpointsArgs,
-    AiContextArgs, AiCorrelateArgs, AiDoctorArgs, AiErrorsArgs, AiIncidentContextArgs,
-    AiIncidentsArgs, AiIndexArgs, AiInvestigateArgs, AiListArgs, AiPruneCheckpointsArgs,
-    AiSearchArgs, AiSimilarArgs, AiWatchArgs, CliMode, OutputArgs,
+    CliMode, OutputArgs, SessionsAbuseArgs, SessionsAddArgs, SessionsAskHistoryArgs,
+    SessionsAssessArgs, SessionsBlocksArgs, SessionsCheckpointsArgs, SessionsContextArgs,
+    SessionsCorrelateArgs, SessionsDoctorArgs, SessionsErrorsArgs, SessionsIncidentContextArgs,
+    SessionsIncidentsArgs, SessionsIndexArgs, SessionsInvestigateArgs, SessionsListArgs,
+    SessionsPruneCheckpointsArgs, SessionsSearchArgs, SessionsSimilarArgs, SessionsWatchArgs,
 };
 
 // ─── AI Arg → Request conversions (bead 0p8r.8) ─────────────────────────────
 
-impl AiSearchArgs {
+impl SessionsSearchArgs {
     pub(crate) fn into_request(self) -> SearchSessionsRequest {
         SearchSessionsRequest {
             query: self.query,
@@ -47,7 +48,7 @@ impl AiSearchArgs {
     }
 }
 
-impl AiAbuseArgs {
+impl SessionsAbuseArgs {
     pub(crate) fn into_request(self) -> AbuseSearchRequest {
         AbuseSearchRequest {
             project: self.project,
@@ -62,7 +63,7 @@ impl AiAbuseArgs {
     }
 }
 
-impl AiCorrelateArgs {
+impl SessionsCorrelateArgs {
     pub(crate) fn into_request(self) -> AiCorrelateRequest {
         AiCorrelateRequest {
             project: self.project,
@@ -83,7 +84,7 @@ impl AiCorrelateArgs {
     }
 }
 
-impl AiBlocksArgs {
+impl SessionsBlocksArgs {
     pub(crate) fn into_request(self) -> UsageBlocksRequest {
         UsageBlocksRequest {
             project: self.project,
@@ -95,7 +96,7 @@ impl AiBlocksArgs {
     }
 }
 
-impl AiContextArgs {
+impl SessionsContextArgs {
     pub(crate) fn into_request(self) -> ProjectContextRequest {
         ProjectContextRequest {
             project: self.project,
@@ -105,7 +106,7 @@ impl AiContextArgs {
     }
 }
 
-impl AiListArgs {
+impl SessionsListArgs {
     pub(crate) fn into_tools_request(self) -> ListAiToolsRequest {
         ListAiToolsRequest {
             project: self.project,
@@ -123,7 +124,7 @@ impl AiListArgs {
     }
 }
 
-impl AiCheckpointsArgs {
+impl SessionsCheckpointsArgs {
     pub(crate) fn into_request(self) -> AiCheckpointsRequest {
         AiCheckpointsRequest {
             errors_only: self.errors_only,
@@ -133,13 +134,13 @@ impl AiCheckpointsArgs {
     }
 }
 
-impl AiErrorsArgs {
+impl SessionsErrorsArgs {
     pub(crate) fn into_request(self) -> AiParseErrorsRequest {
         AiParseErrorsRequest { limit: self.limit }
     }
 }
 
-impl AiPruneCheckpointsArgs {
+impl SessionsPruneCheckpointsArgs {
     pub(crate) fn into_request(self) -> AiPruneCheckpointsRequest {
         AiPruneCheckpointsRequest {
             dry_run: self.dry_run,
@@ -149,7 +150,7 @@ impl AiPruneCheckpointsArgs {
     }
 }
 
-impl AiSimilarArgs {
+impl SessionsSimilarArgs {
     pub(crate) fn into_request(self) -> SimilarIncidentsRequest {
         SimilarIncidentsRequest {
             query: self.query,
@@ -164,7 +165,7 @@ impl AiSimilarArgs {
     }
 }
 
-impl AiAskHistoryArgs {
+impl SessionsAskHistoryArgs {
     pub(crate) fn into_request(self) -> AskHistoryRequest {
         AskHistoryRequest {
             query: self.query,
@@ -177,7 +178,7 @@ impl AiAskHistoryArgs {
     }
 }
 
-impl AiIncidentContextArgs {
+impl SessionsIncidentContextArgs {
     pub(crate) fn into_request(self) -> IncidentContextRequest {
         IncidentContextRequest {
             since: self.since,
@@ -199,7 +200,7 @@ impl AiIncidentContextArgs {
 //   These bail in HTTP mode with an inline message per the bead table
 //   (no shared helper — eng-review #S4).
 
-pub(crate) async fn run_ai_search(mode: &CliMode, args: AiSearchArgs) -> Result<()> {
+pub(crate) async fn run_ai_search(mode: &CliMode, args: SessionsSearchArgs) -> Result<()> {
     let json = args.json;
     let req = args.into_request();
     let response = match mode {
@@ -209,7 +210,7 @@ pub(crate) async fn run_ai_search(mode: &CliMode, args: AiSearchArgs) -> Result<
     print_search_sessions_response(&response, json)
 }
 
-pub(crate) async fn run_ai_abuse(mode: &CliMode, args: AiAbuseArgs) -> Result<()> {
+pub(crate) async fn run_ai_abuse(mode: &CliMode, args: SessionsAbuseArgs) -> Result<()> {
     let json = args.json;
     let req = args.into_request();
     let response = match mode {
@@ -219,7 +220,7 @@ pub(crate) async fn run_ai_abuse(mode: &CliMode, args: AiAbuseArgs) -> Result<()
     print_abuse_search_response(&response, json)
 }
 
-pub(crate) async fn run_ai_correlate(mode: &CliMode, args: AiCorrelateArgs) -> Result<()> {
+pub(crate) async fn run_ai_correlate(mode: &CliMode, args: SessionsCorrelateArgs) -> Result<()> {
     let json = args.json;
     let req = args.into_request();
     let response = match mode {
@@ -229,7 +230,7 @@ pub(crate) async fn run_ai_correlate(mode: &CliMode, args: AiCorrelateArgs) -> R
     print_ai_correlate_response(&response, json)
 }
 
-pub(crate) async fn run_ai_blocks(mode: &CliMode, args: AiBlocksArgs) -> Result<()> {
+pub(crate) async fn run_ai_blocks(mode: &CliMode, args: SessionsBlocksArgs) -> Result<()> {
     let json = args.json;
     let detail = args.detail;
     let limit = args.limit;
@@ -245,7 +246,7 @@ pub(crate) async fn run_ai_blocks(mode: &CliMode, args: AiBlocksArgs) -> Result<
     )
 }
 
-pub(crate) async fn run_ai_context(mode: &CliMode, args: AiContextArgs) -> Result<()> {
+pub(crate) async fn run_ai_context(mode: &CliMode, args: SessionsContextArgs) -> Result<()> {
     let json = args.json;
     let req = args.into_request();
     let response = match mode {
@@ -255,7 +256,7 @@ pub(crate) async fn run_ai_context(mode: &CliMode, args: AiContextArgs) -> Resul
     print_project_context_response(&response, json)
 }
 
-pub(crate) async fn run_ai_tools(mode: &CliMode, args: AiListArgs) -> Result<()> {
+pub(crate) async fn run_ai_tools(mode: &CliMode, args: SessionsListArgs) -> Result<()> {
     let json = args.json;
     let req = args.into_tools_request();
     let response = match mode {
@@ -265,7 +266,7 @@ pub(crate) async fn run_ai_tools(mode: &CliMode, args: AiListArgs) -> Result<()>
     print_ai_tools_response(&response, json)
 }
 
-pub(crate) async fn run_ai_projects(mode: &CliMode, args: AiListArgs) -> Result<()> {
+pub(crate) async fn run_ai_projects(mode: &CliMode, args: SessionsListArgs) -> Result<()> {
     let json = args.json;
     let req = args.into_projects_request();
     let response = match mode {
@@ -275,7 +276,10 @@ pub(crate) async fn run_ai_projects(mode: &CliMode, args: AiListArgs) -> Result<
     print_ai_projects_response(&response, json)
 }
 
-pub(crate) async fn run_ai_checkpoints(mode: &CliMode, args: AiCheckpointsArgs) -> Result<()> {
+pub(crate) async fn run_ai_checkpoints(
+    mode: &CliMode,
+    args: SessionsCheckpointsArgs,
+) -> Result<()> {
     let json = args.json;
     let req = args.into_request();
     let response = match mode {
@@ -289,7 +293,7 @@ pub(crate) async fn run_ai_checkpoints(mode: &CliMode, args: AiCheckpointsArgs) 
     print_checkpoints_response(&response, json)
 }
 
-pub(crate) async fn run_ai_errors(mode: &CliMode, args: AiErrorsArgs) -> Result<()> {
+pub(crate) async fn run_ai_errors(mode: &CliMode, args: SessionsErrorsArgs) -> Result<()> {
     let json = args.json;
     let req = args.into_request();
     let response = match mode {
@@ -301,7 +305,7 @@ pub(crate) async fn run_ai_errors(mode: &CliMode, args: AiErrorsArgs) -> Result<
 
 pub(crate) async fn run_ai_prune_checkpoints(
     mode: &CliMode,
-    args: AiPruneCheckpointsArgs,
+    args: SessionsPruneCheckpointsArgs,
 ) -> Result<()> {
     let json = args.json;
     let req = args.into_request();
@@ -312,13 +316,11 @@ pub(crate) async fn run_ai_prune_checkpoints(
     print_prune_checkpoints_response(&response, json)
 }
 
-// ─── LOCAL-only AI commands (6) — error in HTTP mode ────────────────────────
+// ─── LOCAL-only session commands (6) — error in HTTP mode ───────────────────
 
-pub(crate) async fn run_ai_index(mode: &CliMode, args: AiIndexArgs) -> Result<()> {
+pub(crate) async fn run_ai_index(mode: &CliMode, args: SessionsIndexArgs) -> Result<()> {
     let service = match mode {
-        CliMode::Http(_) => {
-            bail!("ai index reads host ~/.claude/projects; omit --http")
-        }
+        CliMode::Http(_) => bail!("sessions index reads host ~/.claude/projects; omit --http"),
         CliMode::Local(service) => service,
     };
     let response = service
@@ -328,9 +330,9 @@ pub(crate) async fn run_ai_index(mode: &CliMode, args: AiIndexArgs) -> Result<()
     ensure_index_success(&response)
 }
 
-pub(crate) async fn run_ai_add(mode: &CliMode, args: AiAddArgs) -> Result<()> {
+pub(crate) async fn run_ai_add(mode: &CliMode, args: SessionsAddArgs) -> Result<()> {
     let service = match mode {
-        CliMode::Http(_) => bail!("ai add reads a host file path; omit --http"),
+        CliMode::Http(_) => bail!("sessions add reads a host file path; omit --http"),
         CliMode::Local(service) => service,
     };
     let response = service.add_ai_file(args.file, args.force).await?;
@@ -338,10 +340,10 @@ pub(crate) async fn run_ai_add(mode: &CliMode, args: AiAddArgs) -> Result<()> {
     ensure_index_success(&response)
 }
 
-pub(crate) async fn run_ai_doctor(mode: &CliMode, args: AiDoctorArgs) -> Result<()> {
+pub(crate) async fn run_ai_doctor(mode: &CliMode, args: SessionsDoctorArgs) -> Result<()> {
     let service = match mode {
         CliMode::Http(_) => {
-            bail!("ai doctor checks host filesystem permissions; omit --http")
+            bail!("sessions doctor checks host filesystem permissions; omit --http")
         }
         CliMode::Local(service) => service,
     };
@@ -353,7 +355,7 @@ pub(crate) async fn run_ai_doctor(mode: &CliMode, args: AiDoctorArgs) -> Result<
 pub(crate) async fn run_ai_smoke_watch(mode: &CliMode, args: OutputArgs) -> Result<()> {
     let service = match mode {
         CliMode::Http(_) => {
-            bail!("ai smoke-watch writes synthetic transcript to host fs; omit --http")
+            bail!("sessions smoke-watch writes synthetic transcript to host fs; omit --http")
         }
         CliMode::Local(service) => service,
     };
@@ -365,20 +367,20 @@ pub(crate) async fn run_ai_smoke_watch(mode: &CliMode, args: OutputArgs) -> Resu
     Ok(())
 }
 
-pub(crate) async fn run_ai_watch_status(mode: &CliMode, args: OutputArgs) -> Result<()> {
+pub(crate) async fn run_sessions_watch_status(mode: &CliMode, args: OutputArgs) -> Result<()> {
     if matches!(mode, CliMode::Http(_)) {
-        bail!("ai watch-status shells out to systemctl on host; omit --http");
+        bail!("sessions watch-status shells out to systemctl on host; omit --http");
     }
     let CliMode::Local(service) = mode else {
         unreachable!("http mode returned above");
     };
     let response = service.ai_watch_status().await?;
-    print_ai_watch_status_response(&response, args.json)
+    print_sessions_watch_status_response(&response, args.json)
 }
 
-pub(crate) async fn run_ai_watch(mode: &CliMode, args: AiWatchArgs) -> Result<()> {
+pub(crate) async fn run_sessions_watch(mode: &CliMode, args: SessionsWatchArgs) -> Result<()> {
     let service = match mode {
-        CliMode::Http(_) => bail!("ai watch is a long-running daemon; omit --http"),
+        CliMode::Http(_) => bail!("sessions watch is a long-running daemon; omit --http"),
         CliMode::Local(service) => service.clone(),
     };
     let options = cortex::ai_watch::WatchOptions {
@@ -394,7 +396,10 @@ pub(crate) async fn run_ai_watch(mode: &CliMode, args: AiWatchArgs) -> Result<()
 
 // ─── RAG v1 dispatch (LOCAL-only) ────────────────────────────────────────────
 
-pub(crate) async fn run_ai_similar_incidents(mode: &CliMode, args: AiSimilarArgs) -> Result<()> {
+pub(crate) async fn run_ai_similar_incidents(
+    mode: &CliMode,
+    args: SessionsSimilarArgs,
+) -> Result<()> {
     let json = args.json;
     let req = args.into_request();
     let response = match mode {
@@ -404,7 +409,7 @@ pub(crate) async fn run_ai_similar_incidents(mode: &CliMode, args: AiSimilarArgs
     print_similar_incidents_response(&response, json)
 }
 
-pub(crate) async fn run_ai_ask_history(mode: &CliMode, args: AiAskHistoryArgs) -> Result<()> {
+pub(crate) async fn run_ai_ask_history(mode: &CliMode, args: SessionsAskHistoryArgs) -> Result<()> {
     let json = args.json;
     let req = args.into_request();
     let response = match mode {
@@ -416,7 +421,7 @@ pub(crate) async fn run_ai_ask_history(mode: &CliMode, args: AiAskHistoryArgs) -
 
 pub(crate) async fn run_ai_incident_context(
     mode: &CliMode,
-    args: AiIncidentContextArgs,
+    args: SessionsIncidentContextArgs,
 ) -> Result<()> {
     let json = args.json;
     let req = args.into_request();
@@ -427,7 +432,7 @@ pub(crate) async fn run_ai_incident_context(
     print_incident_context_response(&response, json)
 }
 
-impl AiIncidentsArgs {
+impl SessionsIncidentsArgs {
     pub(crate) fn into_request(self) -> AiIncidentRequest {
         AiIncidentRequest {
             project: self.project,
@@ -441,7 +446,7 @@ impl AiIncidentsArgs {
     }
 }
 
-impl AiInvestigateArgs {
+impl SessionsInvestigateArgs {
     pub(crate) fn into_request(self) -> AiInvestigateRequest {
         AiInvestigateRequest {
             incident_id: None,
@@ -457,7 +462,7 @@ impl AiInvestigateArgs {
     }
 }
 
-pub(crate) async fn run_ai_incidents(mode: &CliMode, args: AiIncidentsArgs) -> Result<()> {
+pub(crate) async fn run_ai_incidents(mode: &CliMode, args: SessionsIncidentsArgs) -> Result<()> {
     let json = args.json;
     let req = args.into_request();
     let response = match mode {
@@ -467,7 +472,10 @@ pub(crate) async fn run_ai_incidents(mode: &CliMode, args: AiIncidentsArgs) -> R
     print_ai_incidents_response(&response, json)
 }
 
-pub(crate) async fn run_ai_investigate(mode: &CliMode, args: AiInvestigateArgs) -> Result<()> {
+pub(crate) async fn run_ai_investigate(
+    mode: &CliMode,
+    args: SessionsInvestigateArgs,
+) -> Result<()> {
     let json = args.json;
     let print_options = AiInvestigatePrintOptions {
         detail: args.detail,
@@ -482,7 +490,7 @@ pub(crate) async fn run_ai_investigate(mode: &CliMode, args: AiInvestigateArgs) 
     print_ai_investigate_response_with_options(&response, json, print_options)
 }
 
-pub(crate) async fn run_ai_assess(mode: &CliMode, args: AiAssessArgs) -> Result<()> {
+pub(crate) async fn run_ai_assess(mode: &CliMode, args: SessionsAssessArgs) -> Result<()> {
     let service = match mode {
         CliMode::Http(_) => {
             bail!("ai assess spawns Gemini CLI on the local host; omit --http")
@@ -530,5 +538,5 @@ pub(crate) async fn run_ai_assess(mode: &CliMode, args: AiAssessArgs) -> Result<
 }
 
 #[cfg(test)]
-#[path = "dispatch_ai_tests.rs"]
+#[path = "dispatch_sessions_tests.rs"]
 mod tests;

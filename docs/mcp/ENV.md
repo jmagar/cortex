@@ -8,7 +8,7 @@ Concise reference. See [CONFIG.md](../CONFIG.md) for full documentation includin
 
 | Path | How | Credentials |
 |------|-----|-------------|
-| **Plugin** | Claude Code connects via HTTP; server mode delegates setup to `cortex setup repair` / `cortex deploy local` | `${user_config.*}` in `.mcp.json`; setup writes `~/.cortex/.env` |
+| **Plugin** | Claude Code connects via HTTP; server mode delegates setup to `cortex setup repair` / `cortex setup deploy local` | `${user_config.*}` in `.mcp.json`; setup writes `~/.cortex/.env` |
 | **One-line installer** | `curl .../install.sh \| sh` then `cortex setup` | `~/.cortex/.env` |
 | **Docker** | `docker compose up -d` | `.env` file |
 | **Bare metal** | `cargo run --release -- serve mcp` or `cortex serve mcp` | `config.toml` or env vars |

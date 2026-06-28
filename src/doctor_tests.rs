@@ -331,7 +331,7 @@ fn systemctl_unix_timestamp_parses_at_prefixed_seconds() {
     let _path_guard = EnvGuard::set("PATH", path);
 
     assert_eq!(
-        systemctl_unix_timestamp("cortex-ai-watch.service").as_deref(),
+        systemctl_unix_timestamp("cortex-sessions-watch.service").as_deref(),
         Some("2026-05-19T22:30:09.000Z")
     );
 }
@@ -348,8 +348,8 @@ fn ai_watcher_process_start_time_falls_back_to_human_timestamp() {
         &systemctl,
         r#"#!/bin/sh
 case "$*" in
-  "--user show -p ExecMainStartTimestamp --value --timestamp=unix cortex-ai-watch.service") printf 'Tue 2026-05-19 22:30:09 EDT\n'; exit 0 ;;
-  "--user show -p ExecMainStartTimestamp --value cortex-ai-watch.service") printf 'Tue 2026-05-19 22:30:09 EDT\n'; exit 0 ;;
+  "--user show -p ExecMainStartTimestamp --value --timestamp=unix cortex-sessions-watch.service") printf 'Tue 2026-05-19 22:30:09 EDT\n'; exit 0 ;;
+  "--user show -p ExecMainStartTimestamp --value cortex-sessions-watch.service") printf 'Tue 2026-05-19 22:30:09 EDT\n'; exit 0 ;;
   *) exit 1 ;;
 esac
 "#,

@@ -64,7 +64,7 @@ pub const FULL_VACUUM_SIZE_GUARD_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 
 /// Process-wide single-flight gate for the maintenance routes
 /// (`POST /api/db/vacuum`, `POST /api/db/checkpoint`,
-/// `POST /api/ai/prune-checkpoints`). Held via `ApiState::maintenance_permit`,
+/// `POST /api/sessions/prune-checkpoints`). Held via `ApiState::maintenance_permit`,
 /// which clones the `Arc<Semaphore>` populated here at first call.
 ///
 /// **Dual-permit pattern (eng-review C2)**: this gate is SEPARATE from
@@ -261,24 +261,27 @@ pub fn router(state: ApiState) -> anyhow::Result<Router> {
         .route("/api/graph/around", get(graph_around))
         .route("/api/graph/explain", get(graph_explain))
         .route("/api/graph/evidence", get(graph_evidence))
-        .route("/api/ai/ask-history", get(ai_ask_history))
-        .route("/api/ai/incidents", get(ai_incidents))
-        .route("/api/ai/investigate", get(ai_investigate))
+        .route("/api/sessions/ask-history", get(ai_ask_history))
+        .route("/api/sessions/incidents", get(ai_incidents))
+        .route("/api/sessions/investigate", get(ai_investigate))
         .route("/api/compose/status", get(compose_status))
         .route("/api/compose/doctor", get(compose_doctor))
         // --- ai session queries ---
         .route("/api/sessions", get(sessions))
-        .route("/api/ai/search", get(ai_search))
-        .route("/api/ai/abuse", get(ai_abuse))
-        .route("/api/ai/correlate", get(ai_correlate))
-        .route("/api/ai/blocks", get(ai_blocks))
-        .route("/api/ai/context", get(ai_context))
-        .route("/api/ai/tools", get(ai_tools))
-        .route("/api/ai/projects", get(ai_projects))
+        .route("/api/sessions/search", get(ai_search))
+        .route("/api/sessions/abuse", get(ai_abuse))
+        .route("/api/sessions/correlate", get(ai_correlate))
+        .route("/api/sessions/blocks", get(ai_blocks))
+        .route("/api/sessions/context", get(ai_context))
+        .route("/api/sessions/tools", get(ai_tools))
+        .route("/api/sessions/projects", get(ai_projects))
         // --- ai diagnostic + admin (bead 0p8r.3) ---
-        .route("/api/ai/checkpoints", get(ai_checkpoints))
-        .route("/api/ai/errors", get(ai_parse_errors))
-        .route("/api/ai/prune-checkpoints", post(ai_prune_checkpoints))
+        .route("/api/sessions/checkpoints", get(ai_checkpoints))
+        .route("/api/sessions/errors", get(ai_parse_errors))
+        .route(
+            "/api/sessions/prune-checkpoints",
+            post(ai_prune_checkpoints),
+        )
         // --- db ops (bead 0p8r.4) ---
         .route("/api/db/status", get(db_status))
         .route("/api/db/integrity", get(db_integrity))
@@ -352,7 +355,7 @@ fn require_api_admin_token(
         return Some(
             (
                 StatusCode::FORBIDDEN,
-                Json(json!({"error": "CORTEX_API_ADMIN_TOKEN required for file-tail management"})),
+                Json(json!({"error": "CORTEX_API_ADMIN_TOKEN required for admin API actions"})),
             )
                 .into_response(),
         );
@@ -367,7 +370,7 @@ fn require_api_admin_token(
         Some(
             (
                 StatusCode::FORBIDDEN,
-                Json(json!({"error": "X-Cortex-Admin-Token required for file-tail management"})),
+                Json(json!({"error": "X-Cortex-Admin-Token required for admin API actions"})),
             )
                 .into_response(),
         )
@@ -724,8 +727,14 @@ struct AckErrorBody {
 
 async fn ack_error(
     State(state): State<ApiState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     Json(body): Json<AckErrorBody>,
 ) -> impl IntoResponse {
+    if let Some(resp) = require_api_admin_token(&state, &headers) {
+        return resp;
+    }
+    tracing::warn!(caller_ip = %peer.ip(), signature_hash = %body.signature_hash, "admin: ack_error invoked");
     respond(
         state
             .service
@@ -748,8 +757,14 @@ struct UnackErrorBody {
 
 async fn unack_error(
     State(state): State<ApiState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     Json(body): Json<UnackErrorBody>,
 ) -> impl IntoResponse {
+    if let Some(resp) = require_api_admin_token(&state, &headers) {
+        return resp;
+    }
+    tracing::warn!(caller_ip = %peer.ip(), signature_hash = %body.signature_hash, "admin: unack_error invoked");
     respond(
         state
             .service
@@ -1147,7 +1162,7 @@ async fn ai_search(
     Json(response).into_response()
 }
 
-/// `/api/ai/abuse` deserializes directly into [`AbuseSearchRequest`] via
+/// `/api/sessions/abuse` deserializes directly into [`AbuseSearchRequest`] via
 /// `serde_qs::axum::QsQuery`, which handles `Vec<String>` from repeated
 /// `?terms=a&terms=b` (and `?terms[]=a&terms[]=b`) query params — something
 /// the default `serde_urlencoded` backing of `axum::extract::Query` cannot do
@@ -1227,7 +1242,7 @@ async fn ai_projects(
 // service refactor was cut). Handlers build the typed Request struct from
 // query/body, then unpack into positional args.
 
-/// `GET /api/ai/checkpoints` — inventory of AI transcript checkpoints (read).
+/// `GET /api/sessions/checkpoints` — inventory of AI transcript checkpoints (read).
 async fn ai_checkpoints(
     State(state): State<ApiState>,
     Query(req): Query<AiCheckpointsRequest>,
@@ -1240,7 +1255,7 @@ async fn ai_checkpoints(
     )
 }
 
-/// `GET /api/ai/errors` — recent transcript parse errors (read).
+/// `GET /api/sessions/errors` — recent transcript parse errors (read).
 async fn ai_parse_errors(
     State(state): State<ApiState>,
     Query(req): Query<AiParseErrorsRequest>,
@@ -1248,7 +1263,7 @@ async fn ai_parse_errors(
     respond(state.service.list_ai_parse_errors(req.limit).await)
 }
 
-/// `POST /api/ai/prune-checkpoints` — admin/destructive: delete checkpoints
+/// `POST /api/sessions/prune-checkpoints` — admin/destructive: delete checkpoints
 /// from the AI transcript inventory.
 ///
 /// Validation flow (eng-review C3 — defense against `POST {}` mass-delete):
@@ -1419,14 +1434,14 @@ fn cors_layer(port: u16, loopback_bind: bool, allowed_origins: &[String]) -> Cor
         }
     }
     // GET for reads, POST for mutating endpoints (added with bead 0p8r.3 —
-    // first POST route is /api/ai/prune-checkpoints), OPTIONS so browser
+    // first POST route is /api/sessions/prune-checkpoints), OPTIONS so browser
     // preflights for the POST endpoint succeed.
     //
     // `allow_headers` is an explicit allowlist (bead 0p8r.14): bearer auth
     // still defends every request, but pinning the preflight surface to the
     // headers the API actually reads keeps a compromised allowed-origin page
     // from echoing arbitrary headers (cookies from other origins, custom auth
-    // tokens) through the browser into POST /api/ai/prune-checkpoints,
+    // tokens) through the browser into POST /api/sessions/prune-checkpoints,
     // /api/db/vacuum, /api/db/checkpoint.
     CorsLayer::new()
         .allow_origin(origins)

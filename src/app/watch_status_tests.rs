@@ -129,7 +129,7 @@ async fn ai_watch_status_returns_journal_lines_from_os_adapter() {
     let pool = Arc::new(init_pool(&storage).unwrap());
     let os = Arc::new(MockProbeOs {
         journal_output:
-            "May 26 10:00:00 host cortex-ai-watch[123]: started\nMay 26 10:01:00 host cortex-ai-watch[123]: indexed 5 files\n"
+            "May 26 10:00:00 host cortex-sessions-watch[123]: started\nMay 26 10:01:00 host cortex-sessions-watch[123]: indexed 5 files\n"
                 .to_string(),
         probe_stdout: b"active\n".to_vec(),
         probe_success: true,
@@ -138,7 +138,7 @@ async fn ai_watch_status_returns_journal_lines_from_os_adapter() {
 
     let report = service.ai_watch_status().await.unwrap();
 
-    assert_eq!(report.service, "cortex-ai-watch.service");
+    assert_eq!(report.service, "cortex-sessions-watch.service");
     assert_eq!(report.latest_journal.len(), 2);
     assert!(report.latest_journal[0].contains("started"));
     assert_eq!(report.active.as_deref(), Some("active"));
@@ -161,7 +161,7 @@ async fn ai_watch_status_degrades_gracefully_when_journalctl_fails() {
         report.journal_error.is_some(),
         "journal_error should be set when journalctl fails"
     );
-    assert_eq!(report.service, "cortex-ai-watch.service");
+    assert_eq!(report.service, "cortex-sessions-watch.service");
     // systemctl probe returned "inactive" from the mock (non-zero exit but non-empty stdout)
     assert_eq!(report.active.as_deref(), Some("inactive"));
 }

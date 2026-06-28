@@ -2,8 +2,8 @@ use anyhow::{Result, anyhow, bail};
 use cortex::app::CortexService;
 
 use super::args::{
-    AgentCommandCommand, AiCommand, CliCommand, DbCommand, GraphCommand, NotifyCommand,
-    ShellCommand, SigCommand,
+    AgentCommandCommand, AlertsCommand, CliCommand, DbCommand, GraphCommand, IngestCommand,
+    NotifyCommand, ShellCommand, SigCommand, StateCommand, StatsCommand,
 };
 use super::dispatch;
 
@@ -50,59 +50,95 @@ pub(crate) async fn run(mode: CliMode, command: CliCommand) -> Result<()> {
         CliCommand::Filter(args) => dispatch::run_filter(&mode, args).await,
         CliCommand::Tail(args) => dispatch::run_tail(&mode, args).await,
         CliCommand::Errors(args) => dispatch::run_errors(&mode, args).await,
-        CliCommand::Hosts(args) => dispatch::run_hosts(&mode, args).await,
+        CliCommand::Hosts(command) => match command {
+            super::HostsCommand::List(args) => dispatch::run_hosts(&mode, args).await,
+            super::HostsCommand::Sources(args) => dispatch::run_source_ips(&mode, args).await,
+            super::HostsCommand::Silent(args) => dispatch::run_silent_hosts(&mode, args).await,
+        },
         CliCommand::Incident(args) => dispatch::run_incident(&mode, args).await,
         CliCommand::Correlate(args) => dispatch::run_correlate(&mode, args).await,
-        CliCommand::Stats(args) => dispatch::run_stats(&mode, args).await,
-        CliCommand::Sessions(args) => dispatch::run_sessions(&mode, args).await,
-        CliCommand::FileTail(command) => dispatch::run_file_tail(&mode, command).await,
-        // AI commands (bead 0p8r.8). 10 are HTTP-capable; 6 are LOCAL-only
-        // and bail in HTTP mode with a per-command inline message.
-        CliCommand::Ai(ai) => match ai {
-            AiCommand::Search(args) => dispatch::run_ai_search(&mode, args).await,
-            AiCommand::Abuse(args) => dispatch::run_ai_abuse(&mode, args).await,
-            AiCommand::Correlate(args) => dispatch::run_ai_correlate(&mode, args).await,
-            AiCommand::Blocks(args) => dispatch::run_ai_blocks(&mode, args).await,
-            AiCommand::Context(args) => dispatch::run_ai_context(&mode, args).await,
-            AiCommand::Tools(args) => dispatch::run_ai_tools(&mode, args).await,
-            AiCommand::Projects(args) => dispatch::run_ai_projects(&mode, args).await,
-            AiCommand::Checkpoints(args) => dispatch::run_ai_checkpoints(&mode, args).await,
-            AiCommand::Errors(args) => dispatch::run_ai_errors(&mode, args).await,
-            AiCommand::PruneCheckpoints(args) => {
+        CliCommand::State(command) => match command {
+            StateCommand::Host(args) => dispatch::run_host_state(&mode, args).await,
+            StateCommand::Fleet(args) => dispatch::run_fleet_state(&mode, args).await,
+            StateCommand::ClockSkew(args) => dispatch::run_clock_skew(&mode, args).await,
+        },
+        CliCommand::Stats(command) => match command {
+            StatsCommand::Summary(args) => dispatch::run_stats(&mode, args).await,
+            StatsCommand::IngestRate(args) => dispatch::run_ingest_rate(&mode, args).await,
+        },
+        CliCommand::Ingest(command) => match command {
+            IngestCommand::Shell(shell) => match shell {
+                ShellCommand::Index(args) => {
+                    super::dispatch_command_log::run_shell_index(&mode, args).await
+                }
+                ShellCommand::AtuinIndex(args) => {
+                    super::dispatch_command_log::run_shell_atuin_index(&mode, args).await
+                }
+            },
+            IngestCommand::AgentCommand(command) => match command {
+                AgentCommandCommand::IngestSpool(args) => {
+                    super::dispatch_command_log::run_agent_command_ingest_spool(&mode, args).await
+                }
+                AgentCommandCommand::Wrap(_) => {
+                    bail!(
+                        "internal: ingest agent-command wrap must be dispatched before CliMode creation"
+                    )
+                }
+            },
+            IngestCommand::Inventory(_) => {
+                bail!(
+                    "internal: ingest inventory must be dispatched by main::run_cli before reaching cli::run()"
+                )
+            }
+            IngestCommand::FileTail(command) => dispatch::run_file_tail(&mode, command).await,
+            IngestCommand::SyslogStatus(args) => super::run_ingest_syslog_status(args).await,
+            IngestCommand::DockerStatus(args) => super::run_ingest_docker_status(args).await,
+            IngestCommand::DockerSources(args) => super::run_ingest_docker_sources(args).await,
+        },
+        CliCommand::Sessions(command) => match command {
+            super::SessionsCommand::List(args) => dispatch::run_sessions(&mode, args).await,
+            super::SessionsCommand::Search(args) => dispatch::run_ai_search(&mode, args).await,
+            super::SessionsCommand::Abuse(args) => dispatch::run_ai_abuse(&mode, args).await,
+            super::SessionsCommand::Correlate(args) => {
+                dispatch::run_ai_correlate(&mode, args).await
+            }
+            super::SessionsCommand::Blocks(args) => dispatch::run_ai_blocks(&mode, args).await,
+            super::SessionsCommand::Context(args) => dispatch::run_ai_context(&mode, args).await,
+            super::SessionsCommand::Tools(args) => dispatch::run_ai_tools(&mode, args).await,
+            super::SessionsCommand::Projects(args) => dispatch::run_ai_projects(&mode, args).await,
+            super::SessionsCommand::Checkpoints(args) => {
+                dispatch::run_ai_checkpoints(&mode, args).await
+            }
+            super::SessionsCommand::Errors(args) => dispatch::run_ai_errors(&mode, args).await,
+            super::SessionsCommand::PruneCheckpoints(args) => {
                 dispatch::run_ai_prune_checkpoints(&mode, args).await
             }
-            AiCommand::Index(args) => dispatch::run_ai_index(&mode, args).await,
-            AiCommand::Add(args) => dispatch::run_ai_add(&mode, args).await,
-            AiCommand::Doctor(args) => dispatch::run_ai_doctor(&mode, args).await,
-            AiCommand::SmokeWatch(args) => dispatch::run_ai_smoke_watch(&mode, args).await,
-            AiCommand::WatchStatus(args) => dispatch::run_ai_watch_status(&mode, args).await,
-            AiCommand::Watch(args) => dispatch::run_ai_watch(&mode, args).await,
-            AiCommand::SimilarIncidents(args) => {
+            super::SessionsCommand::Index(args) => dispatch::run_ai_index(&mode, args).await,
+            super::SessionsCommand::Add(args) => dispatch::run_ai_add(&mode, args).await,
+            super::SessionsCommand::Doctor(args) => dispatch::run_ai_doctor(&mode, args).await,
+            super::SessionsCommand::SmokeWatch(args) => {
+                dispatch::run_ai_smoke_watch(&mode, args).await
+            }
+            super::SessionsCommand::WatchStatus(args) => {
+                dispatch::run_sessions_watch_status(&mode, args).await
+            }
+            super::SessionsCommand::Watch(args) => dispatch::run_sessions_watch(&mode, args).await,
+            super::SessionsCommand::SimilarIncidents(args) => {
                 dispatch::run_ai_similar_incidents(&mode, args).await
             }
-            AiCommand::AskHistory(args) => dispatch::run_ai_ask_history(&mode, args).await,
-            AiCommand::IncidentContext(args) => {
+            super::SessionsCommand::AskHistory(args) => {
+                dispatch::run_ai_ask_history(&mode, args).await
+            }
+            super::SessionsCommand::IncidentContext(args) => {
                 dispatch::run_ai_incident_context(&mode, args).await
             }
-            AiCommand::Incidents(args) => dispatch::run_ai_incidents(&mode, args).await,
-            AiCommand::Investigate(args) => dispatch::run_ai_investigate(&mode, args).await,
-            AiCommand::Assess(args) => dispatch::run_ai_assess(&mode, args).await,
-        },
-        CliCommand::Shell(shell) => match shell {
-            ShellCommand::Index(args) => {
-                super::dispatch_command_log::run_shell_index(&mode, args).await
+            super::SessionsCommand::Incidents(args) => {
+                dispatch::run_ai_incidents(&mode, args).await
             }
-            ShellCommand::AtuinIndex(args) => {
-                super::dispatch_command_log::run_shell_atuin_index(&mode, args).await
+            super::SessionsCommand::Investigate(args) => {
+                dispatch::run_ai_investigate(&mode, args).await
             }
-        },
-        CliCommand::AgentCommand(command) => match command {
-            AgentCommandCommand::IngestSpool(args) => {
-                super::dispatch_command_log::run_agent_command_ingest_spool(&mode, args).await
-            }
-            AgentCommandCommand::Wrap(_) => {
-                bail!("internal: agent-command wrap must be dispatched before CliMode creation")
-            }
+            super::SessionsCommand::Assess(args) => dispatch::run_ai_assess(&mode, args).await,
         },
         CliCommand::Heartbeat(command) => {
             super::heartbeat_agent::run_heartbeat_no_db(command).await
@@ -122,28 +158,24 @@ pub(crate) async fn run(mode: CliMode, command: CliCommand) -> Result<()> {
         // Compose/Setup/Config are local-only and main::run_cli reroutes them BEFORE
         // calling run(). If we reach here, the front door was bypassed —
         // bail with a clear internal-error message rather than a placeholder.
-        CliCommand::SourceIps(args) => dispatch::run_source_ips(&mode, args).await,
         CliCommand::Timeline(args) => dispatch::run_timeline(&mode, args).await,
         CliCommand::Patterns(args) => dispatch::run_patterns(&mode, args).await,
-        CliCommand::IngestRate(args) => dispatch::run_ingest_rate(&mode, args).await,
-        CliCommand::Sig(sig) => match sig {
-            SigCommand::List(args) => dispatch::run_sig_list(&mode, args).await,
-            SigCommand::Ack(args) => dispatch::run_sig_ack(&mode, args).await,
-            SigCommand::Unack(args) => dispatch::run_sig_unack(&mode, args).await,
-        },
-        CliCommand::Notify(notify) => match notify {
-            NotifyCommand::Recent(args) => dispatch::run_notify_recent(&mode, args).await,
-            NotifyCommand::Test(args) => dispatch::run_notify_test(&mode, args).await,
+        CliCommand::Alerts(alerts) => match alerts {
+            AlertsCommand::Signatures(sig) => match sig {
+                SigCommand::List(args) => dispatch::run_sig_list(&mode, args).await,
+                SigCommand::Ack(args) => dispatch::run_sig_ack(&mode, args).await,
+                SigCommand::Unack(args) => dispatch::run_sig_unack(&mode, args).await,
+            },
+            AlertsCommand::Notifications(notify) => match notify {
+                NotifyCommand::Recent(args) => dispatch::run_notify_recent(&mode, args).await,
+                NotifyCommand::Test(args) => dispatch::run_notify_test(&mode, args).await,
+            },
         },
         // Surface parity gap closure (2026-05-22)
-        CliCommand::SilentHosts(args) => dispatch::run_silent_hosts(&mode, args).await,
-        CliCommand::ClockSkew(args) => dispatch::run_clock_skew(&mode, args).await,
         CliCommand::Anomalies(args) => dispatch::run_anomalies(&mode, args).await,
         CliCommand::Compare(args) => dispatch::run_compare(&mode, args).await,
         CliCommand::Apps(args) => dispatch::run_apps(&mode, args).await,
         // Heartbeat fleet state parity (cxih.4)
-        CliCommand::HostState(args) => dispatch::run_host_state(&mode, args).await,
-        CliCommand::FleetState(args) => dispatch::run_fleet_state(&mode, args).await,
         CliCommand::CorrelateState(args) => dispatch::run_correlate_state(&mode, args).await,
         CliCommand::TopicCorrelate(args) => dispatch::run_topic_correlate(&mode, args).await,
         CliCommand::Entity(args) => dispatch::run_entity_lookup(&mode, args).await,
@@ -154,19 +186,14 @@ pub(crate) async fn run(mode: CliMode, command: CliCommand) -> Result<()> {
             GraphCommand::Status(args) => dispatch::run_graph_status(&mode, args).await,
             GraphCommand::Rebuild(args) => dispatch::run_graph_rebuild(&mode, args).await,
         },
-        CliCommand::Compose(_) | CliCommand::Service(_) | CliCommand::Setup(_) => {
+        CliCommand::Compose(_) | CliCommand::Setup(_) => {
             bail!(
-                "internal: compose/service/setup must be dispatched by main::run_cli before reaching cli::run()"
+                "internal: compose/setup must be dispatched by main::run_cli before reaching cli::run()"
             )
         }
         CliCommand::Config(_) => {
             bail!(
                 "internal: config commands must be dispatched by main::run_cli before reaching cli::run()"
-            )
-        }
-        CliCommand::Inventory(_) => {
-            bail!(
-                "internal: inventory commands must be dispatched by main::run_cli before reaching cli::run()"
             )
         }
         CliCommand::Complete(_) | CliCommand::Completions(_) => {

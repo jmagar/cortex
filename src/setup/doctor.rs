@@ -3,11 +3,11 @@ use std::path::Path;
 use std::process::Command;
 use std::time::Instant;
 
-use super::ai_watch::{run_ai_watch_service_setup, transcript_root_permissions_phase};
 use super::debug_wrapper::{check_debug_compose_content_phase, check_debug_wrapper_content_phase};
 use super::firstrun::filesystem_phase;
+use super::sessions_watch::{run_sessions_watch_service_setup, transcript_root_permissions_phase};
 use super::{
-    AiWatchServiceAction, PhaseTimer, SetupPhase, SetupReport, SetupReportInput, SetupStatus,
+    PhaseTimer, SessionsWatchServiceAction, SetupPhase, SetupReport, SetupReportInput, SetupStatus,
     check_file_phase, setup_report,
 };
 
@@ -48,11 +48,11 @@ pub async fn run_setup_doctor() -> io::Result<SetupReport> {
             "override uses production config (not the debug build override — expected in production)",
         ),
         transcript_root_permissions_phase(&user_home),
-        super::ai_watch::ai_index_timer_disabled_phase(),
+        super::sessions_watch::ai_index_timer_disabled_phase(),
     ];
 
     phases.extend(
-        run_ai_watch_service_setup(AiWatchServiceAction::Check)
+        run_sessions_watch_service_setup(SessionsWatchServiceAction::Check)
             .await?
             .phases,
     );

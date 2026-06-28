@@ -1,30 +1,18 @@
 use anyhow::{Result, anyhow, bail};
 
-use crate::cli::{
-    CliCommand, FileTailAddArgs, FileTailCommand, FileTailIdArgs, FileTailListArgs, suggest,
-};
+use crate::cli::{FileTailAddArgs, FileTailCommand, FileTailIdArgs, FileTailListArgs, suggest};
 
-pub(crate) fn parse_file_tail(args: &[String]) -> Result<CliCommand> {
+pub(crate) fn parse_file_tail_command(args: &[String]) -> Result<FileTailCommand> {
     let (command, rest) = args
         .split_first()
         .ok_or_else(|| anyhow!("file-tail subcommand is required"))?;
     match command.as_str() {
-        "list" => Ok(CliCommand::FileTail(FileTailCommand::List(parse_list(
-            rest,
-        )?))),
-        "status" => Ok(CliCommand::FileTail(FileTailCommand::Status(parse_list(
-            rest,
-        )?))),
-        "add" => Ok(CliCommand::FileTail(FileTailCommand::Add(parse_add(rest)?))),
-        "remove" => Ok(CliCommand::FileTail(FileTailCommand::Remove(parse_id(
-            rest,
-        )?))),
-        "enable" => Ok(CliCommand::FileTail(FileTailCommand::Enable(parse_id(
-            rest,
-        )?))),
-        "disable" => Ok(CliCommand::FileTail(FileTailCommand::Disable(parse_id(
-            rest,
-        )?))),
+        "list" => Ok(FileTailCommand::List(parse_list(rest)?)),
+        "status" => Ok(FileTailCommand::Status(parse_list(rest)?)),
+        "add" => Ok(FileTailCommand::Add(parse_add(rest)?)),
+        "remove" => Ok(FileTailCommand::Remove(parse_id(rest)?)),
+        "enable" => Ok(FileTailCommand::Enable(parse_id(rest)?)),
+        "disable" => Ok(FileTailCommand::Disable(parse_id(rest)?)),
         _ => bail!(
             "{}",
             suggest::unknown_command(

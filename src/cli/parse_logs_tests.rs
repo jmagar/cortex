@@ -25,13 +25,13 @@ fn parse_timeline_collects_bucket_group_and_filters() {
 }
 
 #[test]
-fn parse_source_ips_accepts_limit_and_offset() {
+fn parse_hosts_sources_accepts_limit_and_offset() {
     let args = strings(&["--limit", "10", "--offset=5"]);
 
-    let command = parse_source_ips(&args).unwrap();
+    let command = parse_hosts_sources(&args).unwrap();
 
     match command {
-        crate::cli::CliCommand::SourceIps(args) => {
+        crate::cli::CliCommand::Hosts(crate::cli::HostsCommand::Sources(args)) => {
             assert_eq!(args.limit, Some(10));
             assert_eq!(args.offset, Some(5));
         }
@@ -152,7 +152,7 @@ fn parse_search_tail_sessions_incident_and_correlate_cover_common_filters() {
     ]))
     .unwrap();
     match sessions {
-        crate::cli::CliCommand::Sessions(args) => {
+        crate::cli::CliCommand::Sessions(crate::cli::SessionsCommand::List(args)) => {
             assert_eq!(args.project.as_deref(), Some("/repo"));
             assert_eq!(args.tool.as_deref(), Some("Bash"));
             assert_eq!(args.limit, Some(4));
@@ -220,21 +220,21 @@ fn parse_log_commands_report_help_and_unknown_argument_errors() {
             "requires --reference-time",
         ),
         (
-            parse_source_ips,
+            parse_hosts_sources,
             vec!["--bogus"],
-            "unknown source-ips option",
+            "unknown hosts sources option",
         ),
         (parse_timeline, vec!["--bogus"], "unknown timeline option"),
         (parse_patterns, vec!["--bogus"], "unknown patterns option"),
-        (
-            parse_ingest_rate,
-            vec!["--host"],
-            "unknown ingest-rate option",
-        ),
     ] {
         let err = parser(&strings(&args)).unwrap_err().to_string();
         assert!(err.contains(expected), "expected {expected:?}, got {err:?}");
     }
+
+    let err = parse_ingest_rate_args(&strings(&["--host"]))
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("unknown ingest-rate option"), "got {err:?}");
 }
 
 #[test]
@@ -309,7 +309,7 @@ fn filter_and_sessions_normalize_relative_from() {
 
     // Equals form is normalized too.
     let sessions = parse_sessions(&strings(&["--since=1h"])).unwrap();
-    let crate::cli::CliCommand::Sessions(args) = sessions else {
+    let crate::cli::CliCommand::Sessions(crate::cli::SessionsCommand::List(args)) = sessions else {
         panic!("expected Sessions");
     };
     assert!(

@@ -1,5 +1,5 @@
 //! Aurora bordered summary panel. Use for terminal "done" output:
-//! db status, doctor summary, ai-watch overview.
+//! db status, doctor summary, sessions-watch overview.
 //!
 //! ```text
 //! ╭─ DB Status ──────╮

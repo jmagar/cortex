@@ -1,52 +1,12 @@
 use anyhow::{Result, anyhow, bail};
 
-use super::parse_admin::{parse_compose, parse_db, parse_service, parse_setup, parse_stats};
-use super::parse_ai::parse_ai;
-use super::parse_command_log::{parse_agent_command, parse_shell};
+use super::parse_admin::{parse_compose, parse_db, parse_setup, parse_stats};
 use super::parse_logs::{
-    parse_correlate, parse_errors, parse_filter, parse_hosts, parse_incident, parse_ingest_rate,
-    parse_patterns, parse_search, parse_sessions, parse_source_ips, parse_tail, parse_timeline,
+    parse_correlate, parse_errors, parse_filter, parse_hosts, parse_incident, parse_patterns,
+    parse_search, parse_tail, parse_timeline,
 };
+use super::parse_sessions::parse_sessions_command;
 use super::{CliCommand, commands, parse_config, suggest};
-
-pub(crate) const TOP_LEVEL_COMMANDS: &[&str] = &[
-    "search",
-    "filter",
-    "tail",
-    "errors",
-    "hosts",
-    "sessions",
-    "incident",
-    "ai",
-    "shell",
-    "agent-command",
-    "heartbeat",
-    "correlate",
-    "stats",
-    "compose",
-    "service",
-    "setup",
-    "db",
-    "config",
-    "inventory",
-    "source-ips",
-    "timeline",
-    "patterns",
-    "ingest-rate",
-    "sig",
-    "notify",
-    "silent-hosts",
-    "clock-skew",
-    "anomalies",
-    "compare",
-    "apps",
-    "host-state",
-    "fleet-state",
-    "correlate-state",
-    "topic-correlate",
-    "file-tail",
-    "completions",
-];
 
 pub(crate) fn parse_command(args: Vec<String>) -> Result<CliCommand> {
     let (command, rest) = args
@@ -58,83 +18,40 @@ pub(crate) fn parse_command(args: Vec<String>) -> Result<CliCommand> {
         "tail" => parse_tail(rest),
         "errors" => parse_errors(rest),
         "hosts" => parse_hosts(rest),
-        "sessions" => parse_sessions(rest),
+        "sessions" => parse_sessions_command(rest),
         "incident" => parse_incident(rest),
-        "ai" => parse_ai(rest),
-        "shell" => parse_shell(rest),
-        "agent-command" => parse_agent_command(rest),
         "heartbeat" => parse_heartbeat(rest),
         "correlate" => parse_correlate(rest),
+        "state" => commands::state::parse_state(rest),
+        "ingest" => commands::ingest::parse_ingest(rest),
         "stats" => parse_stats(rest),
         "compose" => parse_compose(rest),
-        "service" => parse_service(rest),
         "setup" => parse_setup(rest),
         "db" => parse_db(rest),
         "config" => parse_config::parse_config(rest),
-        "inventory" => parse_inventory(rest),
-        "source-ips" => parse_source_ips(rest),
         "timeline" => parse_timeline(rest),
         "patterns" => parse_patterns(rest),
-        "ingest-rate" => parse_ingest_rate(rest),
         "entity" => commands::graph::parse_entity(rest),
         "graph" => commands::graph::parse_graph(rest),
-        "sig" => commands::sig::parse_sig(rest),
-        "notify" => commands::notify::parse_notify(rest),
+        "alerts" => commands::alerts::parse_alerts(rest),
         // Surface parity gap closure (2026-05-22)
-        "silent-hosts" => commands::silent_hosts::parse_silent_hosts(rest),
-        "clock-skew" => commands::clock_skew::parse_clock_skew(rest),
         "anomalies" => commands::anomalies::parse_anomalies(rest),
         "compare" => commands::compare::parse_compare(rest),
         "apps" => commands::apps::parse_apps(rest),
         // Heartbeat fleet state parity (cxih.4)
-        "host-state" => commands::host_state::parse_host_state(rest),
-        "fleet-state" => commands::fleet_state::parse_fleet_state(rest),
         "correlate-state" => commands::correlate_state::parse_correlate_state(rest),
         "topic-correlate" => commands::topic_correlate::parse_topic_correlate(rest),
-        "file-tail" => commands::file_tails::parse_file_tail(rest),
         "__complete" => Ok(CliCommand::Complete(rest.to_vec())),
         "completions" => Ok(CliCommand::Completions(rest.to_vec())),
         _ => bail!(
             "{}",
-            suggest::unknown_command("CLI command", command, TOP_LEVEL_COMMANDS)
+            suggest::unknown_command(
+                "CLI command",
+                command,
+                cortex::surface_registry::TOP_LEVEL_COMMANDS
+            )
         ),
     }
-}
-
-fn parse_inventory(args: &[String]) -> Result<CliCommand> {
-    let (command, rest) = args
-        .split_first()
-        .ok_or_else(|| anyhow!("inventory subcommand is required: refresh or status"))?;
-    if matches!(command.as_str(), "--help" | "-h" | "help") {
-        bail!("{}", inventory_usage());
-    }
-    let mut json = false;
-    for arg in rest {
-        match arg.as_str() {
-            "--json" => json = true,
-            "--help" | "-h" => bail!("{}", inventory_usage()),
-            other => bail!(
-                "{}",
-                suggest::unknown_option("inventory", other, &["--json"])
-            ),
-        }
-    }
-    match command.as_str() {
-        "refresh" => Ok(CliCommand::Inventory(super::InventoryCommand::Refresh(
-            super::InventoryArgs { json },
-        ))),
-        "status" => Ok(CliCommand::Inventory(super::InventoryCommand::Status(
-            super::InventoryArgs { json },
-        ))),
-        _ => bail!(
-            "{}",
-            suggest::unknown_command("inventory subcommand", command, &["refresh", "status"])
-        ),
-    }
-}
-
-fn inventory_usage() -> &'static str {
-    "Usage: cortex inventory refresh [--json]\n       cortex inventory status [--json]"
 }
 
 fn parse_heartbeat(args: &[String]) -> Result<CliCommand> {

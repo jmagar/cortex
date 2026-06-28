@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-06-27
+
+### Changed
+
+- **Breaking CLI consolidation:** replace top-level `cortex source-ips` and
+  `cortex silent-hosts` with `cortex hosts sources` and `cortex hosts silent`.
+- **Breaking CLI consolidation:** replace `cortex service logs SERVICE` with
+  `cortex compose logs SERVICE`, keeping stack-wide Compose logs under the same
+  `compose logs` command.
+- **Breaking CLI consolidation:** move deployment workflows under setup as
+  `cortex setup deploy preflight|local|remote|agent`; top-level
+  `cortex deploy ...` is no longer accepted.
+- **Breaking CLI consolidation:** move host/fleet/clock state under
+  `cortex state host|fleet|clock-skew` and ingest throughput under
+  `cortex stats ingest-rate`.
+- **Breaking CLI consolidation:** move error signature and notification
+  commands under `cortex alerts signatures|notifications`.
+- **Breaking CLI consolidation:** move shell history, agent-command spool,
+  inventory cache, and file-tail management under `cortex ingest ...`; add
+  read-only `cortex ingest syslog status` and
+  `cortex ingest docker status|sources`.
+
+## [2.0.0] - 2026-06-27
+
 ## [1.34.6] - 2026-06-27
 
 ## [1.34.5] - 2026-06-27

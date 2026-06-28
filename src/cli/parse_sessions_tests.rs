@@ -1,33 +1,33 @@
 use super::*;
 
 #[test]
-fn parse_ai_search_requires_query() {
+fn parse_sessions_search_requires_query() {
     let args = strings(&["--project", "/repo"]);
 
-    let err = parse_ai_search(&args).unwrap_err().to_string();
+    let err = parse_sessions_search(&args).unwrap_err().to_string();
 
     assert!(err.contains("requires a query"));
 }
 
 #[test]
-fn parse_ai_watch_rejects_zero_debounce() {
+fn parse_sessions_watch_rejects_zero_debounce() {
     let args = strings(&["--debounce-ms", "0"]);
 
-    let err = parse_ai_watch(&args).unwrap_err().to_string();
+    let err = parse_sessions_watch(&args).unwrap_err().to_string();
 
     assert!(err.contains("expects a positive integer"));
 }
 
 #[test]
-fn parse_ai_blocks_accepts_limit_and_detail() {
+fn parse_sessions_blocks_accepts_limit_and_detail() {
     let args = strings(&["--limit", "12", "--detail", "full", "--json"]);
 
-    let command = parse_ai_blocks(&args).unwrap();
+    let command = parse_sessions_blocks(&args).unwrap();
 
     match command {
-        crate::cli::CliCommand::Ai(crate::cli::AiCommand::Blocks(args)) => {
+        crate::cli::CliCommand::Sessions(crate::cli::SessionsCommand::Blocks(args)) => {
             assert_eq!(args.limit, Some(12));
-            assert_eq!(args.detail, crate::cli::AiOutputDetail::Full);
+            assert_eq!(args.detail, crate::cli::SessionsOutputDetail::Full);
             assert!(args.json);
         }
         other => panic!("unexpected command: {other:?}"),
@@ -35,18 +35,18 @@ fn parse_ai_blocks_accepts_limit_and_detail() {
 }
 
 #[test]
-fn parse_ai_dispatches_status_and_smoke_watch_output_flags() {
-    let status = parse_ai(&strings(&["watch-status", "--json"])).unwrap();
+fn parse_sessions_dispatches_status_and_smoke_watch_output_flags() {
+    let status = parse_sessions_command(&strings(&["watch-status", "--json"])).unwrap();
     match status {
-        crate::cli::CliCommand::Ai(crate::cli::AiCommand::WatchStatus(args)) => {
+        crate::cli::CliCommand::Sessions(crate::cli::SessionsCommand::WatchStatus(args)) => {
             assert!(args.json);
         }
         other => panic!("unexpected command: {other:?}"),
     }
 
-    let smoke = parse_ai(&strings(&["smoke-watch", "--json"])).unwrap();
+    let smoke = parse_sessions_command(&strings(&["smoke-watch", "--json"])).unwrap();
     match smoke {
-        crate::cli::CliCommand::Ai(crate::cli::AiCommand::SmokeWatch(args)) => {
+        crate::cli::CliCommand::Sessions(crate::cli::SessionsCommand::SmokeWatch(args)) => {
             assert!(args.json);
         }
         other => panic!("unexpected command: {other:?}"),
@@ -54,8 +54,8 @@ fn parse_ai_dispatches_status_and_smoke_watch_output_flags() {
 }
 
 #[test]
-fn parse_ai_search_abuse_and_correlate_accept_equals_forms() {
-    let search = parse_ai_search(&strings(&[
+fn parse_sessions_search_abuse_and_correlate_accept_equals_forms() {
+    let search = parse_sessions_search(&strings(&[
         "--project=/repo",
         "--tool=Edit",
         "--since=2026-01-01T00:00:00Z",
@@ -67,7 +67,7 @@ fn parse_ai_search_abuse_and_correlate_accept_equals_forms() {
     ]))
     .unwrap();
     match search {
-        crate::cli::CliCommand::Ai(crate::cli::AiCommand::Search(args)) => {
+        crate::cli::CliCommand::Sessions(crate::cli::SessionsCommand::Search(args)) => {
             assert_eq!(args.query, "disk full");
             assert_eq!(args.project.as_deref(), Some("/repo"));
             assert_eq!(args.tool.as_deref(), Some("Edit"));
@@ -77,7 +77,7 @@ fn parse_ai_search_abuse_and_correlate_accept_equals_forms() {
         other => panic!("unexpected command: {other:?}"),
     }
 
-    let abuse = parse_ai_abuse(&strings(&[
+    let abuse = parse_sessions_abuse(&strings(&[
         "--project=/repo",
         "--tool=Bash",
         "--since=2026-01-01T00:00:00Z",
@@ -91,7 +91,7 @@ fn parse_ai_search_abuse_and_correlate_accept_equals_forms() {
     ]))
     .unwrap();
     match abuse {
-        crate::cli::CliCommand::Ai(crate::cli::AiCommand::Abuse(args)) => {
+        crate::cli::CliCommand::Sessions(crate::cli::SessionsCommand::Abuse(args)) => {
             assert_eq!(args.before, Some(2));
             assert_eq!(args.after, Some(3));
             assert_eq!(args.terms, vec!["panic", "timeout"]);
@@ -99,7 +99,7 @@ fn parse_ai_search_abuse_and_correlate_accept_equals_forms() {
         other => panic!("unexpected command: {other:?}"),
     }
 
-    let correlate = parse_ai_correlate(&strings(&[
+    let correlate = parse_sessions_correlate(&strings(&[
         "--project=/repo",
         "--tool=Read",
         "--session-id=s1",
@@ -117,7 +117,7 @@ fn parse_ai_search_abuse_and_correlate_accept_equals_forms() {
     ]))
     .unwrap();
     match correlate {
-        crate::cli::CliCommand::Ai(crate::cli::AiCommand::Correlate(args)) => {
+        crate::cli::CliCommand::Sessions(crate::cli::SessionsCommand::Correlate(args)) => {
             assert_eq!(args.session_id.as_deref(), Some("s1"));
             assert_eq!(args.window_minutes, Some(15));
             assert_eq!(args.events_per_anchor, Some(4));
@@ -128,11 +128,11 @@ fn parse_ai_search_abuse_and_correlate_accept_equals_forms() {
 }
 
 #[test]
-fn parse_ai_inventory_and_indexing_commands_accept_flags() {
+fn parse_sessions_inventory_and_indexing_commands_accept_flags() {
     let context =
-        parse_ai_context(&strings(&["--project=/repo", "--tool=Edit", "--limit=3"])).unwrap();
+        parse_sessions_context(&strings(&["--project=/repo", "--tool=Edit", "--limit=3"])).unwrap();
     match context {
-        crate::cli::CliCommand::Ai(crate::cli::AiCommand::Context(args)) => {
+        crate::cli::CliCommand::Sessions(crate::cli::SessionsCommand::Context(args)) => {
             assert_eq!(args.project, "/repo");
             assert_eq!(args.tool.as_deref(), Some("Edit"));
             assert_eq!(args.limit, Some(3));
@@ -140,7 +140,7 @@ fn parse_ai_inventory_and_indexing_commands_accept_flags() {
         other => panic!("unexpected command: {other:?}"),
     }
 
-    let tools = parse_ai_tools(&strings(&[
+    let tools = parse_sessions_tools(&strings(&[
         "--project=/repo",
         "--since=2026-01-01T00:00:00Z",
         "--until=2026-01-02T00:00:00Z",
@@ -148,35 +148,35 @@ fn parse_ai_inventory_and_indexing_commands_accept_flags() {
     ]))
     .unwrap();
     match tools {
-        crate::cli::CliCommand::Ai(crate::cli::AiCommand::Tools(args)) => {
+        crate::cli::CliCommand::Sessions(crate::cli::SessionsCommand::Tools(args)) => {
             assert_eq!(args.project.as_deref(), Some("/repo"));
             assert!(args.json);
         }
         other => panic!("unexpected command: {other:?}"),
     }
 
-    let projects = parse_ai_projects(&strings(&[
+    let projects = parse_sessions_projects(&strings(&[
         "--tool=Write",
         "--since=2026-01-01T00:00:00Z",
         "--until=2026-01-02T00:00:00Z",
     ]))
     .unwrap();
     match projects {
-        crate::cli::CliCommand::Ai(crate::cli::AiCommand::Projects(args)) => {
+        crate::cli::CliCommand::Sessions(crate::cli::SessionsCommand::Projects(args)) => {
             assert_eq!(args.tool.as_deref(), Some("Write"));
             assert_eq!(args.until.as_deref(), Some("2026-01-02T00:00:00+00:00"));
         }
         other => panic!("unexpected command: {other:?}"),
     }
 
-    let index = parse_ai_index(&strings(&[
+    let index = parse_sessions_index(&strings(&[
         "--path=/tmp/transcripts",
         "--since=2026-01-01T00:00:00Z",
         "--force",
     ]))
     .unwrap();
     match index {
-        crate::cli::CliCommand::Ai(crate::cli::AiCommand::Index(args)) => {
+        crate::cli::CliCommand::Sessions(crate::cli::SessionsCommand::Index(args)) => {
             assert_eq!(args.path.as_deref(), Some("/tmp/transcripts"));
             assert_eq!(args.since.as_deref(), Some("2026-01-01T00:00:00+00:00"));
             assert!(args.force);
@@ -184,14 +184,14 @@ fn parse_ai_inventory_and_indexing_commands_accept_flags() {
         other => panic!("unexpected command: {other:?}"),
     }
 
-    let add = parse_ai_add(&strings(&[
+    let add = parse_sessions_add(&strings(&[
         "--file=/tmp/session.jsonl",
         "--force",
         "--json",
     ]))
     .unwrap();
     match add {
-        crate::cli::CliCommand::Ai(crate::cli::AiCommand::Add(args)) => {
+        crate::cli::CliCommand::Sessions(crate::cli::SessionsCommand::Add(args)) => {
             assert_eq!(args.file, "/tmp/session.jsonl");
             assert!(args.force);
             assert!(args.json);
@@ -201,8 +201,8 @@ fn parse_ai_inventory_and_indexing_commands_accept_flags() {
 }
 
 #[test]
-fn parse_ai_watch_checkpoint_error_and_doctor_commands_accept_flags() {
-    let watch = parse_ai_watch(&strings(&[
+fn parse_sessions_watch_checkpoint_error_and_doctor_commands_accept_flags() {
+    let watch = parse_sessions_watch(&strings(&[
         "--path=/tmp/sessions",
         "--debounce-ms=25",
         "--settle-ms=30",
@@ -212,7 +212,7 @@ fn parse_ai_watch_checkpoint_error_and_doctor_commands_accept_flags() {
     ]))
     .unwrap();
     match watch {
-        crate::cli::CliCommand::Ai(crate::cli::AiCommand::Watch(args)) => {
+        crate::cli::CliCommand::Sessions(crate::cli::SessionsCommand::Watch(args)) => {
             assert_eq!(args.path.as_deref(), Some("/tmp/sessions"));
             assert_eq!(args.debounce_ms, 25);
             assert_eq!(args.settle_ms, 30);
@@ -223,9 +223,9 @@ fn parse_ai_watch_checkpoint_error_and_doctor_commands_accept_flags() {
     }
 
     let checkpoints =
-        parse_ai_checkpoints(&strings(&["--errors", "--missing", "--limit=11"])).unwrap();
+        parse_sessions_checkpoints(&strings(&["--errors", "--missing", "--limit=11"])).unwrap();
     match checkpoints {
-        crate::cli::CliCommand::Ai(crate::cli::AiCommand::Checkpoints(args)) => {
+        crate::cli::CliCommand::Sessions(crate::cli::SessionsCommand::Checkpoints(args)) => {
             assert!(args.errors_only);
             assert!(args.missing_only);
             assert_eq!(args.limit, Some(11));
@@ -233,9 +233,9 @@ fn parse_ai_watch_checkpoint_error_and_doctor_commands_accept_flags() {
         other => panic!("unexpected command: {other:?}"),
     }
 
-    let errors = parse_ai_errors(&strings(&["--limit=6", "--json"])).unwrap();
+    let errors = parse_sessions_errors(&strings(&["--limit=6", "--json"])).unwrap();
     match errors {
-        crate::cli::CliCommand::Ai(crate::cli::AiCommand::Errors(args)) => {
+        crate::cli::CliCommand::Sessions(crate::cli::SessionsCommand::Errors(args)) => {
             assert_eq!(args.limit, Some(6));
             assert!(args.json);
         }
@@ -243,9 +243,10 @@ fn parse_ai_watch_checkpoint_error_and_doctor_commands_accept_flags() {
     }
 
     let prune =
-        parse_ai_prune_checkpoints(&strings(&["--missing", "--dry-run", "--limit=2"])).unwrap();
+        parse_sessions_prune_checkpoints(&strings(&["--missing", "--dry-run", "--limit=2"]))
+            .unwrap();
     match prune {
-        crate::cli::CliCommand::Ai(crate::cli::AiCommand::PruneCheckpoints(args)) => {
+        crate::cli::CliCommand::Sessions(crate::cli::SessionsCommand::PruneCheckpoints(args)) => {
             assert!(args.missing_only);
             assert!(args.dry_run);
             assert_eq!(args.limit, Some(2));
@@ -253,9 +254,9 @@ fn parse_ai_watch_checkpoint_error_and_doctor_commands_accept_flags() {
         other => panic!("unexpected command: {other:?}"),
     }
 
-    let doctor = parse_ai_doctor(&strings(&["--strict-permissions", "--json"])).unwrap();
+    let doctor = parse_sessions_doctor(&strings(&["--strict-permissions", "--json"])).unwrap();
     match doctor {
-        crate::cli::CliCommand::Ai(crate::cli::AiCommand::Doctor(args)) => {
+        crate::cli::CliCommand::Sessions(crate::cli::SessionsCommand::Doctor(args)) => {
             assert!(args.strict_permissions);
             assert!(args.json);
         }
@@ -264,18 +265,18 @@ fn parse_ai_watch_checkpoint_error_and_doctor_commands_accept_flags() {
 }
 
 #[test]
-fn parse_ai_reports_errors_for_missing_required_or_unexpected_args() {
+fn parse_sessions_reports_errors_for_missing_required_or_unexpected_args() {
     for (subcommand, parser, args, expected) in [
         (
             "context",
-            parse_ai_context as fn(&[String]) -> anyhow::Result<crate::cli::CliCommand>,
+            parse_sessions_context as fn(&[String]) -> anyhow::Result<crate::cli::CliCommand>,
             vec!["--tool=Edit"],
             "requires --project",
         ),
-        ("add", parse_ai_add, vec!["--json"], "requires --file"),
+        ("add", parse_sessions_add, vec!["--json"], "requires --file"),
         (
             "prune",
-            parse_ai_prune_checkpoints,
+            parse_sessions_prune_checkpoints,
             vec!["--dry-run"],
             "requires --missing",
         ),
@@ -289,19 +290,19 @@ fn parse_ai_reports_errors_for_missing_required_or_unexpected_args() {
 
     for (parser, args, expected) in [
         (
-            parse_ai_abuse as fn(&[String]) -> anyhow::Result<crate::cli::CliCommand>,
+            parse_sessions_abuse as fn(&[String]) -> anyhow::Result<crate::cli::CliCommand>,
             vec!["extra"],
-            "unexpected ai abuse argument",
+            "unexpected sessions abuse argument",
         ),
         (
-            parse_ai_correlate,
+            parse_sessions_correlate,
             vec!["extra"],
-            "unexpected ai correlate argument",
+            "unexpected sessions correlate argument",
         ),
         (
-            parse_ai_context,
+            parse_sessions_context,
             vec!["/repo", "extra"],
-            "unexpected ai context argument",
+            "unexpected sessions context argument",
         ),
     ] {
         let err = parser(&strings(&args)).unwrap_err().to_string();
@@ -310,8 +311,8 @@ fn parse_ai_reports_errors_for_missing_required_or_unexpected_args() {
 }
 
 #[test]
-fn parse_ai_unknown_subcommand_suggests_close_match() {
-    let err = parse_ai(&strings(&["serach", "error"]))
+fn parse_sessions_unknown_subcommand_suggests_close_match() {
+    let err = parse_sessions_command(&strings(&["serach", "error"]))
         .unwrap_err()
         .to_string();
 

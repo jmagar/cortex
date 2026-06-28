@@ -28,6 +28,7 @@ pub mod receiver;
 pub mod runtime;
 pub mod scanner;
 pub mod setup;
+pub mod surface_registry;
 pub mod web_app;
 
 pub(crate) mod db;

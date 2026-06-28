@@ -18,18 +18,19 @@ use super::{
     format_file_tail_response, http_or_cancel_with, run_ai_abuse, run_ai_add, run_ai_blocks,
     run_ai_checkpoints, run_ai_context, run_ai_correlate, run_ai_doctor, run_ai_errors,
     run_ai_index, run_ai_projects, run_ai_prune_checkpoints, run_ai_search, run_ai_smoke_watch,
-    run_ai_tools, run_ai_watch, run_ai_watch_status, run_correlate, run_db_backup,
-    run_db_checkpoint, run_db_integrity, run_db_status, run_db_vacuum, run_errors, run_file_tail,
-    run_hosts, run_search, run_sessions, run_stats, run_tail,
+    run_ai_tools, run_correlate, run_db_backup, run_db_checkpoint, run_db_integrity, run_db_status,
+    run_db_vacuum, run_errors, run_file_tail, run_hosts, run_search, run_sessions,
+    run_sessions_watch, run_sessions_watch_status, run_stats, run_tail,
 };
 use crate::cli::http_client::HttpClient;
 use crate::cli::{
-    AiAbuseArgs, AiAddArgs, AiBlocksArgs, AiCheckpointsArgs, AiContextArgs, AiCorrelateArgs,
-    AiDoctorArgs, AiErrorsArgs, AiIndexArgs, AiListArgs, AiPruneCheckpointsArgs, AiSearchArgs,
-    AiWatchArgs, CliMode, CorrelateArgs, DbBackupArgs, DbCheckpointArgs, DbIntegrityArgs,
-    DbStatusArgs, DbVacuumArgs, EntityArgs, FileTailCommand, FileTailListArgs, FilterArgs,
-    GraphAroundArgs, GraphEvidenceArgs, GraphExplainArgs, IngestRateArgs, OutputArgs, PatternsArgs,
-    SearchArgs, SessionsArgs, SigAckArgs, SigListArgs, SigUnackArgs, SourceIpsArgs, TailArgs,
+    CliMode, CorrelateArgs, DbBackupArgs, DbCheckpointArgs, DbIntegrityArgs, DbStatusArgs,
+    DbVacuumArgs, EntityArgs, FileTailCommand, FileTailListArgs, FilterArgs, GraphAroundArgs,
+    GraphEvidenceArgs, GraphExplainArgs, IngestRateArgs, OutputArgs, PatternsArgs, SearchArgs,
+    SessionsAbuseArgs, SessionsAddArgs, SessionsArgs, SessionsBlocksArgs, SessionsCheckpointsArgs,
+    SessionsContextArgs, SessionsCorrelateArgs, SessionsDoctorArgs, SessionsErrorsArgs,
+    SessionsIndexArgs, SessionsListArgs, SessionsPruneCheckpointsArgs, SessionsSearchArgs,
+    SessionsWatchArgs, SigAckArgs, SigListArgs, SigUnackArgs, SourceIpsArgs, TailArgs,
     TimeRangeArgs, TimelineArgs,
 };
 use anyhow::{Result, bail};
@@ -591,7 +592,7 @@ async fn run_search_via_dispatch_can_be_cancelled() {
 
 #[test]
 fn ai_search_args_into_request_snapshot() {
-    let args = AiSearchArgs {
+    let args = SessionsSearchArgs {
         query: "needle".into(),
         project: Some("/p".into()),
         tool: Some("claude".into()),
@@ -609,7 +610,7 @@ fn ai_search_args_into_request_snapshot() {
 
 #[test]
 fn ai_abuse_args_into_request_snapshot() {
-    let args = AiAbuseArgs {
+    let args = SessionsAbuseArgs {
         project: Some("/p".into()),
         tool: Some("claude".into()),
         since: None,
@@ -629,7 +630,7 @@ fn ai_abuse_args_into_request_snapshot() {
 
 #[test]
 fn ai_correlate_args_into_request_snapshot() {
-    let args = AiCorrelateArgs {
+    let args = SessionsCorrelateArgs {
         project: Some("/p".into()),
         tool: Some("claude".into()),
         session_id: Some("s1".into()),
@@ -655,7 +656,7 @@ fn ai_correlate_args_into_request_snapshot() {
 
 #[test]
 fn ai_blocks_args_into_request_snapshot() {
-    let args = AiBlocksArgs {
+    let args = SessionsBlocksArgs {
         project: Some("/p".into()),
         tool: None,
         since: None,
@@ -672,7 +673,7 @@ fn ai_blocks_args_into_request_snapshot() {
 
 #[test]
 fn ai_context_args_into_request_snapshot() {
-    let args = AiContextArgs {
+    let args = SessionsContextArgs {
         project: "/p".into(),
         tool: Some("claude".into()),
         limit: Some(10),
@@ -687,7 +688,7 @@ fn ai_context_args_into_request_snapshot() {
 
 #[test]
 fn ai_tools_args_into_request_snapshot() {
-    let args = AiListArgs {
+    let args = SessionsListArgs {
         project: Some("/p".into()),
         tool: None,
         since: Some("2026-01-01T00:00:00Z".into()),
@@ -703,7 +704,7 @@ fn ai_tools_args_into_request_snapshot() {
 
 #[test]
 fn ai_projects_args_into_request_snapshot() {
-    let args = AiListArgs {
+    let args = SessionsListArgs {
         project: None,
         tool: Some("claude".into()),
         since: None,
@@ -719,7 +720,7 @@ fn ai_projects_args_into_request_snapshot() {
 
 #[test]
 fn ai_checkpoints_args_into_request_snapshot() {
-    let args = AiCheckpointsArgs {
+    let args = SessionsCheckpointsArgs {
         errors_only: true,
         missing_only: false,
         limit: Some(20),
@@ -734,7 +735,7 @@ fn ai_checkpoints_args_into_request_snapshot() {
 
 #[test]
 fn ai_errors_args_into_request_snapshot() {
-    let args = AiErrorsArgs {
+    let args = SessionsErrorsArgs {
         limit: Some(5),
         json: false,
     };
@@ -747,7 +748,7 @@ fn ai_errors_args_into_request_snapshot() {
 
 #[test]
 fn ai_prune_checkpoints_args_into_request_snapshot() {
-    let args = AiPruneCheckpointsArgs {
+    let args = SessionsPruneCheckpointsArgs {
         missing_only: true,
         dry_run: true,
         limit: Some(100),
@@ -777,28 +778,28 @@ fn empty_search_sessions_body() -> serde_json::Value {
 async fn run_ai_search_http_sends_exactly_one_request() {
     let (server, mode) = http_mode().await;
     Mock::given(method("GET"))
-        .and(path("/api/ai/search"))
+        .and(path("/api/sessions/search"))
         .respond_with(ResponseTemplate::new(200).set_body_json(empty_search_sessions_body()))
         .expect(1)
         .mount(&server)
         .await;
     run_ai_search(
         &mode,
-        AiSearchArgs {
+        SessionsSearchArgs {
             query: "q".into(),
             json: true,
             ..Default::default()
         },
     )
     .await
-    .expect("ai search ok");
+    .expect("sessions search ok");
 }
 
 #[tokio::test]
 async fn run_ai_abuse_http_sends_exactly_one_request() {
     let (server, mode) = http_mode().await;
     Mock::given(method("GET"))
-        .and(path("/api/ai/abuse"))
+        .and(path("/api/sessions/abuse"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "terms": [],
             "candidate_rows": 0,
@@ -812,21 +813,21 @@ async fn run_ai_abuse_http_sends_exactly_one_request() {
         .await;
     run_ai_abuse(
         &mode,
-        AiAbuseArgs {
+        SessionsAbuseArgs {
             terms: vec!["bad".into()],
             json: true,
             ..Default::default()
         },
     )
     .await
-    .expect("ai abuse ok");
+    .expect("sessions abuse ok");
 }
 
 #[tokio::test]
 async fn run_ai_correlate_http_sends_exactly_one_request() {
     let (server, mode) = http_mode().await;
     Mock::given(method("GET"))
-        .and(path("/api/ai/correlate"))
+        .and(path("/api/sessions/correlate"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "window_minutes": 15,
             "severity_min": "info",
@@ -843,20 +844,20 @@ async fn run_ai_correlate_http_sends_exactly_one_request() {
         .await;
     run_ai_correlate(
         &mode,
-        AiCorrelateArgs {
+        SessionsCorrelateArgs {
             json: true,
             ..Default::default()
         },
     )
     .await
-    .expect("ai correlate ok");
+    .expect("sessions correlate ok");
 }
 
 #[tokio::test]
 async fn run_ai_blocks_http_sends_exactly_one_request() {
     let (server, mode) = http_mode().await;
     Mock::given(method("GET"))
-        .and(path("/api/ai/blocks"))
+        .and(path("/api/sessions/blocks"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "total_blocks": 0,
             "truncated": false,
@@ -867,20 +868,20 @@ async fn run_ai_blocks_http_sends_exactly_one_request() {
         .await;
     run_ai_blocks(
         &mode,
-        AiBlocksArgs {
+        SessionsBlocksArgs {
             json: true,
             ..Default::default()
         },
     )
     .await
-    .expect("ai blocks ok");
+    .expect("sessions blocks ok");
 }
 
 #[tokio::test]
 async fn run_ai_context_http_sends_exactly_one_request() {
     let (server, mode) = http_mode().await;
     Mock::given(method("GET"))
-        .and(path("/api/ai/context"))
+        .and(path("/api/sessions/context"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "project": "/p",
             "tools": [],
@@ -897,21 +898,21 @@ async fn run_ai_context_http_sends_exactly_one_request() {
         .await;
     run_ai_context(
         &mode,
-        AiContextArgs {
+        SessionsContextArgs {
             project: "/p".into(),
             json: true,
             ..Default::default()
         },
     )
     .await
-    .expect("ai context ok");
+    .expect("sessions context ok");
 }
 
 #[tokio::test]
 async fn run_ai_tools_http_sends_exactly_one_request() {
     let (server, mode) = http_mode().await;
     Mock::given(method("GET"))
-        .and(path("/api/ai/tools"))
+        .and(path("/api/sessions/tools"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "total_tools": 0,
             "truncated": false,
@@ -922,20 +923,20 @@ async fn run_ai_tools_http_sends_exactly_one_request() {
         .await;
     run_ai_tools(
         &mode,
-        AiListArgs {
+        SessionsListArgs {
             json: true,
             ..Default::default()
         },
     )
     .await
-    .expect("ai tools ok");
+    .expect("sessions tools ok");
 }
 
 #[tokio::test]
 async fn run_ai_projects_http_sends_exactly_one_request() {
     let (server, mode) = http_mode().await;
     Mock::given(method("GET"))
-        .and(path("/api/ai/projects"))
+        .and(path("/api/sessions/projects"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "total_projects": 0,
             "truncated": false,
@@ -946,60 +947,60 @@ async fn run_ai_projects_http_sends_exactly_one_request() {
         .await;
     run_ai_projects(
         &mode,
-        AiListArgs {
+        SessionsListArgs {
             json: true,
             ..Default::default()
         },
     )
     .await
-    .expect("ai projects ok");
+    .expect("sessions projects ok");
 }
 
 #[tokio::test]
 async fn run_ai_checkpoints_http_sends_exactly_one_request() {
     let (server, mode) = http_mode().await;
     Mock::given(method("GET"))
-        .and(path("/api/ai/checkpoints"))
+        .and(path("/api/sessions/checkpoints"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
         .expect(1)
         .mount(&server)
         .await;
     run_ai_checkpoints(
         &mode,
-        AiCheckpointsArgs {
+        SessionsCheckpointsArgs {
             json: true,
             ..Default::default()
         },
     )
     .await
-    .expect("ai checkpoints ok");
+    .expect("sessions checkpoints ok");
 }
 
 #[tokio::test]
 async fn run_ai_errors_http_sends_exactly_one_request() {
     let (server, mode) = http_mode().await;
     Mock::given(method("GET"))
-        .and(path("/api/ai/errors"))
+        .and(path("/api/sessions/errors"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
         .expect(1)
         .mount(&server)
         .await;
     run_ai_errors(
         &mode,
-        AiErrorsArgs {
+        SessionsErrorsArgs {
             json: true,
             ..Default::default()
         },
     )
     .await
-    .expect("ai errors ok");
+    .expect("sessions errors ok");
 }
 
 #[tokio::test]
 async fn run_ai_prune_checkpoints_http_sends_exactly_one_request() {
     let (server, mode) = http_mode().await;
     Mock::given(method("POST"))
-        .and(path("/api/ai/prune-checkpoints"))
+        .and(path("/api/sessions/prune-checkpoints"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "matched": 0,
             "pruned": 0,
@@ -1011,14 +1012,14 @@ async fn run_ai_prune_checkpoints_http_sends_exactly_one_request() {
         .await;
     run_ai_prune_checkpoints(
         &mode,
-        AiPruneCheckpointsArgs {
+        SessionsPruneCheckpointsArgs {
             dry_run: true,
             json: true,
             ..Default::default()
         },
     )
     .await
-    .expect("ai prune-checkpoints ok");
+    .expect("sessions prune-checkpoints ok");
 }
 
 // ─── LOCAL-only HTTP-mode error tests (6) ───────────────────────────────────
@@ -1036,12 +1037,12 @@ async fn http_only_mode() -> CliMode {
 #[tokio::test]
 async fn run_ai_index_http_bails_with_inline_message() {
     let mode = http_only_mode().await;
-    let err = run_ai_index(&mode, AiIndexArgs::default())
+    let err = run_ai_index(&mode, SessionsIndexArgs::default())
         .await
         .expect_err("must bail in http mode");
     assert_eq!(
         err.to_string(),
-        "ai index reads host ~/.claude/projects; omit --http"
+        "sessions index reads host ~/.claude/projects; omit --http"
     );
 }
 
@@ -1050,7 +1051,7 @@ async fn run_ai_add_http_bails_with_inline_message() {
     let mode = http_only_mode().await;
     let err = run_ai_add(
         &mode,
-        AiAddArgs {
+        SessionsAddArgs {
             file: "/tmp/x".into(),
             ..Default::default()
         },
@@ -1059,19 +1060,19 @@ async fn run_ai_add_http_bails_with_inline_message() {
     .expect_err("must bail in http mode");
     assert_eq!(
         err.to_string(),
-        "ai add reads a host file path; omit --http"
+        "sessions add reads a host file path; omit --http"
     );
 }
 
 #[tokio::test]
 async fn run_ai_doctor_http_bails_with_inline_message() {
     let mode = http_only_mode().await;
-    let err = run_ai_doctor(&mode, AiDoctorArgs::default())
+    let err = run_ai_doctor(&mode, SessionsDoctorArgs::default())
         .await
         .expect_err("must bail in http mode");
     assert_eq!(
         err.to_string(),
-        "ai doctor checks host filesystem permissions; omit --http"
+        "sessions doctor checks host filesystem permissions; omit --http"
     );
 }
 
@@ -1083,31 +1084,31 @@ async fn run_ai_smoke_watch_http_bails_with_inline_message() {
         .expect_err("must bail in http mode");
     assert_eq!(
         err.to_string(),
-        "ai smoke-watch writes synthetic transcript to host fs; omit --http"
+        "sessions smoke-watch writes synthetic transcript to host fs; omit --http"
     );
 }
 
 #[tokio::test]
-async fn run_ai_watch_status_http_bails_with_inline_message() {
+async fn run_sessions_watch_status_http_bails_with_inline_message() {
     let mode = http_only_mode().await;
-    let err = run_ai_watch_status(&mode, OutputArgs { json: true })
+    let err = run_sessions_watch_status(&mode, OutputArgs { json: true })
         .await
         .expect_err("must bail in http mode");
     assert_eq!(
         err.to_string(),
-        "ai watch-status shells out to systemctl on host; omit --http"
+        "sessions watch-status shells out to systemctl on host; omit --http"
     );
 }
 
 #[tokio::test]
-async fn run_ai_watch_http_bails_with_inline_message() {
+async fn run_sessions_watch_http_bails_with_inline_message() {
     let mode = http_only_mode().await;
-    let err = run_ai_watch(&mode, AiWatchArgs::default())
+    let err = run_sessions_watch(&mode, SessionsWatchArgs::default())
         .await
         .expect_err("must bail in http mode");
     assert_eq!(
         err.to_string(),
-        "ai watch is a long-running daemon; omit --http"
+        "sessions watch is a long-running daemon; omit --http"
     );
 }
 

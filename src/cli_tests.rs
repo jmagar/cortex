@@ -97,11 +97,11 @@ fn parse_tail_binds_positional_to_host_with_explicit_count() {
 }
 
 #[test]
-fn parse_service_logs_accepts_time_range_and_json() {
+fn parse_compose_service_logs_accepts_time_range_and_json() {
     let parsed = CliCommand::parse(strings(&[
-        "service",
+        "compose",
         "logs",
-        "cortex-ai-watch",
+        "cortex-sessions-watch",
         "--since",
         "2026-05-19 19:55:00",
         "--until=2026-05-19 20:05:00",
@@ -113,14 +113,24 @@ fn parse_service_logs_accepts_time_range_and_json() {
 
     assert_eq!(
         parsed,
-        CliCommand::Service(ServiceCommand::Logs(ServiceLogsArgs {
-            service: "cortex-ai-watch".into(),
+        CliCommand::Compose(ComposeCommand::ServiceLogs(ServiceLogsArgs {
+            service: "cortex-sessions-watch".into(),
             since: Some("2026-05-19 19:55:00".into()),
             until: Some("2026-05-19 20:05:00".into()),
             tail: Some(50),
             json: true,
         }))
     );
+}
+
+#[test]
+fn parse_old_service_top_level_command_is_removed() {
+    let err = CliCommand::parse(strings(&["service", "logs", "cortex"])).unwrap_err();
+    assert!(
+        err.to_string().contains("removed CLI command: service"),
+        "expected service to be rejected, got: {err}"
+    );
+    assert!(err.to_string().contains("cortex compose logs SERVICE"));
 }
 
 #[test]
@@ -132,7 +142,7 @@ fn parse_incident_accepts_window_service_and_json() {
         "--minutes",
         "10",
         "--service",
-        "cortex-ai-watch",
+        "cortex-sessions-watch",
         "--host",
         "dookie",
         "--limit",
@@ -147,7 +157,7 @@ fn parse_incident_accepts_window_service_and_json() {
             // `--around` is normalized to RFC3339 (`+00:00`) at parse time.
             around: "2026-05-20T04:00:00+00:00".into(),
             minutes: Some(10),
-            service: Some("cortex-ai-watch".into()),
+            service: Some("cortex-sessions-watch".into()),
             host: Some("dookie".into()),
             limit: Some(25),
             json: true,
@@ -199,23 +209,16 @@ fn parse_unknown_option_errors() {
     assert!(err.to_string().contains("unknown stats option"));
 }
 
-#[test]
-fn run_compose_rejects_non_compose_commands_before_live_probes() {
-    let error = run_compose(CliCommand::Stats(OutputArgs::default()))
-        .unwrap_err()
-        .to_string();
+#[tokio::test]
+async fn run_compose_rejects_non_compose_commands_before_live_probes() {
+    let error = run_compose(CliCommand::Stats(args::StatsCommand::Summary(
+        OutputArgs::default(),
+    )))
+    .await
+    .unwrap_err()
+    .to_string();
 
     assert!(error.contains("non-compose command"));
-}
-
-#[tokio::test]
-async fn run_service_no_db_rejects_non_service_commands_before_db_access() {
-    let error = run_service_no_db(CliCommand::Stats(OutputArgs::default()))
-        .await
-        .unwrap_err()
-        .to_string();
-
-    assert!(error.contains("non-service command"));
 }
 
 #[tokio::test]
@@ -234,9 +237,9 @@ async fn run_inventory_status_uses_cache_only_and_accepts_json_or_text_output() 
 }
 
 #[test]
-fn parse_ai_search_collects_filters() {
+fn parse_sessions_search_collects_filters() {
     let parsed = CliCommand::parse(strings(&[
-        "ai",
+        "sessions",
         "search",
         "auth failure",
         "--tool",
@@ -249,7 +252,7 @@ fn parse_ai_search_collects_filters() {
 
     assert_eq!(
         parsed,
-        CliCommand::Ai(AiCommand::Search(AiSearchArgs {
+        CliCommand::Sessions(SessionsCommand::Search(SessionsSearchArgs {
             query: "auth failure".into(),
             project: Some("/tmp/project".into()),
             tool: Some("claude".into()),
@@ -260,9 +263,19 @@ fn parse_ai_search_collects_filters() {
 }
 
 #[test]
-fn parse_ai_abuse_collects_filters_and_context_options() {
+fn parse_sessions_top_level_is_removed() {
+    let err = CliCommand::parse(strings(&["ai", "search", "auth failure"])).unwrap_err();
+    assert!(
+        err.to_string().contains("removed CLI command: ai"),
+        "got: {err}"
+    );
+    assert!(err.to_string().contains("cortex sessions"));
+}
+
+#[test]
+fn parse_sessions_abuse_collects_filters_and_context_options() {
     let parsed = CliCommand::parse(strings(&[
-        "ai",
+        "sessions",
         "abuse",
         "--project=/tmp/project",
         "--tool",
@@ -280,7 +293,7 @@ fn parse_ai_abuse_collects_filters_and_context_options() {
 
     assert_eq!(
         parsed,
-        CliCommand::Ai(AiCommand::Abuse(AiAbuseArgs {
+        CliCommand::Sessions(SessionsCommand::Abuse(SessionsAbuseArgs {
             project: Some("/tmp/project".into()),
             tool: Some("codex".into()),
             limit: Some(5),
@@ -294,9 +307,9 @@ fn parse_ai_abuse_collects_filters_and_context_options() {
 }
 
 #[test]
-fn parse_ai_correlate_collects_cross_reference_filters() {
+fn parse_sessions_correlate_collects_cross_reference_filters() {
     let parsed = CliCommand::parse(strings(&[
-        "ai",
+        "sessions",
         "correlate",
         "--project=/tmp/project",
         "--tool",
@@ -321,7 +334,7 @@ fn parse_ai_correlate_collects_cross_reference_filters() {
 
     assert_eq!(
         parsed,
-        CliCommand::Ai(AiCommand::Correlate(AiCorrelateArgs {
+        CliCommand::Sessions(SessionsCommand::Correlate(SessionsCorrelateArgs {
             project: Some("/tmp/project".into()),
             tool: Some("codex".into()),
             session_id: Some("sess-1".into()),
@@ -339,23 +352,23 @@ fn parse_ai_correlate_collects_cross_reference_filters() {
 }
 
 #[test]
-fn parse_ai_context_requires_project() {
-    let err = CliCommand::parse(strings(&["ai", "context"])).unwrap_err();
+fn parse_sessions_context_requires_project() {
+    let err = CliCommand::parse(strings(&["sessions", "context"])).unwrap_err();
     assert!(err.to_string().contains("requires --project"));
 }
 
 #[test]
-fn parse_ai_add_requires_file() {
-    let err = CliCommand::parse(strings(&["ai", "add"])).unwrap_err();
+fn parse_sessions_add_requires_file() {
+    let err = CliCommand::parse(strings(&["sessions", "add"])).unwrap_err();
     assert!(err.to_string().contains("--file"));
 }
 
 #[test]
-fn parse_ai_watch_defaults() {
-    let command = CliCommand::parse(strings(&["ai", "watch"])).unwrap();
+fn parse_sessions_watch_defaults() {
+    let command = CliCommand::parse(strings(&["sessions", "watch"])).unwrap();
     assert_eq!(
         command,
-        CliCommand::Ai(AiCommand::Watch(AiWatchArgs {
+        CliCommand::Sessions(SessionsCommand::Watch(SessionsWatchArgs {
             path: None,
             debounce_ms: 750,
             settle_ms: 500,
@@ -367,9 +380,9 @@ fn parse_ai_watch_defaults() {
 }
 
 #[test]
-fn parse_ai_watch_all_options() {
+fn parse_sessions_watch_all_options() {
     let command = CliCommand::parse(strings(&[
-        "ai",
+        "sessions",
         "watch",
         "--path",
         "/tmp/transcripts",
@@ -383,7 +396,7 @@ fn parse_ai_watch_all_options() {
     .unwrap();
     assert_eq!(
         command,
-        CliCommand::Ai(AiCommand::Watch(AiWatchArgs {
+        CliCommand::Sessions(SessionsCommand::Watch(SessionsWatchArgs {
             path: Some("/tmp/transcripts".into()),
             debounce_ms: 100,
             settle_ms: 250,
@@ -395,15 +408,15 @@ fn parse_ai_watch_all_options() {
 }
 
 #[test]
-fn parse_ai_watch_rejects_zero_timing_values() {
-    let err = CliCommand::parse(strings(&["ai", "watch", "--debounce-ms", "0"])).unwrap_err();
+fn parse_sessions_watch_rejects_zero_timing_values() {
+    let err = CliCommand::parse(strings(&["sessions", "watch", "--debounce-ms", "0"])).unwrap_err();
     assert!(err.to_string().contains("positive integer"));
 }
 
 #[test]
-fn parse_ai_index_collects_reindex_controls() {
+fn parse_sessions_index_collects_reindex_controls() {
     let parsed = CliCommand::parse(strings(&[
-        "ai",
+        "sessions",
         "index",
         "--path=/tmp/session.jsonl",
         "--since",
@@ -415,7 +428,7 @@ fn parse_ai_index_collects_reindex_controls() {
 
     assert_eq!(
         parsed,
-        CliCommand::Ai(AiCommand::Index(AiIndexArgs {
+        CliCommand::Sessions(SessionsCommand::Index(SessionsIndexArgs {
             path: Some("/tmp/session.jsonl".into()),
             since: Some("2026-05-14T00:00:00+00:00".into()),
             force: true,
@@ -425,9 +438,9 @@ fn parse_ai_index_collects_reindex_controls() {
 }
 
 #[test]
-fn parse_ai_checkpoints_collects_filters() {
+fn parse_sessions_checkpoints_collects_filters() {
     let parsed = CliCommand::parse(strings(&[
-        "ai",
+        "sessions",
         "checkpoints",
         "--errors",
         "--limit=25",
@@ -437,7 +450,7 @@ fn parse_ai_checkpoints_collects_filters() {
 
     assert_eq!(
         parsed,
-        CliCommand::Ai(AiCommand::Checkpoints(AiCheckpointsArgs {
+        CliCommand::Sessions(SessionsCommand::Checkpoints(SessionsCheckpointsArgs {
             errors_only: true,
             missing_only: false,
             limit: Some(25),
@@ -447,12 +460,13 @@ fn parse_ai_checkpoints_collects_filters() {
 }
 
 #[test]
-fn parse_ai_errors_collects_limit() {
-    let parsed = CliCommand::parse(strings(&["ai", "errors", "--limit", "10", "--json"])).unwrap();
+fn parse_sessions_errors_collects_limit() {
+    let parsed =
+        CliCommand::parse(strings(&["sessions", "errors", "--limit", "10", "--json"])).unwrap();
 
     assert_eq!(
         parsed,
-        CliCommand::Ai(AiCommand::Errors(AiErrorsArgs {
+        CliCommand::Sessions(SessionsCommand::Errors(SessionsErrorsArgs {
             limit: Some(10),
             json: true,
         }))
@@ -460,19 +474,25 @@ fn parse_ai_errors_collects_limit() {
 }
 
 #[test]
-fn parse_ai_prune_checkpoints_requires_missing() {
-    let err = CliCommand::parse(strings(&["ai", "prune-checkpoints", "--dry-run"])).unwrap_err();
+fn parse_sessions_prune_checkpoints_requires_missing() {
+    let err =
+        CliCommand::parse(strings(&["sessions", "prune-checkpoints", "--dry-run"])).unwrap_err();
     assert!(err.to_string().contains("--missing"));
 }
 
 #[test]
-fn parse_ai_doctor_accepts_strict_permissions() {
-    let parsed =
-        CliCommand::parse(strings(&["ai", "doctor", "--strict-permissions", "--json"])).unwrap();
+fn parse_sessions_doctor_accepts_strict_permissions() {
+    let parsed = CliCommand::parse(strings(&[
+        "sessions",
+        "doctor",
+        "--strict-permissions",
+        "--json",
+    ]))
+    .unwrap();
 
     assert_eq!(
         parsed,
-        CliCommand::Ai(AiCommand::Doctor(AiDoctorArgs {
+        CliCommand::Sessions(SessionsCommand::Doctor(SessionsDoctorArgs {
             json: true,
             strict_permissions: true,
         }))
@@ -480,22 +500,22 @@ fn parse_ai_doctor_accepts_strict_permissions() {
 }
 
 #[test]
-fn parse_ai_watch_status_accepts_json() {
-    let parsed = CliCommand::parse(strings(&["ai", "watch-status", "--json"])).unwrap();
+fn parse_sessions_watch_status_accepts_json() {
+    let parsed = CliCommand::parse(strings(&["sessions", "watch-status", "--json"])).unwrap();
 
     assert_eq!(
         parsed,
-        CliCommand::Ai(AiCommand::WatchStatus(OutputArgs { json: true }))
+        CliCommand::Sessions(SessionsCommand::WatchStatus(OutputArgs { json: true }))
     );
 }
 
 #[test]
-fn parse_ai_smoke_watch_accepts_json() {
-    let parsed = CliCommand::parse(strings(&["ai", "smoke-watch", "--json"])).unwrap();
+fn parse_sessions_smoke_watch_accepts_json() {
+    let parsed = CliCommand::parse(strings(&["sessions", "smoke-watch", "--json"])).unwrap();
 
     assert_eq!(
         parsed,
-        CliCommand::Ai(AiCommand::SmokeWatch(OutputArgs { json: true }))
+        CliCommand::Sessions(SessionsCommand::SmokeWatch(OutputArgs { json: true }))
     );
 }
 
@@ -874,12 +894,12 @@ fn ai_watch_coordination_skipped_when_unit_missing() {
     // test cannot leak CORTEX_AI_WATCH_UNIT into peers.
     let _g = EnvVarGuard::set(
         "CORTEX_AI_WATCH_UNIT",
-        "cortex-ai-watch-test-missing-9f3e.service",
+        "cortex-sessions-watch-test-missing-9f3e.service",
     );
     let env_path = std::path::PathBuf::from("/nonexistent-env-9f3e");
     let mut cache = DoctorCache::default();
-    let phase = ai_watch_coordination_phase(&env_path, &mut cache);
-    assert_eq!(phase.name, "ai-watch-coord");
+    let phase = sessions_watch_coordination_phase(&env_path, &mut cache);
+    assert_eq!(phase.name, "sessions-watch-coord");
     assert!(
         matches!(phase.status, SetupStatus::Skipped | SetupStatus::Warn),
         "expected Skipped or Warn, got {:?} (detail={})",
@@ -1043,7 +1063,7 @@ fn global_flags_extract_rejects_missing_values() {
 fn global_flags_combined_extract() {
     let mut args = strings(&[
         "--http",
-        "ai",
+        "sessions",
         "search",
         "--server=http://x:3100",
         "--token",
@@ -1054,7 +1074,7 @@ fn global_flags_combined_extract() {
     assert!(flags.force_http);
     assert_eq!(flags.server.as_deref(), Some("http://x:3100"));
     assert_eq!(flags.token.as_deref(), Some("tok"));
-    assert_eq!(args, strings(&["ai", "search", "needle"]));
+    assert_eq!(args, strings(&["sessions", "search", "needle"]));
 }
 
 #[test]
@@ -1249,9 +1269,9 @@ fn setup_report_phase_list_does_not_include_data_mount_post_cutover() {
 // ─── cortex-kmib: AI abuse incident investigations ───────────────────────
 
 #[test]
-fn parse_ai_incidents_defaults() {
-    let cmd = CliCommand::parse(strings(&["ai", "incidents"])).unwrap();
-    let CliCommand::Ai(AiCommand::Incidents(args)) = cmd else {
+fn parse_sessions_incidents_defaults() {
+    let cmd = CliCommand::parse(strings(&["sessions", "incidents"])).unwrap();
+    let CliCommand::Sessions(SessionsCommand::Incidents(args)) = cmd else {
         panic!("expected Incidents");
     };
     assert_eq!(args.project, None);
@@ -1263,9 +1283,9 @@ fn parse_ai_incidents_defaults() {
 }
 
 #[test]
-fn parse_ai_incidents_all_flags() {
+fn parse_sessions_incidents_all_flags() {
     let cmd = CliCommand::parse(strings(&[
-        "ai",
+        "sessions",
         "incidents",
         "--project",
         "axon_rust",
@@ -1282,7 +1302,7 @@ fn parse_ai_incidents_all_flags() {
         "--json",
     ]))
     .unwrap();
-    let CliCommand::Ai(AiCommand::Incidents(args)) = cmd else {
+    let CliCommand::Sessions(SessionsCommand::Incidents(args)) = cmd else {
         panic!("expected Incidents");
     };
     assert_eq!(args.project.as_deref(), Some("axon_rust"));
@@ -1294,16 +1314,16 @@ fn parse_ai_incidents_all_flags() {
 }
 
 #[test]
-fn parse_ai_incidents_equals_syntax() {
+fn parse_sessions_incidents_equals_syntax() {
     let cmd = CliCommand::parse(strings(&[
-        "ai",
+        "sessions",
         "incidents",
         "--project=lab",
         "--window-minutes=30",
         "--term=broken",
     ]))
     .unwrap();
-    let CliCommand::Ai(AiCommand::Incidents(args)) = cmd else {
+    let CliCommand::Sessions(SessionsCommand::Incidents(args)) = cmd else {
         panic!("expected Incidents");
     };
     assert_eq!(args.project.as_deref(), Some("lab"));
@@ -1312,9 +1332,9 @@ fn parse_ai_incidents_equals_syntax() {
 }
 
 #[test]
-fn parse_ai_investigate_defaults() {
-    let cmd = CliCommand::parse(strings(&["ai", "investigate"])).unwrap();
-    let CliCommand::Ai(AiCommand::Investigate(args)) = cmd else {
+fn parse_sessions_investigate_defaults() {
+    let cmd = CliCommand::parse(strings(&["sessions", "investigate"])).unwrap();
+    let CliCommand::Sessions(SessionsCommand::Investigate(args)) = cmd else {
         panic!("expected Investigate");
     };
     assert_eq!(args.project, None);
@@ -1323,9 +1343,9 @@ fn parse_ai_investigate_defaults() {
 }
 
 #[test]
-fn parse_ai_investigate_all_flags() {
+fn parse_sessions_investigate_all_flags() {
     let cmd = CliCommand::parse(strings(&[
-        "ai",
+        "sessions",
         "investigate",
         "--project",
         "lab",
@@ -1340,7 +1360,7 @@ fn parse_ai_investigate_all_flags() {
         "--json",
     ]))
     .unwrap();
-    let CliCommand::Ai(AiCommand::Investigate(args)) = cmd else {
+    let CliCommand::Sessions(SessionsCommand::Investigate(args)) = cmd else {
         panic!("expected Investigate");
     };
     assert_eq!(args.project.as_deref(), Some("lab"));
@@ -1352,23 +1372,23 @@ fn parse_ai_investigate_all_flags() {
 }
 
 #[test]
-fn parse_ai_investigate_equals_syntax() {
+fn parse_sessions_investigate_equals_syntax() {
     let cmd = CliCommand::parse(strings(&[
-        "ai",
+        "sessions",
         "investigate",
         "--correlation-window-minutes=45",
     ]))
     .unwrap();
-    let CliCommand::Ai(AiCommand::Investigate(args)) = cmd else {
+    let CliCommand::Sessions(SessionsCommand::Investigate(args)) = cmd else {
         panic!("expected Investigate");
     };
     assert_eq!(args.correlation_window_minutes, Some(45));
 }
 
 #[test]
-fn parse_ai_assess_with_incident_id() {
-    let cmd = CliCommand::parse(strings(&["ai", "assess", "inc-00000000deadbeef"])).unwrap();
-    let CliCommand::Ai(AiCommand::Assess(args)) = cmd else {
+fn parse_sessions_assess_with_incident_id() {
+    let cmd = CliCommand::parse(strings(&["sessions", "assess", "inc-00000000deadbeef"])).unwrap();
+    let CliCommand::Sessions(SessionsCommand::Assess(args)) = cmd else {
         panic!("expected Assess");
     };
     assert_eq!(args.incident_id, "inc-00000000deadbeef");
@@ -1377,9 +1397,9 @@ fn parse_ai_assess_with_incident_id() {
 }
 
 #[test]
-fn parse_ai_assess_with_model_and_json() {
+fn parse_sessions_assess_with_model_and_json() {
     let cmd = CliCommand::parse(strings(&[
-        "ai",
+        "sessions",
         "assess",
         "inc-abc123",
         "--model",
@@ -1387,7 +1407,7 @@ fn parse_ai_assess_with_model_and_json() {
         "--json",
     ]))
     .unwrap();
-    let CliCommand::Ai(AiCommand::Assess(args)) = cmd else {
+    let CliCommand::Sessions(SessionsCommand::Assess(args)) = cmd else {
         panic!("expected Assess");
     };
     assert_eq!(args.incident_id, "inc-abc123");
@@ -1396,8 +1416,8 @@ fn parse_ai_assess_with_model_and_json() {
 }
 
 #[test]
-fn parse_ai_assess_requires_incident_id() {
-    let result = CliCommand::parse(strings(&["ai", "assess"]));
+fn parse_sessions_assess_requires_incident_id() {
+    let result = CliCommand::parse(strings(&["sessions", "assess"]));
     assert!(result.is_err(), "assess without incident_id should fail");
     let msg = result.unwrap_err().to_string();
     assert!(
@@ -1407,8 +1427,8 @@ fn parse_ai_assess_requires_incident_id() {
 }
 
 #[test]
-fn parse_ai_assess_rejects_extra_positional() {
-    let result = CliCommand::parse(strings(&["ai", "assess", "inc-abc", "extra"]));
+fn parse_sessions_assess_rejects_extra_positional() {
+    let result = CliCommand::parse(strings(&["sessions", "assess", "inc-abc", "extra"]));
     assert!(
         result.is_err(),
         "assess with two positional args should fail"
@@ -1416,11 +1436,11 @@ fn parse_ai_assess_rejects_extra_positional() {
 }
 
 #[test]
-fn parse_ai_assess_filter_flags_forwarded() {
+fn parse_sessions_assess_filter_flags_forwarded() {
     // Verify that the same filter flags available on `ai incidents` are
     // also accepted on `ai assess` so the incident_id hash can be reproduced.
     let cmd = CliCommand::parse(strings(&[
-        "ai",
+        "sessions",
         "assess",
         "inc-abc123",
         "--project",
@@ -1437,7 +1457,7 @@ fn parse_ai_assess_filter_flags_forwarded() {
         "300",
     ]))
     .unwrap();
-    let CliCommand::Ai(AiCommand::Assess(args)) = cmd else {
+    let CliCommand::Sessions(SessionsCommand::Assess(args)) = cmd else {
         panic!("expected Assess");
     };
     assert_eq!(args.incident_id, "inc-abc123");
@@ -1451,33 +1471,78 @@ fn parse_ai_assess_filter_flags_forwarded() {
 // ── Surface parity gap closure (2026-05-22) ─────────────────────────────────
 
 #[test]
-fn parse_silent_hosts_with_minutes_and_json() {
+fn parse_hosts_silent_with_minutes_and_json() {
     let cmd = CliCommand::parse(strings(&[
-        "silent-hosts",
+        "hosts",
+        "silent",
         "--silent-minutes",
         "120",
         "--json",
     ]))
-    .expect("parse silent-hosts");
+    .expect("parse hosts silent");
     match cmd {
-        CliCommand::SilentHosts(args) => {
+        CliCommand::Hosts(HostsCommand::Silent(args)) => {
             assert_eq!(args.silent_minutes, Some(120));
             assert!(args.json);
         }
-        other => panic!("expected SilentHosts, got {other:?}"),
+        other => panic!("expected Hosts::Silent, got {other:?}"),
+    }
+}
+
+#[test]
+fn parse_hosts_sources_with_limit_offset_and_json() {
+    let cmd = CliCommand::parse(strings(&[
+        "hosts",
+        "sources",
+        "--limit",
+        "10",
+        "--offset=5",
+        "--json",
+    ]))
+    .expect("parse hosts sources");
+    match cmd {
+        CliCommand::Hosts(HostsCommand::Sources(args)) => {
+            assert_eq!(args.limit, Some(10));
+            assert_eq!(args.offset, Some(5));
+            assert!(args.json);
+        }
+        other => panic!("expected Hosts::Sources, got {other:?}"),
+    }
+}
+
+#[test]
+fn parse_old_host_inventory_top_level_commands_are_removed() {
+    for (command, replacement) in [
+        ("source-ips", "cortex hosts sources"),
+        ("silent-hosts", "cortex hosts silent"),
+    ] {
+        let err = CliCommand::parse(strings(&[command])).unwrap_err();
+        assert!(
+            err.to_string().contains("removed CLI command"),
+            "expected {command} to be rejected as removed, got: {err}"
+        );
+        assert!(
+            err.to_string().contains(replacement),
+            "expected {command} replacement {replacement}, got: {err}"
+        );
     }
 }
 
 #[test]
 fn parse_clock_skew_with_since() {
-    let cmd = CliCommand::parse(strings(&["clock-skew", "--since", "2026-05-20T00:00:00Z"]))
-        .expect("parse clock-skew");
+    let cmd = CliCommand::parse(strings(&[
+        "state",
+        "clock-skew",
+        "--since",
+        "2026-05-20T00:00:00Z",
+    ]))
+    .expect("parse clock-skew");
     match cmd {
-        CliCommand::ClockSkew(args) => {
+        CliCommand::State(args::StateCommand::ClockSkew(args)) => {
             assert_eq!(args.since.as_deref(), Some("2026-05-20T00:00:00+00:00"));
             assert!(!args.json);
         }
-        other => panic!("expected ClockSkew, got {other:?}"),
+        other => panic!("expected state clock-skew, got {other:?}"),
     }
 }
 

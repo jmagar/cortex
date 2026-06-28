@@ -21,12 +21,13 @@ fn mode_parse_accepts_single_binary_transport_commands() {
 
 #[test]
 fn mode_parse_accepts_heartbeat_state_commands() {
-    // Regression: host-state/fleet-state/correlate-state are routed in
+    // Regression: state host/state fleet/correlate-state are routed in
     // parse.rs + run.rs, but were missing from Mode::parse's top-level command
     // gate, so they fell through to print_usage()+exit 1 (bd syslog-mcp-8fww).
     assert!(matches!(
         Mode::parse(vec![
-            "host-state".into(),
+            "state".into(),
+            "host".into(),
             "--host".into(),
             "tootie".into(),
             "--json".into()
@@ -35,7 +36,7 @@ fn mode_parse_accepts_heartbeat_state_commands() {
         Mode::Cli(_)
     ));
     assert!(matches!(
-        Mode::parse(vec!["fleet-state".into(), "--json".into()]).unwrap(),
+        Mode::parse(vec!["state".into(), "fleet".into(), "--json".into()]).unwrap(),
         Mode::Cli(_)
     ));
     assert!(matches!(
@@ -85,14 +86,6 @@ fn mode_parse_rejects_unknown_commands() {
 fn mode_parse_keeps_runtime_status_mcp_only() {
     let err = Mode::parse(vec!["status".into()]).unwrap_err();
     assert!(err.to_string().contains("unknown CLI command"));
-}
-
-#[test]
-fn mode_parse_accepts_ai_namespace() {
-    assert!(matches!(
-        Mode::parse(vec!["ai".into(), "tools".into(), "--json".into()]).unwrap(),
-        Mode::Cli(_)
-    ));
 }
 
 #[test]
@@ -156,11 +149,11 @@ fn mode_parse_accepts_setup_namespace() {
 }
 
 #[test]
-fn mode_parse_accepts_ai_index_timer_setup_namespace() {
+fn mode_parse_accepts_sessions_index_timer_setup_namespace() {
     assert!(matches!(
         Mode::parse(vec![
             "setup".into(),
-            "ai-index-timer".into(),
+            "sessions-index-timer".into(),
             "install".into(),
             "--json".into()
         ])
@@ -170,17 +163,28 @@ fn mode_parse_accepts_ai_index_timer_setup_namespace() {
 }
 
 #[test]
-fn mode_parse_accepts_ai_watch_service_setup_namespace() {
+fn mode_parse_accepts_sessions_watch_service_setup_namespace() {
     assert!(matches!(
         Mode::parse(vec![
             "setup".into(),
-            "ai-watch-service".into(),
+            "sessions-watch-service".into(),
             "install".into(),
             "--json".into()
         ])
         .unwrap(),
         Mode::Setup(_)
     ));
+}
+
+#[test]
+fn mode_parse_rejects_old_ai_setup_namespaces() {
+    for old_name in ["ai-index-timer", "ai-watch-service"] {
+        let err = Mode::parse(vec!["setup".into(), old_name.into(), "check".into()]).unwrap_err();
+        assert!(
+            err.to_string().contains("unknown setup argument"),
+            "expected {old_name} to be rejected, got: {err}"
+        );
+    }
 }
 
 #[test]
@@ -215,6 +219,7 @@ fn mode_parse_accepts_heartbeat_agent_setup_namespace() {
 fn mode_parse_accepts_command_ingest_namespace() {
     assert!(matches!(
         Mode::parse(vec![
+            "ingest".into(),
             "shell".into(),
             "index".into(),
             "--path".into(),
@@ -240,6 +245,7 @@ fn mode_parse_accepts_command_ingest_namespace() {
     ));
     assert!(matches!(
         Mode::parse(vec![
+            "ingest".into(),
             "agent-command".into(),
             "ingest-spool".into(),
             "--path".into(),
@@ -251,6 +257,7 @@ fn mode_parse_accepts_command_ingest_namespace() {
     ));
     assert!(matches!(
         Mode::parse(vec![
+            "ingest".into(),
             "agent-command".into(),
             "wrap".into(),
             "--spool".into(),
@@ -266,6 +273,7 @@ fn mode_parse_accepts_command_ingest_namespace() {
 #[test]
 fn mode_parse_preserves_wrapped_command_http_like_flags() {
     let mode = Mode::parse(vec![
+        "ingest".into(),
         "agent-command".into(),
         "wrap".into(),
         "--spool".into(),
@@ -283,9 +291,11 @@ fn mode_parse_preserves_wrapped_command_http_like_flags() {
         panic!("expected CLI mode");
     };
     assert_eq!(invocation.flags, cli::GlobalFlags::default());
-    let cli::CliCommand::AgentCommand(cli::AgentCommandCommand::Wrap(args)) = invocation.command
+    let cli::CliCommand::Ingest(cli::IngestCommand::AgentCommand(cli::AgentCommandCommand::Wrap(
+        args,
+    ))) = invocation.command
     else {
-        panic!("expected agent-command wrap");
+        panic!("expected ingest agent-command wrap");
     };
     assert_eq!(
         args.command,
@@ -336,13 +346,20 @@ fn mode_parse_accepts_setup_doctor_namespace() {
 }
 
 #[test]
-fn mode_parse_accepts_deploy_namespace() {
+fn mode_parse_accepts_setup_deploy_namespace() {
     assert!(matches!(
-        Mode::parse(vec!["deploy".into(), "preflight".into(), "--json".into()]).unwrap(),
+        Mode::parse(vec![
+            "setup".into(),
+            "deploy".into(),
+            "preflight".into(),
+            "--json".into()
+        ])
+        .unwrap(),
         Mode::Deploy(_)
     ));
     assert!(matches!(
         Mode::parse(vec![
+            "setup".into(),
             "deploy".into(),
             "local".into(),
             "--dry-run".into(),
@@ -353,6 +370,7 @@ fn mode_parse_accepts_deploy_namespace() {
     ));
     assert!(matches!(
         Mode::parse(vec![
+            "setup".into(),
             "deploy".into(),
             "remote".into(),
             "tootie".into(),
@@ -364,6 +382,7 @@ fn mode_parse_accepts_deploy_namespace() {
     ));
     assert!(matches!(
         Mode::parse(vec![
+            "setup".into(),
             "deploy".into(),
             "agent".into(),
             "--hosts".into(),
@@ -384,20 +403,28 @@ fn mode_parse_accepts_deploy_namespace() {
 }
 
 #[test]
+fn mode_parse_rejects_top_level_deploy_namespace() {
+    let err = Mode::parse(vec!["deploy".into(), "preflight".into()]).unwrap_err();
+    assert!(err.to_string().contains("removed CLI command: deploy"));
+    assert!(err.to_string().contains("cortex setup deploy"));
+}
+
+#[test]
 fn mode_parse_rejects_unknown_deploy_subcommand() {
-    let err = Mode::parse(vec!["deploy".into(), "bogus".into()]).unwrap_err();
+    let err = Mode::parse(vec!["setup".into(), "deploy".into(), "bogus".into()]).unwrap_err();
     assert!(err.to_string().contains("unknown deploy subcommand: bogus"));
 }
 
 #[test]
 fn mode_parse_rejects_remote_deploy_without_host() {
-    let err = Mode::parse(vec!["deploy".into(), "remote".into()]).unwrap_err();
+    let err = Mode::parse(vec!["setup".into(), "deploy".into(), "remote".into()]).unwrap_err();
     assert!(err.to_string().contains("deploy remote requires a host"));
 }
 
 #[test]
 fn mode_parse_rejects_remote_deploy_with_multiple_hosts() {
     let err = Mode::parse(vec![
+        "setup".into(),
         "deploy".into(),
         "remote".into(),
         "host-a".into(),
@@ -478,12 +505,12 @@ fn parse_deploy_agent_reports_missing_option_values() {
 fn mode_parse_setup_subcommands_default_to_check_and_parse_remove() {
     let cases = [
         (
-            vec!["setup", "ai-index-timer", "--json"],
-            "ai-index-timer check",
+            vec!["setup", "sessions-index-timer", "--json"],
+            "sessions-index-timer check",
         ),
         (
-            vec!["setup", "ai-watch-service", "remove", "--json"],
-            "ai-watch-service remove",
+            vec!["setup", "sessions-watch-service", "remove", "--json"],
+            "sessions-watch-service remove",
         ),
         (
             vec!["setup", "agent-command", "remove", "--json"],
@@ -513,10 +540,10 @@ fn mode_parse_setup_subcommands_default_to_check_and_parse_remove() {
 }
 
 #[test]
-fn mode_parse_rejects_duplicate_ai_watch_service_actions() {
+fn mode_parse_rejects_duplicate_sessions_watch_service_actions() {
     let err = Mode::parse(vec![
         "setup".into(),
-        "ai-watch-service".into(),
+        "sessions-watch-service".into(),
         "install".into(),
         "remove".into(),
     ])
@@ -524,7 +551,7 @@ fn mode_parse_rejects_duplicate_ai_watch_service_actions() {
 
     assert!(
         err.to_string()
-            .contains("ai-watch-service action specified more than once")
+            .contains("sessions-watch-service action specified more than once")
     );
 }
 
@@ -819,8 +846,8 @@ fn mode_parse_rejects_http_flag_on_deploy() {
     let err = Mode::parse(vec!["--http".into(), "deploy".into(), "local".into()]).unwrap_err();
     let msg = err.to_string();
     assert!(
-        msg.contains("Local-only commands") && msg.contains("reject HTTP flags"),
-        "expected local-only guard message, got: {msg}"
+        msg.contains("HTTP flags") && msg.contains("query CLI"),
+        "expected HTTP flag guard message, got: {msg}"
     );
 }
 
@@ -831,9 +858,19 @@ fn mode_parse_accepts_new_surface_parity_subcommands() {
     // `CompareArgs::into_request()`, not the top-level parser, so a bare
     // `compare` is accepted by `Mode::parse` even though running it would
     // later bail.
-    for cmd in &["silent-hosts", "clock-skew", "anomalies", "compare", "apps"] {
-        let result = Mode::parse(vec![(*cmd).to_string()]);
-        assert!(result.is_ok(), "Mode::parse rejected '{cmd}': {result:?}");
+    let cases: &[&[&str]] = &[
+        &["hosts", "silent"],
+        &["state", "clock-skew"],
+        &["anomalies"],
+        &["compare"],
+        &["apps"],
+    ];
+    for args in cases {
+        let result = Mode::parse(args.iter().map(|arg| (*arg).to_string()).collect());
+        assert!(
+            result.is_ok(),
+            "Mode::parse rejected '{args:?}': {result:?}"
+        );
     }
 }
 
@@ -857,8 +894,8 @@ async fn run_cli_rejects_http_flags_for_local_only_compose_setup_and_inventory()
             "`setup` (local-only command)",
         ),
         (
-            &["inventory", "--token", "secret", "refresh"][..],
-            "`inventory` (local-only command)",
+            &["ingest", "inventory", "--token", "secret", "refresh"][..],
+            "`ingest inventory` (local-only command)",
         ),
     ] {
         let err = super::run_cli(cli_invocation(args)).await.unwrap_err();
@@ -879,6 +916,7 @@ async fn run_cli_rejects_http_flags_for_agent_local_surfaces() {
         ),
         (
             &[
+                "ingest",
                 "agent-command",
                 "wrap",
                 "--server",
@@ -888,10 +926,11 @@ async fn run_cli_rejects_http_flags_for_agent_local_surfaces() {
                 "--",
                 "true",
             ][..],
-            "`agent-command wrap` (wrapper command)",
+            "`ingest agent-command wrap` (wrapper command)",
         ),
         (
             &[
+                "ingest",
                 "shell",
                 "index",
                 "--path",

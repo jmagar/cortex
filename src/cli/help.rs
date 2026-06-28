@@ -29,7 +29,7 @@ struct CommandDoc {
 }
 
 struct NestedCommandDoc {
-    /// Full path after `cortex`, e.g. `ai search`.
+    /// Full path after `cortex`, e.g. `sessions search`.
     path: &'static str,
     summary: &'static str,
     usage: &'static [&'static str],
@@ -41,54 +41,30 @@ const SECTIONS: &[(&str, &[&str])] = &[
     (
         "Search & Logs",
         &[
-            "search",
-            "filter",
-            "tail",
-            "errors",
-            "hosts",
-            "sessions",
-            "incident",
-            "source-ips",
-            "entity",
-            "graph",
+            "search", "filter", "tail", "errors", "hosts", "incident", "entity", "graph",
         ],
     ),
     (
         "Analytics & Correlation",
         &[
             "stats",
+            "state",
             "timeline",
             "patterns",
-            "ingest-rate",
             "apps",
             "correlate",
-            "host-state",
-            "fleet-state",
             "correlate-state",
             "topic-correlate",
-            "silent-hosts",
-            "clock-skew",
             "anomalies",
             "compare",
         ],
     ),
-    ("AI Transcripts", &["ai"]),
-    ("Signals & Alerts", &["sig", "notify"]),
-    (
-        "Ingestion",
-        &[
-            "shell",
-            "agent-command",
-            "heartbeat",
-            "inventory",
-            "file-tail",
-        ],
-    ),
+    ("AI Transcripts", &["sessions"]),
+    ("Signals & Alerts", &["alerts"]),
+    ("Ingestion", &["ingest", "heartbeat"]),
     (
         "Runtime & Setup",
-        &[
-            "serve", "mcp", "doctor", "db", "compose", "service", "setup", "deploy", "config",
-        ],
+        &["serve", "mcp", "doctor", "db", "compose", "setup", "config"],
     ),
 ];
 
@@ -120,8 +96,12 @@ const CATALOG: &[CommandDoc] = &[
     },
     CommandDoc {
         name: "hosts",
-        summary: "List all hosts that have sent logs",
-        usage: &["cortex hosts [--json]"],
+        summary: "List hosts, source identities, and silent hosts",
+        usage: &[
+            "cortex hosts [--json]",
+            "cortex hosts sources [--limit N] [--offset N] [--json]",
+            "cortex hosts silent [--silent-minutes N] [--json]",
+        ],
     },
     CommandDoc {
         name: "sessions",
@@ -136,11 +116,6 @@ const CATALOG: &[CommandDoc] = &[
         usage: &[
             "cortex incident --around TIME [--minutes N] [--service SERVICE] [--host HOST] [--limit N] [--json]",
         ],
-    },
-    CommandDoc {
-        name: "source-ips",
-        summary: "List unique source IPs with log counts",
-        usage: &["cortex source-ips [--limit N] [--offset N] [--json]"],
     },
     CommandDoc {
         name: "entity",
@@ -170,7 +145,19 @@ const CATALOG: &[CommandDoc] = &[
     CommandDoc {
         name: "stats",
         summary: "Database and ingest statistics",
-        usage: &["cortex stats [--json]"],
+        usage: &[
+            "cortex stats [--json]",
+            "cortex stats ingest-rate [--by-host] [--json]",
+        ],
+    },
+    CommandDoc {
+        name: "state",
+        summary: "Host, fleet, and clock state",
+        usage: &[
+            "cortex state host [--host-id ID] [--host HOST] [--since TIME] [--limit N] [--json]",
+            "cortex state fleet [--include-ok|--exclude-ok] [--sort pressure|freshness|hostname] [--json]",
+            "cortex state clock-skew [--since TIME] [--limit N] [--json]",
+        ],
     },
     CommandDoc {
         name: "timeline",
@@ -187,11 +174,6 @@ const CATALOG: &[CommandDoc] = &[
         ],
     },
     CommandDoc {
-        name: "ingest-rate",
-        summary: "Current ingest rate (logs/sec)",
-        usage: &["cortex ingest-rate [--by-host] [--json]"],
-    },
-    CommandDoc {
         name: "apps",
         summary: "Top application/program names by volume",
         usage: &[
@@ -203,20 +185,6 @@ const CATALOG: &[CommandDoc] = &[
         summary: "Correlate events around a reference time",
         usage: &[
             "cortex correlate --reference-time TIME [--window-minutes N] [--severity-min LEVEL] [--host HOST] [--source SOURCE] [--query FTS] [--limit N] [--json]",
-        ],
-    },
-    CommandDoc {
-        name: "host-state",
-        summary: "Per-host health/pressure snapshot",
-        usage: &[
-            "cortex host-state [--host-id ID] [--host HOST] [--since TIME] [--limit N] [--json]",
-        ],
-    },
-    CommandDoc {
-        name: "fleet-state",
-        summary: "Fleet-wide host state overview",
-        usage: &[
-            "cortex fleet-state [--include-ok|--exclude-ok] [--sort pressure|freshness|hostname] [--json]",
         ],
     },
     CommandDoc {
@@ -234,16 +202,6 @@ const CATALOG: &[CommandDoc] = &[
         ],
     },
     CommandDoc {
-        name: "silent-hosts",
-        summary: "Hosts that have gone quiet",
-        usage: &["cortex silent-hosts [--silent-minutes N] [--json]"],
-    },
-    CommandDoc {
-        name: "clock-skew",
-        summary: "Detect host clock skew",
-        usage: &["cortex clock-skew [--since TIME] [--limit N] [--json]"],
-    },
-    CommandDoc {
         name: "anomalies",
         summary: "Log-volume anomalies vs a baseline window",
         usage: &["cortex anomalies [--recent-minutes N] [--baseline-minutes N] [--json]"],
@@ -255,63 +213,57 @@ const CATALOG: &[CommandDoc] = &[
     },
     // ── AI Transcripts ─────────────────────────────────────────────────────
     CommandDoc {
-        name: "ai",
+        name: "sessions",
         summary: "AI transcript search, correlation, and indexing",
         usage: &[
-            "cortex ai search QUERY [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--json]",
-            "cortex ai abuse [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--before N] [--after N] [--term WORD] [--json]",
-            "cortex ai incidents [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--window-minutes N] [--term WORD] [--json]",
-            "cortex ai investigate [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--window-minutes N] [--correlation-window-minutes N] [--term WORD] [--detail compact|full] [--include-transcript] [--max-bytes N] [--json]",
-            "cortex ai assess INCIDENT_ID [--model MODEL] [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--window-minutes N] [--correlation-window-minutes N] [--term WORD] [--json]",
-            "cortex ai correlate [--project PATH] [--tool TOOL] [--session-id ID] [--ai-query FTS] [--log-query FTS] [--host HOST] [--source SOURCE] [--app APP] [--since TIME] [--until TIME] [--window-minutes N] [--severity-min LEVEL] [--limit N] [--events-per-anchor N] [--json]",
-            "cortex ai blocks [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--detail compact|full] [--json]",
-            "cortex ai context --project PATH [--tool TOOL] [--limit N] [--json]",
-            "cortex ai tools [--project PATH] [--since TIME] [--until TIME] [--json]",
-            "cortex ai projects [--tool TOOL] [--since TIME] [--until TIME] [--json]",
-            "cortex ai index [--path PATH] [--since TIME] [--force] [--json]",
-            "cortex ai add --file FILE [--force] [--json]",
-            "cortex ai watch [--path PATH] [--debounce-ms N] [--settle-ms N] [--max-retries N] [--no-initial-scan] [--json]",
-            "cortex ai checkpoints [--errors] [--missing] [--limit N] [--json]",
-            "cortex ai errors [--limit N] [--json]",
-            "cortex ai prune-checkpoints --missing [--dry-run] [--limit N] [--json]",
-            "cortex ai doctor [--strict-permissions] [--json]",
-            "cortex ai watch-status [--json]",
-            "cortex ai smoke-watch [--json]",
+            "cortex sessions search QUERY [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--json]",
+            "cortex sessions abuse [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--before N] [--after N] [--term WORD] [--json]",
+            "cortex sessions incidents [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--window-minutes N] [--term WORD] [--json]",
+            "cortex sessions investigate [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--window-minutes N] [--correlation-window-minutes N] [--term WORD] [--detail compact|full] [--include-transcript] [--max-bytes N] [--json]",
+            "cortex sessions assess INCIDENT_ID [--model MODEL] [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--window-minutes N] [--correlation-window-minutes N] [--term WORD] [--json]",
+            "cortex sessions correlate [--project PATH] [--tool TOOL] [--session-id ID] [--ai-query FTS] [--log-query FTS] [--host HOST] [--source SOURCE] [--app APP] [--since TIME] [--until TIME] [--window-minutes N] [--severity-min LEVEL] [--limit N] [--events-per-anchor N] [--json]",
+            "cortex sessions blocks [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--detail compact|full] [--json]",
+            "cortex sessions context --project PATH [--tool TOOL] [--limit N] [--json]",
+            "cortex sessions tools [--project PATH] [--since TIME] [--until TIME] [--json]",
+            "cortex sessions projects [--tool TOOL] [--since TIME] [--until TIME] [--json]",
+            "cortex sessions index [--path PATH] [--since TIME] [--force] [--json]",
+            "cortex sessions add --file FILE [--force] [--json]",
+            "cortex sessions watch [--path PATH] [--debounce-ms N] [--settle-ms N] [--max-retries N] [--no-initial-scan] [--json]",
+            "cortex sessions checkpoints [--errors] [--missing] [--limit N] [--json]",
+            "cortex sessions errors [--limit N] [--json]",
+            "cortex sessions prune-checkpoints --missing [--dry-run] [--limit N] [--json]",
+            "cortex sessions doctor [--strict-permissions] [--json]",
+            "cortex sessions watch-status [--json]",
+            "cortex sessions smoke-watch [--json]",
         ],
     },
     // ── Signals & Alerts ───────────────────────────────────────────────────
     CommandDoc {
-        name: "sig",
-        summary: "Manage error signatures (list/ack/unack)",
+        name: "alerts",
+        summary: "Manage error signatures and notifications",
         usage: &[
-            "cortex sig list [--include-acknowledged] [--limit N] [--json]",
-            "cortex sig ack HASH [--notes TEXT] [--json]",
-            "cortex sig unack HASH [--reason TEXT] [--json]",
-        ],
-    },
-    CommandDoc {
-        name: "notify",
-        summary: "Notification firings and test sends",
-        usage: &[
-            "cortex notify recent [--rule-id ID] [--since TIME] [--limit N] [--json]",
-            "cortex notify test [--body TEXT] [--json]   (requires --http)",
+            "cortex alerts signatures list [--include-acknowledged] [--limit N] [--json]",
+            "cortex alerts signatures ack HASH [--notes TEXT] [--json]",
+            "cortex alerts signatures unack HASH [--reason TEXT] [--json]",
+            "cortex alerts notifications recent [--rule-id ID] [--since TIME] [--limit N] [--json]",
+            "cortex alerts notifications test [--body TEXT] [--json]   (requires --http)",
         ],
     },
     // ── Ingestion ──────────────────────────────────────────────────────────
     CommandDoc {
-        name: "shell",
-        summary: "Index shell history (zsh, atuin)",
+        name: "ingest",
+        summary: "Ingest shell, command, inventory, file-tail, Docker, and syslog sources",
         usage: &[
-            "cortex shell index --path PATH [--shell zsh] [--json]",
-            "cortex shell atuin-index --path PATH [--json]",
-        ],
-    },
-    CommandDoc {
-        name: "agent-command",
-        summary: "Ingest and wrap agent command spools",
-        usage: &[
-            "cortex agent-command ingest-spool --path PATH [--json]",
-            "cortex agent-command wrap --spool PATH -- COMMAND...",
+            "cortex ingest shell index --path PATH [--shell zsh] [--json]",
+            "cortex ingest shell atuin-index --path PATH [--json]",
+            "cortex ingest agent-command ingest-spool --path PATH [--json]",
+            "cortex ingest agent-command wrap --spool PATH -- COMMAND...",
+            "cortex ingest inventory refresh|status [--json]",
+            "cortex ingest file-tail list|status [--json]",
+            "cortex ingest file-tail add --id ID --path PATH --tag TAG --host HOST [--facility FACILITY] [--severity SEVERITY] [--from-start] [--json]",
+            "cortex ingest file-tail remove|enable|disable --id ID [--json]",
+            "cortex ingest syslog status [--json]",
+            "cortex ingest docker status|sources [--json]",
         ],
     },
     CommandDoc {
@@ -319,26 +271,6 @@ const CATALOG: &[CommandDoc] = &[
         summary: "Run the host heartbeat agent",
         usage: &[
             "cortex heartbeat agent [--target URL] [--token TOKEN] [--interval-secs N] [--probe-deadline-ms N] [--collection-deadline-ms N] [--retry-buffer N] [--host-id-path PATH] [--once|--emit] [--json]",
-        ],
-    },
-    CommandDoc {
-        name: "inventory",
-        summary: "Refresh and inspect the private homelab inventory cache",
-        usage: &[
-            "cortex inventory refresh [--json]",
-            "cortex inventory status [--json]",
-        ],
-    },
-    CommandDoc {
-        name: "file-tail",
-        summary: "Manage file-tail log ingest sources",
-        usage: &[
-            "cortex file-tail list [--json]",
-            "cortex file-tail status [--json]",
-            "cortex file-tail add --id ID --path PATH --tag TAG --host HOST [--facility FACILITY] [--severity SEVERITY] [--from-start] [--json]",
-            "cortex file-tail remove --id ID [--json]",
-            "cortex file-tail enable --id ID [--json]",
-            "cortex file-tail disable --id ID [--json]",
         ],
     },
     // ── Runtime & Setup ────────────────────────────────────────────────────
@@ -376,37 +308,23 @@ const CATALOG: &[CommandDoc] = &[
             "cortex compose status [--compose-file FILE] [--project-dir DIR] [--project-name NAME] [--json]",
             "cortex compose pull|up|restart [--dry-run] [--allow-cwd-target] [--json]",
             "cortex compose down --yes [--dry-run] [--allow-cwd-target] [--json]",
-            "cortex compose logs [--tail N] [--json]",
+            "cortex compose logs [SERVICE] [--since TIME] [--until TIME] [--tail N] [--json]",
         ],
-    },
-    CommandDoc {
-        name: "service",
-        summary: "Inspect container service logs",
-        usage: &["cortex service logs SERVICE [--since TIME] [--until TIME] [--tail N] [--json]"],
     },
     CommandDoc {
         name: "setup",
         summary: "Initialize, check, and repair configuration",
         usage: &[
             "cortex setup check|repair [--json]",
-            "cortex setup ai-index-timer install|remove|check [--json]",
-            "cortex setup ai-watch-service install|remove|check [--json]",
+            "cortex setup sessions-index-timer install|remove|check [--json]",
+            "cortex setup sessions-watch-service install|remove|check [--json]",
             "cortex setup agent-command install|remove|check [--json]",
             "cortex setup heartbeat-agent install|remove|check [--json]",
             "cortex setup debug-wrapper install|remove|check [--json]",
             "cortex setup debug-compose install|remove|check [--json]",
+            "cortex setup deploy preflight|local|remote|agent [OPTIONS]",
             "cortex setup plugin-hook [--no-repair] [--json]",
             "cortex setup doctor [--json]",
-        ],
-    },
-    CommandDoc {
-        name: "deploy",
-        summary: "Provision cortex locally or on remote hosts",
-        usage: &[
-            "cortex deploy preflight [--json]",
-            "cortex deploy local [--dry-run] [--json]",
-            "cortex deploy remote HOST [--dry-run] [--json]",
-            "cortex deploy agent [--hosts h1,h2] [--target URL] [--heartbeat-token TOKEN] [--docker] [--journald] [--binary PATH]",
         ],
     },
     CommandDoc {
@@ -423,147 +341,223 @@ const CATALOG: &[CommandDoc] = &[
 
 const NESTED_CATALOG: &[NestedCommandDoc] = &[
     NestedCommandDoc {
-        path: "inventory refresh",
+        path: "ingest shell",
+        summary: "Index shell history sources",
+        usage: &[
+            "cortex ingest shell index --path PATH [--shell zsh] [--json]",
+            "cortex ingest shell atuin-index --path PATH [--json]",
+        ],
+    },
+    NestedCommandDoc {
+        path: "ingest agent-command",
+        summary: "Ingest and wrap agent command spools",
+        usage: &[
+            "cortex ingest agent-command ingest-spool --path PATH [--json]",
+            "cortex ingest agent-command wrap --spool PATH -- COMMAND...",
+        ],
+    },
+    NestedCommandDoc {
+        path: "ingest inventory",
+        summary: "Refresh and inspect the private homelab inventory cache",
+        usage: &[
+            "cortex ingest inventory refresh [--json]",
+            "cortex ingest inventory status [--json]",
+        ],
+    },
+    NestedCommandDoc {
+        path: "ingest file-tail",
+        summary: "Manage file-tail log ingest sources",
+        usage: &[
+            "cortex ingest file-tail list [--json]",
+            "cortex ingest file-tail status [--json]",
+            "cortex ingest file-tail add --id ID --path PATH --tag TAG --host HOST [--facility FACILITY] [--severity SEVERITY] [--from-start] [--json]",
+            "cortex ingest file-tail remove --id ID [--json]",
+            "cortex ingest file-tail enable --id ID [--json]",
+            "cortex ingest file-tail disable --id ID [--json]",
+        ],
+    },
+    NestedCommandDoc {
+        path: "ingest syslog",
+        summary: "Inspect syslog ingest listener configuration",
+        usage: &[
+            "cortex ingest syslog status [--json]",
+            "cortex ingest syslog test   (deferred; does not send frames yet)",
+        ],
+    },
+    NestedCommandDoc {
+        path: "ingest docker",
+        summary: "Inspect Docker ingest configuration without exposing endpoints",
+        usage: &[
+            "cortex ingest docker status [--json]",
+            "cortex ingest docker sources [--json]",
+        ],
+    },
+    NestedCommandDoc {
+        path: "state host",
+        summary: "Per-host health and pressure snapshot",
+        usage: &[
+            "cortex state host [--host-id ID] [--host HOST] [--since TIME] [--limit N] [--json]",
+        ],
+    },
+    NestedCommandDoc {
+        path: "state fleet",
+        summary: "Fleet-wide host state overview",
+        usage: &[
+            "cortex state fleet [--include-ok|--exclude-ok] [--sort pressure|freshness|hostname] [--json]",
+        ],
+    },
+    NestedCommandDoc {
+        path: "state clock-skew",
+        summary: "Detect host clock skew",
+        usage: &["cortex state clock-skew [--since TIME] [--limit N] [--json]"],
+    },
+    NestedCommandDoc {
+        path: "stats ingest-rate",
+        summary: "Current ingest rate by time bucket and optionally by host",
+        usage: &["cortex stats ingest-rate [--by-host] [--json]"],
+    },
+    NestedCommandDoc {
+        path: "ingest inventory refresh",
         summary: "Collect native homelab inventory into the private filesystem cache",
-        usage: &["cortex inventory refresh [--json]"],
+        usage: &["cortex ingest inventory refresh [--json]"],
     },
     NestedCommandDoc {
-        path: "inventory status",
+        path: "ingest inventory status",
         summary: "Inspect cache freshness, warnings, and artifact paths without refreshing",
-        usage: &["cortex inventory status [--json]"],
+        usage: &["cortex ingest inventory status [--json]"],
     },
     NestedCommandDoc {
-        path: "ai search",
+        path: "sessions search",
         summary: "Full-text search over indexed AI transcript sessions",
         usage: &[
-            "cortex ai search QUERY [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--json]",
+            "cortex sessions search QUERY [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--json]",
         ],
     },
     NestedCommandDoc {
-        path: "ai abuse",
+        path: "sessions abuse",
         summary: "Find risky or failure-related transcript messages",
         usage: &[
-            "cortex ai abuse [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--before N] [--after N] [--term WORD] [--json]",
+            "cortex sessions abuse [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--before N] [--after N] [--term WORD] [--json]",
         ],
     },
     NestedCommandDoc {
-        path: "ai incidents",
+        path: "sessions incidents",
         summary: "Cluster AI transcript abuse matches into incidents",
         usage: &[
-            "cortex ai incidents [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--window-minutes N] [--term WORD] [--json]",
+            "cortex sessions incidents [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--window-minutes N] [--term WORD] [--json]",
         ],
     },
     NestedCommandDoc {
-        path: "ai investigate",
+        path: "sessions investigate",
         summary: "Expand AI incidents into evidence bundles",
         usage: &[
-            "cortex ai investigate [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--window-minutes N] [--correlation-window-minutes N] [--term WORD] [--detail compact|full] [--include-transcript] [--max-bytes N] [--json]",
+            "cortex sessions investigate [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--window-minutes N] [--correlation-window-minutes N] [--term WORD] [--detail compact|full] [--include-transcript] [--max-bytes N] [--json]",
             "Default output is compact; use --detail full for complete evidence.",
         ],
     },
     NestedCommandDoc {
-        path: "ai assess",
+        path: "sessions assess",
         summary: "Assess one AI incident with optional model context",
         usage: &[
-            "cortex ai assess INCIDENT_ID [--model MODEL] [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--window-minutes N] [--correlation-window-minutes N] [--term WORD] [--json]",
+            "cortex sessions assess INCIDENT_ID [--model MODEL] [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--window-minutes N] [--correlation-window-minutes N] [--term WORD] [--json]",
         ],
     },
     NestedCommandDoc {
-        path: "ai correlate",
+        path: "sessions correlate",
         summary: "Correlate AI transcript anchors with non-AI logs",
         usage: &[
-            "cortex ai correlate [--project PATH] [--tool TOOL] [--session-id ID] [--ai-query FTS] [--log-query FTS] [--host HOST] [--source SOURCE] [--app APP] [--since TIME] [--until TIME] [--window-minutes N] [--severity-min LEVEL] [--limit N] [--events-per-anchor N] [--json]",
+            "cortex sessions correlate [--project PATH] [--tool TOOL] [--session-id ID] [--ai-query FTS] [--log-query FTS] [--host HOST] [--source SOURCE] [--app APP] [--since TIME] [--until TIME] [--window-minutes N] [--severity-min LEVEL] [--limit N] [--events-per-anchor N] [--json]",
         ],
     },
     NestedCommandDoc {
-        path: "ai blocks",
+        path: "sessions blocks",
         summary: "AI transcript activity grouped into 5-hour UTC blocks",
         usage: &[
-            "cortex ai blocks [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--detail compact|full] [--json]",
+            "cortex sessions blocks [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--detail compact|full] [--json]",
             "Default output is capped for interactive use; use --detail full for every block.",
         ],
     },
     NestedCommandDoc {
-        path: "ai context",
+        path: "sessions context",
         summary: "Recent AI transcript context for one project",
-        usage: &["cortex ai context --project PATH [--tool TOOL] [--limit N] [--json]"],
+        usage: &["cortex sessions context --project PATH [--tool TOOL] [--limit N] [--json]"],
     },
     NestedCommandDoc {
-        path: "ai tools",
+        path: "sessions tools",
         summary: "List AI tools present in transcript metadata",
-        usage: &["cortex ai tools [--project PATH] [--since TIME] [--until TIME] [--json]"],
+        usage: &["cortex sessions tools [--project PATH] [--since TIME] [--until TIME] [--json]"],
     },
     NestedCommandDoc {
-        path: "ai projects",
+        path: "sessions projects",
         summary: "List AI projects present in transcript metadata",
-        usage: &["cortex ai projects [--tool TOOL] [--since TIME] [--until TIME] [--json]"],
+        usage: &["cortex sessions projects [--tool TOOL] [--since TIME] [--until TIME] [--json]"],
     },
     NestedCommandDoc {
-        path: "ai index",
+        path: "sessions index",
         summary: "Index local AI transcript roots",
-        usage: &["cortex ai index [--path PATH] [--since TIME] [--force] [--json]"],
+        usage: &["cortex sessions index [--path PATH] [--since TIME] [--force] [--json]"],
     },
     NestedCommandDoc {
-        path: "ai add",
+        path: "sessions add",
         summary: "Index one AI transcript file",
-        usage: &["cortex ai add --file FILE [--force] [--json]"],
+        usage: &["cortex sessions add --file FILE [--force] [--json]"],
     },
     NestedCommandDoc {
-        path: "ai watch",
+        path: "sessions watch",
         summary: "Run the local transcript watch daemon",
         usage: &[
-            "cortex ai watch [--path PATH] [--debounce-ms N] [--settle-ms N] [--max-retries N] [--no-initial-scan] [--json]",
+            "cortex sessions watch [--path PATH] [--debounce-ms N] [--settle-ms N] [--max-retries N] [--no-initial-scan] [--json]",
         ],
     },
     NestedCommandDoc {
-        path: "ai checkpoints",
+        path: "sessions checkpoints",
         summary: "List AI transcript indexing checkpoints",
-        usage: &["cortex ai checkpoints [--errors] [--missing] [--limit N] [--json]"],
+        usage: &["cortex sessions checkpoints [--errors] [--missing] [--limit N] [--json]"],
     },
     NestedCommandDoc {
-        path: "ai errors",
+        path: "sessions errors",
         summary: "List AI transcript parse errors",
-        usage: &["cortex ai errors [--limit N] [--json]"],
+        usage: &["cortex sessions errors [--limit N] [--json]"],
     },
     NestedCommandDoc {
-        path: "ai prune-checkpoints",
+        path: "sessions prune-checkpoints",
         summary: "Prune stale AI indexing checkpoints",
-        usage: &["cortex ai prune-checkpoints --missing [--dry-run] [--limit N] [--json]"],
+        usage: &["cortex sessions prune-checkpoints --missing [--dry-run] [--limit N] [--json]"],
     },
     NestedCommandDoc {
-        path: "ai doctor",
+        path: "sessions doctor",
         summary: "Check local AI transcript indexing prerequisites",
-        usage: &["cortex ai doctor [--strict-permissions] [--json]"],
+        usage: &["cortex sessions doctor [--strict-permissions] [--json]"],
     },
     NestedCommandDoc {
-        path: "ai watch-status",
+        path: "sessions watch-status",
         summary: "Inspect the local AI transcript watch service",
-        usage: &["cortex ai watch-status [--json]"],
+        usage: &["cortex sessions watch-status [--json]"],
     },
     NestedCommandDoc {
-        path: "ai smoke-watch",
+        path: "sessions smoke-watch",
         summary: "Run a local AI transcript watch smoke test",
-        usage: &["cortex ai smoke-watch [--json]"],
+        usage: &["cortex sessions smoke-watch [--json]"],
     },
     NestedCommandDoc {
-        path: "ai similar",
+        path: "sessions similar",
         summary: "Find incidents similar to a free-text query",
         usage: &[
-            "cortex ai similar QUERY [--host HOST] [--app APP] [--severity-min LEVEL] [--since TIME] [--until TIME] [--window-minutes N] [--limit N] [--json]",
+            "cortex sessions similar QUERY [--host HOST] [--app APP] [--severity-min LEVEL] [--since TIME] [--until TIME] [--window-minutes N] [--limit N] [--json]",
         ],
     },
     NestedCommandDoc {
-        path: "ai ask-history",
+        path: "sessions ask-history",
         summary: "Search historical AI sessions and nearby system logs",
         usage: &[
-            "cortex ai ask-history QUERY [--host HOST] [--app APP] [--since TIME] [--until TIME] [--limit N] [--json]",
+            "cortex sessions ask-history QUERY [--host HOST] [--app APP] [--since TIME] [--until TIME] [--limit N] [--json]",
         ],
     },
     NestedCommandDoc {
-        path: "ai incident-context",
+        path: "sessions incident-context",
         summary: "Build incident context from an explicit time window",
         usage: &[
-            "cortex ai incident-context --since TIME --until TIME [--host HOST] [--app APP] [--query FTS] [--severity-min LEVEL] [--limit N] [--json]",
+            "cortex sessions incident-context --since TIME --until TIME [--host HOST] [--app APP] [--query FTS] [--severity-min LEVEL] [--limit N] [--json]",
         ],
     },
     NestedCommandDoc {
@@ -627,8 +621,11 @@ const NESTED_CATALOG: &[NestedCommandDoc] = &[
     },
     NestedCommandDoc {
         path: "compose logs",
-        summary: "Show bounded Docker Compose logs",
-        usage: &["cortex compose logs [--tail N] [--json]"],
+        summary: "Show bounded stack logs or one service's logs",
+        usage: &[
+            "cortex compose logs [--tail N] [--json]",
+            "cortex compose logs SERVICE [--since TIME] [--until TIME] [--tail N] [--json]",
+        ],
     },
     NestedCommandDoc {
         path: "setup check",
@@ -651,54 +648,46 @@ const NESTED_CATALOG: &[NestedCommandDoc] = &[
         usage: &["cortex setup plugin-hook [--no-repair] [--json]"],
     },
     NestedCommandDoc {
+        path: "setup deploy",
+        summary: "Provision cortex locally or on remote hosts",
+        usage: &[
+            "cortex setup deploy preflight [--json]",
+            "cortex setup deploy local [--dry-run] [--json]",
+            "cortex setup deploy remote HOST [--dry-run] [--json]",
+            "cortex setup deploy agent [--hosts h1,h2] [--target URL] [--heartbeat-token TOKEN] [--docker] [--journald] [--binary PATH]",
+        ],
+    },
+    NestedCommandDoc {
         path: "setup doctor",
         summary: "Run setup diagnostics across all phases",
         usage: &["cortex setup doctor [--json]"],
     },
     NestedCommandDoc {
-        path: "sig list",
+        path: "alerts signatures list",
         summary: "List error signatures",
-        usage: &["cortex sig list [--include-acknowledged] [--limit N] [--json]"],
+        usage: &["cortex alerts signatures list [--include-acknowledged] [--limit N] [--json]"],
     },
     NestedCommandDoc {
-        path: "sig ack",
+        path: "alerts signatures ack",
         summary: "Acknowledge an error signature",
-        usage: &["cortex sig ack HASH [--notes TEXT] [--json]"],
+        usage: &["cortex alerts signatures ack HASH [--notes TEXT] [--json]"],
     },
     NestedCommandDoc {
-        path: "sig unack",
+        path: "alerts signatures unack",
         summary: "Unacknowledge an error signature",
-        usage: &["cortex sig unack HASH [--reason TEXT] [--json]"],
+        usage: &["cortex alerts signatures unack HASH [--reason TEXT] [--json]"],
     },
     NestedCommandDoc {
-        path: "notify recent",
+        path: "alerts notifications recent",
         summary: "List recent notification firings",
-        usage: &["cortex notify recent [--rule-id ID] [--since TIME] [--limit N] [--json]"],
+        usage: &[
+            "cortex alerts notifications recent [--rule-id ID] [--since TIME] [--limit N] [--json]",
+        ],
     },
     NestedCommandDoc {
-        path: "notify test",
+        path: "alerts notifications test",
         summary: "Send a test notification",
-        usage: &["cortex notify test [--body TEXT] [--json]   (requires --http)"],
-    },
-    NestedCommandDoc {
-        path: "shell index",
-        summary: "Index shell history",
-        usage: &["cortex shell index --path PATH [--shell zsh] [--json]"],
-    },
-    NestedCommandDoc {
-        path: "shell atuin-index",
-        summary: "Index Atuin shell history",
-        usage: &["cortex shell atuin-index --path PATH [--json]"],
-    },
-    NestedCommandDoc {
-        path: "agent-command ingest-spool",
-        summary: "Ingest agent command spool files",
-        usage: &["cortex agent-command ingest-spool --path PATH [--json]"],
-    },
-    NestedCommandDoc {
-        path: "agent-command wrap",
-        summary: "Wrap a command and spool execution metadata",
-        usage: &["cortex agent-command wrap --spool PATH -- COMMAND..."],
+        usage: &["cortex alerts notifications test [--body TEXT] [--json]   (requires --http)"],
     },
     NestedCommandDoc {
         path: "heartbeat agent",
@@ -706,38 +695,6 @@ const NESTED_CATALOG: &[NestedCommandDoc] = &[
         usage: &[
             "cortex heartbeat agent [--target URL] [--token TOKEN] [--interval-secs N] [--probe-deadline-ms N] [--collection-deadline-ms N] [--retry-buffer N] [--host-id-path PATH] [--once|--emit] [--json]",
         ],
-    },
-    NestedCommandDoc {
-        path: "file-tail list",
-        summary: "List configured file-tail sources",
-        usage: &["cortex file-tail list [--json]"],
-    },
-    NestedCommandDoc {
-        path: "file-tail status",
-        summary: "List configured file-tail sources with runtime state",
-        usage: &["cortex file-tail status [--json]"],
-    },
-    NestedCommandDoc {
-        path: "file-tail add",
-        summary: "Add or update a managed file-tail source",
-        usage: &[
-            "cortex file-tail add --id ID --path PATH --tag TAG --host HOST [--facility FACILITY] [--severity SEVERITY] [--from-start] [--json]",
-        ],
-    },
-    NestedCommandDoc {
-        path: "file-tail remove",
-        summary: "Remove a managed file-tail source",
-        usage: &["cortex file-tail remove --id ID [--json]"],
-    },
-    NestedCommandDoc {
-        path: "file-tail enable",
-        summary: "Enable a managed file-tail source",
-        usage: &["cortex file-tail enable --id ID [--json]"],
-    },
-    NestedCommandDoc {
-        path: "file-tail disable",
-        summary: "Disable a managed file-tail source",
-        usage: &["cortex file-tail disable --id ID [--json]"],
     },
 ];
 
@@ -787,7 +744,7 @@ const QUICK_START: &[&str] = &[
     "cortex search \"oom killer\" --host web-01 --since 1h",
     "cortex search --grep \"smoke-test\"   # literal text, no FTS5 syntax",
     "cortex tail -n 50 --severity err",
-    "cortex ai investigate --window-minutes 30",
+    "cortex sessions investigate --window-minutes 30",
 ];
 
 // ── Color helpers (pure: driven by the `color` flag) ────────────────────────
@@ -977,7 +934,7 @@ pub(crate) enum HelpRequest {
 /// *flags* count anywhere (nobody queries those literals), but the bare word
 /// `help` counts only in command position (`args[0]`). This keeps free-text
 /// queries that contain "help" working — `cortex search help`,
-/// `cortex ai search help`, and `cortex ai abuse --term help` all run the
+/// `cortex sessions search help`, and `cortex sessions abuse --term help` all run the
 /// query, not the help banner.
 pub(crate) fn classify_help(args: &[String]) -> HelpRequest {
     let is_help_flag = |s: &str| matches!(s, "-h" | "--help");
@@ -1015,8 +972,8 @@ pub(crate) fn classify_help(args: &[String]) -> HelpRequest {
             positionals.push(a);
         }
     }
-    if positionals.len() >= 2 {
-        let nested = format!("{} {}", positionals[0], positionals[1]);
+    for len in (2..=positionals.len()).rev() {
+        let nested = positionals[..len].join(" ");
         if nested_lookup(&nested).is_some() {
             return HelpRequest::Command(nested);
         }

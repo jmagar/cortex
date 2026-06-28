@@ -1,20 +1,23 @@
-use anyhow::{Result, anyhow, bail};
+use anyhow::{Result, bail};
 
-use super::parse_ai_more::{
-    parse_ai_ask_history, parse_ai_assess, parse_ai_incident_context, parse_ai_incidents,
-    parse_ai_investigate, parse_ai_similar,
-};
 use super::parse_common::{
-    FlagCursor, norm_time, parse_output_args, parse_positive_u64_flag, parse_u32_flag,
-    value_after_equals,
+    FlagCursor, norm_time, parse_output_args, parse_u32_flag, value_after_equals,
+};
+use super::parse_logs::parse_sessions;
+use super::parse_sessions_more::{
+    parse_sessions_ask_history, parse_sessions_assess, parse_sessions_incident_context,
+    parse_sessions_incidents, parse_sessions_investigate, parse_sessions_similar,
+};
+use super::parse_sessions_ops::{
+    parse_sessions_add, parse_sessions_checkpoints, parse_sessions_doctor, parse_sessions_errors,
+    parse_sessions_index, parse_sessions_prune_checkpoints, parse_sessions_watch,
 };
 use super::{
-    AiAbuseArgs, AiAddArgs, AiBlocksArgs, AiCheckpointsArgs, AiCommand, AiContextArgs,
-    AiCorrelateArgs, AiDoctorArgs, AiErrorsArgs, AiIndexArgs, AiListArgs, AiOutputDetail,
-    AiPruneCheckpointsArgs, AiSearchArgs, AiWatchArgs, CliCommand,
+    CliCommand, SessionsAbuseArgs, SessionsBlocksArgs, SessionsCommand, SessionsContextArgs,
+    SessionsCorrelateArgs, SessionsListArgs, SessionsOutputDetail, SessionsSearchArgs,
 };
 
-const AI_SUBCOMMANDS: &[&str] = &[
+const SESSIONS_SUBCOMMANDS: &[&str] = &[
     "search",
     "abuse",
     "correlate",
@@ -39,48 +42,53 @@ const AI_SUBCOMMANDS: &[&str] = &[
     "assess",
 ];
 
-pub(crate) fn parse_ai(args: &[String]) -> Result<CliCommand> {
-    let (subcommand, rest) = args
-        .split_first()
-        .ok_or_else(|| anyhow!("ai requires a subcommand"))?;
-    match subcommand.as_str() {
-        "search" => parse_ai_search(rest),
-        "abuse" => parse_ai_abuse(rest),
-        "correlate" => parse_ai_correlate(rest),
-        "blocks" => parse_ai_blocks(rest),
-        "context" => parse_ai_context(rest),
-        "tools" => parse_ai_tools(rest),
-        "projects" => parse_ai_projects(rest),
-        "index" => parse_ai_index(rest),
-        "add" => parse_ai_add(rest),
-        "watch" => parse_ai_watch(rest),
-        "checkpoints" => parse_ai_checkpoints(rest),
-        "errors" => parse_ai_errors(rest),
-        "prune-checkpoints" => parse_ai_prune_checkpoints(rest),
-        "doctor" => parse_ai_doctor(rest),
-        "watch-status" => Ok(CliCommand::Ai(AiCommand::WatchStatus(parse_output_args(
-            "ai watch-status",
-            rest,
-        )?))),
-        "smoke-watch" => Ok(CliCommand::Ai(AiCommand::SmokeWatch(parse_output_args(
-            "ai smoke-watch",
-            rest,
-        )?))),
-        "similar" => parse_ai_similar(rest),
-        "ask-history" => parse_ai_ask_history(rest),
-        "incident-context" => parse_ai_incident_context(rest),
-        "incidents" => parse_ai_incidents(rest),
-        "investigate" => parse_ai_investigate(rest),
-        "assess" => parse_ai_assess(rest),
+pub(crate) fn parse_sessions_command(args: &[String]) -> Result<CliCommand> {
+    let (subcommand, rest) = match args.split_first() {
+        None => ("", args),
+        Some((subcommand, _)) if subcommand.starts_with('-') => ("", args),
+        Some((subcommand, rest)) => (subcommand.as_str(), rest),
+    };
+    match subcommand {
+        "" => parse_sessions(rest),
+        "search" => parse_sessions_search(rest),
+        "abuse" => parse_sessions_abuse(rest),
+        "correlate" => parse_sessions_correlate(rest),
+        "blocks" => parse_sessions_blocks(rest),
+        "context" => parse_sessions_context(rest),
+        "tools" => parse_sessions_tools(rest),
+        "projects" => parse_sessions_projects(rest),
+        "index" => parse_sessions_index(rest),
+        "add" => parse_sessions_add(rest),
+        "watch" => parse_sessions_watch(rest),
+        "checkpoints" => parse_sessions_checkpoints(rest),
+        "errors" => parse_sessions_errors(rest),
+        "prune-checkpoints" => parse_sessions_prune_checkpoints(rest),
+        "doctor" => parse_sessions_doctor(rest),
+        "watch-status" => Ok(CliCommand::Sessions(SessionsCommand::WatchStatus(
+            parse_output_args("sessions watch-status", rest)?,
+        ))),
+        "smoke-watch" => Ok(CliCommand::Sessions(SessionsCommand::SmokeWatch(
+            parse_output_args("sessions smoke-watch", rest)?,
+        ))),
+        "similar" => parse_sessions_similar(rest),
+        "ask-history" => parse_sessions_ask_history(rest),
+        "incident-context" => parse_sessions_incident_context(rest),
+        "incidents" => parse_sessions_incidents(rest),
+        "investigate" => parse_sessions_investigate(rest),
+        "assess" => parse_sessions_assess(rest),
         _ => bail!(
             "{}",
-            super::suggest::unknown_command("ai subcommand", subcommand, AI_SUBCOMMANDS)
+            super::suggest::unknown_command(
+                "sessions subcommand",
+                subcommand,
+                SESSIONS_SUBCOMMANDS
+            )
         ),
     }
 }
 
-pub(crate) fn parse_ai_search(args: &[String]) -> Result<CliCommand> {
-    let mut parsed = AiSearchArgs::default();
+pub(crate) fn parse_sessions_search(args: &[String]) -> Result<CliCommand> {
+    let mut parsed = SessionsSearchArgs::default();
     let mut query = Vec::new();
     let mut flags = FlagCursor::new(args);
     while let Some(arg) = flags.next() {
@@ -109,19 +117,19 @@ pub(crate) fn parse_ai_search(args: &[String]) -> Result<CliCommand> {
                     value_after_equals(arg, "--limit")?,
                 )?)
             }
-            _ if arg.starts_with('-') => bail!("unknown ai search option: {arg}"),
+            _ if arg.starts_with('-') => bail!("unknown sessions search option: {arg}"),
             _ => query.push(arg),
         }
     }
     parsed.query = query.join(" ");
     if parsed.query.is_empty() {
-        bail!("ai search requires a query");
+        bail!("sessions search requires a query");
     }
-    Ok(CliCommand::Ai(AiCommand::Search(parsed)))
+    Ok(CliCommand::Sessions(SessionsCommand::Search(parsed)))
 }
 
-pub(crate) fn parse_ai_abuse(args: &[String]) -> Result<CliCommand> {
-    let mut parsed = AiAbuseArgs::default();
+pub(crate) fn parse_sessions_abuse(args: &[String]) -> Result<CliCommand> {
+    let mut parsed = SessionsAbuseArgs::default();
     let mut flags = FlagCursor::new(args);
     while let Some(arg) = flags.next() {
         match arg.as_str() {
@@ -169,15 +177,15 @@ pub(crate) fn parse_ai_abuse(args: &[String]) -> Result<CliCommand> {
             _ if arg.starts_with("--term=") => {
                 parsed.terms.push(value_after_equals(arg, "--term")?)
             }
-            _ if arg.starts_with('-') => bail!("unknown ai abuse option: {arg}"),
-            _ => bail!("unexpected ai abuse argument: {arg}"),
+            _ if arg.starts_with('-') => bail!("unknown sessions abuse option: {arg}"),
+            _ => bail!("unexpected sessions abuse argument: {arg}"),
         }
     }
-    Ok(CliCommand::Ai(AiCommand::Abuse(parsed)))
+    Ok(CliCommand::Sessions(SessionsCommand::Abuse(parsed)))
 }
 
-pub(crate) fn parse_ai_correlate(args: &[String]) -> Result<CliCommand> {
-    let mut parsed = AiCorrelateArgs::default();
+pub(crate) fn parse_sessions_correlate(args: &[String]) -> Result<CliCommand> {
+    let mut parsed = SessionsCorrelateArgs::default();
     let mut flags = FlagCursor::new(args);
     while let Some(arg) = flags.next() {
         match arg.as_str() {
@@ -255,15 +263,15 @@ pub(crate) fn parse_ai_correlate(args: &[String]) -> Result<CliCommand> {
                     value_after_equals(arg, "--events-per-anchor")?,
                 )?)
             }
-            _ if arg.starts_with('-') => bail!("unknown ai correlate option: {arg}"),
-            _ => bail!("unexpected ai correlate argument: {arg}"),
+            _ if arg.starts_with('-') => bail!("unknown sessions correlate option: {arg}"),
+            _ => bail!("unexpected sessions correlate argument: {arg}"),
         }
     }
-    Ok(CliCommand::Ai(AiCommand::Correlate(parsed)))
+    Ok(CliCommand::Sessions(SessionsCommand::Correlate(parsed)))
 }
 
-pub(crate) fn parse_ai_blocks(args: &[String]) -> Result<CliCommand> {
-    let mut parsed = AiBlocksArgs::default();
+pub(crate) fn parse_sessions_blocks(args: &[String]) -> Result<CliCommand> {
+    let mut parsed = SessionsBlocksArgs::default();
     let mut flags = FlagCursor::new(args);
     while let Some(arg) = flags.next() {
         match arg.as_str() {
@@ -276,7 +284,7 @@ pub(crate) fn parse_ai_blocks(args: &[String]) -> Result<CliCommand> {
                 parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)? as usize)
             }
             "--detail" => {
-                parsed.detail = AiOutputDetail::parse(&flags.value("--detail")?, "--detail")?
+                parsed.detail = SessionsOutputDetail::parse(&flags.value("--detail")?, "--detail")?
             }
             _ if arg.starts_with("--project=") => {
                 parsed.project = Some(value_after_equals(arg, "--project")?)
@@ -296,12 +304,12 @@ pub(crate) fn parse_ai_blocks(args: &[String]) -> Result<CliCommand> {
             }
             _ if arg.starts_with("--detail=") => {
                 parsed.detail =
-                    AiOutputDetail::parse(&value_after_equals(arg, "--detail")?, "--detail")?
+                    SessionsOutputDetail::parse(&value_after_equals(arg, "--detail")?, "--detail")?
             }
             _ if arg.starts_with('-') => bail!(
                 "{}",
                 super::suggest::unknown_option(
-                    "ai blocks",
+                    "sessions blocks",
                     &arg,
                     &[
                         "--json",
@@ -314,14 +322,14 @@ pub(crate) fn parse_ai_blocks(args: &[String]) -> Result<CliCommand> {
                     ],
                 )
             ),
-            _ => bail!("unexpected ai blocks argument: {arg}"),
+            _ => bail!("unexpected sessions blocks argument: {arg}"),
         }
     }
-    Ok(CliCommand::Ai(AiCommand::Blocks(parsed)))
+    Ok(CliCommand::Sessions(SessionsCommand::Blocks(parsed)))
 }
 
-pub(crate) fn parse_ai_context(args: &[String]) -> Result<CliCommand> {
-    let mut parsed = AiContextArgs::default();
+pub(crate) fn parse_sessions_context(args: &[String]) -> Result<CliCommand> {
+    let mut parsed = SessionsContextArgs::default();
     let mut flags = FlagCursor::new(args);
     while let Some(arg) = flags.next() {
         match arg.as_str() {
@@ -341,19 +349,19 @@ pub(crate) fn parse_ai_context(args: &[String]) -> Result<CliCommand> {
                     value_after_equals(arg, "--limit")?,
                 )?)
             }
-            _ if arg.starts_with('-') => bail!("unknown ai context option: {arg}"),
+            _ if arg.starts_with('-') => bail!("unknown sessions context option: {arg}"),
             _ if parsed.project.is_empty() => parsed.project = arg,
-            _ => bail!("unexpected ai context argument: {arg}"),
+            _ => bail!("unexpected sessions context argument: {arg}"),
         }
     }
     if parsed.project.is_empty() {
-        bail!("ai context requires --project <PATH>");
+        bail!("sessions context requires --project <PATH>");
     }
-    Ok(CliCommand::Ai(AiCommand::Context(parsed)))
+    Ok(CliCommand::Sessions(SessionsCommand::Context(parsed)))
 }
 
-pub(crate) fn parse_ai_tools(args: &[String]) -> Result<CliCommand> {
-    let mut parsed = AiListArgs::default();
+pub(crate) fn parse_sessions_tools(args: &[String]) -> Result<CliCommand> {
+    let mut parsed = SessionsListArgs::default();
     let mut flags = FlagCursor::new(args);
     while let Some(arg) = flags.next() {
         match arg.as_str() {
@@ -370,14 +378,14 @@ pub(crate) fn parse_ai_tools(args: &[String]) -> Result<CliCommand> {
             _ if arg.starts_with("--until=") => {
                 parsed.until = Some(norm_time(value_after_equals(arg, "--until")?)?)
             }
-            _ => bail!("unknown ai tools option: {arg}"),
+            _ => bail!("unknown sessions tools option: {arg}"),
         }
     }
-    Ok(CliCommand::Ai(AiCommand::Tools(parsed)))
+    Ok(CliCommand::Sessions(SessionsCommand::Tools(parsed)))
 }
 
-pub(crate) fn parse_ai_projects(args: &[String]) -> Result<CliCommand> {
-    let mut parsed = AiListArgs::default();
+pub(crate) fn parse_sessions_projects(args: &[String]) -> Result<CliCommand> {
+    let mut parsed = SessionsListArgs::default();
     let mut flags = FlagCursor::new(args);
     while let Some(arg) = flags.next() {
         match arg.as_str() {
@@ -394,177 +402,12 @@ pub(crate) fn parse_ai_projects(args: &[String]) -> Result<CliCommand> {
             _ if arg.starts_with("--until=") => {
                 parsed.until = Some(norm_time(value_after_equals(arg, "--until")?)?)
             }
-            _ => bail!("unknown ai projects option: {arg}"),
+            _ => bail!("unknown sessions projects option: {arg}"),
         }
     }
-    Ok(CliCommand::Ai(AiCommand::Projects(parsed)))
-}
-
-pub(crate) fn parse_ai_index(args: &[String]) -> Result<CliCommand> {
-    let mut parsed = AiIndexArgs::default();
-    let mut flags = FlagCursor::new(args);
-    while let Some(arg) = flags.next() {
-        match arg.as_str() {
-            "--json" => parsed.json = true,
-            "--path" => parsed.path = Some(flags.value("--path")?),
-            "--force" => parsed.force = true,
-            "--since" => parsed.since = Some(norm_time(flags.value("--since")?)?),
-            _ if arg.starts_with("--path=") => {
-                parsed.path = Some(value_after_equals(arg, "--path")?)
-            }
-            _ if arg.starts_with("--since=") => {
-                parsed.since = Some(norm_time(value_after_equals(arg, "--since")?)?)
-            }
-            _ => bail!("unknown ai index option: {arg}"),
-        }
-    }
-    Ok(CliCommand::Ai(AiCommand::Index(parsed)))
-}
-
-pub(crate) fn parse_ai_add(args: &[String]) -> Result<CliCommand> {
-    let mut parsed = AiAddArgs::default();
-    let mut flags = FlagCursor::new(args);
-    while let Some(arg) = flags.next() {
-        match arg.as_str() {
-            "--json" => parsed.json = true,
-            "--file" => parsed.file = flags.value("--file")?,
-            "--force" => parsed.force = true,
-            _ if arg.starts_with("--file=") => parsed.file = value_after_equals(arg, "--file")?,
-            _ => bail!("unknown ai add option: {arg}"),
-        }
-    }
-    if parsed.file.is_empty() {
-        bail!("ai add requires --file <PATH>");
-    }
-    Ok(CliCommand::Ai(AiCommand::Add(parsed)))
-}
-
-pub(crate) fn parse_ai_watch(args: &[String]) -> Result<CliCommand> {
-    let mut parsed = AiWatchArgs::default();
-    let mut flags = FlagCursor::new(args);
-    while let Some(arg) = flags.next() {
-        match arg.as_str() {
-            "--json" => parsed.json = true,
-            "--path" => parsed.path = Some(flags.value("--path")?),
-            "--debounce-ms" => {
-                parsed.debounce_ms =
-                    parse_positive_u64_flag("--debounce-ms", flags.value("--debounce-ms")?)?;
-            }
-            "--settle-ms" => {
-                parsed.settle_ms =
-                    parse_positive_u64_flag("--settle-ms", flags.value("--settle-ms")?)?;
-            }
-            "--max-retries" => {
-                parsed.max_retries =
-                    parse_u32_flag("--max-retries", flags.value("--max-retries")?)?
-                        .try_into()
-                        .map_err(|_| anyhow!("--max-retries is too large"))?;
-            }
-            "--no-initial-scan" => parsed.no_initial_scan = true,
-            _ if arg.starts_with("--path=") => {
-                parsed.path = Some(value_after_equals(arg, "--path")?)
-            }
-            _ if arg.starts_with("--debounce-ms=") => {
-                parsed.debounce_ms = parse_positive_u64_flag(
-                    "--debounce-ms",
-                    value_after_equals(arg, "--debounce-ms")?,
-                )?;
-            }
-            _ if arg.starts_with("--settle-ms=") => {
-                parsed.settle_ms = parse_positive_u64_flag(
-                    "--settle-ms",
-                    value_after_equals(arg, "--settle-ms")?,
-                )?;
-            }
-            _ if arg.starts_with("--max-retries=") => {
-                parsed.max_retries =
-                    parse_u32_flag("--max-retries", value_after_equals(arg, "--max-retries")?)?
-                        .try_into()
-                        .map_err(|_| anyhow!("--max-retries is too large"))?;
-            }
-            _ => bail!("unknown ai watch option: {arg}"),
-        }
-    }
-    Ok(CliCommand::Ai(AiCommand::Watch(parsed)))
-}
-
-pub(crate) fn parse_ai_checkpoints(args: &[String]) -> Result<CliCommand> {
-    let mut parsed = AiCheckpointsArgs::default();
-    let mut flags = FlagCursor::new(args);
-    while let Some(arg) = flags.next() {
-        match arg.as_str() {
-            "--json" => parsed.json = true,
-            "--errors" => parsed.errors_only = true,
-            "--missing" => parsed.missing_only = true,
-            "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
-            _ if arg.starts_with("--limit=") => {
-                parsed.limit = Some(parse_u32_flag(
-                    "--limit",
-                    value_after_equals(arg, "--limit")?,
-                )?)
-            }
-            _ => bail!("unknown ai checkpoints option: {arg}"),
-        }
-    }
-    Ok(CliCommand::Ai(AiCommand::Checkpoints(parsed)))
-}
-
-pub(crate) fn parse_ai_errors(args: &[String]) -> Result<CliCommand> {
-    let mut parsed = AiErrorsArgs::default();
-    let mut flags = FlagCursor::new(args);
-    while let Some(arg) = flags.next() {
-        match arg.as_str() {
-            "--json" => parsed.json = true,
-            "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
-            _ if arg.starts_with("--limit=") => {
-                parsed.limit = Some(parse_u32_flag(
-                    "--limit",
-                    value_after_equals(arg, "--limit")?,
-                )?)
-            }
-            _ => bail!("unknown ai errors option: {arg}"),
-        }
-    }
-    Ok(CliCommand::Ai(AiCommand::Errors(parsed)))
-}
-
-pub(crate) fn parse_ai_prune_checkpoints(args: &[String]) -> Result<CliCommand> {
-    let mut parsed = AiPruneCheckpointsArgs::default();
-    let mut flags = FlagCursor::new(args);
-    while let Some(arg) = flags.next() {
-        match arg.as_str() {
-            "--json" => parsed.json = true,
-            "--missing" => parsed.missing_only = true,
-            "--dry-run" => parsed.dry_run = true,
-            "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
-            _ if arg.starts_with("--limit=") => {
-                parsed.limit = Some(parse_u32_flag(
-                    "--limit",
-                    value_after_equals(arg, "--limit")?,
-                )?)
-            }
-            _ => bail!("unknown ai prune-checkpoints option: {arg}"),
-        }
-    }
-    if !parsed.missing_only {
-        bail!("ai prune-checkpoints requires --missing");
-    }
-    Ok(CliCommand::Ai(AiCommand::PruneCheckpoints(parsed)))
-}
-
-pub(crate) fn parse_ai_doctor(args: &[String]) -> Result<CliCommand> {
-    let mut parsed = AiDoctorArgs::default();
-    let mut flags = FlagCursor::new(args);
-    while let Some(arg) = flags.next() {
-        match arg.as_str() {
-            "--json" => parsed.json = true,
-            "--strict-permissions" => parsed.strict_permissions = true,
-            _ => bail!("unknown ai doctor option: {arg}"),
-        }
-    }
-    Ok(CliCommand::Ai(AiCommand::Doctor(parsed)))
+    Ok(CliCommand::Sessions(SessionsCommand::Projects(parsed)))
 }
 
 #[cfg(test)]
-#[path = "parse_ai_tests.rs"]
+#[path = "parse_sessions_tests.rs"]
 mod tests;

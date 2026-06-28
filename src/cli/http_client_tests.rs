@@ -626,7 +626,7 @@ async fn ask_history_round_trips_typed_response() {
 
     let (server, client) = start_mock_with_client().await;
     Mock::given(method("GET"))
-        .and(path("/api/ai/ask-history"))
+        .and(path("/api/sessions/ask-history"))
         .and(header("authorization", "Bearer test-value"))
         .and(query_param("query", "why did deploy fail"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({

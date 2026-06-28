@@ -12,40 +12,29 @@ const PARSER_TOKENS: &[&str] = &[
     "hosts",
     "sessions",
     "incident",
-    "ai",
-    "shell",
-    "agent-command",
+    "sessions",
     "heartbeat",
     "correlate",
+    "state",
+    "ingest",
     "stats",
     "compose",
-    "service",
     "setup",
     "db",
     "config",
-    "inventory",
-    "source-ips",
     "entity",
     "graph",
     "timeline",
     "patterns",
-    "ingest-rate",
-    "sig",
-    "notify",
-    "silent-hosts",
-    "clock-skew",
+    "alerts",
     "anomalies",
     "compare",
     "apps",
-    "host-state",
-    "fleet-state",
     "correlate-state",
-    "file-tail",
     // Mode-level (src/main.rs)
     "serve",
     "mcp",
     "doctor",
-    "deploy",
 ];
 
 #[test]
@@ -93,7 +82,7 @@ fn top_level_help_plain_lists_sections_and_commands() {
     assert!(out.contains("Quick Start"));
     assert!(out.contains("Commands"));
     assert!(out.contains("Search & Logs"));
-    assert!(out.contains("source-ips"));
+    assert!(out.contains("hosts"));
     assert!(out.contains("file-tail"));
     assert!(out.contains("→ Run cortex <command> --help"));
 }
@@ -116,30 +105,61 @@ fn command_help_shows_detailed_flags() {
 
 #[test]
 fn nested_help_shows_subcommand_specific_usage() {
-    let out = render_command("ai search", false).expect("ai search is known");
-    assert!(out.contains("cortex ai search QUERY"), "got: {out}");
-    assert!(!out.contains("cortex ai investigate"), "got: {out}");
+    let out = render_command("sessions search", false).expect("sessions search is known");
+    assert!(out.contains("cortex sessions search QUERY"), "got: {out}");
+    assert!(!out.contains("cortex sessions investigate"), "got: {out}");
 
-    let out = render_command("ai investigate", false).expect("ai investigate is known");
+    let out = render_command("sessions investigate", false).expect("sessions investigate is known");
     assert!(out.contains("--detail compact|full"), "got: {out}");
     assert!(out.contains("--include-transcript"), "got: {out}");
 
-    let out = render_command("inventory refresh", false).expect("inventory refresh is known");
+    let out = render_command("ingest inventory refresh", false)
+        .expect("ingest inventory refresh is known");
     assert!(
-        out.contains("cortex inventory refresh [--json]"),
+        out.contains("cortex ingest inventory refresh [--json]"),
         "got: {out}"
     );
-    assert!(!out.contains("cortex inventory status"), "got: {out}");
-
-    let out = render_command("inventory status", false).expect("inventory status is known");
     assert!(
-        out.contains("cortex inventory status [--json]"),
+        !out.contains("cortex ingest inventory status"),
         "got: {out}"
     );
 
-    let out = render_command("file-tail add", false).expect("file-tail add is known");
-    assert!(out.contains("cortex file-tail add --id ID"), "got: {out}");
+    let out =
+        render_command("ingest inventory status", false).expect("ingest inventory status is known");
+    assert!(
+        out.contains("cortex ingest inventory status [--json]"),
+        "got: {out}"
+    );
+
+    let out = render_command("ingest file-tail", false).expect("ingest file-tail is known");
+    assert!(
+        out.contains("cortex ingest file-tail add --id ID"),
+        "got: {out}"
+    );
     assert!(out.contains("--from-start"), "got: {out}");
+}
+
+#[test]
+fn every_nested_help_path_classifies_and_renders() {
+    let v = |xs: Vec<&str>| xs.into_iter().map(str::to_string).collect::<Vec<_>>();
+
+    for doc in NESTED_CATALOG {
+        let mut args = doc.path.split_whitespace().collect::<Vec<_>>();
+        args.push("--help");
+        assert_eq!(
+            classify_help(&v(args)),
+            HelpRequest::Command(doc.path.to_string()),
+            "nested help path should classify: {}",
+            doc.path
+        );
+        let body = render_command(doc.path, false)
+            .unwrap_or_else(|| panic!("nested help path should render: {}", doc.path));
+        assert!(
+            body.contains(doc.usage[0]),
+            "nested help for `{}` should include its primary usage, got: {body}",
+            doc.path
+        );
+    }
 }
 
 #[test]
@@ -188,8 +208,8 @@ fn classify_help_distinguishes_top_level_command_and_none() {
         HelpRequest::Command("db status".to_string())
     );
     assert_eq!(
-        classify_help(&v(&["ai", "search", "--help"])),
-        HelpRequest::Command("ai search".to_string())
+        classify_help(&v(&["sessions", "search", "--help"])),
+        HelpRequest::Command("sessions search".to_string())
     );
     assert_eq!(
         classify_help(&v(&["search", "--help"])),
@@ -208,11 +228,11 @@ fn classify_help_distinguishes_top_level_command_and_none() {
     // position) must NOT trigger help — these run the actual search.
     assert_eq!(classify_help(&v(&["search", "help"])), HelpRequest::None);
     assert_eq!(
-        classify_help(&v(&["ai", "search", "help"])),
+        classify_help(&v(&["sessions", "search", "help"])),
         HelpRequest::None
     );
     assert_eq!(
-        classify_help(&v(&["ai", "abuse", "--term", "help"])),
+        classify_help(&v(&["sessions", "abuse", "--term", "help"])),
         HelpRequest::None
     );
     // But `help` in command position is still a top-level request.

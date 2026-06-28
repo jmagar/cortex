@@ -502,10 +502,10 @@ Each stored log entry has these fields:
 
 ### AI transcript indexing
 
-`cortex ai index` scans the default local transcript roots
-`~/.claude/projects`, `~/.codex/sessions`, and `~/.gemini/tmp`; `cortex ai index --path PATH`
+`cortex sessions index` scans the default local transcript roots
+`~/.claude/projects`, `~/.codex/sessions`, and `~/.gemini/tmp`; `cortex sessions index --path PATH`
 can scan a known transcript directory or one explicit supported transcript file, and
-`cortex ai add --file FILE` imports one file. Recursive scans are limited to
+`cortex sessions add --file FILE` imports one file. Recursive scans are limited to
 `~/.claude/projects`, `~/.codex/sessions`, `~/.gemini/tmp`, or their children; broad roots such
 as `/`, `$HOME`, and the current repo root are rejected before walking. The
 scanner skips symlinks, counts unsupported files without parsing them, and
@@ -515,31 +515,31 @@ Gemini file has only `projectHash`, Cortex stores the project as
 `gemini://project/<hash>` so session inventory remains queryable. Use
 `--force` to reimport a transcript path from scratch after parser changes,
 `--since RFC3339` to scan only recently modified files, and
-`cortex ai checkpoints --errors` plus `cortex ai errors` to inspect structured
+`cortex sessions checkpoints --errors` plus `cortex sessions errors` to inspect structured
 scanner failures.
 
 For real-time local Claude/Codex/Gemini transcript ingestion, install the host-local
 watch service:
 
 ```bash
-cortex setup ai-watch-service install
-cortex setup ai-watch-service check
-cortex setup ai-watch-service remove
+cortex setup sessions-watch-service install
+cortex setup sessions-watch-service check
+cortex setup sessions-watch-service remove
 ```
 
 The watcher runs outside Docker because it needs host access to
 `~/.claude/projects`, `~/.codex/sessions`, and `~/.gemini/tmp`. It writes to the configured live
 SQLite DB and delegates every stable changed supported transcript file to the
-same scanner path used by `cortex ai add --file FILE`; Gemini `session-*.json`
+same scanner path used by `cortex sessions add --file FILE`; Gemini `session-*.json`
 chat files use the same checkpoint and duplicate-suppression path. Installing the watcher
 disables the older polling timer so both helpers do not scan the same files.
 
 The optional polling fallback is still available:
 
 ```bash
-cortex setup ai-index-timer install
-cortex setup ai-index-timer check
-cortex setup ai-index-timer remove
+cortex setup sessions-index-timer install
+cortex setup sessions-index-timer check
+cortex setup sessions-index-timer remove
 ```
 
 Both helpers are deliberately not inside the Docker container. Docker Compose
@@ -644,10 +644,10 @@ Useful setup commands:
 cortex setup          # first-run or normal repair
 cortex setup check    # inspect only; does not mutate files or start services
 cortex setup repair   # repair env/assets and restart the Docker stack
-cortex deploy preflight       # clearer alias for setup check
-cortex deploy local           # clearer local Compose deploy/reconcile command
-cortex deploy local --dry-run # run the deploy preflight without mutating Docker
-cortex setup ai-watch-service install  # host-local real-time transcript watcher
+cortex setup deploy preflight       # deployment preflight using setup assets
+cortex setup deploy local           # local Compose deploy/reconcile command
+cortex setup deploy local --dry-run # run the deploy preflight without mutating Docker
+cortex setup sessions-watch-service install  # host-local real-time transcript watcher
 cortex doctor binary  # check host/container binary freshness
 ```
 
@@ -696,9 +696,9 @@ The plugin deploys the server with Docker Compose through the same `cortex setup
 path as the one-line installer. You can still build and run the binary locally
 for development, but automated deployment is Compose-only.
 
-`cortex deploy local` is the operator-facing name for the same local
-Compose-backed reconcile path. It exists so deploy workflows do not need to call
-a command named `setup repair` directly.
+`cortex setup deploy local` is the operator-facing name for the same local
+Compose-backed reconcile path. It exists so deploy workflows stay under the
+setup namespace without calling a command named `setup repair` directly.
 
 ### Docker
 
@@ -976,8 +976,8 @@ Provision a least-privilege deploy key instead: generate a dedicated keypair in 
 cortex serve mcp  # UDP/TCP syslog ingest plus HTTP MCP on /mcp
 cortex mcp        # query-only MCP stdio transport
 cortex setup      # install/repair shared ~/.cortex Docker Compose setup
-cortex deploy preflight  # check deploy prerequisites without mutating Docker
-cortex deploy local      # reconcile local Compose deployment
+cortex setup deploy preflight  # check deploy prerequisites without mutating Docker
+cortex setup deploy local      # reconcile local Compose deployment
 cortex stats      # query the SQLite DB directly from the CLI
 cortex db status  # inspect SQLite maintenance state
 cortex db backup  # create a WAL-safe SQLite backup
@@ -1010,9 +1010,11 @@ cortex compose pull            # pull image for resolved Compose project
 cortex compose up              # run docker compose up -d for resolved service
 cortex compose restart         # restart resolved service
 cortex compose logs --tail 20  # bounded compose logs
+cortex compose logs cortex --tail 20  # bounded logs for one service
 
 # Surface parity (2026-05-22) — each is also a REST GET on /api/<command>
-cortex silent-hosts --silent-minutes 60
+cortex hosts sources --limit 50
+cortex hosts silent --silent-minutes 60
 cortex clock-skew   --since 2026-05-20T00:00:00Z
 cortex anomalies    --recent-minutes 30 --baseline-minutes 720
 cortex compare      --a-from 2026-05-20T00:00:00Z --a-to 2026-05-20T23:59:59Z \
@@ -1034,9 +1036,9 @@ GET  /api/compare?a_from=...&a_to=...&b_from=...&b_to=...
 GET  /api/apps?hostname=&from=&to=&limit=&offset=
 GET  /api/similar-incidents?query=...&window_minutes=30
 GET  /api/incident-context?from=...&to=...
-GET  /api/ai/ask-history?query=...
-GET  /api/ai/incidents?terms[]=foo&terms[]=bar
-GET  /api/ai/investigate?correlation_window_minutes=30
+GET  /api/sessions/ask-history?query=...
+GET  /api/sessions/incidents?terms[]=foo&terms[]=bar
+GET  /api/sessions/investigate?correlation_window_minutes=30
 GET  /api/graph/entity?entity_type=host&key=tootie
 GET  /api/graph/around?entity_type=host&key=tootie&depth=1
 GET  /api/graph/explain?entity_type=host&key=tootie&depth=2

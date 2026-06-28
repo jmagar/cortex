@@ -5,10 +5,10 @@
 
 use anyhow::{Result, bail};
 
-use super::super::args::{CliCommand, ClockSkewArgs};
+use super::super::args::ClockSkewArgs;
 use super::super::{FlagCursor, norm_time, parse_u32_flag};
 
-pub(crate) fn parse_clock_skew(args: &[String]) -> Result<CliCommand> {
+pub(crate) fn parse_clock_skew_args(args: &[String]) -> Result<ClockSkewArgs> {
     let mut parsed = ClockSkewArgs::default();
     let mut flags = FlagCursor::new(args);
     while let Some(arg) = flags.next() {
@@ -22,5 +22,5 @@ pub(crate) fn parse_clock_skew(args: &[String]) -> Result<CliCommand> {
             bail!("unknown clock-skew option: {arg}");
         }
     }
-    Ok(CliCommand::ClockSkew(parsed))
+    Ok(parsed)
 }

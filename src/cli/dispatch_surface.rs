@@ -5,8 +5,8 @@ use super::sparkline::sparkline;
 
 use anyhow::{Result, bail};
 use cortex::app::{
-    AckErrorRequest, IngestRateRequest, ListSourceIpsRequest, PatternsRequest, TimelineRequest,
-    UnackErrorRequest, UnaddressedErrorsRequest,
+    AckErrorRequest, IngestRateRequest, ListSourceIpsRequest, PatternsRequest, StatsRequest,
+    StatsResponse, TimelineRequest, UnackErrorRequest, UnaddressedErrorsRequest,
 };
 
 use super::{
@@ -14,7 +14,7 @@ use super::{
     SigListArgs, SigUnackArgs, SourceIpsArgs, TimelineArgs,
 };
 
-// ─── Surface parity (source-ips, timeline, patterns, ingest-rate, sig, notify) ─
+// ─── Surface parity (hosts sources, timeline, patterns, ingest-rate, sig, notify) ─
 
 impl SourceIpsArgs {
     pub(crate) fn into_request(self) -> ListSourceIpsRequest {
@@ -192,7 +192,13 @@ pub(crate) async fn run_ingest_rate(mode: &CliMode, args: IngestRateArgs) -> Res
     let json = args.json;
     let req = args.into_request();
     let response = match mode {
-        CliMode::Local(service) => service.ingest_rate(req).await?,
+        CliMode::Local(service) => match service.stats_domain(StatsRequest::IngestRate(req)).await?
+        {
+            StatsResponse::IngestRate(response) => response,
+            StatsResponse::Summary(_) => {
+                bail!("internal: stats ingest-rate returned summary response")
+            }
+        },
         CliMode::Http(client) => http_or_cancel(client.ingest_rate(&req)).await?,
     };
     if json {

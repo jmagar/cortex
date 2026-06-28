@@ -3,8 +3,9 @@ use anyhow::{Result, bail};
 use super::argdefaults::{effective_limit, effective_since, positional_value};
 use super::parse_common::{FlagCursor, parse_output_args, parse_u32_flag, value_after_equals};
 use super::{
-    CliCommand, CorrelateArgs, FilterArgs, IncidentArgs, IngestRateArgs, PatternsArgs, SearchArgs,
-    SessionsArgs, SourceIpsArgs, TailArgs, TimeRangeArgs, TimelineArgs,
+    CliCommand, CorrelateArgs, FilterArgs, HostsCommand, IncidentArgs, IngestRateArgs,
+    PatternsArgs, SearchArgs, SessionsArgs, SessionsCommand, SilentHostsArgs, SourceIpsArgs,
+    TailArgs, TimeRangeArgs, TimelineArgs,
 };
 use cortex::app::parse_time_arg;
 
@@ -271,7 +272,22 @@ pub(crate) fn parse_errors(args: &[String]) -> Result<CliCommand> {
 }
 
 pub(crate) fn parse_hosts(args: &[String]) -> Result<CliCommand> {
-    Ok(CliCommand::Hosts(parse_output_args("hosts", args)?))
+    let (subcommand, rest) = match args.split_first() {
+        None => ("", args),
+        Some((subcommand, _)) if subcommand.starts_with('-') => ("", args),
+        Some((subcommand, rest)) => (subcommand.as_str(), rest),
+    };
+    match subcommand {
+        "" => Ok(CliCommand::Hosts(HostsCommand::List(parse_output_args(
+            "hosts", rest,
+        )?))),
+        "sources" => parse_hosts_sources(rest),
+        "silent" => parse_hosts_silent(rest),
+        _ => bail!(
+            "{}",
+            super::suggest::unknown_command("hosts subcommand", subcommand, &["sources", "silent"],)
+        ),
+    }
 }
 
 pub(crate) fn parse_sessions(args: &[String]) -> Result<CliCommand> {
@@ -311,7 +327,7 @@ pub(crate) fn parse_sessions(args: &[String]) -> Result<CliCommand> {
             _ => bail!("unexpected sessions argument: {arg}"),
         }
     }
-    Ok(CliCommand::Sessions(parsed))
+    Ok(CliCommand::Sessions(SessionsCommand::List(parsed)))
 }
 
 pub(crate) fn parse_incident(args: &[String]) -> Result<CliCommand> {
@@ -432,7 +448,7 @@ to anchor correlate on a time and filter by host, pass `--reference-time <time> 
     Ok(CliCommand::Correlate(parsed))
 }
 
-pub(crate) fn parse_source_ips(args: &[String]) -> Result<CliCommand> {
+pub(crate) fn parse_hosts_sources(args: &[String]) -> Result<CliCommand> {
     let mut parsed = SourceIpsArgs::default();
     let mut flags = FlagCursor::new(args);
     while let Some(arg) = flags.next() {
@@ -443,10 +459,25 @@ pub(crate) fn parse_source_ips(args: &[String]) -> Result<CliCommand> {
         } else if let Some(v) = flags.match_value(&arg, "--offset")? {
             parsed.offset = Some(parse_u32_flag("--offset", v)?);
         } else {
-            bail!("unknown source-ips option: {arg}");
+            bail!("unknown hosts sources option: {arg}");
         }
     }
-    Ok(CliCommand::SourceIps(parsed))
+    Ok(CliCommand::Hosts(HostsCommand::Sources(parsed)))
+}
+
+pub(crate) fn parse_hosts_silent(args: &[String]) -> Result<CliCommand> {
+    let mut parsed = SilentHostsArgs::default();
+    let mut flags = FlagCursor::new(args);
+    while let Some(arg) = flags.next() {
+        if arg == "--json" {
+            parsed.json = true;
+        } else if let Some(v) = flags.match_value(&arg, "--silent-minutes")? {
+            parsed.silent_minutes = Some(parse_u32_flag("--silent-minutes", v)?);
+        } else {
+            bail!("unknown hosts silent option: {arg}");
+        }
+    }
+    Ok(CliCommand::Hosts(HostsCommand::Silent(parsed)))
 }
 
 pub(crate) fn parse_timeline(args: &[String]) -> Result<CliCommand> {
@@ -505,7 +536,7 @@ pub(crate) fn parse_patterns(args: &[String]) -> Result<CliCommand> {
     Ok(CliCommand::Patterns(parsed))
 }
 
-pub(crate) fn parse_ingest_rate(args: &[String]) -> Result<CliCommand> {
+pub(crate) fn parse_ingest_rate_args(args: &[String]) -> Result<IngestRateArgs> {
     let mut parsed = IngestRateArgs::default();
     let mut flags = FlagCursor::new(args);
     while let Some(arg) = flags.next() {
@@ -515,7 +546,7 @@ pub(crate) fn parse_ingest_rate(args: &[String]) -> Result<CliCommand> {
             _ => bail!("unknown ingest-rate option: {arg}"),
         }
     }
-    Ok(CliCommand::IngestRate(parsed))
+    Ok(parsed)
 }
 
 #[cfg(test)]

@@ -66,7 +66,7 @@ impl From<db::AbuseIncident> for AbuseIncident {
 #[serde(deny_unknown_fields)]
 pub struct AiInvestigateRequest {
     // `incident_id` exists on the service-layer request but is NOT part of the
-    // `/api/ai/investigate` query surface (`AiInvestigateQuery` in api.rs uses
+    // `/api/sessions/investigate` query surface (`AiInvestigateQuery` in api.rs uses
     // `deny_unknown_fields`). serde_qs emits `None` options as a bare key
     // (`incident_id&project&...`), which the server rejects as an unknown
     // field. Skipping when `None` keeps the CLI HTTP path (which always sets

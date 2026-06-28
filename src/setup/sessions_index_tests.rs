@@ -50,17 +50,17 @@ fn path_with_prepended(dir: &std::path::Path) -> std::ffi::OsString {
 #[test]
 fn install_ai_index_timer_files_writes_script_service_and_timer() {
     let dir = tempfile::tempdir().unwrap();
-    let bin_path = dir.path().join("bin/cortex-ai-index");
+    let bin_path = dir.path().join("bin/cortex-sessions-index");
     let systemd_dir = dir.path().join("systemd");
-    let service_path = systemd_dir.join("cortex-ai-index.service");
-    let timer_path = systemd_dir.join("cortex-ai-index.timer");
+    let service_path = systemd_dir.join("cortex-sessions-index.service");
+    let timer_path = systemd_dir.join("cortex-sessions-index.timer");
 
     let phase =
         install_ai_index_timer_files(&bin_path, &systemd_dir, &service_path, &timer_path).unwrap();
 
     assert_eq!(phase.status, SetupStatus::Ok);
     let script = std::fs::read_to_string(&bin_path).unwrap();
-    assert!(script.contains("cortex ai index --json"));
+    assert!(script.contains("cortex sessions index --json"));
     assert!(script.contains("CORTEX_DOCKER_INGEST_ENABLED"));
     let service = std::fs::read_to_string(&service_path).unwrap();
     assert!(service.contains(&format!("ExecStart={}", bin_path.display())));
@@ -71,9 +71,9 @@ fn install_ai_index_timer_files_writes_script_service_and_timer() {
 #[test]
 fn remove_ai_index_timer_files_is_idempotent() {
     let dir = tempfile::tempdir().unwrap();
-    let bin_path = dir.path().join("bin/cortex-ai-index");
-    let service_path = dir.path().join("systemd/cortex-ai-index.service");
-    let timer_path = dir.path().join("systemd/cortex-ai-index.timer");
+    let bin_path = dir.path().join("bin/cortex-sessions-index");
+    let service_path = dir.path().join("systemd/cortex-sessions-index.service");
+    let timer_path = dir.path().join("systemd/cortex-sessions-index.timer");
     std::fs::create_dir_all(bin_path.parent().unwrap()).unwrap();
     std::fs::create_dir_all(service_path.parent().unwrap()).unwrap();
     std::fs::write(&bin_path, "script").unwrap();
@@ -92,11 +92,11 @@ fn remove_ai_index_timer_files_is_idempotent() {
 
 #[test]
 fn service_and_timer_units_keep_host_user_timer_contract() {
-    let service = ai_index_service_unit(Path::new("/home/me/.local/bin/cortex-ai-index"));
+    let service = ai_index_service_unit(Path::new("/home/me/.local/bin/cortex-sessions-index"));
     let timer = ai_index_timer_unit();
 
     assert!(service.contains("Type=oneshot"));
-    assert!(service.contains("ExecStart=/home/me/.local/bin/cortex-ai-index"));
+    assert!(service.contains("ExecStart=/home/me/.local/bin/cortex-sessions-index"));
     assert!(timer.contains("OnBootSec=5min"));
     assert!(timer.contains("Persistent=true"));
     assert!(timer.contains("WantedBy=timers.target"));
@@ -121,30 +121,31 @@ async fn run_ai_index_timer_setup_install_check_and_remove_round_trip() {
     let _cortex_home = EnvGuard::set("CORTEX_HOME", &cortex_home);
     let _path = EnvGuard::set("PATH", path_with_prepended(&bin_dir));
 
-    let install = run_ai_index_timer_setup(AiIndexTimerAction::Install)
+    let install = run_sessions_index_timer_setup(SessionsIndexTimerAction::Install)
         .await
         .unwrap();
-    assert_eq!(install.mode, "ai-index-timer-install");
+    assert_eq!(install.mode, "sessions-index-timer-install");
     assert!(
         install
             .phases
             .iter()
-            .any(|phase| phase.name == "ai-index-timer-files" && phase.status == SetupStatus::Ok)
+            .any(|phase| phase.name == "sessions-index-timer-files"
+                && phase.status == SetupStatus::Ok)
     );
-    assert!(home.join(".local/bin/cortex-ai-index").is_file());
+    assert!(home.join(".local/bin/cortex-sessions-index").is_file());
     assert!(
-        home.join(".config/systemd/user/cortex-ai-index.service")
+        home.join(".config/systemd/user/cortex-sessions-index.service")
             .is_file()
     );
     assert!(
-        home.join(".config/systemd/user/cortex-ai-index.timer")
+        home.join(".config/systemd/user/cortex-sessions-index.timer")
             .is_file()
     );
 
-    let check = run_ai_index_timer_setup(AiIndexTimerAction::Check)
+    let check = run_sessions_index_timer_setup(SessionsIndexTimerAction::Check)
         .await
         .unwrap();
-    assert_eq!(check.mode, "ai-index-timer-check");
+    assert_eq!(check.mode, "sessions-index-timer-check");
     assert!(
         check
             .phases
@@ -152,19 +153,19 @@ async fn run_ai_index_timer_setup_install_check_and_remove_round_trip() {
             .any(|phase| phase.name == "systemctl-user" && phase.status == SetupStatus::Ok)
     );
 
-    let remove = run_ai_index_timer_setup(AiIndexTimerAction::Remove)
+    let remove = run_sessions_index_timer_setup(SessionsIndexTimerAction::Remove)
         .await
         .unwrap();
-    assert_eq!(remove.mode, "ai-index-timer-remove");
-    assert!(!home.join(".local/bin/cortex-ai-index").exists());
+    assert_eq!(remove.mode, "sessions-index-timer-remove");
+    assert!(!home.join(".local/bin/cortex-sessions-index").exists());
     assert!(
         !home
-            .join(".config/systemd/user/cortex-ai-index.service")
+            .join(".config/systemd/user/cortex-sessions-index.service")
             .exists()
     );
     assert!(
         !home
-            .join(".config/systemd/user/cortex-ai-index.timer")
+            .join(".config/systemd/user/cortex-sessions-index.timer")
             .exists()
     );
 }

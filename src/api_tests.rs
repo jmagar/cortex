@@ -230,7 +230,7 @@ async fn file_tails_route_rejects_when_server_admin_token_unconfigured() {
     assert_eq!(status, axum::http::StatusCode::FORBIDDEN);
     assert_eq!(
         value["error"],
-        "CORTEX_API_ADMIN_TOKEN required for file-tail management"
+        "CORTEX_API_ADMIN_TOKEN required for admin API actions"
     );
 }
 
@@ -252,7 +252,7 @@ async fn file_tails_route_rejects_blank_server_admin_token() {
     assert_eq!(status, axum::http::StatusCode::FORBIDDEN);
     assert_eq!(
         value["error"],
-        "CORTEX_API_ADMIN_TOKEN required for file-tail management"
+        "CORTEX_API_ADMIN_TOKEN required for admin API actions"
     );
 }
 
@@ -274,8 +274,35 @@ async fn file_tails_route_rejects_wrong_admin_token() {
     assert_eq!(status, axum::http::StatusCode::FORBIDDEN);
     assert_eq!(
         value["error"],
-        "X-Cortex-Admin-Token required for file-tail management"
+        "X-Cortex-Admin-Token required for admin API actions"
     );
+}
+
+#[tokio::test]
+async fn error_ack_routes_reject_normal_bearer_without_admin_token() {
+    let (mut state, _pool, _dir) = test_state(Some("secret".into()));
+    state.config.admin_token = crate::config::Secret(Some("admin-secret".into()));
+    let app = test_router(state);
+    let hash = "0".repeat(64);
+
+    for (path, body) in [
+        (
+            "/api/errors/ack",
+            serde_json::json!({ "signature_hash": hash, "notes": "handled" }),
+        ),
+        (
+            "/api/errors/unack",
+            serde_json::json!({ "signature_hash": hash, "reason": "regressed" }),
+        ),
+    ] {
+        let (status, value) = post_json(app.clone(), path, body, Some("secret")).await;
+
+        assert_eq!(status, axum::http::StatusCode::FORBIDDEN, "{path}: {value}");
+        assert_eq!(
+            value["error"],
+            "X-Cortex-Admin-Token required for admin API actions"
+        );
+    }
 }
 
 #[tokio::test]
@@ -609,7 +636,7 @@ async fn version_git_sha_is_omitted_when_unset_or_string_when_set() {
     );
 }
 
-// ── /api/sessions + /api/ai/* happy-paths and contract checks ───────────────
+// ── /api/sessions + /api/sessions/* happy-paths and contract checks ───────────────
 
 fn ai_entry(
     ts: &str,
@@ -665,7 +692,7 @@ async fn sessions_route_lists_ingested_session() {
 async fn ai_search_requires_query_param() {
     let (state, _pool, _dir) = test_state(Some("secret".into()));
     let app = router(state).unwrap();
-    let (status, _) = get_json(app, "/api/ai/search", Some("secret")).await;
+    let (status, _) = get_json(app, "/api/sessions/search", Some("secret")).await;
     assert_eq!(
         status,
         axum::http::StatusCode::BAD_REQUEST,
@@ -679,7 +706,7 @@ async fn ai_search_clamps_limit_and_marks_truncated() {
     let app = router(state).unwrap();
     let (status, value) = get_json(
         app,
-        "/api/ai/search?query=anything&limit=10000",
+        "/api/sessions/search?query=anything&limit=10000",
         Some("secret"),
     )
     .await;
@@ -698,7 +725,8 @@ async fn ai_search_clamps_limit_and_marks_truncated() {
 async fn ai_search_without_limit_omits_clamp_marker() {
     let (state, _pool, _dir) = test_state(Some("secret".into()));
     let app = router(state).unwrap();
-    let (status, value) = get_json(app, "/api/ai/search?query=anything", Some("secret")).await;
+    let (status, value) =
+        get_json(app, "/api/sessions/search?query=anything", Some("secret")).await;
     assert_eq!(status, axum::http::StatusCode::OK);
     assert!(
         value.get("limit_clamped_to").is_none(),
@@ -712,7 +740,7 @@ async fn ai_abuse_accepts_terms_singular_query_param() {
     // `terms=<x>` and surfaces it as a single-element Vec<String>.
     let (state, _pool, _dir) = test_state(Some("secret".into()));
     let app = router(state).unwrap();
-    let (status, value) = get_json(app, "/api/ai/abuse?terms=ignore", Some("secret")).await;
+    let (status, value) = get_json(app, "/api/sessions/abuse?terms=ignore", Some("secret")).await;
     assert_eq!(status, axum::http::StatusCode::OK);
     assert!(value.get("matches").is_some());
 }
@@ -726,7 +754,7 @@ async fn ai_abuse_accepts_multiple_terms_via_repeated_keys() {
     let app = router(state).unwrap();
     let (status, value) = get_json(
         app,
-        "/api/ai/abuse?terms=alpha&terms=beta&terms=gamma",
+        "/api/sessions/abuse?terms=alpha&terms=beta&terms=gamma",
         Some("secret"),
     )
     .await;
@@ -744,7 +772,7 @@ async fn ai_abuse_accepts_multiple_terms_via_repeated_keys() {
 async fn ai_abuse_clamps_limit_and_marks_truncated() {
     let (state, _pool, _dir) = test_state(Some("secret".into()));
     let app = router(state).unwrap();
-    let (status, value) = get_json(app, "/api/ai/abuse?limit=10000", Some("secret")).await;
+    let (status, value) = get_json(app, "/api/sessions/abuse?limit=10000", Some("secret")).await;
     assert_eq!(status, axum::http::StatusCode::OK);
     assert_eq!(value["limit_clamped_to"], 500);
     assert_eq!(value["truncated"], true);
@@ -756,7 +784,7 @@ async fn ai_correlate_clamps_events_per_anchor_and_marks_clamp() {
     let app = router(state).unwrap();
     let (status, value) = get_json(
         app,
-        "/api/ai/correlate?events_per_anchor=200",
+        "/api/sessions/correlate?events_per_anchor=200",
         Some("secret"),
     )
     .await;
@@ -776,7 +804,7 @@ async fn ai_correlate_without_clamp_has_no_marker() {
     let app = router(state).unwrap();
     let (status, value) = get_json(
         app,
-        "/api/ai/correlate?events_per_anchor=10",
+        "/api/sessions/correlate?events_per_anchor=10",
         Some("secret"),
     )
     .await;
@@ -791,7 +819,7 @@ async fn ai_correlate_without_clamp_has_no_marker() {
 async fn ai_blocks_returns_payload() {
     let (state, _pool, _dir) = test_state(Some("secret".into()));
     let app = router(state).unwrap();
-    let (status, value) = get_json(app, "/api/ai/blocks", Some("secret")).await;
+    let (status, value) = get_json(app, "/api/sessions/blocks", Some("secret")).await;
     assert_eq!(status, axum::http::StatusCode::OK);
     assert!(value.get("blocks").is_some());
 }
@@ -800,7 +828,7 @@ async fn ai_blocks_returns_payload() {
 async fn ai_context_rejects_missing_project() {
     let (state, _pool, _dir) = test_state(Some("secret".into()));
     let app = router(state).unwrap();
-    let (status, _) = get_json(app, "/api/ai/context", Some("secret")).await;
+    let (status, _) = get_json(app, "/api/sessions/context", Some("secret")).await;
     assert_eq!(
         status,
         axum::http::StatusCode::BAD_REQUEST,
@@ -812,7 +840,7 @@ async fn ai_context_rejects_missing_project() {
 async fn ai_context_rejects_empty_project() {
     let (state, _pool, _dir) = test_state(Some("secret".into()));
     let app = router(state).unwrap();
-    let (status, value) = get_json(app, "/api/ai/context?project=", Some("secret")).await;
+    let (status, value) = get_json(app, "/api/sessions/context?project=", Some("secret")).await;
     assert_eq!(
         status,
         axum::http::StatusCode::BAD_REQUEST,
@@ -828,7 +856,7 @@ async fn ai_context_rejects_empty_project() {
 async fn ai_context_accepts_non_empty_project() {
     let (state, _pool, _dir) = test_state(Some("secret".into()));
     let app = router(state).unwrap();
-    let (status, value) = get_json(app, "/api/ai/context?project=foo", Some("secret")).await;
+    let (status, value) = get_json(app, "/api/sessions/context?project=foo", Some("secret")).await;
     assert_eq!(status, axum::http::StatusCode::OK);
     assert_eq!(value["project"], "foo");
 }
@@ -837,7 +865,7 @@ async fn ai_context_accepts_non_empty_project() {
 async fn ai_tools_returns_payload() {
     let (state, _pool, _dir) = test_state(Some("secret".into()));
     let app = router(state).unwrap();
-    let (status, value) = get_json(app, "/api/ai/tools", Some("secret")).await;
+    let (status, value) = get_json(app, "/api/sessions/tools", Some("secret")).await;
     assert_eq!(status, axum::http::StatusCode::OK);
     assert!(value.get("tools").is_some());
 }
@@ -846,7 +874,7 @@ async fn ai_tools_returns_payload() {
 async fn ai_projects_returns_payload() {
     let (state, _pool, _dir) = test_state(Some("secret".into()));
     let app = router(state).unwrap();
-    let (status, value) = get_json(app, "/api/ai/projects", Some("secret")).await;
+    let (status, value) = get_json(app, "/api/sessions/projects", Some("secret")).await;
     assert_eq!(status, axum::http::StatusCode::OK);
     assert!(value.get("projects").is_some());
 }
@@ -857,7 +885,7 @@ async fn ai_projects_returns_payload() {
 async fn unknown_query_param_returns_400_on_ai_blocks() {
     let (state, _pool, _dir) = test_state(Some("secret".into()));
     let app = router(state).unwrap();
-    let (status, _) = get_json(app, "/api/ai/blocks?bogus=1", Some("secret")).await;
+    let (status, _) = get_json(app, "/api/sessions/blocks?bogus=1", Some("secret")).await;
     assert_eq!(
         status,
         axum::http::StatusCode::BAD_REQUEST,
@@ -881,13 +909,13 @@ async fn ai_routes_require_bearer() {
     let app = router(state).unwrap();
     for path in [
         "/api/sessions",
-        "/api/ai/search?query=x",
-        "/api/ai/abuse",
-        "/api/ai/correlate",
-        "/api/ai/blocks",
-        "/api/ai/context?project=foo",
-        "/api/ai/tools",
-        "/api/ai/projects",
+        "/api/sessions/search?query=x",
+        "/api/sessions/abuse",
+        "/api/sessions/correlate",
+        "/api/sessions/blocks",
+        "/api/sessions/context?project=foo",
+        "/api/sessions/tools",
+        "/api/sessions/projects",
     ] {
         let (status, _) = get_json(app.clone(), path, None).await;
         assert_eq!(
@@ -1226,7 +1254,7 @@ async fn investigation_v1_ask_requires_auth_and_returns_no_store_safe_envelope()
 async fn ai_checkpoints_route_returns_empty_when_db_empty() {
     let (state, _pool, _dir) = test_state(Some("secret".into()));
     let app = test_router(state);
-    let (status, value) = get_json(app, "/api/ai/checkpoints", Some("secret")).await;
+    let (status, value) = get_json(app, "/api/sessions/checkpoints", Some("secret")).await;
     assert_eq!(status, axum::http::StatusCode::OK);
     assert!(value.is_array(), "expected JSON array, got {value}");
     assert_eq!(value.as_array().unwrap().len(), 0);
@@ -1238,7 +1266,7 @@ async fn ai_checkpoints_route_accepts_filter_flags() {
     let app = test_router(state);
     let (status, _) = get_json(
         app,
-        "/api/ai/checkpoints?errors_only=true&missing_only=false&limit=10",
+        "/api/sessions/checkpoints?errors_only=true&missing_only=false&limit=10",
         Some("secret"),
     )
     .await;
@@ -1249,7 +1277,7 @@ async fn ai_checkpoints_route_accepts_filter_flags() {
 async fn ai_checkpoints_rejects_unknown_query_param() {
     let (state, _pool, _dir) = test_state(Some("secret".into()));
     let app = test_router(state);
-    let (status, _) = get_json(app, "/api/ai/checkpoints?bogus=1", Some("secret")).await;
+    let (status, _) = get_json(app, "/api/sessions/checkpoints?bogus=1", Some("secret")).await;
     assert_eq!(
         status,
         axum::http::StatusCode::BAD_REQUEST,
@@ -1261,7 +1289,7 @@ async fn ai_checkpoints_rejects_unknown_query_param() {
 async fn ai_parse_errors_route_returns_empty_when_db_empty() {
     let (state, _pool, _dir) = test_state(Some("secret".into()));
     let app = test_router(state);
-    let (status, value) = get_json(app, "/api/ai/errors", Some("secret")).await;
+    let (status, value) = get_json(app, "/api/sessions/errors", Some("secret")).await;
     assert_eq!(status, axum::http::StatusCode::OK);
     assert!(value.is_array(), "expected JSON array, got {value}");
 }
@@ -1270,7 +1298,7 @@ async fn ai_parse_errors_route_returns_empty_when_db_empty() {
 async fn ai_parse_errors_honors_limit() {
     let (state, _pool, _dir) = test_state(Some("secret".into()));
     let app = test_router(state);
-    let (status, _) = get_json(app, "/api/ai/errors?limit=5", Some("secret")).await;
+    let (status, _) = get_json(app, "/api/sessions/errors?limit=5", Some("secret")).await;
     assert_eq!(status, axum::http::StatusCode::OK);
 }
 
@@ -1280,7 +1308,7 @@ async fn ai_prune_checkpoints_with_dry_run_true_returns_ok() {
     let app = test_router(state);
     let (status, value) = post_json(
         app,
-        "/api/ai/prune-checkpoints",
+        "/api/sessions/prune-checkpoints",
         // `missing_only` is required by the service (it refuses to prune
         // arbitrary checkpoints — see scanner::checkpoint::prune_checkpoints).
         json!({"dry_run": true, "missing_only": true}),
@@ -1299,7 +1327,7 @@ async fn ai_prune_checkpoints_with_dry_run_false_returns_ok_and_prunes() {
     let app = test_router(state);
     let (status, value) = post_json(
         app,
-        "/api/ai/prune-checkpoints",
+        "/api/sessions/prune-checkpoints",
         json!({"dry_run": false, "missing_only": true}),
         Some("secret"),
     )
@@ -1317,8 +1345,13 @@ async fn ai_prune_checkpoints_with_dry_run_false_returns_ok_and_prunes() {
 async fn ai_prune_checkpoints_missing_dry_run_returns_400() {
     let (state, _pool, _dir) = test_state(Some("secret".into()));
     let app = test_router(state);
-    let (status, value) =
-        post_json(app, "/api/ai/prune-checkpoints", json!({}), Some("secret")).await;
+    let (status, value) = post_json(
+        app,
+        "/api/sessions/prune-checkpoints",
+        json!({}),
+        Some("secret"),
+    )
+    .await;
     assert_eq!(
         status,
         axum::http::StatusCode::BAD_REQUEST,
@@ -1338,7 +1371,7 @@ async fn ai_prune_checkpoints_with_only_missing_only_returns_400() {
     let app = test_router(state);
     let (status, _) = post_json(
         app,
-        "/api/ai/prune-checkpoints",
+        "/api/sessions/prune-checkpoints",
         json!({"missing_only": true}),
         Some("secret"),
     )
@@ -1352,7 +1385,7 @@ async fn ai_prune_checkpoints_rejects_unknown_field() {
     let app = test_router(state);
     let (status, _) = post_json(
         app,
-        "/api/ai/prune-checkpoints",
+        "/api/sessions/prune-checkpoints",
         json!({"dry_run": true, "unknown": 1}),
         Some("secret"),
     )
@@ -1370,7 +1403,7 @@ async fn ai_prune_checkpoints_rejects_non_object_body() {
     let app = test_router(state);
     let (status, _) = post_json(
         app,
-        "/api/ai/prune-checkpoints",
+        "/api/sessions/prune-checkpoints",
         json!([1, 2, 3]),
         Some("secret"),
     )
@@ -1384,7 +1417,7 @@ async fn ai_prune_checkpoints_rejects_malformed_json() {
     let app = test_router(state);
     let request = Request::builder()
         .method("POST")
-        .uri("/api/ai/prune-checkpoints")
+        .uri("/api/sessions/prune-checkpoints")
         .header("Content-Type", "application/json")
         .header("Authorization", "Bearer secret")
         .body(axum::body::Body::from("{not json"))
@@ -1399,7 +1432,7 @@ async fn ai_prune_checkpoints_requires_bearer() {
     let app = test_router(state);
     let (status, _) = post_json(
         app,
-        "/api/ai/prune-checkpoints",
+        "/api/sessions/prune-checkpoints",
         json!({"dry_run": true}),
         None,
     )
@@ -1411,7 +1444,7 @@ async fn ai_prune_checkpoints_requires_bearer() {
 async fn ai_checkpoints_routes_require_bearer() {
     let (state, _pool, _dir) = test_state(Some("secret".into()));
     let app = test_router(state);
-    for path in ["/api/ai/checkpoints", "/api/ai/errors"] {
+    for path in ["/api/sessions/checkpoints", "/api/sessions/errors"] {
         let (status, _) = get_json(app.clone(), path, None).await;
         assert_eq!(
             status,
@@ -1433,7 +1466,7 @@ async fn cors_preflight_for_post_includes_post_in_allow_methods() {
     let app = test_router(state);
     let request = Request::builder()
         .method("OPTIONS")
-        .uri("/api/ai/prune-checkpoints")
+        .uri("/api/sessions/prune-checkpoints")
         .header("Origin", "http://localhost:3100")
         .header("Access-Control-Request-Method", "POST")
         .header(
@@ -1500,7 +1533,7 @@ async fn cors_preflight_rejects_non_allowlisted_header() {
     let app = test_router(state);
     let request = Request::builder()
         .method("OPTIONS")
-        .uri("/api/ai/prune-checkpoints")
+        .uri("/api/sessions/prune-checkpoints")
         .header("Origin", "http://localhost:3100")
         .header("Access-Control-Request-Method", "POST")
         .header(
@@ -1531,13 +1564,13 @@ async fn cors_preflight_rejects_non_allowlisted_header() {
 async fn bead_0p8r_3_routes_require_bearer() {
     let (state, _pool, _dir) = test_state(Some("secret".into()));
     let app = test_router(state);
-    for path in ["/api/ai/checkpoints", "/api/ai/errors"] {
+    for path in ["/api/sessions/checkpoints", "/api/sessions/errors"] {
         let (status, _) = get_json(app.clone(), path, None).await;
         assert_eq!(status, axum::http::StatusCode::UNAUTHORIZED, "{path}");
     }
     let (status, _) = post_json(
         app,
-        "/api/ai/prune-checkpoints",
+        "/api/sessions/prune-checkpoints",
         json!({"dry_run": true}),
         None,
     )
@@ -1994,7 +2027,7 @@ async fn ai_prune_checkpoints_single_flight_returns_409_when_locked() {
 
     let (status, value) = post_json(
         app,
-        "/api/ai/prune-checkpoints",
+        "/api/sessions/prune-checkpoints",
         json!({"dry_run": true}),
         Some("secret"),
     )
@@ -2398,7 +2431,7 @@ async fn ai_ask_history_returns_200_with_token() {
     let app = test_router(state);
     let (status, _value) = get_json(
         app,
-        "/api/ai/ask-history?query=ssh%20key%20rotation",
+        "/api/sessions/ask-history?query=ssh%20key%20rotation",
         Some("secret"),
     )
     .await;
@@ -2406,10 +2439,25 @@ async fn ai_ask_history_returns_200_with_token() {
 }
 
 #[tokio::test]
+async fn ai_api_namespace_is_removed() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+
+    let (status, _value) = get_json(
+        app,
+        "/api/ai/search?query=ssh%20key%20rotation",
+        Some("secret"),
+    )
+    .await;
+
+    assert_eq!(status, axum::http::StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
 async fn ai_incidents_returns_200_with_token() {
     let (state, _pool, _dir) = test_state(Some("secret".into()));
     let app = test_router(state);
-    let (status, _value) = get_json(app, "/api/ai/incidents?limit=10", Some("secret")).await;
+    let (status, _value) = get_json(app, "/api/sessions/incidents?limit=10", Some("secret")).await;
     assert_eq!(status, axum::http::StatusCode::OK);
 }
 
@@ -2443,8 +2491,8 @@ async fn ai_incidents_accepts_supported_terms_encodings() {
     let app = test_router(state);
 
     for uri in [
-        "/api/ai/incidents?terms=tooling&limit=1",
-        "/api/ai/incidents?terms[]=tooling&limit=1",
+        "/api/sessions/incidents?terms=tooling&limit=1",
+        "/api/sessions/incidents?terms[]=tooling&limit=1",
     ] {
         let (status, value) = get_json(app.clone(), uri, Some("secret")).await;
         assert_eq!(status, axum::http::StatusCode::OK, "{uri}: {value}");
@@ -2462,7 +2510,7 @@ async fn ai_incidents_rejects_unsupported_indexed_terms_query() {
     let app = test_router(state);
     let (status, _value) = get_json(
         app,
-        "/api/ai/incidents?terms%5B0%5D=tooling&limit=1",
+        "/api/sessions/incidents?terms%5B0%5D=tooling&limit=1",
         Some("secret"),
     )
     .await;
@@ -2475,7 +2523,7 @@ async fn ai_investigate_returns_200_with_token() {
     let app = test_router(state);
     let (status, _value) = get_json(
         app,
-        "/api/ai/investigate?window_minutes=60&correlation_window_minutes=30",
+        "/api/sessions/investigate?window_minutes=60&correlation_window_minutes=30",
         Some("secret"),
     )
     .await;
@@ -2501,8 +2549,8 @@ async fn ai_investigate_accepts_supported_terms_encodings() {
     let app = test_router(state);
 
     for uri in [
-        "/api/ai/investigate?terms=tooling&limit=1",
-        "/api/ai/investigate?terms[]=tooling&limit=1",
+        "/api/sessions/investigate?terms=tooling&limit=1",
+        "/api/sessions/investigate?terms[]=tooling&limit=1",
     ] {
         let (status, value) = get_json(app.clone(), uri, Some("secret")).await;
         assert_eq!(status, axum::http::StatusCode::OK, "{uri}: {value}");
@@ -2520,7 +2568,7 @@ async fn ai_investigate_rejects_unsupported_indexed_terms_query() {
     let app = test_router(state);
     let (status, _value) = get_json(
         app,
-        "/api/ai/investigate?terms%5B0%5D=tooling&limit=1",
+        "/api/sessions/investigate?terms%5B0%5D=tooling&limit=1",
         Some("secret"),
     )
     .await;
@@ -2554,7 +2602,7 @@ async fn ai_investigate_cli_query_omits_incident_id_and_server_accepts() {
 
     let (state, _pool, _dir) = test_state(Some("secret".into()));
     let app = test_router(state);
-    let uri = format!("/api/ai/investigate?{qs}");
+    let uri = format!("/api/sessions/investigate?{qs}");
     let (status, value) = get_json(app, &uri, Some("secret")).await;
     assert_eq!(
         status,
@@ -2577,7 +2625,7 @@ async fn ai_investigate_cli_query_with_terms_server_accepts() {
     let qs = serde_qs::to_string(&req).expect("serialize investigate request");
     let (state, _pool, _dir) = test_state(Some("secret".into()));
     let app = test_router(state);
-    let uri = format!("/api/ai/investigate?{qs}");
+    let uri = format!("/api/sessions/investigate?{qs}");
     let (status, value) = get_json(app, &uri, Some("secret")).await;
     assert_eq!(
         status,

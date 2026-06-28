@@ -174,7 +174,7 @@ CORTEX_API_TOKEN=your-api-token         # REQUIRED at startup — /api/* is alwa
 
 # Managed file-tail sources
 # Stored in the parent directory of CORTEX_DB_PATH as file-tails.json.
-# Manage with: cortex file-tail list|status|add|remove|enable|disable
+# Manage with: cortex ingest file-tail list|status|add|remove|enable|disable
 
 # Legacy central pull Docker ingestion compatibility mode (disabled by default)
 # Current deployments use the host-local cortex agent, which streams Docker logs

@@ -82,6 +82,7 @@ mod map;
 mod map_answers;
 mod map_findings;
 mod rag;
+mod surface;
 mod topic_correlate;
 
 pub use compose::run_compose_status;

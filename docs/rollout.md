@@ -34,9 +34,9 @@ cortex --json hosts | jq -S . > /tmp/syslog-local.json
 CORTEX_USE_HTTP=1 cortex --json hosts | jq -S . > /tmp/syslog-http.json
 diff /tmp/syslog-local.json /tmp/syslog-http.json && echo "parity OK"
 
-# 4. ai-watch daemon must be active + binary SHA recorded so we know
+# 4. sessions-watch daemon must be active + binary SHA recorded so we know
 #    what we're replacing in step 4 of "Deploy order".
-systemctl --user status syslog-ai-watch
+systemctl --user status syslog-sessions-watch
 sha256sum ~/.local/bin/cortex
 
 # 5. Compose diagnostics must be clean (0 issues). If non-zero,
@@ -65,8 +65,8 @@ Order matters. Each step's failure mode is documented inline.
    path you use). Keep a backup at `~/.local/bin/cortex.backup` for
    the rollback section below.
 
-4. **`systemctl --user restart syslog-ai-watch`** — **CRITICAL**. The
-   ai-watch daemon is long-running; the process loaded into memory
+4. **`systemctl --user restart syslog-sessions-watch`** — **CRITICAL**. The
+   sessions-watch daemon is long-running; the process loaded into memory
    uses the binary that was on disk at the LAST `systemctl start`.
    Without this restart, the running daemon may diverge silently from
    the new server's expectations (schema, write-path semantics).
@@ -115,8 +115,8 @@ time cortex tail -n 100 --json > /dev/null   # expect: < 0.2s on a warm cache
 ```bash
 # No migration re-apply lines in container logs.
 docker compose logs cortex --since 24h | grep -i "applying migration" | wc -l   # expect: 0
-# ai-watch is still processing — checkpoint count grew.
-cortex ai checkpoints --json | jq '.checkpoints | length'
+# sessions-watch is still processing — checkpoint count grew.
+cortex sessions checkpoints --json | jq '.checkpoints | length'
 ```
 
 ## Token rotation
@@ -156,8 +156,8 @@ cp ~/.local/bin/cortex.backup ~/.local/bin/cortex
 #    line unless the key is fully absent, so deletion is sufficient.
 sed -i '/^CORTEX_USE_HTTP=/d' ~/.cortex/.env
 
-# 3. Restart the ai-watch daemon so it picks up the restored binary.
-systemctl --user restart syslog-ai-watch
+# 3. Restart the sessions-watch daemon so it picks up the restored binary.
+systemctl --user restart syslog-sessions-watch
 ```
 
 If you also need to roll back the container image, run

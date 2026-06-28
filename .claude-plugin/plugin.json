@@ -12,6 +12,7 @@
     "logging",
     "homelab"
   ],
+  "mcpServers": "./plugins/cortex/mcp.json",
   "hooks": "./plugins/cortex/hooks/hooks.json",
   "skills": "./plugins/cortex/skills",
   "userConfig": {

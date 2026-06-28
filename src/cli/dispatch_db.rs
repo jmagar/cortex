@@ -67,7 +67,7 @@ pub(crate) async fn run_db_status(mode: &CliMode, args: DbStatusArgs) -> Result<
     };
     // Coordination phases shell out to docker/systemctl on the host. They
     // make sense in either mode — even with --http, the operator may want
-    // to verify that the host's ai-watch unit agrees with the container's
+    // to verify that the host's sessions-watch unit agrees with the container's
     // /data bind. Keep the opt-in flag mode-agnostic.
     let coordination = if args.check_coord {
         Some(run_coordination_phases())

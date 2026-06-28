@@ -103,7 +103,7 @@ fn human_ai_inventory_outputs_accept_truncated_and_context_payloads() {
         },
         false,
         UsageBlocksPrintOptions {
-            detail: AiOutputDetail::Compact,
+            detail: SessionsOutputDetail::Compact,
             limit: Some(1),
         },
     )

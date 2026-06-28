@@ -34,7 +34,7 @@ to them by default.
 | GET | `/api/tail` | read | query: `hostname?`, `source_ip?`, `app_name?`, `severity_min?`, `n?` (u32) | `SearchLogsResponse { count: usize, logs: [LogEntry] }` (tail order) | 200, 400, 401, 503, 500 | Y | `severity_min` honoured per RFC severity ordering. |
 | GET | `/api/errors` | read | query: `from?`, `to?`, `group_by?` (`app_name` only) | `GetErrorsResponse { summary: [ErrorSummaryEntry] }` | 200, 400, 401, 503, 500 | Y | Counts by host (and optional secondary key). |
 | GET | `/api/hosts` | read | (none) | `ListHostsResponse { hosts: [HostEntry] }` | 200, 401, 503, 500 | Y | Inventory of seen hostnames. |
-| GET | `/api/correlate` | read | query: `reference_time` (REQUIRED, RFC 3339), `window_minutes?` (u32), `severity_min?`, `hostname?`, `source_ip?`, `query?`, `limit?` (u32) | `CorrelateEventsResponse { reference_time, window_minutes, window_from, window_to, severity_min, total_events, truncated, hosts_count, hosts: [CorrelatedHost] }` | 200, 400, 401, 503, 500 | Y | **Distinct from `/api/ai/correlate`** — see disambiguation below. |
+| GET | `/api/correlate` | read | query: `reference_time` (REQUIRED, RFC 3339), `window_minutes?` (u32), `severity_min?`, `hostname?`, `source_ip?`, `query?`, `limit?` (u32) | `CorrelateEventsResponse { reference_time, window_minutes, window_from, window_to, severity_min, total_events, truncated, hosts_count, hosts: [CorrelatedHost] }` | 200, 400, 401, 503, 500 | Y | **Distinct from `/api/sessions/correlate`** — see disambiguation below. |
 | GET | `/api/stats` | read | (none) | `DbStats { total_logs, total_hosts, oldest_log?, newest_log?, logical_db_size_mb, physical_db_size_mb, free_disk_mb?, max_db_size_mb, min_free_disk_mb, write_blocked, phantom_fts_rows? }` | 200, 401, 503, 500 | Y | Hot path; no PRAGMA per request. `phantom_fts_rows` is `null` by default — its `COUNT(*) FROM logs_fts` scan is skipped to stay fast on large DBs; computed only via the opt-in diagnostic path. |
 | GET | `/api/version` | read | (none) | `VersionInfo { version, git_sha?, schema_version }` | 200, 401 | Y | **Cached at startup** — never touches SQLite per request (eng-review #A3). Returns 404 if older server lacks the route (see Versioning policy). |
 
@@ -43,27 +43,27 @@ to them by default.
 | Method | Path | Scope | Request | Response (top-level) | Status codes | Idempotent | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | GET | `/api/sessions` | read | query: `project?`, `tool?`, `hostname?`, `from?`, `to?`, `limit?` | `ListSessionsResponse { count, sessions: [AiSessionEntry] }` | 200, 400, 401, 503, 500 | Y | Inventory of indexed AI transcripts. |
-| GET | `/api/ai/search` | read | query: `query` (REQUIRED), `project?`, `tool?`, `from?`, `to?`, `limit?` (u32) | `SearchSessionsResponse { total_candidates, candidate_rows, candidate_cap, candidate_window_truncated, truncated, sessions: [SearchedSessionEntry], limit_clamped_to? }` | 200, 400, 401, 503, 500 | Y | `limit` clamped at **500** — see Response size caps. |
-| GET | `/api/ai/abuse` | read | query: `project?`, `tool?`, `from?`, `to?`, `limit?`, `before?` (u32), `after?` (u32), **`terms?`** (repeated key: `?terms=foo&terms=bar`) | `AbuseSearchResponse { terms, candidate_rows, candidate_cap, candidate_window_truncated, truncated, matches: [AbuseMatch], limit_clamped_to? }` | 200, 400, 401, 503, 500 | Y | `limit` clamped at **500**. Decoded via `serde_qs::axum::QsQuery`, so `Vec<String>` is supported through repeated `terms=` keys (the CLI's `HttpClient` serializes the shared request type the same way). |
-| GET | `/api/ai/correlate` | read | query: `project?`, `tool?`, `session_id?`, `ai_query?`, `log_query?`, `hostname?`, `source_ip?`, `app_name?`, `from?`, `to?`, `window_minutes?` (u32), `severity_min?`, `limit?` (u32), `events_per_anchor?` (u32) | `AiCorrelateResponse { window_minutes, severity_min, total_anchors, anchor_rows, anchor_limit, anchors_truncated, related_limit_per_anchor, total_related_events, anchors: [AiCorrelationAnchor], events_per_anchor_clamped_to? }` | 200, 400, 401, 503, 500 | Y | `events_per_anchor` clamped at **50** — see Response size caps. Correlates AI transcript anchors against system logs. |
-| GET | `/api/ai/blocks` | read | query: `project?`, `tool?`, `from?`, `to?` | `UsageBlocksResponse { total_blocks, truncated, blocks: [UsageBlock] }` | 200, 400, 401, 503, 500 | Y | Time-bucketed usage. |
-| GET | `/api/ai/context` | read | query: `project` (REQUIRED, non-empty — handler 400s on empty per eng-review #A7), `tool?`, `limit?` | `ProjectContextResponse { project, tools, sessions, hostnames, first_seen?, last_seen?, event_count, recent_entries_truncated, recent_entries: [LogEntry] }` | 200, 400, 401, 503, 500 | Y | Empty `project=` rejected with explicit 400. |
-| GET | `/api/ai/tools` | read | query: `project?`, `from?`, `to?` | `ListAiToolsResponse { total_tools, truncated, tools: [AiToolEntry] }` | 200, 400, 401, 503, 500 | Y | Tool inventory. |
-| GET | `/api/ai/projects` | read | query: `tool?`, `from?`, `to?` | `ListAiProjectsResponse { total_projects, truncated, projects: [AiProjectEntry] }` | 200, 400, 401, 503, 500 | Y | Project inventory. |
+| GET | `/api/sessions/search` | read | query: `query` (REQUIRED), `project?`, `tool?`, `from?`, `to?`, `limit?` (u32) | `SearchSessionsResponse { total_candidates, candidate_rows, candidate_cap, candidate_window_truncated, truncated, sessions: [SearchedSessionEntry], limit_clamped_to? }` | 200, 400, 401, 503, 500 | Y | `limit` clamped at **500** — see Response size caps. |
+| GET | `/api/sessions/abuse` | read | query: `project?`, `tool?`, `from?`, `to?`, `limit?`, `before?` (u32), `after?` (u32), **`terms?`** (repeated key: `?terms=foo&terms=bar`) | `AbuseSearchResponse { terms, candidate_rows, candidate_cap, candidate_window_truncated, truncated, matches: [AbuseMatch], limit_clamped_to? }` | 200, 400, 401, 503, 500 | Y | `limit` clamped at **500**. Decoded via `serde_qs::axum::QsQuery`, so `Vec<String>` is supported through repeated `terms=` keys (the CLI's `HttpClient` serializes the shared request type the same way). |
+| GET | `/api/sessions/correlate` | read | query: `project?`, `tool?`, `session_id?`, `ai_query?`, `log_query?`, `hostname?`, `source_ip?`, `app_name?`, `from?`, `to?`, `window_minutes?` (u32), `severity_min?`, `limit?` (u32), `events_per_anchor?` (u32) | `AiCorrelateResponse { window_minutes, severity_min, total_anchors, anchor_rows, anchor_limit, anchors_truncated, related_limit_per_anchor, total_related_events, anchors: [AiCorrelationAnchor], events_per_anchor_clamped_to? }` | 200, 400, 401, 503, 500 | Y | `events_per_anchor` clamped at **50** — see Response size caps. Correlates AI transcript anchors against system logs. |
+| GET | `/api/sessions/blocks` | read | query: `project?`, `tool?`, `from?`, `to?` | `UsageBlocksResponse { total_blocks, truncated, blocks: [UsageBlock] }` | 200, 400, 401, 503, 500 | Y | Time-bucketed usage. |
+| GET | `/api/sessions/context` | read | query: `project` (REQUIRED, non-empty — handler 400s on empty per eng-review #A7), `tool?`, `limit?` | `ProjectContextResponse { project, tools, sessions, hostnames, first_seen?, last_seen?, event_count, recent_entries_truncated, recent_entries: [LogEntry] }` | 200, 400, 401, 503, 500 | Y | Empty `project=` rejected with explicit 400. |
+| GET | `/api/sessions/tools` | read | query: `project?`, `from?`, `to?` | `ListAiToolsResponse { total_tools, truncated, tools: [AiToolEntry] }` | 200, 400, 401, 503, 500 | Y | Tool inventory. |
+| GET | `/api/sessions/projects` | read | query: `tool?`, `from?`, `to?` | `ListAiProjectsResponse { total_projects, truncated, projects: [AiProjectEntry] }` | 200, 400, 401, 503, 500 | Y | Project inventory. |
 
 ### AI diagnostic + admin (3) — bead `.3`
 
 | Method | Path | Scope | Request | Response (top-level) | Status codes | Idempotent | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| GET | `/api/ai/checkpoints` | read | query: `errors_only?` (bool), `missing_only?` (bool), `limit?` (u32). `deny_unknown_fields`. | service-shaped (list of checkpoint records with parse-error metadata) | 200, 400, 401, 503, 500 | Y | Diagnostic inventory of indexed AI transcript checkpoints. |
-| GET | `/api/ai/errors` | read | query: `limit?`. `deny_unknown_fields`. | service-shaped (list of recent transcript parse errors) | 200, 400, 401, 503, 500 | Y | Surfaces parse failures from the AI indexer. |
-| POST | `/api/ai/prune-checkpoints` | **admin** | body: `{ "dry_run": bool (REQUIRED), "missing_only"?: bool, "limit"?: u32 }`. `deny_unknown_fields`. | service-shaped (count of pruned/would-prune rows) | 200, 400, 401, **409**, 500 | **N** | Single-flight via `MAINTENANCE_PERMIT`; 409 on contention with `/api/db/vacuum` or `/api/db/checkpoint`. `dry_run` is **REQUIRED and explicit** — a missing key returns 400 (defends against `POST {}` mass-delete, eng-review C3). `caller_ip` audit-logged via `tracing::warn!` BEFORE the service call. |
+| GET | `/api/sessions/checkpoints` | read | query: `errors_only?` (bool), `missing_only?` (bool), `limit?` (u32). `deny_unknown_fields`. | service-shaped (list of checkpoint records with parse-error metadata) | 200, 400, 401, 503, 500 | Y | Diagnostic inventory of indexed AI transcript checkpoints. |
+| GET | `/api/sessions/errors` | read | query: `limit?`. `deny_unknown_fields`. | service-shaped (list of recent transcript parse errors) | 200, 400, 401, 503, 500 | Y | Surfaces parse failures from the AI indexer. |
+| POST | `/api/sessions/prune-checkpoints` | **admin** | body: `{ "dry_run": bool (REQUIRED), "missing_only"?: bool, "limit"?: u32 }`. `deny_unknown_fields`. | service-shaped (count of pruned/would-prune rows) | 200, 400, 401, **409**, 500 | **N** | Single-flight via `MAINTENANCE_PERMIT`; 409 on contention with `/api/db/vacuum` or `/api/db/checkpoint`. `dry_run` is **REQUIRED and explicit** — a missing key returns 400 (defends against `POST {}` mass-delete, eng-review C3). `caller_ip` audit-logged via `tracing::warn!` BEFORE the service call. |
 
 ### File-tail admin (1)
 
 | Method | Path | Scope | Request | Response (top-level) | Status codes | Idempotent | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| POST | `/api/file-tails` | **admin** | body: `{ "op": "list" \| "add" \| "remove" \| "enable" \| "disable" \| "status", "id"?: string, "path"?: string, "tag"?: string, "hostname"?: string, "facility"?: string, "severity"?: string, "start_at_end"?: bool }`. `op` is required; `add` requires `id`, `path`, and `tag`; remove/enable/disable require `id`. | `FileTailResponse { sources: [FileTailSource], statuses: [FileTailStatus] }` | 200, 400, 401, **403**, 500 | mixed | Requires normal `Authorization: Bearer $CORTEX_API_TOKEN` plus `X-Cortex-Admin-Token: $CORTEX_API_ADMIN_TOKEN`. Manages Cortex-owned local file-tail ingest sources stored in `<data-dir>/file-tails.json`. `add` paths must be existing non-symlink regular files under `CORTEX_FILE_TAIL_ALLOWED_ROOTS`; keep the documented default to `/file-tail-root` and set an explicit allowlist to opt into broader read-only roots. CLI command: `cortex file-tail ...`; MCP action: `file_tails` (`cortex:admin`). |
+| POST | `/api/file-tails` | **admin** | body: `{ "op": "list" \| "add" \| "remove" \| "enable" \| "disable" \| "status", "id"?: string, "path"?: string, "tag"?: string, "hostname"?: string, "facility"?: string, "severity"?: string, "start_at_end"?: bool }`. `op` is required; `add` requires `id`, `path`, and `tag`; remove/enable/disable require `id`. | `FileTailResponse { sources: [FileTailSource], statuses: [FileTailStatus] }` | 200, 400, 401, **403**, 500 | mixed | Requires normal `Authorization: Bearer $CORTEX_API_TOKEN` plus `X-Cortex-Admin-Token: $CORTEX_API_ADMIN_TOKEN`. Manages Cortex-owned local file-tail ingest sources stored in `<data-dir>/file-tails.json`. `add` paths must be existing non-symlink regular files under `CORTEX_FILE_TAIL_ALLOWED_ROOTS`; keep the documented default to `/file-tail-root` and set an explicit allowlist to opt into broader read-only roots. CLI command: `cortex ingest file-tail ...`; MCP action: `file_tails` (`cortex:admin`). |
 
 ### DB ops (4) — bead `.4`
 
@@ -102,7 +102,7 @@ startup. Two version-skew rules:
 
 - **404 on a known route name = "endpoint not on this server — upgrade."**
   Newer CLI calling an older container will see Axum's default 404 for
-  routes added in later beads (`/api/db/vacuum`, `/api/ai/prune-checkpoints`,
+  routes added in later beads (`/api/db/vacuum`, `/api/sessions/prune-checkpoints`,
   etc.). The CLI maps that to a user-facing "upgrade the container or
   unset `CORTEX_USE_HTTP` to use direct DB" message.
 - **`/api/capabilities` is deferred.** No structured capability map ships
@@ -187,12 +187,12 @@ shell environment is unaffected.
 
 ---
 
-## `/api/correlate` vs `/api/ai/correlate`
+## `/api/correlate` vs `/api/sessions/correlate`
 
 These are **distinct operations** and the names trip people up. Quick
 disambiguation:
 
-| Aspect | `/api/correlate` | `/api/ai/correlate` |
+| Aspect | `/api/correlate` | `/api/sessions/correlate` |
 | --- | --- | --- |
 | Service method | `correlate_events` | `correlate_ai_logs` |
 | Anchored on | A caller-supplied `reference_time` (RFC 3339) | AI transcript anchors matched by `ai_query`/`session_id`/etc. |
@@ -213,9 +213,9 @@ the clamp in the response. The caps are constants in `src/api.rs`:
 
 | Endpoint | Field | Cap | Surfaced as |
 | --- | --- | --- | --- |
-| `/api/ai/search` | `limit` | **500** (`REST_AI_LIMIT_CAP`) | `limit_clamped_to: 500` + `truncated: true` |
-| `/api/ai/abuse` | `limit` | **500** (`REST_AI_LIMIT_CAP`) | `limit_clamped_to: 500` + `truncated: true` |
-| `/api/ai/correlate` | `events_per_anchor` | **50** (`REST_CORRELATE_EVENTS_PER_ANCHOR_CAP`) | `events_per_anchor_clamped_to: 50` |
+| `/api/sessions/search` | `limit` | **500** (`REST_AI_LIMIT_CAP`) | `limit_clamped_to: 500` + `truncated: true` |
+| `/api/sessions/abuse` | `limit` | **500** (`REST_AI_LIMIT_CAP`) | `limit_clamped_to: 500` + `truncated: true` |
+| `/api/sessions/correlate` | `events_per_anchor` | **50** (`REST_CORRELATE_EVENTS_PER_ANCHOR_CAP`) | `events_per_anchor_clamped_to: 50` |
 
 The MCP surface uses the service-layer clamps only; these REST caps are
 the second line of defence so a misbehaving client can't tank the
@@ -256,14 +256,14 @@ A handful of CLI subcommands intentionally stay on the direct-SQLite or
 host-shell path even with `CORTEX_USE_HTTP=true`. The per-command
 reasons (no taxonomy):
 
-- `cortex ai watch` — long-running daemon. HTTP would require a
+- `cortex sessions watch` — long-running daemon. HTTP would require a
   streaming bidirectional surface; the daemon is the writer for the
   same DB the container reads.
-- `cortex ai watch-status` — wraps `systemctl --user show
-  cortex-ai-watch.service` on the host. The container has no view of
+- `cortex sessions watch-status` — wraps `systemctl --user show
+  cortex-sessions-watch.service` on the host. The container has no view of
   the host systemd state.
-- `cortex ai index`, `cortex ai add`, `cortex ai doctor`,
-  `cortex ai smoke-watch` — all touch the host filesystem (transcript
+- `cortex sessions index`, `cortex sessions add`, `cortex sessions doctor`,
+  `cortex sessions smoke-watch` — all touch the host filesystem (transcript
   paths, watcher state). The container can't see them.
 - `cortex db backup` — writes a backup file to a host path. Passing
   the destination over HTTP would force a container-side filesystem

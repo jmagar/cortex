@@ -5,9 +5,9 @@ use cortex::scanner::{
     TranscriptRootStatus,
 };
 
-use super::ai_watch::AiSmokeWatchReport;
 use super::color::{cyan, error, muted, primary, success, violet, warn};
 use super::output_common::{local_ts, print_json, truncate};
+use super::sessions_watch::AiSmokeWatchReport;
 use cortex::app::AiWatchStatusReport;
 
 pub(crate) fn print_checkpoints_response(response: &[CheckpointEntry], json: bool) -> Result<()> {
@@ -192,7 +192,7 @@ pub(crate) fn print_ai_doctor_response(response: &AiDoctorReport, json: bool) ->
     Ok(())
 }
 
-pub(crate) fn print_ai_watch_status_response(
+pub(crate) fn print_sessions_watch_status_response(
     response: &AiWatchStatusReport,
     json: bool,
 ) -> Result<()> {
@@ -487,5 +487,5 @@ pub(crate) fn ensure_ai_doctor_success(
 }
 
 #[cfg(test)]
-#[path = "output_ai_tests.rs"]
+#[path = "output_sessions_tests.rs"]
 mod tests;

@@ -33,7 +33,7 @@ SQLite database and a service layer:
 | `docker_ingest/` | core | Legacy central pull container stdout/stderr + lifecycle events via explicit remote Docker Engine HTTP endpoints |
 | `mcp/` | core | RMCP Streamable HTTP server, `ACTION_SPECS` registry, scope gates, `/health` + `/health/full` |
 | `api.rs` | core | Always-on `/api/*` REST surface (56 routes), bearer-token gated |
-| `scanner/`, `ai_watch.rs` | core | AI transcript scanning/scrubbing and the host-side watch daemon |
+| `scanner/`, `sessions_watch.rs` | core | AI transcript scanning/scrubbing and the host-side watch daemon |
 | `inventory/` | inventory | Collectors (SSH, Docker, UniFi/Unraid/media APIs), redaction, normalized cache |
 | `heartbeat.rs` / `heartbeat_agent.rs` | inventory | `POST /v1/heartbeats` ingest + host-local heartbeat agent |
 | `notifications/` | core | Apprise dispatcher, rule evaluators (incl. `ingest_silence`), daily digest |
@@ -81,7 +81,7 @@ CLI default ──▶ /api/* (REST)                      ├──▶ container 
 CLI explicit "unset CORTEX_USE_HTTP"  ─────────────┘
    ──▶ direct SQLite (RuntimeCore::load_query_only, read-only)
 
-cortex ai watch (systemd) ────────────────────────────▶ direct SQLite
+cortex sessions watch (systemd) ────────────────────────────▶ direct SQLite
    (service.add_ai_file; long-running daemon on the host)
 
 cortex mcp stdio (spawned by AI clients) ─────────────▶ direct SQLite
@@ -97,7 +97,7 @@ SWAG — funnels through one `SyslogService` instance with shared
 remains for two consumers that cannot reasonably go through HTTP — one
 write-path and one read-path:
 
-- `cortex ai watch` (write-path) — a host-side systemd daemon that
+- `cortex sessions watch` (write-path) — a host-side systemd daemon that
   streams local AI transcript files into SQLite. Going through HTTP
   would mean uploading every JSONL chunk over loopback for no value, so
   this writer keeps direct `service.add_ai_file` access against the

@@ -48,11 +48,11 @@ Useful setup commands:
 cortex setup          # first run or normal repair
 cortex setup check    # inspect prerequisites and files only
 cortex setup repair   # rewrite managed assets and restart Compose
-cortex deploy preflight       # operator-facing preflight alias
-cortex deploy local           # operator-facing local deploy/reconcile alias
-cortex deploy local --dry-run # preflight without Docker mutation
-cortex deploy remote host-a --dry-run # SSH preflight for a remote Compose host
-cortex deploy remote host-a           # SSH deploy/reconcile on a remote host
+cortex setup deploy preflight       # operator-facing preflight
+cortex setup deploy local           # operator-facing local deploy/reconcile
+cortex setup deploy local --dry-run # preflight without Docker mutation
+cortex setup deploy remote host-a --dry-run # SSH preflight for a remote Compose host
+cortex setup deploy remote host-a           # SSH deploy/reconcile on a remote host
 ```
 
 `cortex setup` also disables and removes stale user-level
@@ -61,7 +61,7 @@ automated deployment path is Docker Compose only.
 
 ### Remote CLI Deploy
 
-`cortex deploy remote <host>` writes/replaces `~/.cortex/.env`, the
+`cortex setup deploy remote <host>` writes/replaces `~/.cortex/.env`, the
 managed Compose YAML, and `config/Dockerfile` on the SSH target, then runs
 Docker Compose there. Use `--dry-run` first to verify SSH and Docker
 prerequisites. Set token/env values in the local environment before running the

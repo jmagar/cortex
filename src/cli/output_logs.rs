@@ -5,7 +5,7 @@ use cortex::app::{
     SearchLogsResponse, SearchSessionsResponse, UsageBlocksResponse,
 };
 
-use super::AiOutputDetail;
+use super::SessionsOutputDetail;
 use super::color::{cyan, muted, primary, severity, violet};
 use super::output_common::{local_ts, print_json, print_log, truncate};
 
@@ -221,17 +221,17 @@ pub(crate) fn print_ai_correlate_response(
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct UsageBlocksPrintOptions {
-    pub detail: AiOutputDetail,
+    pub detail: SessionsOutputDetail,
     pub limit: Option<usize>,
 }
 
 impl Default for UsageBlocksPrintOptions {
     fn default() -> Self {
-        // Compact matches the CLI default for `ai blocks` (AiBlocksArgs). Leaving
+        // Compact matches the CLI default for `ai blocks` (SessionsBlocksArgs). Leaving
         // this `Full` was a footgun: any call site using `..Default::default()`
         // would silently disable the intended capping/truncation.
         Self {
-            detail: AiOutputDetail::Compact,
+            detail: SessionsOutputDetail::Compact,
             limit: None,
         }
     }

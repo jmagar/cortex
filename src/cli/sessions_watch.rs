@@ -217,5 +217,5 @@ fn current_uid() -> u32 {
 }
 
 #[cfg(test)]
-#[path = "ai_watch_tests.rs"]
+#[path = "sessions_watch_tests.rs"]
 mod tests;
