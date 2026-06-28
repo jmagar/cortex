@@ -65,6 +65,7 @@ mod ai_indexing;
 mod analytics;
 mod assessment;
 mod compose;
+mod domains;
 mod error_detection;
 mod file_tails;
 mod filters;

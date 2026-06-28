@@ -96,7 +96,7 @@ pub(crate) async fn run_source_ips(mode: &CliMode, args: SourceIpsArgs) -> Resul
     let json = args.json;
     let req = args.into_request();
     let response = match mode {
-        CliMode::Local(service) => service.list_source_ips(req).await?,
+        CliMode::Local(service) => service.hosts().source_ips(req).await?,
         CliMode::Http(client) => http_or_cancel(client.source_ips(&req)).await?,
     };
     if json {
@@ -123,7 +123,7 @@ pub(crate) async fn run_timeline(mode: &CliMode, args: TimelineArgs) -> Result<(
     let json = args.json;
     let req = args.into_request();
     let response = match mode {
-        CliMode::Local(service) => service.timeline(req).await?,
+        CliMode::Local(service) => service.stats().timeline(req).await?,
         CliMode::Http(client) => http_or_cancel(client.timeline(&req)).await?,
     };
     if json {
@@ -166,7 +166,7 @@ pub(crate) async fn run_patterns(mode: &CliMode, args: PatternsArgs) -> Result<(
     let json = args.json;
     let req = args.into_request();
     let response = match mode {
-        CliMode::Local(service) => service.patterns(req).await?,
+        CliMode::Local(service) => service.analysis().patterns(req).await?,
         CliMode::Http(client) => http_or_cancel(client.patterns(&req)).await?,
     };
     if json {
@@ -192,13 +192,7 @@ pub(crate) async fn run_ingest_rate(mode: &CliMode, args: IngestRateArgs) -> Res
     let json = args.json;
     let req = args.into_request();
     let response = match mode {
-        CliMode::Local(service) => match service.stats_domain(StatsRequest::IngestRate(req)).await?
-        {
-            StatsResponse::IngestRate(response) => response,
-            StatsResponse::Summary(_) => {
-                bail!("internal: stats ingest-rate returned summary response")
-            }
-        },
+        CliMode::Local(service) => service.stats().ingest_rate(req).await?,
         CliMode::Http(client) => http_or_cancel(client.ingest_rate(&req)).await?,
     };
     if json {
@@ -238,7 +232,7 @@ pub(crate) async fn run_sig_list(mode: &CliMode, args: SigListArgs) -> Result<()
     let json = args.json;
     let req = args.into_request();
     let response = match mode {
-        CliMode::Local(service) => service.unaddressed_errors(req).await?,
+        CliMode::Local(service) => service.alerts().signatures(req).await?,
         CliMode::Http(client) => http_or_cancel(client.unaddressed_errors(&req)).await?,
     };
     if json {
@@ -282,7 +276,7 @@ pub(crate) async fn run_sig_ack(mode: &CliMode, args: SigAckArgs) -> Result<()> 
     let json = args.json;
     let req = args.into_request();
     let response = match mode {
-        CliMode::Local(service) => service.ack_error(req, "cli").await?,
+        CliMode::Local(service) => service.alerts().ack_signature(req, "cli").await?,
         CliMode::Http(client) => http_or_cancel(client.ack_error(&req)).await?,
     };
     if json {
@@ -299,7 +293,7 @@ pub(crate) async fn run_sig_unack(mode: &CliMode, args: SigUnackArgs) -> Result<
     let json = args.json;
     let req = args.into_request();
     let response = match mode {
-        CliMode::Local(service) => service.unack_error(req, "cli").await?,
+        CliMode::Local(service) => service.alerts().unack_signature(req, "cli").await?,
         CliMode::Http(client) => http_or_cancel(client.unack_error(&req)).await?,
     };
     if json {
@@ -322,7 +316,12 @@ pub(crate) async fn run_notify_recent(mode: &CliMode, args: NotifyRecentArgs) ->
     match mode {
         CliMode::Local(service) => {
             let firings = service
-                .notifications_recent(limit, args.rule_id, args.since)
+                .alerts()
+                .notifications(cortex::app::NotificationsRecentRequest {
+                    limit: Some(limit),
+                    rule_id: args.rule_id,
+                    since: args.since,
+                })
                 .await?;
             if json {
                 return print_json(&firings);

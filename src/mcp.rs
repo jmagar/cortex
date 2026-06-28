@@ -14,6 +14,8 @@ mod rmcp_server;
 mod routes;
 mod schemas;
 mod tools;
+mod tools_help;
+mod tools_rag;
 
 pub use action_flags::{Defaults, FlagSpec, ValueKind};
 #[cfg(test)]
