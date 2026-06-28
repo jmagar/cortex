@@ -5,8 +5,8 @@ use super::sparkline::sparkline;
 
 use anyhow::{Result, bail};
 use cortex::app::{
-    AckErrorRequest, IngestRateRequest, ListSourceIpsRequest, PatternsRequest, StatsRequest,
-    StatsResponse, TimelineRequest, UnackErrorRequest, UnaddressedErrorsRequest,
+    AckErrorRequest, IngestRateRequest, ListSourceIpsRequest, PatternsRequest, TimelineRequest,
+    UnackErrorRequest, UnaddressedErrorsRequest,
 };
 
 use super::{

@@ -187,11 +187,11 @@ pub const SURFACE_SPECS: &[SurfaceSpec] = &[
     cli!("graph", Graph, Canonical, Read),
     cli!("errors", Analysis, MovedIntoGroupedDomain, Read, replace: "analysis errors", reason: "analysis owns error, incident, pattern, and anomaly views"),
     cli!("incident", Analysis, MovedIntoGroupedDomain, Read, replace: "analysis incident", reason: "incident context belongs to analysis"),
-    cli!("timeline", Analysis, MovedIntoGroupedDomain, Read, replace: "analysis timeline", reason: "matrix records timeline as analysis unless a later bead keeps it baseline"),
+    cli!("timeline", Analysis, Canonical, Read),
     cli!("patterns", Analysis, MovedIntoGroupedDomain, Read, replace: "analysis patterns", reason: "recurring patterns are analysis output"),
     cli!("anomalies", Analysis, MovedIntoGroupedDomain, Read, replace: "analysis anomalies", reason: "volume anomalies are analysis output"),
     cli!("compare", Analysis, MovedIntoGroupedDomain, Read, replace: "analysis compare", reason: "window comparisons are analysis output"),
-    cli!("correlate", Correlate, MovedIntoGroupedDomain, Read, replace: "correlate events", reason: "correlate uses explicit modes"),
+    cli!("correlate", Correlate, Canonical, Read),
     cli!("correlate-state", Correlate, MovedIntoGroupedDomain, Read, replace: "correlate state", reason: "state correlation is a correlate mode"),
     cli!("topic-correlate", Correlate, MovedIntoGroupedDomain, Read, replace: "correlate topic", reason: "topic correlation is a correlate mode"),
     cli!("host-state", State, MovedIntoGroupedDomain, Read, replace: "state host", reason: "host state belongs under state"),
@@ -201,7 +201,7 @@ pub const SURFACE_SPECS: &[SurfaceSpec] = &[
     cli!("ingest-rate", Stats, MovedIntoGroupedDomain, Read, replace: "stats ingest-rate", reason: "ingest throughput is a stats mode"),
     cli!("shell", Ingest, MovedIntoGroupedDomain, Admin, replace: "ingest shell", reason: "manual ingestion commands live under ingest"),
     cli!("agent-command", Ingest, MovedIntoGroupedDomain, Admin, replace: "ingest agent-command", reason: "agent command ingestion lives under ingest"),
-    local_cli!("heartbeat", Ingest, MovedIntoGroupedDomain, replace: "ingest heartbeat", reason: "host-local heartbeat agent remains local-only but belongs under ingest"),
+    local_cli!("heartbeat", Ingest, RetainedTopLevelOperational),
     cli!("inventory", Ingest, MovedIntoGroupedDomain, Read, replace: "ingest inventory", reason: "inventory refresh/status is an ingest-adjacent cache operation"),
     cli!("file-tail", Ingest, MovedIntoGroupedDomain, Admin, replace: "ingest file-tail", reason: "file-tail management lives under ingest"),
     cli!("sig", Alerts, MovedIntoGroupedDomain, Admin, replace: "alerts signatures", reason: "signatures are alert inputs"),
@@ -333,6 +333,40 @@ pub fn canonical_cli_roots() -> impl Iterator<Item = &'static SurfaceSpec> {
             spec.disposition,
             SurfaceDisposition::Canonical | SurfaceDisposition::RetainedTopLevelOperational
         )
+    })
+}
+
+pub fn is_cli_mode_command(name: &str) -> bool {
+    matches!(
+        name,
+        "__complete"
+            | "search"
+            | "filter"
+            | "tail"
+            | "hosts"
+            | "sessions"
+            | "analysis"
+            | "state"
+            | "ingest"
+            | "alerts"
+            | "heartbeat"
+            | "correlate"
+            | "stats"
+            | "compose"
+            | "setup"
+            | "db"
+            | "config"
+            | "timeline"
+            | "apps"
+            | "entity"
+            | "graph"
+            | "completions"
+    )
+}
+
+pub fn removed_cli_surface(name: &str) -> Option<&'static SurfaceSpec> {
+    specs_for(SurfaceKind::Cli).find(|spec| {
+        spec.spelling == name && spec.disposition == SurfaceDisposition::RemovedCleanBreak
     })
 }
 

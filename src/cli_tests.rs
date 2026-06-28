@@ -212,10 +212,12 @@ fn parse_unknown_option_errors() {
 
 #[tokio::test]
 async fn run_compose_rejects_non_compose_commands_before_live_probes() {
-    let error = run_compose(CliCommand::Stats(OutputArgs::default()))
-        .await
-        .unwrap_err()
-        .to_string();
+    let error = run_compose(CliCommand::Stats(StatsCommand::Summary(
+        OutputArgs::default(),
+    )))
+    .await
+    .unwrap_err()
+    .to_string();
 
     assert!(error.contains("non-compose command"));
 }
@@ -1532,7 +1534,7 @@ fn parse_clock_skew_with_since() {
     ]))
     .expect("parse clock-skew");
     match cmd {
-        CliCommand::ClockSkew(args) => {
+        CliCommand::State(StateCommand::ClockSkew(args)) => {
             assert_eq!(args.since.as_deref(), Some("2026-05-20T00:00:00+00:00"));
             assert!(!args.json);
         }

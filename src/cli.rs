@@ -24,6 +24,8 @@ pub(crate) use args::{
     SigAckArgs, SigListArgs, SigUnackArgs, SilentHostsArgs, SourceIpsArgs, TailArgs, TimeRangeArgs,
     TimelineArgs,
 };
+#[cfg(test)]
+pub(crate) use args::{StateCommand, StatsCommand};
 pub(crate) use args_config::{
     ConfigCommand, ConfigGetArgs, ConfigListArgs, ConfigSetArgs, ConfigTarget, ConfigUnsetArgs,
 };

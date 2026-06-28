@@ -1,6 +1,7 @@
 use super::super::{
     FileTailAddArgs, FileTailCommand, FileTailListArgs, HeartbeatAgentArgs, HeartbeatCommand,
-    InventoryArgs, InventoryCommand, OutputArgs, SessionsCommand,
+    IngestCommand, InventoryArgs, InventoryCommand, OutputArgs, SessionsCommand, StateCommand,
+    StatsCommand,
 };
 use super::*;
 
@@ -22,7 +23,7 @@ fn parser_top_level_commands_are_classified_in_surface_registry() {
 fn parse_routes_stats() {
     assert_eq!(
         parse_command(vec!["stats".to_string()]).unwrap(),
-        CliCommand::Stats(OutputArgs::default())
+        CliCommand::Stats(StatsCommand::Summary(OutputArgs::default()))
     );
 }
 
@@ -51,16 +52,18 @@ fn parses_file_tail_add() {
 
     assert_eq!(
         command,
-        CliCommand::FileTail(FileTailCommand::Add(FileTailAddArgs {
-            id: "swag-access".into(),
-            path: "/mnt/appdata/swag/log/nginx/access.log".into(),
-            tag: "swag-access".into(),
-            host: Some("squirts".into()),
-            facility: Some("local4".into()),
-            severity: Some("info".into()),
-            start_at_end: false,
-            json: true,
-        }))
+        CliCommand::Ingest(IngestCommand::FileTail(FileTailCommand::Add(
+            FileTailAddArgs {
+                id: "swag-access".into(),
+                path: "/mnt/appdata/swag/log/nginx/access.log".into(),
+                tag: "swag-access".into(),
+                host: Some("squirts".into()),
+                facility: Some("local4".into()),
+                severity: Some("info".into()),
+                start_at_end: false,
+                json: true,
+            }
+        )))
     );
 }
 
@@ -93,7 +96,9 @@ fn parses_file_tail_list() {
     .unwrap();
     assert_eq!(
         command,
-        CliCommand::FileTail(FileTailCommand::List(FileTailListArgs { json: true }))
+        CliCommand::Ingest(IngestCommand::FileTail(FileTailCommand::List(
+            FileTailListArgs { json: true }
+        )))
     );
 }
 
@@ -189,7 +194,9 @@ fn parse_routes_inventory_refresh_json() {
             "--json".to_string(),
         ])
         .unwrap(),
-        CliCommand::Inventory(InventoryCommand::Refresh(InventoryArgs { json: true }))
+        CliCommand::Ingest(IngestCommand::Inventory(InventoryCommand::Refresh(
+            InventoryArgs { json: true }
+        )))
     );
 }
 
@@ -216,7 +223,7 @@ fn parse_inventory_unknown_subcommand_suggests() {
     .to_string();
 
     assert!(
-        err.contains("unknown inventory subcommand: stats"),
+        err.contains("unknown ingest inventory subcommand: stats"),
         "got: {err}"
     );
     assert!(
@@ -237,7 +244,7 @@ fn parse_inventory_rejects_unknown_flag() {
     .to_string();
 
     assert!(
-        err.contains("unknown inventory option: --wat"),
+        err.contains("unknown ingest inventory option: --wat"),
         "got: {err}"
     );
 }
@@ -252,7 +259,7 @@ fn parse_inventory_help_does_not_execute_subcommand() {
     .unwrap_err()
     .to_string();
     assert!(
-        err.contains("Usage: cortex inventory refresh"),
+        err.contains("Usage: cortex ingest inventory refresh"),
         "got: {err}"
     );
 
@@ -265,7 +272,7 @@ fn parse_inventory_help_does_not_execute_subcommand() {
     .unwrap_err()
     .to_string();
     assert!(
-        err.contains("Usage: cortex inventory refresh"),
+        err.contains("Usage: cortex ingest inventory refresh"),
         "got: {err}"
     );
 }
@@ -371,7 +378,7 @@ fn parse_routes_host_state() {
             "--json".to_string(),
         ])
         .unwrap(),
-        CliCommand::HostState(_)
+        CliCommand::State(StateCommand::Host(_))
     ));
 }
 
@@ -383,7 +390,7 @@ fn parse_host_state_binds_bare_positional_to_host() {
         "dookie".to_string(),
     ])
     .unwrap();
-    let CliCommand::HostState(args) = cmd else {
+    let CliCommand::State(StateCommand::Host(args)) = cmd else {
         panic!("expected HostState")
     };
     assert_eq!(args.host.as_deref(), Some("dookie"));
@@ -413,7 +420,7 @@ fn parse_host_state_requires_host_selector_with_usage() {
         err.contains("requires --host-id ID or --host HOST"),
         "got: {err}"
     );
-    assert!(err.contains("Usage: cortex host-state"), "got: {err}");
+    assert!(err.contains("Usage: cortex state host"), "got: {err}");
 }
 
 #[test]
@@ -425,7 +432,7 @@ fn parse_routes_fleet_state() {
             "--exclude-ok".to_string()
         ])
         .unwrap(),
-        CliCommand::FleetState(_)
+        CliCommand::State(StateCommand::Fleet(_))
     ));
 }
 
@@ -712,7 +719,7 @@ fn time_flags_normalize_relative_across_state_admin_and_ai_commands() {
     assert!(s.ends_with("+00:00"), "apps --since not normalized: {s}");
 
     // clock-skew --since
-    let CliCommand::ClockSkew(c) = parse_command(vec![
+    let CliCommand::State(StateCommand::ClockSkew(c)) = parse_command(vec![
         "state".into(),
         "clock-skew".into(),
         "--since".into(),
@@ -759,7 +766,7 @@ fn time_flags_normalize_relative_across_state_admin_and_ai_commands() {
     assert!(cs.reference_time.unwrap().ends_with("+00:00"));
 
     // host-state (bare positional host) --since
-    let CliCommand::HostState(hs) = parse_command(vec![
+    let CliCommand::State(StateCommand::Host(hs)) = parse_command(vec![
         "state".into(),
         "host".into(),
         "dookie".into(),

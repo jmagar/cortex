@@ -21,8 +21,8 @@
 use anyhow::{Result, bail};
 use cortex::app::{
     CorrelateEventsRequest, FileTailAddRequest, FileTailOp, FileTailRequest, FileTailResponse,
-    FilterLogsRequest, GetErrorsRequest, IncidentRequest, IngestRequest, IngestResponse,
-    ListSessionsRequest, SearchLogsRequest, StatsRequest, StatsResponse, TailLogsRequest,
+    FilterLogsRequest, GetErrorsRequest, IncidentRequest, ListSessionsRequest, SearchLogsRequest,
+    TailLogsRequest,
 };
 use std::future::Future;
 

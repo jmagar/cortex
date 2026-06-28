@@ -1,10 +1,10 @@
 use anyhow::{Result, anyhow, bail};
 
+use super::args::StatsCommand;
 use super::parse_admin::{parse_compose, parse_db, parse_setup, parse_stats};
-use super::parse_command_log::{parse_agent_command, parse_shell};
 use super::parse_logs::{
-    parse_correlate, parse_errors, parse_filter, parse_hosts, parse_incident, parse_ingest_rate,
-    parse_patterns, parse_search, parse_tail, parse_timeline,
+    parse_correlate, parse_errors, parse_filter, parse_hosts, parse_incident,
+    parse_ingest_rate_args, parse_patterns, parse_search, parse_tail, parse_timeline,
 };
 use super::parse_sessions::parse_sessions_command;
 use super::{CliCommand, commands, parse_config, suggest};
@@ -19,6 +19,8 @@ pub(crate) const TOP_LEVEL_COMMANDS: &[&str] = &[
     "state",
     "ingest",
     "alerts",
+    "entity",
+    "graph",
     "heartbeat",
     "correlate",
     "stats",
@@ -42,7 +44,7 @@ pub(crate) fn parse_command(args: Vec<String>) -> Result<CliCommand> {
         "hosts" => parse_hosts(rest),
         "sessions" => parse_sessions_command(rest),
         "analysis" => parse_analysis(rest),
-        "state" => parse_state(rest),
+        "state" => commands::state::parse_state(rest),
         "ingest" => parse_ingest(rest),
         "alerts" => parse_alerts(rest),
         "heartbeat" => parse_heartbeat(rest),
@@ -102,81 +104,34 @@ fn parse_analysis(args: &[String]) -> Result<CliCommand> {
     }
 }
 
-fn parse_state(args: &[String]) -> Result<CliCommand> {
-    let (subcommand, rest) =
-        parse_required_subcommand("state", args, &["host", "fleet", "clock-skew"])?;
-    match subcommand {
-        "host" => commands::host_state::parse_host_state(rest),
-        "fleet" => commands::fleet_state::parse_fleet_state(rest),
-        "clock-skew" => commands::clock_skew::parse_clock_skew(rest),
-        _ => bail!(
-            "{}",
-            suggest::unknown_command(
-                "state subcommand",
-                subcommand,
-                &["host", "fleet", "clock-skew"],
-            )
-        ),
-    }
-}
-
 fn parse_ingest(args: &[String]) -> Result<CliCommand> {
-    let (subcommand, rest) = parse_required_subcommand(
-        "ingest",
-        args,
-        &["shell", "agent-command", "inventory", "file-tail"],
-    )?;
-    match subcommand {
-        "shell" => parse_shell(rest),
-        "agent-command" => parse_agent_command(rest),
-        "inventory" => parse_inventory(rest),
-        "file-tail" => commands::file_tails::parse_file_tail(rest),
-        _ => bail!(
-            "{}",
-            suggest::unknown_command(
-                "ingest subcommand",
-                subcommand,
-                &["shell", "agent-command", "inventory", "file-tail"],
-            )
-        ),
-    }
+    commands::ingest::parse_ingest(args)
 }
 
 fn parse_alerts(args: &[String]) -> Result<CliCommand> {
-    let (subcommand, rest) =
-        parse_required_subcommand("alerts", args, &["signatures", "notifications"])?;
-    match subcommand {
-        "signatures" => {
-            if matches!(
+    let Some((subcommand, rest)) = args.split_first() else {
+        return commands::alerts::parse_alerts(args);
+    };
+    let mut delegated = Vec::new();
+    match subcommand.as_str() {
+        "signatures"
+            if !matches!(
                 rest.first().map(String::as_str),
-                Some("ack" | "unack" | "list")
-            ) {
-                commands::sig::parse_sig(rest)
-            } else {
-                let mut delegated = Vec::with_capacity(rest.len() + 1);
-                delegated.push("list".to_string());
-                delegated.extend_from_slice(rest);
-                commands::sig::parse_sig(&delegated)
-            }
+                Some("list" | "ack" | "unack")
+            ) =>
+        {
+            delegated.push("signatures".to_string());
+            delegated.push("list".to_string());
+            delegated.extend_from_slice(rest);
+            commands::alerts::parse_alerts(&delegated)
         }
-        "notifications" => {
-            if matches!(rest.first().map(String::as_str), Some("recent" | "test")) {
-                commands::notify::parse_notify(rest)
-            } else {
-                let mut delegated = Vec::with_capacity(rest.len() + 1);
-                delegated.push("recent".to_string());
-                delegated.extend_from_slice(rest);
-                commands::notify::parse_notify(&delegated)
-            }
+        "notifications" if !matches!(rest.first().map(String::as_str), Some("recent" | "test")) => {
+            delegated.push("notifications".to_string());
+            delegated.push("recent".to_string());
+            delegated.extend_from_slice(rest);
+            commands::alerts::parse_alerts(&delegated)
         }
-        _ => bail!(
-            "{}",
-            suggest::unknown_command(
-                "alerts subcommand",
-                subcommand,
-                &["signatures", "notifications"],
-            )
-        ),
+        _ => commands::alerts::parse_alerts(args),
     }
 }
 
@@ -200,7 +155,9 @@ fn parse_correlate_domain(args: &[String]) -> Result<CliCommand> {
 
 fn parse_stats_domain(args: &[String]) -> Result<CliCommand> {
     match args.first().map(String::as_str) {
-        Some("ingest-rate") => parse_ingest_rate(&args[1..]),
+        Some("ingest-rate") => Ok(CliCommand::Stats(StatsCommand::IngestRate(
+            parse_ingest_rate_args(&args[1..])?,
+        ))),
         Some("summary") => parse_stats(&args[1..]),
         Some(other) if !other.starts_with('-') => bail!(
             "{}",
@@ -241,42 +198,6 @@ fn removed_command_replacement(command: &str) -> Option<&'static str> {
 fn removed_command_message(command: &str) -> String {
     let replacement = removed_command_replacement(command).expect("checked by caller");
     format!("removed CLI command: {command}\n\nUse `{replacement}`.")
-}
-
-fn parse_inventory(args: &[String]) -> Result<CliCommand> {
-    let (command, rest) = args
-        .split_first()
-        .ok_or_else(|| anyhow!("inventory subcommand is required: refresh or status"))?;
-    if matches!(command.as_str(), "--help" | "-h" | "help") {
-        bail!("{}", inventory_usage());
-    }
-    let mut json = false;
-    for arg in rest {
-        match arg.as_str() {
-            "--json" => json = true,
-            "--help" | "-h" => bail!("{}", inventory_usage()),
-            other => bail!(
-                "{}",
-                suggest::unknown_option("inventory", other, &["--json"])
-            ),
-        }
-    }
-    match command.as_str() {
-        "refresh" => Ok(CliCommand::Inventory(super::InventoryCommand::Refresh(
-            super::InventoryArgs { json },
-        ))),
-        "status" => Ok(CliCommand::Inventory(super::InventoryCommand::Status(
-            super::InventoryArgs { json },
-        ))),
-        _ => bail!(
-            "{}",
-            suggest::unknown_command("inventory subcommand", command, &["refresh", "status"])
-        ),
-    }
-}
-
-fn inventory_usage() -> &'static str {
-    "Usage: cortex inventory refresh [--json]\n       cortex inventory status [--json]"
 }
 
 fn parse_heartbeat(args: &[String]) -> Result<CliCommand> {

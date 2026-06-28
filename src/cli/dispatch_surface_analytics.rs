@@ -9,7 +9,6 @@ use super::output_common::print_json;
 use anyhow::Result;
 use cortex::app::{
     AnomaliesRequest, ClockSkewRequest, CompareRequest, ListAppsRequest, SilentHostsRequest,
-    StateRequest, StateResponse,
 };
 
 use super::CliMode;

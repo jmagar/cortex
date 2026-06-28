@@ -9,8 +9,7 @@ use super::output_graph::{
 use anyhow::Result;
 use cortex::app::{
     CorrelateStateRequest, FleetStateRequest, GraphAroundRequest, GraphEntityLookupRequest,
-    GraphEvidenceLookupRequest, GraphExplainRequest, HostStateRequest, StateRequest, StateResponse,
-    TopicCorrelateRequest,
+    GraphEvidenceLookupRequest, GraphExplainRequest, HostStateRequest, TopicCorrelateRequest,
 };
 
 use super::CliMode;
