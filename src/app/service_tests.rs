@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::app::UnaddressedErrorsRequest;
 use crate::config::StorageConfig;
 use crate::db::{DbPool, LogBatchEntry, init_pool, insert_logs_batch};
 
@@ -129,6 +130,98 @@ async fn sqlite_heavy_public_reads_use_heavy_limiter() {
     .await;
 
     drop(held);
+}
+
+#[tokio::test]
+async fn grouped_domain_facades_preserve_service_limiters() {
+    async fn assert_busy<T>(result: ServiceResult<T>, expected: &str) {
+        let err = match result {
+            Ok(_) => panic!("held permit should reject the read"),
+            Err(err) => err,
+        };
+        assert!(
+            matches!(err, ServiceError::Busy(ref message) if message == expected),
+            "expected {expected}, got {err:?}"
+        );
+    }
+
+    let (mut service, _pool, _dir) = test_service();
+    service.acquire_timeout = std::time::Duration::from_millis(10);
+
+    let held_heavy = service
+        .heavy_read_permits
+        .clone()
+        .acquire_owned()
+        .await
+        .expect("heavy permit");
+    assert_busy(
+        service.state().fleet(FleetStateRequest::default()).await,
+        "heavy_read_limited",
+    )
+    .await;
+    assert_busy(
+        service
+            .stats()
+            .ingest_rate(IngestRateRequest::default())
+            .await,
+        "heavy_read_limited",
+    )
+    .await;
+    assert_busy(
+        service
+            .analysis()
+            .patterns(PatternsRequest::default())
+            .await,
+        "heavy_read_limited",
+    )
+    .await;
+    assert_busy(
+        service
+            .analysis()
+            .anomalies(AnomaliesRequest::default())
+            .await,
+        "heavy_read_limited",
+    )
+    .await;
+    assert_busy(
+        service
+            .state()
+            .clock_skew(ClockSkewRequest::default())
+            .await,
+        "heavy_read_limited",
+    )
+    .await;
+    drop(held_heavy);
+
+    let db_permits = service.db_permits.available_permits() as u32;
+    let held_db = service
+        .db_permits
+        .clone()
+        .acquire_many_owned(db_permits)
+        .await
+        .expect("db permits");
+    assert_busy(
+        service.hosts().list().await,
+        "database worker limit reached",
+    )
+    .await;
+    assert_busy(
+        service
+            .hosts()
+            .source_ips(ListSourceIpsRequest::default())
+            .await,
+        "database worker limit reached",
+    )
+    .await;
+    assert_busy(
+        service
+            .alerts()
+            .signatures(UnaddressedErrorsRequest::default())
+            .await,
+        "database worker limit reached",
+    )
+    .await;
+    drop(held_db);
 }
 
 #[tokio::test]

@@ -288,19 +288,19 @@ plan (`docs/superpowers/plans/2026-05-21-surface-parity.md`).
 
 | Subcommand | Side | Talks to | Mirrors MCP action |
 |---|---|---|---|
-| `cortex source-ips [--limit N] [--offset N]` | both | local SQLite / REST `/api/source-ips` | `source_ips` |
+| `cortex hosts sources [--limit N] [--offset N]` | both | local SQLite / REST `/api/source-ips` | `source_ips` |
 | `cortex timeline [--bucket ...] [--group-by ...] [filters]` | both | local SQLite / REST `/api/timeline` | `timeline` |
-| `cortex patterns [filters] [--scan-limit N] [--top-n N]` | both | local SQLite / REST `/api/patterns` | `patterns` |
-| `cortex ingest-rate [--by-host]` | both | local SQLite / REST `/api/ingest-rate` | `ingest_rate` |
-| `cortex sig list [--include-acknowledged] [--limit N]` | both | local SQLite / REST `/api/errors/unaddressed` | `unaddressed_errors` |
-| `cortex sig ack HASH [--notes TEXT]` | both | local SQLite / REST `/api/errors/ack` | `ack_error` |
-| `cortex sig unack HASH [--reason TEXT]` | both | local SQLite / REST `/api/errors/unack` | `unack_error` |
-| `cortex notify recent [--rule-id ID] [--since TIME] [--limit N]` | both | local SQLite / REST `/api/notifications/recent` | `notifications_recent` |
-| `cortex notify test [--body TEXT]` | client only (`--http`) | REST `POST /api/notifications/test` | `notifications_test` |
+| `cortex analysis patterns [filters] [--scan-limit N] [--top-n N]` | both | local SQLite / REST `/api/patterns` | `patterns` |
+| `cortex stats ingest-rate [--by-host]` | both | local SQLite / REST `/api/ingest-rate` | `ingest_rate` |
+| `cortex alerts signatures [--include-acknowledged] [--limit N]` | both | local SQLite / REST `/api/errors/unaddressed` | `unaddressed_errors` |
+| `cortex alerts signatures ack HASH [--notes TEXT]` | both | local SQLite / REST `/api/errors/ack` | `ack_error` |
+| `cortex alerts signatures unack HASH [--reason TEXT]` | both | local SQLite / REST `/api/errors/unack` | `unack_error` |
+| `cortex alerts notifications [--rule-id ID] [--since TIME] [--limit N]` | both | local SQLite / REST `/api/notifications/recent` | `notifications_recent` |
+| `cortex alerts notifications test [--body TEXT]` | client only (`--http`) | REST `POST /api/notifications/test` | `notifications_test` |
 
 Notes:
 
-- `notify test` is HTTP-only because the apprise URL configuration is owned by
+- `alerts notifications test` is HTTP-only because the apprise URL configuration is owned by
   the running server process. Local-mode CLI is missing the runtime config; we
   fail closed rather than send a notification from a process that has no
   apprise URLs.

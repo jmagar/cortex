@@ -998,9 +998,10 @@ async fn run_ai_errors_http_sends_exactly_one_request() {
 
 #[tokio::test]
 async fn run_ai_prune_checkpoints_http_sends_exactly_one_request() {
-    let (server, mode) = http_mode().await;
+    let (server, mode) = http_mode_with_admin_token("admin-secret").await;
     Mock::given(method("POST"))
         .and(path("/api/sessions/prune-checkpoints"))
+        .and(header("x-cortex-admin-token", "admin-secret"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "matched": 0,
             "pruned": 0,
@@ -1229,10 +1230,36 @@ async fn run_db_integrity_http_sends_exactly_one_request() {
 }
 
 #[tokio::test]
+async fn run_db_integrity_background_http_sends_admin_header() {
+    let (server, mode) = http_mode_with_admin_token("admin-secret").await;
+    Mock::given(method("POST"))
+        .and(path("/api/db/integrity/background"))
+        .and(header("x-cortex-admin-token", "admin-secret"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "job_id": 42,
+            "status": "running",
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    run_db_integrity(
+        &mode,
+        DbIntegrityArgs {
+            quick: true,
+            json: true,
+            background: true,
+        },
+    )
+    .await
+    .expect("db integrity background ok");
+}
+
+#[tokio::test]
 async fn run_db_checkpoint_http_sends_exactly_one_request() {
-    let (server, mode) = http_mode().await;
+    let (server, mode) = http_mode_with_admin_token("admin-secret").await;
     Mock::given(method("POST"))
         .and(path("/api/db/checkpoint"))
+        .and(header("x-cortex-admin-token", "admin-secret"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "mode": "passive",
             "busy": 0,
@@ -1255,9 +1282,10 @@ async fn run_db_checkpoint_http_sends_exactly_one_request() {
 
 #[tokio::test]
 async fn run_db_vacuum_http_sends_exactly_one_request() {
-    let (server, mode) = http_mode().await;
+    let (server, mode) = http_mode_with_admin_token("admin-secret").await;
     Mock::given(method("POST"))
         .and(path("/api/db/vacuum"))
+        .and(header("x-cortex-admin-token", "admin-secret"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "full": false,
             "incremental_pages": 1000,
@@ -1308,9 +1336,10 @@ async fn run_db_integrity_bails_when_response_not_ok() {
 
 #[tokio::test]
 async fn run_db_checkpoint_bails_when_busy_nonzero() {
-    let (server, mode) = http_mode().await;
+    let (server, mode) = http_mode_with_admin_token("admin-secret").await;
     Mock::given(method("POST"))
         .and(path("/api/db/checkpoint"))
+        .and(header("x-cortex-admin-token", "admin-secret"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "mode": "passive",
             "busy": 1,
@@ -1338,9 +1367,10 @@ async fn run_db_checkpoint_bails_when_busy_nonzero() {
 
 #[tokio::test]
 async fn run_db_vacuum_force_present_sends_force_true_body() {
-    let (server, mode) = http_mode().await;
+    let (server, mode) = http_mode_with_admin_token("admin-secret").await;
     Mock::given(method("POST"))
         .and(path("/api/db/vacuum"))
+        .and(header("x-cortex-admin-token", "admin-secret"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "full": true,
             "incremental_pages": 1000,
@@ -1374,9 +1404,10 @@ async fn run_db_vacuum_force_present_sends_force_true_body() {
 
 #[tokio::test]
 async fn run_db_vacuum_force_absent_does_not_send_force_true() {
-    let (server, mode) = http_mode().await;
+    let (server, mode) = http_mode_with_admin_token("admin-secret").await;
     Mock::given(method("POST"))
         .and(path("/api/db/vacuum"))
+        .and(header("x-cortex-admin-token", "admin-secret"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "full": false,
             "incremental_pages": 1000,
@@ -1418,9 +1449,10 @@ async fn run_db_vacuum_force_absent_does_not_send_force_true() {
 
 #[tokio::test]
 async fn run_db_backup_http_posts_to_api_endpoint() {
-    let (server, mode) = http_mode().await;
+    let (server, mode) = http_mode_with_admin_token("admin-secret").await;
     Mock::given(method("POST"))
         .and(path("/api/db/backup"))
+        .and(header("x-cortex-admin-token", "admin-secret"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "db_path": "/data/cortex.db",
             "backup_path": "/data/backup.db",

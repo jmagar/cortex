@@ -71,7 +71,12 @@ fn global_flags_extracts_bare_and_value_forms_without_touching_command_args() {
 fn global_flags_http_equals_url_sets_server_and_transport() {
     // `--http=<url>` is the curl-style shortcut: enables HTTP transport AND
     // sets the server, so a URL no longer has to go through `--server`.
-    let mut args = strings(&["--http=http://localhost:40110", "topic-correlate", "axon"]);
+    let mut args = strings(&[
+        "--http=http://localhost:40110",
+        "correlate",
+        "topic",
+        "axon",
+    ]);
     let flags = GlobalFlags::extract(&mut args).unwrap();
     assert_eq!(
         flags,
@@ -81,7 +86,7 @@ fn global_flags_http_equals_url_sets_server_and_transport() {
             token: None,
         }
     );
-    assert_eq!(args, strings(&["topic-correlate", "axon"]));
+    assert_eq!(args, strings(&["correlate", "topic", "axon"]));
 }
 
 #[test]
@@ -94,6 +99,7 @@ fn global_flags_http_equals_empty_is_rejected() {
 #[test]
 fn global_flags_stop_at_double_dash_for_wrapped_commands() {
     let mut args = strings(&[
+        "ingest",
         "agent-command",
         "wrap",
         "--token=outer",
@@ -109,6 +115,7 @@ fn global_flags_stop_at_double_dash_for_wrapped_commands() {
     assert_eq!(
         args,
         strings(&[
+            "ingest",
             "agent-command",
             "wrap",
             "--",

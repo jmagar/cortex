@@ -47,6 +47,15 @@ fn test_state_with_origins(
     )
 }
 
+fn test_state_with_admin(
+    token: Option<String>,
+    admin_token: impl Into<String>,
+) -> (ApiState, Arc<DbPool>, tempfile::TempDir) {
+    let (mut state, pool, dir) = test_state(token);
+    state.config.admin_token = crate::config::Secret(Some(admin_token.into()));
+    (state, pool, dir)
+}
+
 fn test_state_full(
     token: Option<String>,
     auth_policy: AuthPolicy,
@@ -1085,6 +1094,14 @@ async fn post_json_with_admin(
     (status, value)
 }
 
+async fn post_json_admin(
+    app: axum::Router,
+    uri: &str,
+    body: serde_json::Value,
+) -> (axum::http::StatusCode, serde_json::Value) {
+    post_json_with_admin(app, uri, body, Some("secret"), Some("admin-secret")).await
+}
+
 async fn post_json_response(
     app: axum::Router,
     uri: &str,
@@ -1304,15 +1321,29 @@ async fn ai_parse_errors_honors_limit() {
 
 #[tokio::test]
 async fn ai_prune_checkpoints_with_dry_run_true_returns_ok() {
-    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let (state, _pool, _dir) = test_state_with_admin(Some("secret".into()), "admin-secret");
     let app = test_router(state);
+    let body = json!({"dry_run": true, "missing_only": true});
+
     let (status, value) = post_json(
+        app.clone(),
+        "/api/sessions/prune-checkpoints",
+        body.clone(),
+        Some("secret"),
+    )
+    .await;
+    assert_eq!(
+        status,
+        axum::http::StatusCode::FORBIDDEN,
+        "response: {value}"
+    );
+
+    let (status, value) = post_json_admin(
         app,
         "/api/sessions/prune-checkpoints",
         // `missing_only` is required by the service (it refuses to prune
         // arbitrary checkpoints — see scanner::checkpoint::prune_checkpoints).
-        json!({"dry_run": true, "missing_only": true}),
-        Some("secret"),
+        body,
     )
     .await;
     assert_eq!(status, axum::http::StatusCode::OK);
@@ -1323,13 +1354,12 @@ async fn ai_prune_checkpoints_with_dry_run_true_returns_ok() {
 
 #[tokio::test]
 async fn ai_prune_checkpoints_with_dry_run_false_returns_ok_and_prunes() {
-    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let (state, _pool, _dir) = test_state_with_admin(Some("secret".into()), "admin-secret");
     let app = test_router(state);
-    let (status, value) = post_json(
+    let (status, value) = post_json_admin(
         app,
         "/api/sessions/prune-checkpoints",
         json!({"dry_run": false, "missing_only": true}),
-        Some("secret"),
     )
     .await;
     assert_eq!(status, axum::http::StatusCode::OK);
@@ -1343,15 +1373,9 @@ async fn ai_prune_checkpoints_with_dry_run_false_returns_ok_and_prunes() {
 /// default `dry_run` to `false` and mass-delete checkpoints.
 #[tokio::test]
 async fn ai_prune_checkpoints_missing_dry_run_returns_400() {
-    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let (state, _pool, _dir) = test_state_with_admin(Some("secret".into()), "admin-secret");
     let app = test_router(state);
-    let (status, value) = post_json(
-        app,
-        "/api/sessions/prune-checkpoints",
-        json!({}),
-        Some("secret"),
-    )
-    .await;
+    let (status, value) = post_json_admin(app, "/api/sessions/prune-checkpoints", json!({})).await;
     assert_eq!(
         status,
         axum::http::StatusCode::BAD_REQUEST,
@@ -1367,13 +1391,12 @@ async fn ai_prune_checkpoints_missing_dry_run_returns_400() {
 #[tokio::test]
 async fn ai_prune_checkpoints_with_only_missing_only_returns_400() {
     // missing_only present but dry_run absent → still 400.
-    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let (state, _pool, _dir) = test_state_with_admin(Some("secret".into()), "admin-secret");
     let app = test_router(state);
-    let (status, _) = post_json(
+    let (status, _) = post_json_admin(
         app,
         "/api/sessions/prune-checkpoints",
         json!({"missing_only": true}),
-        Some("secret"),
     )
     .await;
     assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
@@ -1381,13 +1404,12 @@ async fn ai_prune_checkpoints_with_only_missing_only_returns_400() {
 
 #[tokio::test]
 async fn ai_prune_checkpoints_rejects_unknown_field() {
-    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let (state, _pool, _dir) = test_state_with_admin(Some("secret".into()), "admin-secret");
     let app = test_router(state);
-    let (status, _) = post_json(
+    let (status, _) = post_json_admin(
         app,
         "/api/sessions/prune-checkpoints",
         json!({"dry_run": true, "unknown": 1}),
-        Some("secret"),
     )
     .await;
     assert_eq!(
@@ -1399,27 +1421,23 @@ async fn ai_prune_checkpoints_rejects_unknown_field() {
 
 #[tokio::test]
 async fn ai_prune_checkpoints_rejects_non_object_body() {
-    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let (state, _pool, _dir) = test_state_with_admin(Some("secret".into()), "admin-secret");
     let app = test_router(state);
-    let (status, _) = post_json(
-        app,
-        "/api/sessions/prune-checkpoints",
-        json!([1, 2, 3]),
-        Some("secret"),
-    )
-    .await;
+    let (status, _) =
+        post_json_admin(app, "/api/sessions/prune-checkpoints", json!([1, 2, 3])).await;
     assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]
 async fn ai_prune_checkpoints_rejects_malformed_json() {
-    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let (state, _pool, _dir) = test_state_with_admin(Some("secret".into()), "admin-secret");
     let app = test_router(state);
     let request = Request::builder()
         .method("POST")
         .uri("/api/sessions/prune-checkpoints")
         .header("Content-Type", "application/json")
         .header("Authorization", "Bearer secret")
+        .header("X-Cortex-Admin-Token", "admin-secret")
         .body(axum::body::Body::from("{not json"))
         .unwrap();
     let response = app.oneshot(request).await.unwrap();
@@ -1733,16 +1751,58 @@ async fn db_integrity_requires_bearer() {
 }
 
 #[tokio::test]
-async fn db_checkpoint_passive_returns_ok() {
-    let (state, _pool, _dir) = test_state(Some("secret".into()));
+async fn admin_maintenance_routes_reject_plain_api_bearer() {
+    let (state, _pool, _dir) = test_state_with_admin(Some("secret".into()), "admin-secret");
     let app = test_router(state);
-    let (status, value) = post_json(
-        app,
-        "/api/db/checkpoint",
-        json!({"mode": "passive"}),
-        Some("secret"),
+
+    for (uri, body) in [
+        (
+            "/api/sessions/prune-checkpoints",
+            json!({"dry_run": true, "missing_only": true}),
+        ),
+        (
+            "/api/db/integrity/background?quick=true",
+            serde_json::Value::Null,
+        ),
+        ("/api/db/checkpoint", json!({"mode": "passive"})),
+        (
+            "/api/db/vacuum",
+            json!({"full": false, "incremental_pages": 16}),
+        ),
+        ("/api/db/backup", json!({})),
+    ] {
+        let (status, _) = post_json(app.clone(), uri, body, Some("secret")).await;
+        assert_eq!(
+            status,
+            axum::http::StatusCode::FORBIDDEN,
+            "{uri} must require X-Cortex-Admin-Token in addition to bearer auth"
+        );
+    }
+}
+
+#[tokio::test]
+async fn admin_maintenance_background_and_backup_accept_admin_token() {
+    let (state, _pool, _dir) = test_state_with_admin(Some("secret".into()), "admin-secret");
+    let app = test_router(state);
+
+    let (status, value) = post_json_admin(
+        app.clone(),
+        "/api/db/integrity/background?quick=true",
+        serde_json::Value::Null,
     )
     .await;
+    assert_eq!(status, axum::http::StatusCode::OK, "body: {value}");
+
+    let (status, value) = post_json_admin(app, "/api/db/backup", json!({})).await;
+    assert_eq!(status, axum::http::StatusCode::OK, "body: {value}");
+}
+
+#[tokio::test]
+async fn db_checkpoint_passive_returns_ok() {
+    let (state, _pool, _dir) = test_state_with_admin(Some("secret".into()), "admin-secret");
+    let app = test_router(state);
+    let (status, value) =
+        post_json_admin(app, "/api/db/checkpoint", json!({"mode": "passive"})).await;
     assert_eq!(status, axum::http::StatusCode::OK, "body: {value}");
     assert_eq!(value["mode"], "passive");
 }
@@ -1750,15 +1810,10 @@ async fn db_checkpoint_passive_returns_ok() {
 #[tokio::test]
 async fn db_checkpoint_accepts_uppercase_mode() {
     // Validation is case-insensitive; the service receives the lowercase form.
-    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let (state, _pool, _dir) = test_state_with_admin(Some("secret".into()), "admin-secret");
     let app = test_router(state);
-    let (status, value) = post_json(
-        app,
-        "/api/db/checkpoint",
-        json!({"mode": "PASSIVE"}),
-        Some("secret"),
-    )
-    .await;
+    let (status, value) =
+        post_json_admin(app, "/api/db/checkpoint", json!({"mode": "PASSIVE"})).await;
     assert_eq!(status, axum::http::StatusCode::OK);
     assert_eq!(value["mode"], "passive");
 }
@@ -1766,15 +1821,10 @@ async fn db_checkpoint_accepts_uppercase_mode() {
 /// Bead 0p8r.4 #A17: unknown `mode` returns 400 with allowed list.
 #[tokio::test]
 async fn db_checkpoint_rejects_invalid_mode() {
-    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let (state, _pool, _dir) = test_state_with_admin(Some("secret".into()), "admin-secret");
     let app = test_router(state);
-    let (status, value) = post_json(
-        app,
-        "/api/db/checkpoint",
-        json!({"mode": "INVALID"}),
-        Some("secret"),
-    )
-    .await;
+    let (status, value) =
+        post_json_admin(app, "/api/db/checkpoint", json!({"mode": "INVALID"})).await;
     assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
     let msg = value["error"].as_str().unwrap_or_default();
     for required in ["passive", "full", "restart", "truncate"] {
@@ -1787,13 +1837,12 @@ async fn db_checkpoint_rejects_invalid_mode() {
 
 #[tokio::test]
 async fn db_checkpoint_rejects_unknown_field() {
-    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let (state, _pool, _dir) = test_state_with_admin(Some("secret".into()), "admin-secret");
     let app = test_router(state);
-    let (status, _) = post_json(
+    let (status, _) = post_json_admin(
         app,
         "/api/db/checkpoint",
         json!({"mode": "passive", "bogus": 1}),
-        Some("secret"),
     )
     .await;
     assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
@@ -1809,13 +1858,12 @@ async fn db_checkpoint_requires_bearer() {
 
 #[tokio::test]
 async fn db_vacuum_incremental_returns_ok() {
-    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let (state, _pool, _dir) = test_state_with_admin(Some("secret".into()), "admin-secret");
     let app = test_router(state);
-    let (status, value) = post_json(
+    let (status, value) = post_json_admin(
         app,
         "/api/db/vacuum",
         json!({"full": false, "incremental_pages": 16}),
-        Some("secret"),
     )
     .await;
     assert_eq!(status, axum::http::StatusCode::OK, "body: {value}");
@@ -1826,13 +1874,12 @@ async fn db_vacuum_incremental_returns_ok() {
 #[tokio::test]
 async fn db_vacuum_full_on_small_db_returns_ok() {
     // Fresh DB is well under 2 GB, no force needed.
-    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let (state, _pool, _dir) = test_state_with_admin(Some("secret".into()), "admin-secret");
     let app = test_router(state);
-    let (status, value) = post_json(
+    let (status, value) = post_json_admin(
         app,
         "/api/db/vacuum",
         json!({"full": true, "incremental_pages": 0}),
-        Some("secret"),
     )
     .await;
     assert_eq!(status, axum::http::StatusCode::OK, "body: {value}");
@@ -1847,14 +1894,13 @@ async fn db_vacuum_full_on_small_db_returns_ok() {
 /// rather than a stale snapshot from `ApiState` construction.
 #[tokio::test]
 async fn db_vacuum_full_on_large_db_without_force_returns_409() {
-    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let (state, _pool, _dir) = test_state_with_admin(Some("secret".into()), "admin-secret");
     let state = state.with_full_vacuum_size_guard_bytes(1);
     let app = test_router(state);
-    let (status, value) = post_json(
+    let (status, value) = post_json_admin(
         app,
         "/api/db/vacuum",
         json!({"full": true, "incremental_pages": 0}),
-        Some("secret"),
     )
     .await;
     assert_eq!(status, axum::http::StatusCode::CONFLICT);
@@ -1867,14 +1913,13 @@ async fn db_vacuum_full_on_large_db_without_force_returns_409() {
 
 #[tokio::test]
 async fn db_vacuum_full_with_force_bypasses_size_guard() {
-    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let (state, _pool, _dir) = test_state_with_admin(Some("secret".into()), "admin-secret");
     let state = state.with_full_vacuum_size_guard_bytes(1);
     let app = test_router(state);
-    let (status, _) = post_json(
+    let (status, _) = post_json_admin(
         app,
         "/api/db/vacuum",
         json!({"full": true, "incremental_pages": 0, "force": true}),
-        Some("secret"),
     )
     .await;
     // force=true bypasses the live size pre-flight.
@@ -1883,14 +1928,13 @@ async fn db_vacuum_full_with_force_bypasses_size_guard() {
 
 #[tokio::test]
 async fn db_vacuum_force_false_does_not_bypass_size_guard() {
-    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let (state, _pool, _dir) = test_state_with_admin(Some("secret".into()), "admin-secret");
     let state = state.with_full_vacuum_size_guard_bytes(1);
     let app = test_router(state);
-    let (status, _) = post_json(
+    let (status, _) = post_json_admin(
         app,
         "/api/db/vacuum",
         json!({"full": true, "incremental_pages": 0, "force": false}),
-        Some("secret"),
     )
     .await;
     assert_eq!(
@@ -1906,7 +1950,7 @@ async fn db_vacuum_force_false_does_not_bypass_size_guard() {
 /// stale startup cache (0 bytes on empty DB) and incorrectly returned 200.
 #[tokio::test]
 async fn db_vacuum_full_size_guard_reads_live_size_post_construction() {
-    let (state, pool, _dir) = test_state(Some("secret".into()));
+    let (state, pool, _dir) = test_state_with_admin(Some("secret".into()), "admin-secret");
     let state = state.with_full_vacuum_size_guard_bytes(1);
     // Insert real rows AFTER ApiState was built so the live page_count grows
     // beyond the 1-byte threshold. A pre-bead-.17 implementation that
@@ -1925,11 +1969,10 @@ async fn db_vacuum_full_size_guard_reads_live_size_post_construction() {
         .collect();
     db::insert_logs_batch(&pool, &batch).expect("seed insert");
     let app = test_router(state);
-    let (status, value) = post_json(
+    let (status, value) = post_json_admin(
         app,
         "/api/db/vacuum",
         json!({"full": true, "incremental_pages": 0}),
-        Some("secret"),
     )
     .await;
     assert_eq!(
@@ -1941,14 +1984,13 @@ async fn db_vacuum_full_size_guard_reads_live_size_post_construction() {
 
 #[tokio::test]
 async fn db_vacuum_size_guard_does_not_apply_to_incremental() {
-    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let (state, _pool, _dir) = test_state_with_admin(Some("secret".into()), "admin-secret");
     let state = state.with_full_vacuum_size_guard_bytes(1);
     let app = test_router(state);
-    let (status, _) = post_json(
+    let (status, _) = post_json_admin(
         app,
         "/api/db/vacuum",
         json!({"full": false, "incremental_pages": 16}),
-        Some("secret"),
     )
     .await;
     assert_eq!(status, axum::http::StatusCode::OK);
@@ -1956,13 +1998,12 @@ async fn db_vacuum_size_guard_does_not_apply_to_incremental() {
 
 #[tokio::test]
 async fn db_vacuum_rejects_unknown_field() {
-    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let (state, _pool, _dir) = test_state_with_admin(Some("secret".into()), "admin-secret");
     let app = test_router(state);
-    let (status, _) = post_json(
+    let (status, _) = post_json_admin(
         app,
         "/api/db/vacuum",
         json!({"full": false, "incremental_pages": 16, "bogus": 1}),
-        Some("secret"),
     )
     .await;
     assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
@@ -1990,7 +2031,7 @@ async fn db_vacuum_requires_bearer() {
 /// request arrives).
 #[tokio::test]
 async fn db_vacuum_single_flight_returns_409_when_locked() {
-    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let (state, _pool, _dir) = test_state_with_admin(Some("secret".into()), "admin-secret");
     // Grab the permit from THIS state (each test has its own per
     // `with_isolated_maintenance_permit`).
     let permit = Arc::clone(&state.maintenance_permit)
@@ -1998,11 +2039,10 @@ async fn db_vacuum_single_flight_returns_409_when_locked() {
         .expect("permit must be free at test start");
     let app = test_router(state);
 
-    let (status, value) = post_json(
+    let (status, value) = post_json_admin(
         app,
         "/api/db/vacuum",
         json!({"full": false, "incremental_pages": 16}),
-        Some("secret"),
     )
     .await;
     assert_eq!(status, axum::http::StatusCode::CONFLICT);
@@ -2019,17 +2059,16 @@ async fn db_vacuum_single_flight_returns_409_when_locked() {
 /// clean 409 rather than SQLITE_BUSY/timeout.
 #[tokio::test]
 async fn ai_prune_checkpoints_single_flight_returns_409_when_locked() {
-    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let (state, _pool, _dir) = test_state_with_admin(Some("secret".into()), "admin-secret");
     let permit = Arc::clone(&state.maintenance_permit)
         .try_acquire_owned()
         .expect("permit must be free at test start");
     let app = test_router(state);
 
-    let (status, value) = post_json(
+    let (status, value) = post_json_admin(
         app,
         "/api/sessions/prune-checkpoints",
         json!({"dry_run": true}),
-        Some("secret"),
     )
     .await;
     assert_eq!(status, axum::http::StatusCode::CONFLICT);
@@ -2043,19 +2082,14 @@ async fn ai_prune_checkpoints_single_flight_returns_409_when_locked() {
 
 #[tokio::test]
 async fn db_checkpoint_single_flight_returns_409_when_locked() {
-    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let (state, _pool, _dir) = test_state_with_admin(Some("secret".into()), "admin-secret");
     let permit = Arc::clone(&state.maintenance_permit)
         .try_acquire_owned()
         .expect("permit must be free at test start");
     let app = test_router(state);
 
-    let (status, value) = post_json(
-        app,
-        "/api/db/checkpoint",
-        json!({"mode": "passive"}),
-        Some("secret"),
-    )
-    .await;
+    let (status, value) =
+        post_json_admin(app, "/api/db/checkpoint", json!({"mode": "passive"})).await;
     assert_eq!(status, axum::http::StatusCode::CONFLICT);
     assert_eq!(
         value["error"].as_str().unwrap_or_default(),
@@ -2069,20 +2103,14 @@ async fn db_checkpoint_single_flight_returns_409_when_locked() {
 /// both). With one held, the other returns 409.
 #[tokio::test]
 async fn db_vacuum_blocks_db_checkpoint_via_shared_permit() {
-    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let (state, _pool, _dir) = test_state_with_admin(Some("secret".into()), "admin-secret");
     let permit = Arc::clone(&state.maintenance_permit)
         .try_acquire_owned()
         .expect("permit must be free at test start");
     let app = test_router(state);
 
     // Hold the permit, fire a checkpoint POST — should 409.
-    let (status, _) = post_json(
-        app,
-        "/api/db/checkpoint",
-        json!({"mode": "passive"}),
-        Some("secret"),
-    )
-    .await;
+    let (status, _) = post_json_admin(app, "/api/db/checkpoint", json!({"mode": "passive"})).await;
     assert_eq!(status, axum::http::StatusCode::CONFLICT);
 
     drop(permit);
@@ -2093,17 +2121,16 @@ async fn db_vacuum_blocks_db_checkpoint_via_shared_permit() {
 /// explicitly removes the race window so the assertion is strict.
 #[tokio::test]
 async fn db_vacuum_request_returns_409_when_permit_held() {
-    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let (state, _pool, _dir) = test_state_with_admin(Some("secret".into()), "admin-secret");
     let _held = Arc::clone(&state.maintenance_permit)
         .try_acquire_owned()
         .expect("permit must be free at test start");
     let app = test_router(state);
 
-    let (status, _) = post_json(
+    let (status, _) = post_json_admin(
         app,
         "/api/db/vacuum",
         json!({"full": false, "incremental_pages": 16}),
-        Some("secret"),
     )
     .await;
     assert_eq!(
@@ -2119,25 +2146,23 @@ async fn db_vacuum_request_returns_409_when_permit_held() {
 /// permit-held variant above carries the strict contention check.
 #[tokio::test]
 async fn db_vacuum_concurrent_requests_no_5xx_at_least_one_success() {
-    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let (state, _pool, _dir) = test_state_with_admin(Some("secret".into()), "admin-secret");
     let app = test_router(state);
 
     let app2 = app.clone();
     let h1 = tokio::spawn(async move {
-        post_json(
+        post_json_admin(
             app2,
             "/api/db/vacuum",
             json!({"full": false, "incremental_pages": 16}),
-            Some("secret"),
         )
         .await
     });
     let h2 = tokio::spawn(async move {
-        post_json(
+        post_json_admin(
             app,
             "/api/db/vacuum",
             json!({"full": false, "incremental_pages": 16}),
-            Some("secret"),
         )
         .await
     });
@@ -2443,14 +2468,29 @@ async fn ai_api_namespace_is_removed() {
     let (state, _pool, _dir) = test_state(Some("secret".into()));
     let app = test_router(state);
 
-    let (status, _value) = get_json(
-        app,
+    for route in [
+        "/api/ai",
         "/api/ai/search?query=ssh%20key%20rotation",
-        Some("secret"),
-    )
-    .await;
-
-    assert_eq!(status, axum::http::StatusCode::NOT_FOUND);
+        "/api/ai/abuse",
+        "/api/ai/correlate",
+        "/api/ai/blocks",
+        "/api/ai/context?project=foo",
+        "/api/ai/tools",
+        "/api/ai/projects",
+        "/api/ai/ask-history?query=test",
+        "/api/ai/incidents",
+        "/api/ai/investigate",
+        "/api/ai/checkpoints",
+        "/api/ai/errors",
+        "/api/ai/prune-checkpoints",
+    ] {
+        let (status, _value) = get_json(app.clone(), route, Some("secret")).await;
+        assert_eq!(
+            status,
+            axum::http::StatusCode::NOT_FOUND,
+            "{route} must stay unmounted as a clean protocol break"
+        );
+    }
 }
 
 #[tokio::test]

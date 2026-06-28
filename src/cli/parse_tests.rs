@@ -1,78 +1,29 @@
-use super::super::args::{
-    FleetStateArgs, HostStateArgs, IngestCommand, StateCommand, StatsCommand,
-};
 use super::super::{
     FileTailAddArgs, FileTailCommand, FileTailListArgs, HeartbeatAgentArgs, HeartbeatCommand,
-    InventoryArgs, InventoryCommand, OutputArgs, SessionsCommand,
+    IngestCommand, InventoryArgs, InventoryCommand, OutputArgs, SessionsCommand, StateCommand,
+    StatsCommand,
 };
 use super::*;
+
+#[test]
+fn parser_top_level_commands_are_classified_in_surface_registry() {
+    for command in TOP_LEVEL_COMMANDS {
+        let spec =
+            cortex::surface_registry::find(cortex::surface_registry::SurfaceKind::Cli, command)
+                .unwrap_or_else(|| panic!("{command} missing from surface registry"));
+        assert_ne!(
+            spec.disposition,
+            cortex::surface_registry::SurfaceDisposition::RemovedCleanBreak,
+            "{command} is still accepted by the parser and cannot be marked removed"
+        );
+    }
+}
 
 #[test]
 fn parse_routes_stats() {
     assert_eq!(
         parse_command(vec!["stats".to_string()]).unwrap(),
         CliCommand::Stats(StatsCommand::Summary(OutputArgs::default()))
-    );
-}
-
-#[test]
-fn parse_routes_state_commands() {
-    assert_eq!(
-        parse_command(vec![
-            "state".into(),
-            "host".into(),
-            "--host".into(),
-            "dookie".into(),
-            "--limit".into(),
-            "5".into(),
-            "--json".into(),
-        ])
-        .unwrap(),
-        CliCommand::State(StateCommand::Host(HostStateArgs {
-            host_id: None,
-            host: Some("dookie".into()),
-            since: None,
-            limit: Some(5),
-            json: true,
-        }))
-    );
-
-    assert_eq!(
-        parse_command(vec![
-            "state".into(),
-            "fleet".into(),
-            "--include-ok".into(),
-            "--sort".into(),
-            "hostname".into(),
-        ])
-        .unwrap(),
-        CliCommand::State(StateCommand::Fleet(FleetStateArgs {
-            include_ok: Some(true),
-            sort: Some("hostname".into()),
-            json: false,
-        }))
-    );
-
-    assert!(matches!(
-        parse_command(vec!["state".into(), "clock-skew".into(), "--json".into()]).unwrap(),
-        CliCommand::State(StateCommand::ClockSkew(_))
-    ));
-}
-
-#[test]
-fn parse_routes_stats_ingest_rate() {
-    assert_eq!(
-        parse_command(vec![
-            "stats".into(),
-            "ingest-rate".into(),
-            "--by-host".into(),
-            "--json".into(),
-        ])
-        .unwrap(),
-        CliCommand::Stats(StatsCommand::IngestRate(super::super::IngestRateArgs {
-            by_host: true,
-            json: true,
-        }))
     );
 }
 
@@ -111,7 +62,7 @@ fn parses_file_tail_add() {
                 severity: Some("info".into()),
                 start_at_end: false,
                 json: true,
-            },
+            }
         )))
     );
 }
@@ -234,34 +185,6 @@ fn parse_rejects_unknown_command() {
 }
 
 #[test]
-fn parse_removed_commands_report_matrix_replacements() {
-    for (command, replacement) in [
-        ("ai", "cortex sessions"),
-        ("source-ips", "cortex hosts sources"),
-        ("silent-hosts", "cortex hosts silent"),
-        ("service", "cortex compose logs SERVICE"),
-        ("deploy", "cortex setup deploy"),
-        ("sig", "cortex alerts signatures"),
-        ("notify", "cortex alerts notifications"),
-        ("host-state", "cortex state host"),
-        ("fleet-state", "cortex state fleet"),
-        ("clock-skew", "cortex state clock-skew"),
-        ("ingest-rate", "cortex stats ingest-rate"),
-        ("shell", "cortex ingest shell"),
-        ("agent-command", "cortex ingest agent-command"),
-        ("inventory", "cortex ingest inventory"),
-        ("file-tail", "cortex ingest file-tail"),
-    ] {
-        let err = parse_command(vec![command.to_string()])
-            .unwrap_err()
-            .to_string();
-
-        assert!(err.contains("removed CLI command: "), "got: {err}");
-        assert!(err.contains(replacement), "got: {err}");
-    }
-}
-
-#[test]
 fn parse_routes_inventory_refresh_json() {
     assert_eq!(
         parse_command(vec![
@@ -284,7 +207,7 @@ fn parse_inventory_requires_subcommand() {
         .to_string();
 
     assert!(
-        err.contains("ingest inventory subcommand is required"),
+        err.contains("inventory subcommand is required"),
         "got: {err}"
     );
 }
@@ -363,6 +286,85 @@ fn parse_unknown_command_suggests_close_match() {
     assert!(err.contains("Did you mean `search`?"), "got: {err}");
 }
 
+#[test]
+fn removed_top_level_commands_fail_with_replacement_guidance() {
+    let cases = [
+        ("ai", "cortex sessions"),
+        ("source-ips", "cortex hosts sources"),
+        ("silent-hosts", "cortex hosts silent"),
+        ("service", "cortex compose logs SERVICE"),
+        ("deploy", "cortex setup deploy"),
+        ("host-state", "cortex state host"),
+        ("fleet-state", "cortex state fleet"),
+        ("clock-skew", "cortex state clock-skew"),
+        ("ingest-rate", "cortex stats ingest-rate"),
+        ("sig", "cortex alerts signatures"),
+        ("notify", "cortex alerts notifications"),
+        ("file-tail", "cortex ingest file-tail"),
+        ("shell", "cortex ingest shell"),
+        ("agent-command", "cortex ingest agent-command"),
+        ("inventory", "cortex ingest inventory"),
+        ("errors", "cortex analysis errors"),
+        ("incident", "cortex analysis incident"),
+        ("patterns", "cortex analysis patterns"),
+        ("anomalies", "cortex analysis anomalies"),
+        ("compare", "cortex analysis compare"),
+        ("correlate-state", "cortex correlate state"),
+        ("topic-correlate", "cortex correlate topic"),
+    ];
+
+    for (old, replacement) in cases {
+        let err = parse_command(vec![old.to_string()])
+            .unwrap_err()
+            .to_string();
+        assert_eq!(
+            err,
+            format!("removed CLI command: {old}\n\nUse `{replacement}`.")
+        );
+    }
+}
+
+#[test]
+fn removed_command_replacements_parse() {
+    let replacements = [
+        vec!["sessions"],
+        vec!["hosts", "sources"],
+        vec!["hosts", "silent"],
+        vec!["compose", "logs", "cortex.service"],
+        vec!["state", "host", "dookie"],
+        vec!["state", "fleet"],
+        vec!["state", "clock-skew"],
+        vec!["stats", "ingest-rate"],
+        vec!["alerts", "signatures"],
+        vec!["alerts", "notifications"],
+        vec!["ingest", "file-tail", "list"],
+        vec!["ingest", "shell", "index", "--path", "/tmp/history"],
+        vec![
+            "ingest",
+            "agent-command",
+            "ingest-spool",
+            "--path",
+            "/tmp/spool",
+        ],
+        vec!["ingest", "inventory", "status"],
+        vec!["analysis", "errors"],
+        vec!["analysis", "incident", "--around", "1h"],
+        vec!["analysis", "patterns"],
+        vec!["analysis", "anomalies"],
+        vec![
+            "analysis", "compare", "--a-from", "2h", "--a-to", "1h", "--b-from", "1h", "--b-to",
+            "now",
+        ],
+        vec!["correlate", "state", "--reference-time", "1h"],
+        vec!["correlate", "topic", "dookie"],
+    ];
+
+    for replacement in replacements {
+        let args = replacement.into_iter().map(str::to_string).collect();
+        parse_command(args).unwrap();
+    }
+}
+
 // ─── Heartbeat fleet state parity (cxih.4) ──────────────────────────────────
 
 #[test]
@@ -382,9 +384,14 @@ fn parse_routes_host_state() {
 
 #[test]
 fn parse_host_state_binds_bare_positional_to_host() {
-    let cmd = parse_command(vec!["state".into(), "host".into(), "dookie".into()]).unwrap();
+    let cmd = parse_command(vec![
+        "state".to_string(),
+        "host".to_string(),
+        "dookie".to_string(),
+    ])
+    .unwrap();
     let CliCommand::State(StateCommand::Host(args)) = cmd else {
-        panic!("expected state host")
+        panic!("expected HostState")
     };
     assert_eq!(args.host.as_deref(), Some("dookie"));
 }
@@ -655,7 +662,8 @@ fn parse_graph_around_rejects_bad_depth() {
 fn parse_routes_correlate_state() {
     assert!(matches!(
         parse_command(vec![
-            "correlate-state".to_string(),
+            "correlate".to_string(),
+            "state".to_string(),
             "--reference-time".to_string(),
             "2026-05-25T00:00:00Z".to_string(),
         ])
@@ -666,9 +674,13 @@ fn parse_routes_correlate_state() {
 
 #[test]
 fn parse_correlate_state_rejects_unknown_flag() {
-    let err = parse_command(vec!["correlate-state".to_string(), "--bogus".to_string()])
-        .unwrap_err()
-        .to_string();
+    let err = parse_command(vec![
+        "correlate".to_string(),
+        "state".to_string(),
+        "--bogus".to_string(),
+    ])
+    .unwrap_err()
+    .to_string();
     assert!(err.contains("unknown correlate-state option"), "got: {err}");
 }
 
@@ -679,13 +691,14 @@ fn parse_correlate_nontime_positional_points_to_topic_correlate() {
     // that the positional is a reference time and point at topic-correlate.
     let err = parse_command(vec![
         "correlate".to_string(),
+        "events".to_string(),
         "squirts".to_string(),
         "dockersocket".to_string(),
     ])
     .unwrap_err()
     .to_string();
     assert!(err.contains("reference time"), "got: {err}");
-    assert!(err.contains("topic-correlate squirts"), "got: {err}");
+    assert!(err.contains("correlate topic squirts"), "got: {err}");
 }
 
 // Regression: every CLI flag whose value is bound into a SQL timestamp
@@ -713,15 +726,19 @@ fn time_flags_normalize_relative_across_state_admin_and_ai_commands() {
         "2d".into(),
     ])
     .unwrap() else {
-        panic!("expected state clock-skew")
+        panic!("expected ClockSkew")
     };
     assert!(c.since.unwrap().ends_with("+00:00"));
 
     // compare: each of the four window flags normalizes independently.
     for flag in ["--a-from", "--a-to", "--b-from", "--b-to"] {
-        let CliCommand::Compare(cmp) =
-            parse_command(vec!["compare".into(), flag.into(), "1h".into()]).unwrap()
-        else {
+        let CliCommand::Compare(cmp) = parse_command(vec![
+            "analysis".into(),
+            "compare".into(),
+            flag.into(),
+            "1h".into(),
+        ])
+        .unwrap() else {
             panic!("expected Compare")
         };
         let v = match flag {
@@ -738,7 +755,8 @@ fn time_flags_normalize_relative_across_state_admin_and_ai_commands() {
 
     // correlate-state --reference-time
     let CliCommand::CorrelateState(cs) = parse_command(vec![
-        "correlate-state".into(),
+        "correlate".into(),
+        "state".into(),
         "--reference-time".into(),
         "1h".into(),
     ])
@@ -756,7 +774,7 @@ fn time_flags_normalize_relative_across_state_admin_and_ai_commands() {
         "30m".into(),
     ])
     .unwrap() else {
-        panic!("expected state host")
+        panic!("expected HostState")
     };
     assert!(hs.since.unwrap().ends_with("+00:00"));
 

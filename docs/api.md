@@ -4,6 +4,9 @@
 > epic `cortex-0p8r` (v0.26). All endpoints require a bearer token
 > (`Authorization: Bearer $CORTEX_API_TOKEN`); 401 is returned for
 > missing/invalid tokens regardless of bind address.
+> Routes marked **admin** additionally require
+> `X-Cortex-Admin-Token: $CORTEX_API_ADMIN_TOKEN`; missing or invalid admin
+> tokens return 403.
 >
 > CLI commands route here by default since v0.26 via
 > `CORTEX_USE_HTTP=true` written to `~/.cortex/.env` by
@@ -57,7 +60,7 @@ to them by default.
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | GET | `/api/sessions/checkpoints` | read | query: `errors_only?` (bool), `missing_only?` (bool), `limit?` (u32). `deny_unknown_fields`. | service-shaped (list of checkpoint records with parse-error metadata) | 200, 400, 401, 503, 500 | Y | Diagnostic inventory of indexed AI transcript checkpoints. |
 | GET | `/api/sessions/errors` | read | query: `limit?`. `deny_unknown_fields`. | service-shaped (list of recent transcript parse errors) | 200, 400, 401, 503, 500 | Y | Surfaces parse failures from the AI indexer. |
-| POST | `/api/sessions/prune-checkpoints` | **admin** | body: `{ "dry_run": bool (REQUIRED), "missing_only"?: bool, "limit"?: u32 }`. `deny_unknown_fields`. | service-shaped (count of pruned/would-prune rows) | 200, 400, 401, **409**, 500 | **N** | Single-flight via `MAINTENANCE_PERMIT`; 409 on contention with `/api/db/vacuum` or `/api/db/checkpoint`. `dry_run` is **REQUIRED and explicit** — a missing key returns 400 (defends against `POST {}` mass-delete, eng-review C3). `caller_ip` audit-logged via `tracing::warn!` BEFORE the service call. |
+| POST | `/api/sessions/prune-checkpoints` | **admin** | body: `{ "dry_run": bool (REQUIRED), "missing_only"?: bool, "limit"?: u32 }`. `deny_unknown_fields`. | service-shaped (count of pruned/would-prune rows) | 200, 400, 401, **403**, **409**, 500 | **N** | Requires the admin header. Single-flight via `MAINTENANCE_PERMIT`; 409 on contention with `/api/db/vacuum` or `/api/db/checkpoint`. `dry_run` is **REQUIRED and explicit** — a missing key returns 400 (defends against `POST {}` mass-delete, eng-review C3). `caller_ip` audit-logged via `tracing::warn!` BEFORE the service call. |
 
 ### File-tail admin (1)
 
@@ -65,14 +68,17 @@ to them by default.
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | POST | `/api/file-tails` | **admin** | body: `{ "op": "list" \| "add" \| "remove" \| "enable" \| "disable" \| "status", "id"?: string, "path"?: string, "tag"?: string, "hostname"?: string, "facility"?: string, "severity"?: string, "start_at_end"?: bool }`. `op` is required; `add` requires `id`, `path`, and `tag`; remove/enable/disable require `id`. | `FileTailResponse { sources: [FileTailSource], statuses: [FileTailStatus] }` | 200, 400, 401, **403**, 500 | mixed | Requires normal `Authorization: Bearer $CORTEX_API_TOKEN` plus `X-Cortex-Admin-Token: $CORTEX_API_ADMIN_TOKEN`. Manages Cortex-owned local file-tail ingest sources stored in `<data-dir>/file-tails.json`. `add` paths must be existing non-symlink regular files under `CORTEX_FILE_TAIL_ALLOWED_ROOTS`; keep the documented default to `/file-tail-root` and set an explicit allowlist to opt into broader read-only roots. CLI command: `cortex ingest file-tail ...`; MCP action: `file_tails` (`cortex:admin`). |
 
-### DB ops (4) — bead `.4`
+### DB ops (7) — bead `.4`
 
 | Method | Path | Scope | Request | Response (top-level) | Status codes | Idempotent | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | GET | `/api/db/status` | read | (none) | `DbMaintenanceStatus { db_path, page_count, freelist_count, page_size, logical_size_bytes, physical_size_bytes, wal_size_bytes?, shm_size_bytes?, sqlite_page_cache_mb, sqlite_page_cache_kib_per_connection, sqlite_mmap_mb, sqlite_mmap_bytes, heavy_read_concurrency, wal_checkpoint_mb, wal_checkpoint_threshold_bytes, cgroup_memory_status, cgroup_memory_max_bytes?, cgroup_memory_current_bytes?, cgroup_memory_peak_bytes?, auto_vacuum, journal_mode, integrity_ok?, integrity_messages: [String] }` | 200, 401, 503, 500 | Y | DIFFERENT shape from `/api/stats`: a maintenance-focused PRAGMA/cache/WAL/cgroup snapshot. Cgroup diagnostics expose a compact status plus numeric values only; cgroup file paths and read errors are not returned. Bypasses `MAINTENANCE_PERMIT`. |
 | GET | `/api/db/integrity` | read | query: `quick?` (bool — default `false` runs full `PRAGMA integrity_check`; `true` runs `PRAGMA quick_check`). `deny_unknown_fields`. | `DbIntegrityResult` | 200, 400, 401, 503, 500 | Y | Full check on a multi-GB DB can be slow but does NOT take `MAINTENANCE_PERMIT`. |
-| POST | `/api/db/checkpoint` | **admin** | body: `{ "mode": "passive" \| "full" \| "restart" \| "truncate" }`. Validated handler-side BEFORE the service call (eng-review #A17). | `DbCheckpointResult` | 200, 400, 401, **409**, 500 | **N** | Single-flight via `MAINTENANCE_PERMIT`; 409 on contention. `caller_ip` audit-logged before service call. |
-| POST | `/api/db/vacuum` | **admin** | body: `{ "full": bool, "force"?: bool, "incremental_pages"?: u32 }`. `force` is `Option<bool>` so the size pre-flight only relaxes on explicit `"force": true`. | `DbVacuumResult` (incl. `after_physical_size_bytes`) | 200, 400, 401, **409**, 500 | **N** | Single-flight via `MAINTENANCE_PERMIT`. Size pre-flight: `full && !force` reads the LIVE `page_count * page_size` (no cached snapshot) on every call and returns 409 if logical size > **2 GB**. `caller_ip` audit-logged before service call. See "VACUUM on large DBs" below. |
+| POST | `/api/db/integrity/background` | **admin** | query: `quick?` (bool). | `DbIntegrityJobStarted { job_id, status }` | 200, 400, 401, **403**, 500 | **N** | Requires the admin header. Starts a server-side background integrity job; poll `/api/db/integrity/jobs/{id}` for the outcome. |
+| GET | `/api/db/integrity/jobs/{id}` | read | path: `id` (i64). | `MaintenanceJobStatus` | 200, 401, 404, 503, 500 | Y | Polls a background integrity job. |
+| POST | `/api/db/checkpoint` | **admin** | body: `{ "mode": "passive" \| "full" \| "restart" \| "truncate" }`. Validated handler-side BEFORE the service call (eng-review #A17). | `DbCheckpointResult` | 200, 400, 401, **403**, **409**, 500 | **N** | Requires the admin header. Single-flight via `MAINTENANCE_PERMIT`; 409 on contention. `caller_ip` audit-logged before service call. |
+| POST | `/api/db/vacuum` | **admin** | body: `{ "full": bool, "force"?: bool, "incremental_pages"?: u32 }`. `force` is `Option<bool>` so the size pre-flight only relaxes on explicit `"force": true`. | `DbVacuumResult` (incl. `after_physical_size_bytes`) | 200, 400, 401, **403**, **409**, 500 | **N** | Requires the admin header. Single-flight via `MAINTENANCE_PERMIT`. Size pre-flight: `full && !force` reads the LIVE `page_count * page_size` (no cached snapshot) on every call and returns 409 if logical size > **2 GB**. `caller_ip` audit-logged before service call. See "VACUUM on large DBs" below. |
+| POST | `/api/db/backup` | **admin** | body: `{ "output_path"?: string }` or empty body. | `DbBackupResult { db_path, backup_path, size_bytes }` | 200, 400, 401, **403**, **409**, 500 | **N** | Requires the admin header. Runs an online backup inside the server process; `output_path` is server-side, not a local shell path. Single-flight via `MAINTENANCE_PERMIT`. |
 
 ### Compose diagnostics (2)
 
@@ -180,10 +186,10 @@ shell environment is unaffected.
   in production.
 - **API auth model.** `build_auth_layer` accepts the normal
   `CORTEX_API_TOKEN`; `AuthPolicy::Mounted` is enforced for `/api/*`
-  regardless of bind address (eng-review C1). Most legacy admin rows still use
-  that bearer as their only gate. `/api/file-tails` additionally requires
-  `X-Cortex-Admin-Token: $CORTEX_API_ADMIN_TOKEN` because it exposes configured
-  filesystem paths and can mutate runtime tail sources.
+  regardless of bind address (eng-review C1). Routes marked **admin** require
+  both the normal bearer and the `X-Cortex-Admin-Token` header; this covers
+  file-tail management plus maintenance mutations such as session checkpoint
+  pruning, DB background integrity, checkpoint, vacuum, and backup.
 
 ---
 

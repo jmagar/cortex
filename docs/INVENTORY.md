@@ -78,17 +78,17 @@ methods as the MCP actions.
 | --- | --- | --- |
 | `cortex search` | `search` | Full-text search with filters |
 | `cortex tail` | `tail` | Recent log entries |
-| `cortex errors` | `errors` | Error/warning summary |
+| `cortex analysis errors` | `errors` | Error/warning summary |
 | `cortex hosts` | `hosts` | Known host list |
 | `cortex hosts sources` | `source_ips` | Source identifiers with hostname breakdown |
 | `cortex hosts silent` | `silent_hosts` | Hosts older than a staleness threshold |
 | `cortex ingest inventory refresh` | -- | Native refresh into `~/.cortex/inventory` |
 | `cortex ingest inventory status` | -- | Cache freshness, collector status, warnings, and artifact paths |
 | `cortex filter` | `filter` | Structured filter-only log retrieval |
-| `cortex correlate` | `correlate` | Cross-host event correlation |
+| `cortex correlate events` | `correlate` | Cross-host event correlation |
 | `cortex state host` | `host_state` | Latest bounded heartbeat state for one host |
 | `cortex state fleet` | `fleet_state` | Fleet-wide heartbeat snapshot with pressure flags |
-| `cortex correlate-state` | `correlate_state` | Logs plus heartbeat summaries around a reference time |
+| `cortex correlate state` | `correlate_state` | Logs plus heartbeat summaries around a reference time |
 | `cortex entity` | `graph` | Resolve a graph entity by canonical key or alias |
 | `cortex graph status` | `graph` | Inspect graph projection status, freshness, counts, and rebuild progress |
 | `cortex graph rebuild` | `graph` | Explicitly rebuild the derived graph projection from current source tables |
@@ -157,7 +157,7 @@ methods as the MCP actions.
 
 ## Homelab inventory refresh
 
-`cortex inventory refresh` writes the private cache consumed by MCP
+`cortex ingest inventory refresh` writes the private cache consumed by MCP
 `action=map` under `~/.cortex/inventory`. The server also refreshes that cache
 automatically: one refresh runs shortly after startup, then every
 `CORTEX_INVENTORY_REFRESH_INTERVAL_SECS` seconds. Set the interval to `0` to

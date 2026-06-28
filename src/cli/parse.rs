@@ -1,12 +1,37 @@
 use anyhow::{Result, anyhow, bail};
 
+use super::args::StatsCommand;
 use super::parse_admin::{parse_compose, parse_db, parse_setup, parse_stats};
 use super::parse_logs::{
-    parse_correlate, parse_errors, parse_filter, parse_hosts, parse_incident, parse_patterns,
-    parse_search, parse_tail, parse_timeline,
+    parse_correlate, parse_errors, parse_filter, parse_hosts, parse_incident,
+    parse_ingest_rate_args, parse_patterns, parse_search, parse_tail, parse_timeline,
 };
 use super::parse_sessions::parse_sessions_command;
 use super::{CliCommand, commands, parse_config, suggest};
+
+pub(crate) const TOP_LEVEL_COMMANDS: &[&str] = &[
+    "search",
+    "filter",
+    "tail",
+    "hosts",
+    "sessions",
+    "analysis",
+    "state",
+    "ingest",
+    "alerts",
+    "entity",
+    "graph",
+    "heartbeat",
+    "correlate",
+    "stats",
+    "compose",
+    "setup",
+    "db",
+    "config",
+    "timeline",
+    "apps",
+    "completions",
+];
 
 pub(crate) fn parse_command(args: Vec<String>) -> Result<CliCommand> {
     let (command, rest) = args
@@ -16,42 +41,139 @@ pub(crate) fn parse_command(args: Vec<String>) -> Result<CliCommand> {
         "search" => parse_search(rest),
         "filter" => parse_filter(rest),
         "tail" => parse_tail(rest),
-        "errors" => parse_errors(rest),
         "hosts" => parse_hosts(rest),
         "sessions" => parse_sessions_command(rest),
-        "incident" => parse_incident(rest),
-        "heartbeat" => parse_heartbeat(rest),
-        "correlate" => parse_correlate(rest),
+        "analysis" => parse_analysis(rest),
         "state" => commands::state::parse_state(rest),
-        "ingest" => commands::ingest::parse_ingest(rest),
-        "stats" => parse_stats(rest),
+        "ingest" => parse_ingest(rest),
+        "alerts" => parse_alerts(rest),
+        "heartbeat" => parse_heartbeat(rest),
+        "correlate" => parse_correlate_domain(rest),
+        "stats" => parse_stats_domain(rest),
         "compose" => parse_compose(rest),
         "setup" => parse_setup(rest),
         "db" => parse_db(rest),
         "config" => parse_config::parse_config(rest),
         "timeline" => parse_timeline(rest),
-        "patterns" => parse_patterns(rest),
         "entity" => commands::graph::parse_entity(rest),
         "graph" => commands::graph::parse_graph(rest),
-        "alerts" => commands::alerts::parse_alerts(rest),
-        // Surface parity gap closure (2026-05-22)
-        "anomalies" => commands::anomalies::parse_anomalies(rest),
-        "compare" => commands::compare::parse_compare(rest),
         "apps" => commands::apps::parse_apps(rest),
-        // Heartbeat fleet state parity (cxih.4)
-        "correlate-state" => commands::correlate_state::parse_correlate_state(rest),
-        "topic-correlate" => commands::topic_correlate::parse_topic_correlate(rest),
         "__complete" => Ok(CliCommand::Complete(rest.to_vec())),
         "completions" => Ok(CliCommand::Completions(rest.to_vec())),
+        _ if cortex::surface_registry::removed_cli_surface(command).is_some() => {
+            bail!("{}", removed_command_message(command))
+        }
+        _ => bail!(
+            "{}",
+            suggest::unknown_command("CLI command", command, TOP_LEVEL_COMMANDS)
+        ),
+    }
+}
+
+fn parse_required_subcommand<'a>(
+    domain: &str,
+    args: &'a [String],
+    expected: &[&str],
+) -> Result<(&'a str, &'a [String])> {
+    let (subcommand, rest) = args
+        .split_first()
+        .ok_or_else(|| anyhow!("{domain} requires a subcommand: {}", expected.join(", ")))?;
+    Ok((subcommand.as_str(), rest))
+}
+
+fn parse_analysis(args: &[String]) -> Result<CliCommand> {
+    let (subcommand, rest) = parse_required_subcommand(
+        "analysis",
+        args,
+        &["errors", "incident", "patterns", "anomalies", "compare"],
+    )?;
+    match subcommand {
+        "errors" => parse_errors(rest),
+        "incident" => parse_incident(rest),
+        "patterns" => parse_patterns(rest),
+        "anomalies" => commands::anomalies::parse_anomalies(rest),
+        "compare" => commands::compare::parse_compare(rest),
         _ => bail!(
             "{}",
             suggest::unknown_command(
-                "CLI command",
-                command,
-                cortex::surface_registry::TOP_LEVEL_COMMANDS
+                "analysis subcommand",
+                subcommand,
+                &["errors", "incident", "patterns", "anomalies", "compare"],
             )
         ),
     }
+}
+
+fn parse_ingest(args: &[String]) -> Result<CliCommand> {
+    commands::ingest::parse_ingest(args)
+}
+
+fn parse_alerts(args: &[String]) -> Result<CliCommand> {
+    let Some((subcommand, rest)) = args.split_first() else {
+        return commands::alerts::parse_alerts(args);
+    };
+    let mut delegated = Vec::new();
+    match subcommand.as_str() {
+        "signatures"
+            if !matches!(
+                rest.first().map(String::as_str),
+                Some("list" | "ack" | "unack")
+            ) =>
+        {
+            delegated.push("signatures".to_string());
+            delegated.push("list".to_string());
+            delegated.extend_from_slice(rest);
+            commands::alerts::parse_alerts(&delegated)
+        }
+        "notifications" if !matches!(rest.first().map(String::as_str), Some("recent" | "test")) => {
+            delegated.push("notifications".to_string());
+            delegated.push("recent".to_string());
+            delegated.extend_from_slice(rest);
+            commands::alerts::parse_alerts(&delegated)
+        }
+        _ => commands::alerts::parse_alerts(args),
+    }
+}
+
+fn parse_correlate_domain(args: &[String]) -> Result<CliCommand> {
+    let (subcommand, rest) =
+        parse_required_subcommand("correlate", args, &["events", "state", "topic"])?;
+    match subcommand {
+        "events" => parse_correlate(rest),
+        "state" => commands::correlate_state::parse_correlate_state(rest),
+        "topic" => commands::topic_correlate::parse_topic_correlate(rest),
+        _ => bail!(
+            "{}",
+            suggest::unknown_command(
+                "correlate subcommand",
+                subcommand,
+                &["events", "state", "topic"],
+            )
+        ),
+    }
+}
+
+fn parse_stats_domain(args: &[String]) -> Result<CliCommand> {
+    match args.first().map(String::as_str) {
+        Some("ingest-rate") => Ok(CliCommand::Stats(StatsCommand::IngestRate(
+            parse_ingest_rate_args(&args[1..])?,
+        ))),
+        Some("summary") => parse_stats(&args[1..]),
+        Some(other) if !other.starts_with('-') => bail!(
+            "{}",
+            suggest::unknown_command("stats subcommand", other, &["summary", "ingest-rate"])
+        ),
+        _ => parse_stats(args),
+    }
+}
+
+fn removed_command_message(command: &str) -> String {
+    let surface =
+        cortex::surface_registry::removed_cli_surface(command).expect("checked by caller");
+    let replacement = surface
+        .replacement
+        .expect("removed CLI surfaces must carry replacement");
+    format!("removed CLI command: {command}\n\nUse `cortex {replacement}`.")
 }
 
 fn parse_heartbeat(args: &[String]) -> Result<CliCommand> {

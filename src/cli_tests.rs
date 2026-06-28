@@ -126,16 +126,16 @@ fn parse_compose_service_logs_accepts_time_range_and_json() {
 #[test]
 fn parse_old_service_top_level_command_is_removed() {
     let err = CliCommand::parse(strings(&["service", "logs", "cortex"])).unwrap_err();
-    assert!(
-        err.to_string().contains("removed CLI command: service"),
-        "expected service to be rejected, got: {err}"
+    assert_eq!(
+        err.to_string(),
+        "removed CLI command: service\n\nUse `cortex compose logs SERVICE`."
     );
-    assert!(err.to_string().contains("cortex compose logs SERVICE"));
 }
 
 #[test]
 fn parse_incident_accepts_window_service_and_json() {
     let parsed = CliCommand::parse(strings(&[
+        "analysis",
         "incident",
         "--around",
         "2026-05-20T04:00:00Z",
@@ -167,7 +167,7 @@ fn parse_incident_accepts_window_service_and_json() {
 
 #[test]
 fn parse_correlate_requires_reference_time() {
-    let err = CliCommand::parse(strings(&["correlate", "--limit", "5"])).unwrap_err();
+    let err = CliCommand::parse(strings(&["correlate", "events", "--limit", "5"])).unwrap_err();
 
     assert!(err.to_string().contains("reference-time"));
 }
@@ -176,6 +176,7 @@ fn parse_correlate_requires_reference_time() {
 fn parse_correlate_accepts_reference_time_and_filters() {
     let parsed = CliCommand::parse(strings(&[
         "correlate",
+        "events",
         "--reference-time=2026-01-01T00:00:00Z",
         "--window-minutes",
         "15",
@@ -211,7 +212,7 @@ fn parse_unknown_option_errors() {
 
 #[tokio::test]
 async fn run_compose_rejects_non_compose_commands_before_live_probes() {
-    let error = run_compose(CliCommand::Stats(args::StatsCommand::Summary(
+    let error = run_compose(CliCommand::Stats(StatsCommand::Summary(
         OutputArgs::default(),
     )))
     .await
@@ -265,11 +266,10 @@ fn parse_sessions_search_collects_filters() {
 #[test]
 fn parse_sessions_top_level_is_removed() {
     let err = CliCommand::parse(strings(&["ai", "search", "auth failure"])).unwrap_err();
-    assert!(
-        err.to_string().contains("removed CLI command: ai"),
-        "got: {err}"
+    assert_eq!(
+        err.to_string(),
+        "removed CLI command: ai\n\nUse `cortex sessions`."
     );
-    assert!(err.to_string().contains("cortex sessions"));
 }
 
 #[test]
@@ -1517,13 +1517,9 @@ fn parse_old_host_inventory_top_level_commands_are_removed() {
         ("silent-hosts", "cortex hosts silent"),
     ] {
         let err = CliCommand::parse(strings(&[command])).unwrap_err();
-        assert!(
-            err.to_string().contains("removed CLI command"),
-            "expected {command} to be rejected as removed, got: {err}"
-        );
-        assert!(
-            err.to_string().contains(replacement),
-            "expected {command} replacement {replacement}, got: {err}"
+        assert_eq!(
+            err.to_string(),
+            format!("removed CLI command: {command}\n\nUse `{replacement}`.")
         );
     }
 }
@@ -1538,17 +1534,18 @@ fn parse_clock_skew_with_since() {
     ]))
     .expect("parse clock-skew");
     match cmd {
-        CliCommand::State(args::StateCommand::ClockSkew(args)) => {
+        CliCommand::State(StateCommand::ClockSkew(args)) => {
             assert_eq!(args.since.as_deref(), Some("2026-05-20T00:00:00+00:00"));
             assert!(!args.json);
         }
-        other => panic!("expected state clock-skew, got {other:?}"),
+        other => panic!("expected ClockSkew, got {other:?}"),
     }
 }
 
 #[test]
 fn parse_anomalies_with_windows() {
     let cmd = CliCommand::parse(strings(&[
+        "analysis",
         "anomalies",
         "--recent-minutes",
         "30",
@@ -1568,6 +1565,7 @@ fn parse_anomalies_with_windows() {
 #[test]
 fn parse_compare_with_ranges() {
     let cmd = CliCommand::parse(strings(&[
+        "analysis",
         "compare",
         "--a-from",
         "2026-05-20T00:00:00Z",

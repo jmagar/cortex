@@ -22,9 +22,12 @@ pub(crate) fn unknown_command(kind: &str, input: &str, candidates: &[&str]) -> S
         && let Some(surface) = cortex::surface_registry::removed_cli_surface(input)
         && let Some(replacement) = surface.replacement
     {
+        let reason = surface
+            .reason
+            .unwrap_or("This spelling is intentionally removed");
         return format!(
             "removed {kind}: {input}\n\nUse `cortex {replacement}` instead. {}.",
-            surface.reason
+            reason
         );
     }
     match did_you_mean(input, candidates) {

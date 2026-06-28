@@ -16,6 +16,29 @@ fn completes_action_names_with_descriptions() {
 }
 
 #[test]
+fn completions_omit_clean_break_roots() {
+    let out = complete(&["actions".into()]).unwrap();
+    for removed in ["ai", "source-ips", "silent-hosts", "service", "deploy"] {
+        assert!(
+            !out.iter()
+                .any(|line| line == removed || line.starts_with(&format!("{removed}\t"))),
+            "removed command {removed} must not appear in completions"
+        );
+    }
+}
+
+#[test]
+fn completion_roots_have_help_entries() {
+    for line in complete(&["actions".into()]).unwrap() {
+        let root = line.split('\t').next().expect("candidate root");
+        assert!(
+            crate::cli::help::render_command(root, false).is_some(),
+            "completion root {root} must be documented in command help"
+        );
+    }
+}
+
+#[test]
 fn completes_flags_for_action() {
     let out = complete(&["flags".into(), "search".into()]).unwrap();
     assert!(out.iter().any(|l| l.starts_with("--host\t")));

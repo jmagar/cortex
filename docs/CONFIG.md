@@ -150,14 +150,14 @@ normal API bearer and `X-Cortex-Admin-Token: $CORTEX_API_ADMIN_TOKEN`; MCP
 management requires `cortex:admin`.
 
 ```bash
-cortex file-tail add \
+cortex ingest file-tail add \
   --id swag-access \
   --path /file-tail-root/swag/log/nginx/access.log \
   --tag swag-access \
   --host squirts \
   --facility local4
 
-cortex file-tail add \
+cortex ingest file-tail add \
   --id swag-error \
   --path /file-tail-root/swag/log/nginx/error.log \
   --tag swag-error \
@@ -165,21 +165,21 @@ cortex file-tail add \
   --facility local4 \
   --severity warning
 
-cortex file-tail add \
+cortex ingest file-tail add \
   --id fail2ban \
   --path /file-tail-root/swag/log/fail2ban/fail2ban.log \
   --tag fail2ban \
   --host squirts \
   --facility local5
 
-cortex file-tail add \
+cortex ingest file-tail add \
   --id authelia \
   --path /file-tail-root/authelia/logs/authelia.log \
   --tag authelia \
   --host squirts \
   --facility local5
 
-cortex file-tail add \
+cortex ingest file-tail add \
   --id adguard-query \
   --path /file-tail-root/adguard/var/data/querylog.json \
   --tag adguard-query \
@@ -214,7 +214,7 @@ The plain JSON API is **always on**: it is mounted under `/api/*` on the same HT
 | Variable | Required | Default | Sensitive | Description |
 | --- | --- | --- | --- | --- |
 | `CORTEX_API_TOKEN` | yes | (none) | **yes** | Bearer token for `/api/*` routes — required at startup |
-| `CORTEX_API_ADMIN_TOKEN` | for REST file-tail management | (none) | **yes** | Extra token sent as `X-Cortex-Admin-Token` for `/api/file-tails` management. The normal API bearer is still required. |
+| `CORTEX_API_ADMIN_TOKEN` | for REST admin mutations | (none) | **yes** | Extra token sent as `X-Cortex-Admin-Token` for admin REST mutations, including `/api/file-tails`, `/api/sessions/prune-checkpoints`, `/api/db/integrity/background`, `/api/db/checkpoint`, `/api/db/vacuum`, and `/api/db/backup`. The normal API bearer is still required. |
 
 ### Headless Gemini assessment (`CORTEX_HEADLESS_*`, `CORTEX_LLM_*`)
 

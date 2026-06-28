@@ -723,9 +723,9 @@ plan explicitly records the deferral and the reason.
 Expected CLI shape:
 
 ```bash
-cortex host-state --host tootie --json
-cortex fleet-state --json
-cortex correlate-state --reference-time 2026-05-24T14:30:00Z --window-minutes 10 --json
+cortex state host --host tootie --json
+cortex state fleet --json
+cortex correlate state --reference-time 2026-05-24T14:30:00Z --window-minutes 10 --json
 ```
 
 Expected REST shape:

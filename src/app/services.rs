@@ -65,6 +65,7 @@ mod ai_indexing;
 mod analytics;
 mod assessment;
 mod compose;
+mod domains;
 mod error_detection;
 mod file_tails;
 mod filters;
@@ -82,7 +83,6 @@ mod map;
 mod map_answers;
 mod map_findings;
 mod rag;
-mod surface;
 mod topic_correlate;
 
 pub use compose::run_compose_status;

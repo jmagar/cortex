@@ -28,6 +28,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   inventory cache, and file-tail management under `cortex ingest ...`; add
   read-only `cortex ingest syslog status` and
   `cortex ingest docker status|sources`.
+- **Breaking CLI consolidation:** move analysis commands under
+  `cortex analysis`: `errors`, `incident`, `patterns`, `anomalies`, and
+  `compare` now fail as top-level commands with replacement guidance.
+- **Breaking CLI consolidation:** make correlation modes explicit:
+  `cortex correlate events`, `cortex correlate state`, and
+  `cortex correlate topic` replace the former top-level event/state/topic
+  spelling.
+- **Breaking CLI consolidation:** move host health views under
+  `cortex state`: `state host`, `state fleet`, and `state clock-skew`.
+- **Breaking CLI consolidation:** move ingest and alert helpers under
+  `cortex ingest` and `cortex alerts`: shell history, agent-command spools,
+  inventory refresh/status, file-tail management, signature ack/unack, and
+  notification commands no longer exist as top-level commands.
+- **Breaking API cleanup:** `/api/ai/*` remains intentionally removed with no
+  compatibility shim; use `/api/sessions/*` endpoints.
+- CLI help, completion roots, smoke scripts, and current docs now advertise the
+  grouped command tree and assert the old removed commands/routes fail
+  intentionally.
 
 ## [2.0.0] - 2026-06-27
 

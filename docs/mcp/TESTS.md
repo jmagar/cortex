@@ -146,9 +146,9 @@ cortex sessions incidents --limit 3 --json
 cortex sessions investigate --limit 1 --json
 
 # Heartbeat fleet state parity commands
-cortex host-state --host tootie --json
-cortex fleet-state --json
-cortex correlate-state --reference-time 2026-01-01T00:00:00Z --window-minutes 10 --json
+cortex state host --host tootie --json
+cortex state fleet --json
+cortex correlate state --reference-time 2026-01-01T00:00:00Z --window-minutes 10 --json
 
 # Graph lookup commands
 cortex entity host tootie --json

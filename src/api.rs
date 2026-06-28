@@ -338,7 +338,7 @@ async fn file_tails(
         return resp;
     }
     tracing::warn!(caller_ip = %peer.ip(), action = ?req.op, "admin: file_tails invoked");
-    respond(state.service.file_tails(req).await)
+    respond(state.service.ingest().file_tails(req).await)
 }
 
 fn require_api_admin_token(
@@ -485,7 +485,8 @@ async fn errors(
     respond(
         state
             .service
-            .get_errors(GetErrorsRequest {
+            .analysis()
+            .errors(GetErrorsRequest {
                 since: query.since,
                 until: query.until,
                 group_by: query.group_by,
@@ -496,7 +497,7 @@ async fn errors(
 }
 
 async fn hosts(State(state): State<ApiState>) -> impl IntoResponse {
-    respond(state.service.list_hosts().await)
+    respond(state.service.hosts().list().await)
 }
 
 #[derive(Debug, Deserialize)]
@@ -518,7 +519,8 @@ async fn correlate(
     respond(
         state
             .service
-            .correlate_events(CorrelateEventsRequest {
+            .correlate()
+            .events(CorrelateEventsRequest {
                 reference_time: query.reference_time,
                 window_minutes: query.window_minutes,
                 severity_min: query.severity_min,
@@ -532,7 +534,7 @@ async fn correlate(
 }
 
 async fn stats(State(state): State<ApiState>) -> impl IntoResponse {
-    respond(state.service.get_stats().await)
+    respond(state.service.stats().summary().await)
 }
 
 /// `GET /api/version` — returns the cached server identity. SQLite is NOT
@@ -556,7 +558,8 @@ async fn source_ips(
     respond(
         state
             .service
-            .list_source_ips(ListSourceIpsRequest {
+            .hosts()
+            .source_ips(ListSourceIpsRequest {
                 limit: query.limit,
                 offset: query.offset,
             })
@@ -586,6 +589,7 @@ async fn timeline(
     respond(
         state
             .service
+            .stats()
             .timeline(TimelineRequest {
                 bucket: query.bucket,
                 group_by: query.group_by,
@@ -618,6 +622,7 @@ async fn patterns(
     respond(
         state
             .service
+            .analysis()
             .patterns(PatternsRequest {
                 since: query.since,
                 until: query.until,
@@ -643,6 +648,7 @@ async fn ingest_rate(
     respond(
         state
             .service
+            .stats()
             .ingest_rate(IngestRateRequest {
                 by_host: query.by_host,
             })
@@ -666,7 +672,7 @@ async fn host_state(
     State(state): State<ApiState>,
     Query(req): Query<HostStateRequest>,
 ) -> impl IntoResponse {
-    respond(state.service.host_state(req).await)
+    respond(state.service.state().host(req).await)
 }
 
 async fn context(
@@ -680,21 +686,21 @@ async fn fleet_state(
     State(state): State<ApiState>,
     Query(req): Query<FleetStateRequest>,
 ) -> impl IntoResponse {
-    respond(state.service.fleet_state(req).await)
+    respond(state.service.state().fleet(req).await)
 }
 
 async fn correlate_state(
     State(state): State<ApiState>,
     Query(req): Query<CorrelateStateRequest>,
 ) -> impl IntoResponse {
-    respond(state.service.correlate_state(req).await)
+    respond(state.service.correlate().state(req).await)
 }
 
 async fn topic_correlate(
     State(state): State<ApiState>,
     Json(req): Json<TopicCorrelateRequest>,
 ) -> impl IntoResponse {
-    respond(state.service.topic_correlate(req).await)
+    respond(state.service.correlate().topic(req).await)
 }
 
 #[derive(Debug, Deserialize)]
@@ -711,7 +717,8 @@ async fn unaddressed_errors(
     respond(
         state
             .service
-            .unaddressed_errors(UnaddressedErrorsRequest {
+            .alerts()
+            .signatures(UnaddressedErrorsRequest {
                 limit: query.limit,
                 include_acknowledged: query.include_acknowledged,
             })
@@ -738,7 +745,8 @@ async fn ack_error(
     respond(
         state
             .service
-            .ack_error(
+            .alerts()
+            .ack_signature(
                 AckErrorRequest {
                     signature_hash: body.signature_hash,
                     notes: body.notes,
@@ -768,7 +776,8 @@ async fn unack_error(
     respond(
         state
             .service
-            .unack_error(
+            .alerts()
+            .unack_signature(
                 UnackErrorRequest {
                     signature_hash: body.signature_hash,
                     reason: body.reason,
@@ -783,7 +792,7 @@ async fn notifications_recent(
     State(state): State<ApiState>,
     Query(req): Query<NotificationsRecentRequest>,
 ) -> impl IntoResponse {
-    respond(state.service.notifications_recent_checked(req).await)
+    respond(state.service.alerts().notifications(req).await)
 }
 
 async fn notifications_test() -> impl IntoResponse {
@@ -808,7 +817,8 @@ async fn silent_hosts(
     respond(
         state
             .service
-            .silent_hosts(SilentHostsRequest {
+            .hosts()
+            .silent(SilentHostsRequest {
                 silent_minutes: query.silent_minutes,
             })
             .await,
@@ -829,6 +839,7 @@ async fn clock_skew(
     respond(
         state
             .service
+            .state()
             .clock_skew(ClockSkewRequest {
                 since: query.since,
                 limit: query.limit,
@@ -851,6 +862,7 @@ async fn anomalies(
     respond(
         state
             .service
+            .analysis()
             .anomalies(AnomaliesRequest {
                 recent_minutes: query.recent_minutes,
                 baseline_minutes: query.baseline_minutes,
@@ -875,6 +887,7 @@ async fn compare(
     respond(
         state
             .service
+            .analysis()
             .compare(CompareRequest {
                 a_from: query.a_from,
                 a_to: query.a_to,
@@ -1283,8 +1296,13 @@ async fn ai_parse_errors(
 async fn ai_prune_checkpoints(
     State(state): State<ApiState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     body: axum::body::Bytes,
 ) -> axum::response::Response {
+    if let Some(resp) = require_api_admin_token(&state, &headers) {
+        return resp;
+    }
+
     // Step 1+2: parse as Value, require `dry_run` key explicitly.
     let value: serde_json::Value = match serde_json::from_slice(&body) {
         Ok(v) => v,
@@ -1487,8 +1505,12 @@ async fn db_integrity(
 /// outcome. Reuses the `quick` query param of the sync endpoint.
 async fn db_integrity_background(
     State(state): State<ApiState>,
+    headers: HeaderMap,
     Query(req): Query<DbIntegrityRequest>,
 ) -> impl IntoResponse {
+    if let Some(resp) = require_api_admin_token(&state, &headers) {
+        return resp;
+    }
     respond(state.service.db_integrity_start_background(req.quick).await)
 }
 
@@ -1504,8 +1526,13 @@ async fn db_integrity_job(State(state): State<ApiState>, Path(id): Path<i64>) ->
 async fn db_checkpoint(
     State(state): State<ApiState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     body: axum::body::Bytes,
 ) -> axum::response::Response {
+    if let Some(resp) = require_api_admin_token(&state, &headers) {
+        return resp;
+    }
+
     let req: DbCheckpointRequest = match serde_json::from_slice(&body) {
         Ok(req) => req,
         Err(err) => {
@@ -1561,8 +1588,13 @@ async fn db_checkpoint(
 async fn db_vacuum(
     State(state): State<ApiState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     body: axum::body::Bytes,
 ) -> axum::response::Response {
+    if let Some(resp) = require_api_admin_token(&state, &headers) {
+        return resp;
+    }
+
     let req: DbVacuumRequest = match serde_json::from_slice(&body) {
         Ok(req) => req,
         Err(err) => {
@@ -1622,8 +1654,13 @@ async fn db_vacuum(
 async fn db_backup(
     State(state): State<ApiState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     body: axum::body::Bytes,
 ) -> axum::response::Response {
+    if let Some(resp) = require_api_admin_token(&state, &headers) {
+        return resp;
+    }
+
     let req: DbBackupRequest = if body.is_empty() {
         DbBackupRequest::default()
     } else {
