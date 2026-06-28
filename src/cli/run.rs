@@ -3,7 +3,7 @@ use cortex::app::CortexService;
 
 use super::args::{
     AgentCommandCommand, AlertsCommand, CliCommand, DbCommand, GraphCommand, NotifyCommand,
-    ShellCommand, SigCommand,
+    ShellCommand, SigCommand, StateCommand, StatsCommand,
 };
 use super::dispatch;
 
@@ -57,7 +57,15 @@ pub(crate) async fn run(mode: CliMode, command: CliCommand) -> Result<()> {
         },
         CliCommand::Incident(args) => dispatch::run_incident(&mode, args).await,
         CliCommand::Correlate(args) => dispatch::run_correlate(&mode, args).await,
-        CliCommand::Stats(args) => dispatch::run_stats(&mode, args).await,
+        CliCommand::State(command) => match command {
+            StateCommand::Host(args) => dispatch::run_host_state(&mode, args).await,
+            StateCommand::Fleet(args) => dispatch::run_fleet_state(&mode, args).await,
+            StateCommand::ClockSkew(args) => dispatch::run_clock_skew(&mode, args).await,
+        },
+        CliCommand::Stats(command) => match command {
+            StatsCommand::Summary(args) => dispatch::run_stats(&mode, args).await,
+            StatsCommand::IngestRate(args) => dispatch::run_ingest_rate(&mode, args).await,
+        },
         CliCommand::FileTail(command) => dispatch::run_file_tail(&mode, command).await,
         CliCommand::Sessions(command) => match command {
             super::SessionsCommand::List(args) => dispatch::run_sessions(&mode, args).await,
@@ -140,7 +148,6 @@ pub(crate) async fn run(mode: CliMode, command: CliCommand) -> Result<()> {
         // bail with a clear internal-error message rather than a placeholder.
         CliCommand::Timeline(args) => dispatch::run_timeline(&mode, args).await,
         CliCommand::Patterns(args) => dispatch::run_patterns(&mode, args).await,
-        CliCommand::IngestRate(args) => dispatch::run_ingest_rate(&mode, args).await,
         CliCommand::Alerts(alerts) => match alerts {
             AlertsCommand::Signatures(sig) => match sig {
                 SigCommand::List(args) => dispatch::run_sig_list(&mode, args).await,
@@ -153,13 +160,10 @@ pub(crate) async fn run(mode: CliMode, command: CliCommand) -> Result<()> {
             },
         },
         // Surface parity gap closure (2026-05-22)
-        CliCommand::ClockSkew(args) => dispatch::run_clock_skew(&mode, args).await,
         CliCommand::Anomalies(args) => dispatch::run_anomalies(&mode, args).await,
         CliCommand::Compare(args) => dispatch::run_compare(&mode, args).await,
         CliCommand::Apps(args) => dispatch::run_apps(&mode, args).await,
         // Heartbeat fleet state parity (cxih.4)
-        CliCommand::HostState(args) => dispatch::run_host_state(&mode, args).await,
-        CliCommand::FleetState(args) => dispatch::run_fleet_state(&mode, args).await,
         CliCommand::CorrelateState(args) => dispatch::run_correlate_state(&mode, args).await,
         CliCommand::TopicCorrelate(args) => dispatch::run_topic_correlate(&mode, args).await,
         CliCommand::Entity(args) => dispatch::run_entity_lookup(&mode, args).await,

@@ -30,4 +30,5 @@ pub(crate) mod file_tails;
 pub(crate) mod fleet_state;
 pub(crate) mod graph;
 pub(crate) mod host_state;
+pub(crate) mod state;
 pub(crate) mod topic_correlate;

@@ -3,8 +3,8 @@ use anyhow::{Result, anyhow, bail};
 use super::parse_admin::{parse_compose, parse_db, parse_setup, parse_stats};
 use super::parse_command_log::{parse_agent_command, parse_shell};
 use super::parse_logs::{
-    parse_correlate, parse_errors, parse_filter, parse_hosts, parse_incident, parse_ingest_rate,
-    parse_patterns, parse_search, parse_tail, parse_timeline,
+    parse_correlate, parse_errors, parse_filter, parse_hosts, parse_incident, parse_patterns,
+    parse_search, parse_tail, parse_timeline,
 };
 use super::parse_sessions::parse_sessions_command;
 use super::{CliCommand, commands, parse_config, suggest};
@@ -25,6 +25,7 @@ pub(crate) fn parse_command(args: Vec<String>) -> Result<CliCommand> {
         "agent-command" => parse_agent_command(rest),
         "heartbeat" => parse_heartbeat(rest),
         "correlate" => parse_correlate(rest),
+        "state" => commands::state::parse_state(rest),
         "stats" => parse_stats(rest),
         "compose" => parse_compose(rest),
         "setup" => parse_setup(rest),
@@ -33,18 +34,14 @@ pub(crate) fn parse_command(args: Vec<String>) -> Result<CliCommand> {
         "inventory" => parse_inventory(rest),
         "timeline" => parse_timeline(rest),
         "patterns" => parse_patterns(rest),
-        "ingest-rate" => parse_ingest_rate(rest),
         "entity" => commands::graph::parse_entity(rest),
         "graph" => commands::graph::parse_graph(rest),
         "alerts" => commands::alerts::parse_alerts(rest),
         // Surface parity gap closure (2026-05-22)
-        "clock-skew" => commands::clock_skew::parse_clock_skew(rest),
         "anomalies" => commands::anomalies::parse_anomalies(rest),
         "compare" => commands::compare::parse_compare(rest),
         "apps" => commands::apps::parse_apps(rest),
         // Heartbeat fleet state parity (cxih.4)
-        "host-state" => commands::host_state::parse_host_state(rest),
-        "fleet-state" => commands::fleet_state::parse_fleet_state(rest),
         "correlate-state" => commands::correlate_state::parse_correlate_state(rest),
         "topic-correlate" => commands::topic_correlate::parse_topic_correlate(rest),
         "file-tail" => commands::file_tails::parse_file_tail(rest),

@@ -226,15 +226,15 @@ fn parse_log_commands_report_help_and_unknown_argument_errors() {
         ),
         (parse_timeline, vec!["--bogus"], "unknown timeline option"),
         (parse_patterns, vec!["--bogus"], "unknown patterns option"),
-        (
-            parse_ingest_rate,
-            vec!["--host"],
-            "unknown ingest-rate option",
-        ),
     ] {
         let err = parser(&strings(&args)).unwrap_err().to_string();
         assert!(err.contains(expected), "expected {expected:?}, got {err:?}");
     }
+
+    let err = parse_ingest_rate_args(&strings(&["--host"]))
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("unknown ingest-rate option"), "got {err:?}");
 }
 
 #[test]

@@ -1,6 +1,7 @@
 use anyhow::{Result, anyhow, bail};
 use cortex::compose::ComposeTarget;
 
+use super::args::StatsCommand;
 use super::parse_common::{FlagCursor, parse_output_args, parse_u32_flag, value_after_equals};
 use super::{
     CliCommand, ComposeArgs, ComposeCommand, ComposeLogsArgs, ComposeMutationArgs, DbBackupArgs,
@@ -8,7 +9,16 @@ use super::{
     DbVacuumArgs, PluginHookArgs, ServiceLogsArgs, SetupArgs, SetupCommand,
 };
 pub(crate) fn parse_stats(args: &[String]) -> Result<CliCommand> {
-    Ok(CliCommand::Stats(parse_output_args("stats", args)?))
+    if let Some((subcommand, rest)) = args.split_first() {
+        if subcommand == "ingest-rate" {
+            return Ok(CliCommand::Stats(StatsCommand::IngestRate(
+                super::parse_logs::parse_ingest_rate_args(rest)?,
+            )));
+        }
+    }
+    Ok(CliCommand::Stats(StatsCommand::Summary(parse_output_args(
+        "stats", args,
+    )?)))
 }
 
 fn parse_service_logs_args(context: &str, args: &[String]) -> Result<ServiceLogsArgs> {

@@ -9,7 +9,8 @@ use super::output_graph::{
 use anyhow::Result;
 use cortex::app::{
     CorrelateStateRequest, FleetStateRequest, GraphAroundRequest, GraphEntityLookupRequest,
-    GraphEvidenceLookupRequest, GraphExplainRequest, HostStateRequest, TopicCorrelateRequest,
+    GraphEvidenceLookupRequest, GraphExplainRequest, HostStateRequest, StateRequest, StateResponse,
+    TopicCorrelateRequest,
 };
 
 use super::CliMode;
@@ -119,7 +120,12 @@ pub(crate) async fn run_host_state(mode: &CliMode, args: HostStateArgs) -> Resul
     let json = args.json;
     let req = args.into_request();
     let response = match mode {
-        CliMode::Local(service) => service.host_state(req).await?,
+        CliMode::Local(service) => match service.state(StateRequest::Host(req)).await? {
+            StateResponse::Host(response) => response,
+            StateResponse::Fleet(_) | StateResponse::ClockSkew(_) => {
+                anyhow::bail!("internal: state host returned wrong response")
+            }
+        },
         CliMode::Http(client) => http_or_cancel(client.host_state(&req)).await?,
     };
     if json {
@@ -162,7 +168,12 @@ pub(crate) async fn run_fleet_state(mode: &CliMode, args: FleetStateArgs) -> Res
     let json = args.json;
     let req = args.into_request();
     let response = match mode {
-        CliMode::Local(service) => service.fleet_state(req).await?,
+        CliMode::Local(service) => match service.state(StateRequest::Fleet(req)).await? {
+            StateResponse::Fleet(response) => response,
+            StateResponse::Host(_) | StateResponse::ClockSkew(_) => {
+                anyhow::bail!("internal: state fleet returned wrong response")
+            }
+        },
         CliMode::Http(client) => http_or_cancel(client.fleet_state(&req)).await?,
     };
     if json {

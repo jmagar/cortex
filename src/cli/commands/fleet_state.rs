@@ -6,9 +6,9 @@
 use anyhow::{Result, bail};
 
 use super::super::FlagCursor;
-use super::super::args::{CliCommand, FleetStateArgs};
+use super::super::args::FleetStateArgs;
 
-pub(crate) fn parse_fleet_state(args: &[String]) -> Result<CliCommand> {
+pub(crate) fn parse_fleet_state_args(args: &[String]) -> Result<FleetStateArgs> {
     let mut parsed = FleetStateArgs::default();
     let mut flags = FlagCursor::new(args);
     while let Some(arg) = flags.next() {
@@ -27,5 +27,5 @@ pub(crate) fn parse_fleet_state(args: &[String]) -> Result<CliCommand> {
             bail!("unknown fleet-state option: {arg}");
         }
     }
-    Ok(CliCommand::FleetState(parsed))
+    Ok(parsed)
 }

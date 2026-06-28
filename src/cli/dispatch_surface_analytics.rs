@@ -9,6 +9,7 @@ use super::output_common::print_json;
 use anyhow::Result;
 use cortex::app::{
     AnomaliesRequest, ClockSkewRequest, CompareRequest, ListAppsRequest, SilentHostsRequest,
+    StateRequest, StateResponse,
 };
 
 use super::CliMode;
@@ -99,7 +100,12 @@ pub(crate) async fn run_clock_skew(mode: &CliMode, args: ClockSkewArgs) -> Resul
     let json = args.json;
     let req = args.into_request();
     let response = match mode {
-        CliMode::Local(service) => service.clock_skew(req).await?,
+        CliMode::Local(service) => match service.state(StateRequest::ClockSkew(req)).await? {
+            StateResponse::ClockSkew(response) => response,
+            StateResponse::Host(_) | StateResponse::Fleet(_) => {
+                anyhow::bail!("internal: state clock-skew returned wrong response")
+            }
+        },
         CliMode::Http(client) => http_or_cancel(client.clock_skew(&req)).await?,
     };
     if json {

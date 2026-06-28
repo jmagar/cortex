@@ -1,3 +1,4 @@
+use super::super::args::{FleetStateArgs, HostStateArgs, StateCommand, StatsCommand};
 use super::super::{
     FileTailAddArgs, FileTailCommand, FileTailListArgs, HeartbeatAgentArgs, HeartbeatCommand,
     InventoryArgs, InventoryCommand, OutputArgs, SessionsCommand,
@@ -8,7 +9,68 @@ use super::*;
 fn parse_routes_stats() {
     assert_eq!(
         parse_command(vec!["stats".to_string()]).unwrap(),
-        CliCommand::Stats(OutputArgs::default())
+        CliCommand::Stats(StatsCommand::Summary(OutputArgs::default()))
+    );
+}
+
+#[test]
+fn parse_routes_state_commands() {
+    assert_eq!(
+        parse_command(vec![
+            "state".into(),
+            "host".into(),
+            "--host".into(),
+            "dookie".into(),
+            "--limit".into(),
+            "5".into(),
+            "--json".into(),
+        ])
+        .unwrap(),
+        CliCommand::State(StateCommand::Host(HostStateArgs {
+            host_id: None,
+            host: Some("dookie".into()),
+            since: None,
+            limit: Some(5),
+            json: true,
+        }))
+    );
+
+    assert_eq!(
+        parse_command(vec![
+            "state".into(),
+            "fleet".into(),
+            "--include-ok".into(),
+            "--sort".into(),
+            "hostname".into(),
+        ])
+        .unwrap(),
+        CliCommand::State(StateCommand::Fleet(FleetStateArgs {
+            include_ok: Some(true),
+            sort: Some("hostname".into()),
+            json: false,
+        }))
+    );
+
+    assert!(matches!(
+        parse_command(vec!["state".into(), "clock-skew".into(), "--json".into()]).unwrap(),
+        CliCommand::State(StateCommand::ClockSkew(_))
+    ));
+}
+
+#[test]
+fn parse_routes_stats_ingest_rate() {
+    assert_eq!(
+        parse_command(vec![
+            "stats".into(),
+            "ingest-rate".into(),
+            "--by-host".into(),
+            "--json".into(),
+        ])
+        .unwrap(),
+        CliCommand::Stats(StatsCommand::IngestRate(super::super::IngestRateArgs {
+            by_host: true,
+            json: true,
+        }))
     );
 }
 
@@ -167,6 +229,10 @@ fn parse_removed_commands_report_matrix_replacements() {
         ("deploy", "cortex setup deploy"),
         ("sig", "cortex alerts signatures"),
         ("notify", "cortex alerts notifications"),
+        ("host-state", "cortex state host"),
+        ("fleet-state", "cortex state fleet"),
+        ("clock-skew", "cortex state clock-skew"),
+        ("ingest-rate", "cortex stats ingest-rate"),
     ] {
         let err = parse_command(vec![command.to_string()])
             .unwrap_err()
@@ -272,21 +338,22 @@ fn parse_unknown_command_suggests_close_match() {
 fn parse_routes_host_state() {
     assert!(matches!(
         parse_command(vec![
-            "host-state".to_string(),
+            "state".to_string(),
+            "host".to_string(),
             "--host".to_string(),
             "tootie".to_string(),
             "--json".to_string(),
         ])
         .unwrap(),
-        CliCommand::HostState(_)
+        CliCommand::State(StateCommand::Host(_))
     ));
 }
 
 #[test]
 fn parse_host_state_binds_bare_positional_to_host() {
-    let cmd = parse_command(vec!["host-state".to_string(), "dookie".to_string()]).unwrap();
-    let CliCommand::HostState(args) = cmd else {
-        panic!("expected HostState")
+    let cmd = parse_command(vec!["state".into(), "host".into(), "dookie".into()]).unwrap();
+    let CliCommand::State(StateCommand::Host(args)) = cmd else {
+        panic!("expected state host")
     };
     assert_eq!(args.host.as_deref(), Some("dookie"));
 }
@@ -294,7 +361,8 @@ fn parse_host_state_binds_bare_positional_to_host() {
 #[test]
 fn parse_host_state_positional_and_host_flag_are_mutually_exclusive() {
     let err = parse_command(vec![
-        "host-state".to_string(),
+        "state".to_string(),
+        "host".to_string(),
         "dookie".to_string(),
         "--host".to_string(),
         "tootie".to_string(),
@@ -306,7 +374,7 @@ fn parse_host_state_positional_and_host_flag_are_mutually_exclusive() {
 
 #[test]
 fn parse_host_state_requires_host_selector_with_usage() {
-    let err = parse_command(vec!["host-state".to_string()])
+    let err = parse_command(vec!["state".to_string(), "host".to_string()])
         .unwrap_err()
         .to_string();
 
@@ -314,21 +382,27 @@ fn parse_host_state_requires_host_selector_with_usage() {
         err.contains("requires --host-id ID or --host HOST"),
         "got: {err}"
     );
-    assert!(err.contains("Usage: cortex host-state"), "got: {err}");
+    assert!(err.contains("Usage: cortex state host"), "got: {err}");
 }
 
 #[test]
 fn parse_routes_fleet_state() {
     assert!(matches!(
-        parse_command(vec!["fleet-state".to_string(), "--exclude-ok".to_string()]).unwrap(),
-        CliCommand::FleetState(_)
+        parse_command(vec![
+            "state".to_string(),
+            "fleet".to_string(),
+            "--exclude-ok".to_string()
+        ])
+        .unwrap(),
+        CliCommand::State(StateCommand::Fleet(_))
     ));
 }
 
 #[test]
 fn parse_fleet_state_rejects_bad_sort() {
     let err = parse_command(vec![
-        "fleet-state".to_string(),
+        "state".to_string(),
+        "fleet".to_string(),
         "--sort".to_string(),
         "bogus".to_string(),
     ])
@@ -601,10 +675,14 @@ fn time_flags_normalize_relative_across_state_admin_and_ai_commands() {
     assert!(s.ends_with("+00:00"), "apps --since not normalized: {s}");
 
     // clock-skew --since
-    let CliCommand::ClockSkew(c) =
-        parse_command(vec!["clock-skew".into(), "--since".into(), "2d".into()]).unwrap()
-    else {
-        panic!("expected ClockSkew")
+    let CliCommand::State(StateCommand::ClockSkew(c)) = parse_command(vec![
+        "state".into(),
+        "clock-skew".into(),
+        "--since".into(),
+        "2d".into(),
+    ])
+    .unwrap() else {
+        panic!("expected state clock-skew")
     };
     assert!(c.since.unwrap().ends_with("+00:00"));
 
@@ -639,14 +717,15 @@ fn time_flags_normalize_relative_across_state_admin_and_ai_commands() {
     assert!(cs.reference_time.unwrap().ends_with("+00:00"));
 
     // host-state (bare positional host) --since
-    let CliCommand::HostState(hs) = parse_command(vec![
-        "host-state".into(),
+    let CliCommand::State(StateCommand::Host(hs)) = parse_command(vec![
+        "state".into(),
+        "host".into(),
         "dookie".into(),
         "--since".into(),
         "30m".into(),
     ])
     .unwrap() else {
-        panic!("expected HostState")
+        panic!("expected state host")
     };
     assert!(hs.since.unwrap().ends_with("+00:00"));
 

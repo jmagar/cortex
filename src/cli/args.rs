@@ -32,7 +32,8 @@ pub(crate) enum CliCommand {
     Sessions(SessionsCommand),
     Incident(IncidentArgs),
     Correlate(CorrelateArgs),
-    Stats(OutputArgs),
+    State(StateCommand),
+    Stats(StatsCommand),
     Compose(ComposeCommand),
     Setup(SetupCommand),
     Db(DbCommand),
@@ -40,17 +41,13 @@ pub(crate) enum CliCommand {
     Inventory(InventoryCommand),
     Timeline(TimelineArgs),
     Patterns(PatternsArgs),
-    IngestRate(IngestRateArgs),
     Alerts(AlertsCommand),
     Shell(ShellCommand),
     AgentCommand(AgentCommandCommand),
     Heartbeat(HeartbeatCommand),
-    ClockSkew(ClockSkewArgs),
     Anomalies(AnomaliesArgs),
     Compare(CompareArgs),
     Apps(AppsArgs),
-    HostState(HostStateArgs),
-    FleetState(FleetStateArgs),
     CorrelateState(CorrelateStateArgs),
     TopicCorrelate(TopicCorrelateArgs),
     Entity(EntityArgs),
@@ -67,6 +64,19 @@ pub(crate) enum HostsCommand {
     List(OutputArgs),
     Sources(SourceIpsArgs),
     Silent(SilentHostsArgs),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum StateCommand {
+    Host(HostStateArgs),
+    Fleet(FleetStateArgs),
+    ClockSkew(ClockSkewArgs),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum StatsCommand {
+    Summary(OutputArgs),
+    IngestRate(IngestRateArgs),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

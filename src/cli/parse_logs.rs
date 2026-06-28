@@ -536,7 +536,7 @@ pub(crate) fn parse_patterns(args: &[String]) -> Result<CliCommand> {
     Ok(CliCommand::Patterns(parsed))
 }
 
-pub(crate) fn parse_ingest_rate(args: &[String]) -> Result<CliCommand> {
+pub(crate) fn parse_ingest_rate_args(args: &[String]) -> Result<IngestRateArgs> {
     let mut parsed = IngestRateArgs::default();
     let mut flags = FlagCursor::new(args);
     while let Some(arg) = flags.next() {
@@ -546,7 +546,7 @@ pub(crate) fn parse_ingest_rate(args: &[String]) -> Result<CliCommand> {
             _ => bail!("unknown ingest-rate option: {arg}"),
         }
     }
-    Ok(CliCommand::IngestRate(parsed))
+    Ok(parsed)
 }
 
 #[cfg(test)]

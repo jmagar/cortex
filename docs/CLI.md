@@ -24,6 +24,10 @@ with replacement guidance instead of dispatching through compatibility aliases.
 | `cortex deploy ...` | `cortex setup deploy ...` |
 | `cortex sig ...` | `cortex alerts signatures ...` |
 | `cortex notify ...` | `cortex alerts notifications ...` |
+| `cortex host-state ...` | `cortex state host ...` |
+| `cortex fleet-state ...` | `cortex state fleet ...` |
+| `cortex clock-skew ...` | `cortex state clock-skew ...` |
+| `cortex ingest-rate ...` | `cortex stats ingest-rate ...` |
 
 The REST `/api/ai/*` namespace is also intentionally removed; use
 `/api/sessions/*`.

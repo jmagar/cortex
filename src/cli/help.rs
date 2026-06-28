@@ -48,16 +48,13 @@ const SECTIONS: &[(&str, &[&str])] = &[
         "Analytics & Correlation",
         &[
             "stats",
+            "state",
             "timeline",
             "patterns",
-            "ingest-rate",
             "apps",
             "correlate",
-            "host-state",
-            "fleet-state",
             "correlate-state",
             "topic-correlate",
-            "clock-skew",
             "anomalies",
             "compare",
         ],
@@ -157,7 +154,19 @@ const CATALOG: &[CommandDoc] = &[
     CommandDoc {
         name: "stats",
         summary: "Database and ingest statistics",
-        usage: &["cortex stats [--json]"],
+        usage: &[
+            "cortex stats [--json]",
+            "cortex stats ingest-rate [--by-host] [--json]",
+        ],
+    },
+    CommandDoc {
+        name: "state",
+        summary: "Host, fleet, and clock state",
+        usage: &[
+            "cortex state host [--host-id ID] [--host HOST] [--since TIME] [--limit N] [--json]",
+            "cortex state fleet [--include-ok|--exclude-ok] [--sort pressure|freshness|hostname] [--json]",
+            "cortex state clock-skew [--since TIME] [--limit N] [--json]",
+        ],
     },
     CommandDoc {
         name: "timeline",
@@ -174,11 +183,6 @@ const CATALOG: &[CommandDoc] = &[
         ],
     },
     CommandDoc {
-        name: "ingest-rate",
-        summary: "Current ingest rate (logs/sec)",
-        usage: &["cortex ingest-rate [--by-host] [--json]"],
-    },
-    CommandDoc {
         name: "apps",
         summary: "Top application/program names by volume",
         usage: &[
@@ -190,20 +194,6 @@ const CATALOG: &[CommandDoc] = &[
         summary: "Correlate events around a reference time",
         usage: &[
             "cortex correlate --reference-time TIME [--window-minutes N] [--severity-min LEVEL] [--host HOST] [--source SOURCE] [--query FTS] [--limit N] [--json]",
-        ],
-    },
-    CommandDoc {
-        name: "host-state",
-        summary: "Per-host health/pressure snapshot",
-        usage: &[
-            "cortex host-state [--host-id ID] [--host HOST] [--since TIME] [--limit N] [--json]",
-        ],
-    },
-    CommandDoc {
-        name: "fleet-state",
-        summary: "Fleet-wide host state overview",
-        usage: &[
-            "cortex fleet-state [--include-ok|--exclude-ok] [--sort pressure|freshness|hostname] [--json]",
         ],
     },
     CommandDoc {
@@ -219,11 +209,6 @@ const CATALOG: &[CommandDoc] = &[
         usage: &[
             "cortex topic-correlate TOPIC [--since TIME] [--until TIME] [--depth N] [--source-kinds KINDS] [--limit N] [--json]",
         ],
-    },
-    CommandDoc {
-        name: "clock-skew",
-        summary: "Detect host clock skew",
-        usage: &["cortex clock-skew [--since TIME] [--limit N] [--json]"],
     },
     CommandDoc {
         name: "anomalies",
@@ -384,6 +369,30 @@ const CATALOG: &[CommandDoc] = &[
 ];
 
 const NESTED_CATALOG: &[NestedCommandDoc] = &[
+    NestedCommandDoc {
+        path: "state host",
+        summary: "Per-host health and pressure snapshot",
+        usage: &[
+            "cortex state host [--host-id ID] [--host HOST] [--since TIME] [--limit N] [--json]",
+        ],
+    },
+    NestedCommandDoc {
+        path: "state fleet",
+        summary: "Fleet-wide host state overview",
+        usage: &[
+            "cortex state fleet [--include-ok|--exclude-ok] [--sort pressure|freshness|hostname] [--json]",
+        ],
+    },
+    NestedCommandDoc {
+        path: "state clock-skew",
+        summary: "Detect host clock skew",
+        usage: &["cortex state clock-skew [--since TIME] [--limit N] [--json]"],
+    },
+    NestedCommandDoc {
+        path: "stats ingest-rate",
+        summary: "Current ingest rate by time bucket and optionally by host",
+        usage: &["cortex stats ingest-rate [--by-host] [--json]"],
+    },
     NestedCommandDoc {
         path: "inventory refresh",
         summary: "Collect native homelab inventory into the private filesystem cache",

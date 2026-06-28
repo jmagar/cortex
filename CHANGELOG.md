@@ -19,6 +19,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Breaking CLI consolidation:** move deployment workflows under setup as
   `cortex setup deploy preflight|local|remote|agent`; top-level
   `cortex deploy ...` is no longer accepted.
+- **Breaking CLI consolidation:** move host/fleet/clock state under
+  `cortex state host|fleet|clock-skew` and ingest throughput under
+  `cortex stats ingest-rate`.
+- **Breaking CLI consolidation:** move error signature and notification
+  commands under `cortex alerts signatures|notifications`.
 
 ## [2.0.0] - 2026-06-27
 

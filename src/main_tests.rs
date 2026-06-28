@@ -21,12 +21,13 @@ fn mode_parse_accepts_single_binary_transport_commands() {
 
 #[test]
 fn mode_parse_accepts_heartbeat_state_commands() {
-    // Regression: host-state/fleet-state/correlate-state are routed in
+    // Regression: state host/state fleet/correlate-state are routed in
     // parse.rs + run.rs, but were missing from Mode::parse's top-level command
     // gate, so they fell through to print_usage()+exit 1 (bd syslog-mcp-8fww).
     assert!(matches!(
         Mode::parse(vec![
-            "host-state".into(),
+            "state".into(),
+            "host".into(),
             "--host".into(),
             "tootie".into(),
             "--json".into()
@@ -35,7 +36,7 @@ fn mode_parse_accepts_heartbeat_state_commands() {
         Mode::Cli(_)
     ));
     assert!(matches!(
-        Mode::parse(vec!["fleet-state".into(), "--json".into()]).unwrap(),
+        Mode::parse(vec!["state".into(), "fleet".into(), "--json".into()]).unwrap(),
         Mode::Cli(_)
     ));
     assert!(matches!(
@@ -853,7 +854,7 @@ fn mode_parse_accepts_new_surface_parity_subcommands() {
     // later bail.
     let cases: &[&[&str]] = &[
         &["hosts", "silent"],
-        &["clock-skew"],
+        &["state", "clock-skew"],
         &["anomalies"],
         &["compare"],
         &["apps"],

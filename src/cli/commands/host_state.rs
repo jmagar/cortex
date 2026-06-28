@@ -6,10 +6,10 @@
 use anyhow::{Result, bail};
 
 use super::super::argdefaults::positional_value;
-use super::super::args::{CliCommand, HostStateArgs};
+use super::super::args::HostStateArgs;
 use super::super::{FlagCursor, norm_time, parse_u32_flag};
 
-pub(crate) fn parse_host_state(args: &[String]) -> Result<CliCommand> {
+pub(crate) fn parse_host_state_args(args: &[String]) -> Result<HostStateArgs> {
     let mut parsed = HostStateArgs::default();
     let mut positionals: Vec<String> = Vec::new();
     let mut flags = FlagCursor::new(args);
@@ -46,8 +46,8 @@ pub(crate) fn parse_host_state(args: &[String]) -> Result<CliCommand> {
     }
     if parsed.host_id.is_none() && parsed.host.is_none() {
         bail!(
-            "host-state requires --host-id ID or --host HOST\n\nUsage: cortex host-state [--host-id ID] [--host HOST] [--since TIME] [--limit N] [--json]"
+            "state host requires --host-id ID or --host HOST\n\nUsage: cortex state host [--host-id ID] [--host HOST] [--since TIME] [--limit N] [--json]"
         );
     }
-    Ok(CliCommand::HostState(parsed))
+    Ok(parsed)
 }

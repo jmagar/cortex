@@ -22,7 +22,7 @@ use anyhow::{Result, bail};
 use cortex::app::{
     CorrelateEventsRequest, FileTailAddRequest, FileTailOp, FileTailRequest, FileTailResponse,
     FilterLogsRequest, GetErrorsRequest, IncidentRequest, ListSessionsRequest, SearchLogsRequest,
-    TailLogsRequest,
+    StatsRequest, StatsResponse, TailLogsRequest,
 };
 use std::future::Future;
 
@@ -274,7 +274,12 @@ pub(crate) async fn run_correlate(mode: &CliMode, args: CorrelateArgs) -> Result
 
 pub(crate) async fn run_stats(mode: &CliMode, args: super::OutputArgs) -> Result<()> {
     let response = match mode {
-        CliMode::Local(service) => service.get_stats().await?,
+        CliMode::Local(service) => match service.stats_domain(StatsRequest::Summary).await? {
+            StatsResponse::Summary(response) => response,
+            StatsResponse::IngestRate(_) => {
+                bail!("internal: stats summary returned ingest-rate response")
+            }
+        },
         CliMode::Http(client) => http_or_cancel(client.stats()).await?,
     };
     print_stats_response(&response, args.json)

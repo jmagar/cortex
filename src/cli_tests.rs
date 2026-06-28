@@ -127,9 +127,10 @@ fn parse_compose_service_logs_accepts_time_range_and_json() {
 fn parse_old_service_top_level_command_is_removed() {
     let err = CliCommand::parse(strings(&["service", "logs", "cortex"])).unwrap_err();
     assert!(
-        err.to_string().contains("unknown CLI command"),
+        err.to_string().contains("removed CLI command: service"),
         "expected service to be rejected, got: {err}"
     );
+    assert!(err.to_string().contains("cortex compose logs SERVICE"));
 }
 
 #[test]
@@ -210,10 +211,12 @@ fn parse_unknown_option_errors() {
 
 #[tokio::test]
 async fn run_compose_rejects_non_compose_commands_before_live_probes() {
-    let error = run_compose(CliCommand::Stats(OutputArgs::default()))
-        .await
-        .unwrap_err()
-        .to_string();
+    let error = run_compose(CliCommand::Stats(args::StatsCommand::Summary(
+        OutputArgs::default(),
+    )))
+    .await
+    .unwrap_err()
+    .to_string();
 
     assert!(error.contains("non-compose command"));
 }
@@ -263,9 +266,10 @@ fn parse_sessions_search_collects_filters() {
 fn parse_sessions_top_level_is_removed() {
     let err = CliCommand::parse(strings(&["ai", "search", "auth failure"])).unwrap_err();
     assert!(
-        err.to_string().contains("unknown CLI command"),
+        err.to_string().contains("removed CLI command: ai"),
         "got: {err}"
     );
+    assert!(err.to_string().contains("cortex sessions"));
 }
 
 #[test]
@@ -1526,14 +1530,19 @@ fn parse_old_host_inventory_top_level_commands_are_removed() {
 
 #[test]
 fn parse_clock_skew_with_since() {
-    let cmd = CliCommand::parse(strings(&["clock-skew", "--since", "2026-05-20T00:00:00Z"]))
-        .expect("parse clock-skew");
+    let cmd = CliCommand::parse(strings(&[
+        "state",
+        "clock-skew",
+        "--since",
+        "2026-05-20T00:00:00Z",
+    ]))
+    .expect("parse clock-skew");
     match cmd {
-        CliCommand::ClockSkew(args) => {
+        CliCommand::State(args::StateCommand::ClockSkew(args)) => {
             assert_eq!(args.since.as_deref(), Some("2026-05-20T00:00:00+00:00"));
             assert!(!args.json);
         }
-        other => panic!("expected ClockSkew, got {other:?}"),
+        other => panic!("expected state clock-skew, got {other:?}"),
     }
 }
 
