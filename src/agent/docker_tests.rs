@@ -54,6 +54,39 @@ fn container_app_name_falls_back_to_service_or_container_name() {
 }
 
 #[test]
+fn should_forward_container_logs_excludes_cortex_server_containers() {
+    let compose_cortex = HashMap::from([
+        (
+            "com.docker.compose.project".to_string(),
+            "cortex".to_string(),
+        ),
+        (
+            "com.docker.compose.service".to_string(),
+            "cortex".to_string(),
+        ),
+    ]);
+    assert!(!should_forward_container_logs("cortex", &compose_cortex));
+
+    let plain_cortex = HashMap::new();
+    assert!(!should_forward_container_logs("cortex", &plain_cortex));
+
+    let agent = HashMap::from([(
+        "com.docker.compose.service".to_string(),
+        "cortex-agent".to_string(),
+    )]);
+    assert!(should_forward_container_logs("cortex-agent", &agent));
+
+    let unrelated = HashMap::from([
+        ("com.docker.compose.project".to_string(), "lab".to_string()),
+        (
+            "com.docker.compose.service".to_string(),
+            "labby".to_string(),
+        ),
+    ]);
+    assert!(should_forward_container_logs("labby", &unrelated));
+}
+
+#[test]
 fn connect_constructs_http_client_without_eager_network_io() {
     connect("http://127.0.0.1:2375").unwrap();
 }
