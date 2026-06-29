@@ -1,6 +1,6 @@
 use serde_json::{Value, json};
 
-use super::actions;
+use super::super::actions;
 
 pub(super) async fn tool_cortex_help() -> anyhow::Result<Value> {
     let mut cheap = Vec::new();

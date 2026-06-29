@@ -31,7 +31,10 @@ use crate::app::{
 use super::AppState;
 use super::actions;
 #[cfg(test)]
-use super::tools_help::tool_cortex_help;
+use help::tool_cortex_help;
+
+mod context;
+mod help;
 
 /// Execute a tool by name
 pub(super) async fn execute_tool(
@@ -113,11 +116,11 @@ async fn dispatch_cortex_action(
         H::NotificationsRecent => tool_notifications_recent(state, args).await,
         H::FileTails => tool_file_tails(state, args).await,
         H::NotificationsTest => tool_notifications_test(state, args, auth).await,
-        H::SimilarIncidents => super::tools_rag::tool_similar_incidents(state, args).await,
-        H::AskHistory => super::tools_rag::tool_ask_history(state, args).await,
-        H::IncidentContext => super::tools_rag::tool_incident_context(state, args).await,
-        H::Graph => super::tools_rag::tool_graph(state, args).await,
-        H::Help => super::tools_help::tool_cortex_help().await,
+        H::SimilarIncidents => context::tool_similar_incidents(state, args).await,
+        H::AskHistory => context::tool_ask_history(state, args).await,
+        H::IncidentContext => context::tool_incident_context(state, args).await,
+        H::Graph => context::tool_graph(state, args).await,
+        H::Help => help::tool_cortex_help().await,
     }
 }
 
