@@ -1,6 +1,6 @@
 use super::*;
 
-pub use crate::file_tail::{
+pub use crate::filetail::{
     FileTailAddRequest, FileTailOp, FileTailRequest, FileTailResponse, FileTailSource,
     FileTailStatus,
 };

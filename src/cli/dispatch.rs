@@ -26,11 +26,11 @@ use cortex::app::{
 };
 use std::future::Future;
 
-use super::output_logs::{
+use super::output::logs::{
     print_correlate_response, print_errors_response, print_hosts_response, print_search_response,
     print_sessions_response, print_stats_response,
 };
-use super::output_sessions::print_incident_response;
+use super::output::sessions::print_incident_response;
 use super::{
     CliMode, CorrelateArgs, FileTailCommand, FileTailIdArgs, FilterArgs, IncidentArgs, SearchArgs,
     SessionsArgs, TailArgs, TimeRangeArgs,
@@ -351,6 +351,15 @@ fn id_request(op: FileTailOp, args: FileTailIdArgs) -> (FileTailRequest, bool) {
     (FileTailRequest::id_op(op, args.id), args.json)
 }
 
+mod surface;
+
+pub(crate) use self::surface::{
+    run_anomalies, run_apps, run_clock_skew, run_compare, run_correlate_state, run_entity_lookup,
+    run_fleet_state, run_graph_around, run_graph_evidence, run_graph_explain, run_graph_rebuild,
+    run_graph_status, run_host_state, run_ingest_rate, run_notify_recent, run_notify_test,
+    run_patterns, run_sig_ack, run_sig_list, run_sig_unack, run_silent_hosts, run_source_ips,
+    run_timeline, run_topic_correlate,
+};
 pub(crate) use super::dispatch_db::{
     run_db_backup, run_db_checkpoint, run_db_integrity, run_db_integrity_status, run_db_status,
     run_db_vacuum,
@@ -361,13 +370,6 @@ pub(crate) use super::dispatch_sessions::{
     run_ai_incidents, run_ai_index, run_ai_investigate, run_ai_projects, run_ai_prune_checkpoints,
     run_ai_search, run_ai_similar_incidents, run_ai_smoke_watch, run_ai_tools, run_sessions_watch,
     run_sessions_watch_status,
-};
-pub(crate) use super::dispatch_surface::{
-    run_anomalies, run_apps, run_clock_skew, run_compare, run_correlate_state, run_entity_lookup,
-    run_fleet_state, run_graph_around, run_graph_evidence, run_graph_explain, run_graph_rebuild,
-    run_graph_status, run_host_state, run_ingest_rate, run_notify_recent, run_notify_test,
-    run_patterns, run_sig_ack, run_sig_list, run_sig_unack, run_silent_hosts, run_source_ips,
-    run_timeline, run_topic_correlate,
 };
 
 #[cfg(test)]

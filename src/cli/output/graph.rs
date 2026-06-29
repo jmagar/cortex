@@ -5,8 +5,8 @@ use cortex::app::{
     GraphRebuildResponse, GraphRelationship,
 };
 
-use super::color::{cyan, muted, primary, warn};
-use super::output_common::{print_json, truncate};
+use super::super::color::{cyan, muted, primary, warn};
+use super::common::{print_json, truncate};
 
 pub(crate) fn print_graph_status_response(
     response: &GraphProjectionStatusResponse,
@@ -450,5 +450,5 @@ fn entity_label(entity: &GraphEntity) -> String {
 }
 
 #[cfg(test)]
-#[path = "output_graph_tests.rs"]
+#[path = "graph_tests.rs"]
 mod tests;

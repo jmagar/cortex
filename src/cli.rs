@@ -50,12 +50,7 @@ mod format;
 mod heartbeat_agent;
 pub(crate) mod help;
 mod hyperlinks;
-mod output_common;
-mod output_graph;
-mod output_logs;
-mod output_ops;
-mod output_sessions;
-mod output_sessions_more;
+mod output;
 mod panel;
 mod parse;
 mod parse_admin;
@@ -63,9 +58,6 @@ mod parse_command_log;
 mod parse_common;
 mod parse_config;
 mod parse_logs;
-mod parse_sessions;
-mod parse_sessions_more;
-mod parse_sessions_ops;
 mod sessions_watch;
 mod setup;
 mod sparkline;
@@ -142,40 +134,40 @@ pub(crate) async fn run_compose(command: CliCommand) -> Result<()> {
     match command {
         ComposeCommand::Status(args) => {
             let status = service.status(&args.target)?;
-            output_ops::print_compose_status_response(&status, args.json)
+            output::ops::print_compose_status_response(&status, args.json)
         }
         ComposeCommand::Doctor(args) => {
             let status = service.status(&args.target)?;
             let coordination = coordination::run_coordination_phases();
-            output_ops::print_compose_doctor_response(&status, &coordination, args.json)?;
-            output_ops::ensure_doctor_coordination_ok(&coordination)?;
+            output::ops::print_compose_doctor_response(&status, &coordination, args.json)?;
+            output::ops::ensure_doctor_coordination_ok(&coordination)?;
             cortex::compose::ensure_doctor_ready(&status)
         }
-        ComposeCommand::Up(args) => output_ops::print_compose_command_response(
+        ComposeCommand::Up(args) => output::ops::print_compose_command_response(
             &service.run_mutation(ComposeMutation::Up, &args.target, &args.options)?,
             args.json,
         ),
-        ComposeCommand::Down(args) => output_ops::print_compose_command_response(
+        ComposeCommand::Down(args) => output::ops::print_compose_command_response(
             &service.run_mutation(ComposeMutation::Down, &args.target, &args.options)?,
             args.json,
         ),
-        ComposeCommand::Restart(args) => output_ops::print_compose_command_response(
+        ComposeCommand::Restart(args) => output::ops::print_compose_command_response(
             &service.run_mutation(ComposeMutation::Restart, &args.target, &args.options)?,
             args.json,
         ),
-        ComposeCommand::Pull(args) => output_ops::print_compose_command_response(
+        ComposeCommand::Pull(args) => output::ops::print_compose_command_response(
             &service.run_mutation(ComposeMutation::Pull, &args.target, &args.options)?,
             args.json,
         ),
         ComposeCommand::Logs(args) => {
             let output = service.logs(&args.target, args.tail)?;
             if args.json {
-                output_common::print_json(&output)?;
+                output::common::print_json(&output)?;
             } else {
                 print!("{}", output.stdout);
                 eprint!("{}", output.stderr);
             }
-            output_ops::ensure_command_success(&output)
+            output::ops::ensure_command_success(&output)
         }
         ComposeCommand::ServiceLogs(args) => {
             let json = args.json;
@@ -189,7 +181,7 @@ pub(crate) async fn run_compose(command: CliCommand) -> Result<()> {
                 &cortex::app::SystemOsAdapter,
             )
             .await?;
-            output_sessions::print_service_logs_response(&report, json)
+            output::sessions::print_service_logs_response(&report, json)
         }
     }
 }
@@ -202,7 +194,7 @@ pub(crate) async fn run_inventory(command: InventoryCommand) -> Result<()> {
             )
             .await?;
             if args.json {
-                output_common::print_json(&report)
+                output::common::print_json(&report)
             } else {
                 println!("inventory refresh: {}", report.status);
                 println!("root: {}", report.root);
@@ -219,7 +211,7 @@ pub(crate) async fn run_inventory(command: InventoryCommand) -> Result<()> {
                 &cortex::inventory::InventoryConfig::from_env(),
             );
             if args.json {
-                output_common::print_json(&status)
+                output::common::print_json(&status)
             } else {
                 println!("inventory status: {}", status.status);
                 println!("root: {}", status.root);
@@ -277,7 +269,7 @@ pub(crate) async fn run_ingest_syslog_status(args: OutputArgs) -> Result<()> {
         flush_interval_ms: receiver.flush_interval,
     };
     if args.json {
-        output_common::print_json(&status)
+        output::common::print_json(&status)
     } else {
         println!("syslog ingest: {}", status.bind_addr);
         println!("max_message_size: {}", status.max_message_size);
@@ -299,7 +291,7 @@ pub(crate) async fn run_ingest_docker_status(args: OutputArgs) -> Result<()> {
         host_local_agent_note: "host-local cortex agents stream Docker logs from each host when enabled there",
     };
     if args.json {
-        output_common::print_json(&status)
+        output::common::print_json(&status)
     } else {
         println!(
             "docker ingest: legacy_central_pull_enabled={}",
@@ -331,7 +323,7 @@ pub(crate) async fn run_ingest_docker_sources(args: OutputArgs) -> Result<()> {
         })
         .collect::<Vec<_>>();
     if args.json {
-        output_common::print_json(&sources)
+        output::common::print_json(&sources)
     } else {
         if sources.is_empty() {
             println!("No legacy central-pull Docker sources configured.");
@@ -358,11 +350,11 @@ use coordination::{
 #[cfg(test)]
 use cortex::scanner::AiDoctorReport;
 #[cfg(test)]
-use output_common::truncate;
+use output::common::truncate;
 #[cfg(test)]
-use output_ops::ensure_doctor_coordination_ok;
+use output::ops::ensure_doctor_coordination_ok;
 #[cfg(test)]
-use output_sessions::ensure_ai_doctor_success;
+use output::sessions::ensure_ai_doctor_success;
 #[cfg(test)]
 use sessions_watch::smoke_watch_target;
 #[cfg(test)]
@@ -371,9 +363,6 @@ use setup::{SetupPhase, SetupStatus};
 mod dispatch;
 mod dispatch_db;
 mod dispatch_sessions;
-mod dispatch_surface;
-mod dispatch_surface_analytics;
-mod dispatch_surface_gap;
 #[allow(dead_code)]
 mod http_client;
 

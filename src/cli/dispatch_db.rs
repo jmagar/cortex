@@ -7,12 +7,12 @@ use cortex::app::{
 };
 
 use super::DbIntegrityStatusArgs;
-use super::output_ops::{print_db_integrity_job_started, print_db_integrity_job_status};
+use super::output::ops::{print_db_integrity_job_started, print_db_integrity_job_status};
 use std::path::PathBuf;
 use std::time::Duration;
 
 use super::coordination::run_coordination_phases;
-use super::output_ops::{
+use super::output::ops::{
     print_db_backup_response, print_db_checkpoint_response, print_db_integrity_response,
     print_db_status_response, print_db_vacuum_response,
 };

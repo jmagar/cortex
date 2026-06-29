@@ -16,7 +16,7 @@ fn test_state_with_token(token: Option<String>) -> (AppState, Arc<db::DbPool>, t
     let dir = tempfile::tempdir().unwrap();
     let storage = StorageConfig::for_test(dir.path().join("mcp-test.db"));
     let pool = Arc::new(db::init_pool(&storage).unwrap());
-    let file_tail_registry = Arc::new(crate::file_tail::FileTailRegistry::new(
+    let file_tail_registry = Arc::new(crate::filetail::FileTailRegistry::new(
         dir.path().join("file-tails.json"),
     ));
     (

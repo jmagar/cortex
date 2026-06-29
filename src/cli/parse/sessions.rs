@@ -1,21 +1,24 @@
 use anyhow::{Result, bail};
 
-use super::parse_common::{
-    FlagCursor, norm_time, parse_output_args, parse_u32_flag, value_after_equals,
-};
-use super::parse_logs::parse_sessions;
-use super::parse_sessions_more::{
+use self::more::{
     parse_sessions_ask_history, parse_sessions_assess, parse_sessions_incident_context,
     parse_sessions_incidents, parse_sessions_investigate, parse_sessions_similar,
 };
-use super::parse_sessions_ops::{
+use self::ops::{
     parse_sessions_add, parse_sessions_checkpoints, parse_sessions_doctor, parse_sessions_errors,
     parse_sessions_index, parse_sessions_prune_checkpoints, parse_sessions_watch,
 };
-use super::{
+use super::super::parse_common::{
+    FlagCursor, norm_time, parse_output_args, parse_u32_flag, value_after_equals,
+};
+use super::super::parse_logs::parse_sessions;
+use super::super::{
     CliCommand, SessionsAbuseArgs, SessionsBlocksArgs, SessionsCommand, SessionsContextArgs,
     SessionsCorrelateArgs, SessionsListArgs, SessionsOutputDetail, SessionsSearchArgs,
 };
+
+mod more;
+mod ops;
 
 const SESSIONS_SUBCOMMANDS: &[&str] = &[
     "search",
@@ -409,5 +412,5 @@ pub(crate) fn parse_sessions_projects(args: &[String]) -> Result<CliCommand> {
 }
 
 #[cfg(test)]
-#[path = "parse_sessions_tests.rs"]
+#[path = "sessions_tests.rs"]
 mod tests;

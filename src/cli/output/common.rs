@@ -2,7 +2,7 @@ use anyhow::Result;
 use cortex::app::LogEntry;
 use serde::Serialize;
 
-use super::color::{cyan, muted, primary, severity, violet};
+use super::super::color::{cyan, muted, primary, severity, violet};
 
 pub(crate) fn print_json<T: Serialize + ?Sized>(value: &T) -> Result<()> {
     println!("{}", serde_json::to_string_pretty(value)?);
@@ -113,5 +113,5 @@ pub(crate) fn truncate_bytes(s: &str, max_bytes: usize) -> String {
 }
 
 #[cfg(test)]
-#[path = "output_common_tests.rs"]
+#[path = "common_tests.rs"]
 mod tests;

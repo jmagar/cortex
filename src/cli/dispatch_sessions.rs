@@ -9,20 +9,20 @@ use cortex::app::{
 };
 use std::io::Write;
 
-use super::output_logs::{
+use super::output::logs::{
     UsageBlocksPrintOptions, print_abuse_search_response, print_ai_correlate_response,
     print_ai_projects_response, print_ai_tools_response, print_project_context_response,
     print_search_sessions_response, print_usage_blocks_response_with_options,
 };
-use super::output_sessions::{
-    ensure_ai_doctor_success, ensure_index_success, print_ai_doctor_response,
-    print_ai_parse_errors_response, print_ai_smoke_watch_response, print_checkpoints_response,
-    print_index_response, print_prune_checkpoints_response, print_sessions_watch_status_response,
-};
-use super::output_sessions_more::{
+use super::output::sessions::more::{
     AiInvestigatePrintOptions, print_ai_incidents_response,
     print_ai_investigate_response_with_options, print_ask_history_response,
     print_incident_context_response, print_similar_incidents_response,
+};
+use super::output::sessions::{
+    ensure_ai_doctor_success, ensure_index_success, print_ai_doctor_response,
+    print_ai_parse_errors_response, print_ai_smoke_watch_response, print_checkpoints_response,
+    print_index_response, print_prune_checkpoints_response, print_sessions_watch_status_response,
 };
 use super::sessions_watch::ai_smoke_watch;
 use super::{

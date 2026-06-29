@@ -1,10 +1,10 @@
-use super::dispatch::http_or_cancel;
-use super::output_common::print_json;
-use super::output_graph::{
+use super::super::super::output::common::print_json;
+use super::super::super::output::graph::{
     print_graph_around_response, print_graph_entity_lookup_response,
     print_graph_evidence_lookup_response, print_graph_rebuild_response,
     print_graph_status_response,
 };
+use super::super::http_or_cancel;
 
 use anyhow::Result;
 use cortex::app::{
@@ -12,8 +12,8 @@ use cortex::app::{
     GraphEvidenceLookupRequest, GraphExplainRequest, HostStateRequest, TopicCorrelateRequest,
 };
 
-use super::CliMode;
-use super::args::{
+use super::super::super::CliMode;
+use super::super::super::args::{
     CorrelateStateArgs, EntityArgs, FleetStateArgs, GraphAroundArgs, GraphEvidenceArgs,
     GraphExplainArgs, GraphRebuildArgs, GraphStatusArgs, HostStateArgs, TopicCorrelateArgs,
 };
@@ -312,7 +312,7 @@ pub(crate) async fn run_graph_explain(mode: &CliMode, args: GraphExplainArgs) ->
         CliMode::Local(service) => service.graph_explain(req).await?,
         CliMode::Http(client) => http_or_cancel(client.graph_explain(&req)).await?,
     };
-    super::output_graph::print_graph_explain_response(&response, json)
+    super::super::super::output::graph::print_graph_explain_response(&response, json)
 }
 
 pub(crate) async fn run_graph_evidence(mode: &CliMode, args: GraphEvidenceArgs) -> Result<()> {
@@ -346,5 +346,5 @@ pub(crate) async fn run_graph_rebuild(mode: &CliMode, args: GraphRebuildArgs) ->
 }
 
 #[cfg(test)]
-#[path = "dispatch_surface_gap_tests.rs"]
+#[path = "gap_tests.rs"]
 mod tests;

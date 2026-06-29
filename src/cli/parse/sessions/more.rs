@@ -1,7 +1,9 @@
 use anyhow::{Result, anyhow, bail};
 
-use super::parse_common::{FlagCursor, norm_time, parse_u32_flag, value_after_equals};
-use super::{
+use super::super::super::parse_common::{
+    FlagCursor, norm_time, parse_u32_flag, value_after_equals,
+};
+use super::super::super::{
     CliCommand, SessionsAskHistoryArgs, SessionsAssessArgs, SessionsCommand,
     SessionsIncidentContextArgs, SessionsIncidentsArgs, SessionsInvestigateArgs,
     SessionsOutputDetail, SessionsSimilarArgs,
@@ -281,7 +283,7 @@ pub(crate) fn parse_sessions_investigate(args: &[String]) -> Result<CliCommand> 
             }
             _ if arg.starts_with('-') => bail!(
                 "{}",
-                super::suggest::unknown_option(
+                super::super::super::suggest::unknown_option(
                     "sessions investigate",
                     &arg,
                     &[
@@ -400,5 +402,5 @@ pub(crate) fn parse_sessions_assess(args: &[String]) -> Result<CliCommand> {
 }
 
 #[cfg(test)]
-#[path = "parse_sessions_more_tests.rs"]
+#[path = "more_tests.rs"]
 mod tests;

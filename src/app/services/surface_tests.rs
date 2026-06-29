@@ -8,7 +8,7 @@ use crate::app::models::{
 use crate::app::{CortexService, ServiceError, ServiceResult};
 use crate::config::StorageConfig;
 use crate::db::{DbPool, init_pool};
-use crate::file_tail::FileTailRequest;
+use crate::filetail::FileTailRequest;
 
 fn test_service() -> (CortexService, Arc<DbPool>, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
