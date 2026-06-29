@@ -90,7 +90,7 @@ impl CliCommand {
 /// All CLI command names paired with their one-line description (empty when the
 /// command has no `ACTION_SPECS` entry, e.g. grouping commands like `sessions`).
 pub(crate) fn registry_actions() -> Vec<(&'static str, &'static str)> {
-    cortex::surface_registry::canonical_cli_roots()
+    cortex::surfaces::canonical_cli_roots()
         .map(|spec| {
             let cmd = spec.spelling;
             let desc = cortex::mcp::description_for(&cmd.replace('-', "_")).unwrap_or("");

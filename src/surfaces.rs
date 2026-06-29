@@ -1,4 +1,4 @@
-//! Shared command/API/action surface registry and decision matrix.
+//! Shared command/API/action surfaces catalog and decision matrix.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SurfaceKind {
@@ -313,13 +313,12 @@ pub const SURFACE_SPECS: &[SurfaceSpec] = &[
     mcp!("help", Protocol, Canonical, Info),
 ];
 
-#[path = "surface_registry_api.rs"]
-mod api_specs;
+mod api;
 
 pub fn specs_for(kind: SurfaceKind) -> impl Iterator<Item = &'static SurfaceSpec> {
     SURFACE_SPECS
         .iter()
-        .chain(api_specs::API_SURFACE_SPECS.iter())
+        .chain(api::API_SURFACE_SPECS.iter())
         .filter(move |spec| spec.kind == kind)
 }
 
@@ -375,5 +374,5 @@ pub fn removed_cli_surface(name: &str) -> Option<&'static SurfaceSpec> {
 }
 
 #[cfg(test)]
-#[path = "surface_registry_tests.rs"]
+#[path = "surfaces_tests.rs"]
 mod tests;
