@@ -141,6 +141,9 @@ async fn list_containers(docker: &Docker) -> Result<Vec<ContainerInfo>> {
             let id = s.id?;
             let name = container_display_name(&id, s.names);
             let labels: HashMap<String, String> = s.labels.unwrap_or_default();
+            if !should_forward_container_logs(&name, &labels) {
+                return None;
+            }
             let app_name = container_app_name(&name, &labels);
             Some(ContainerInfo { id, name, app_name })
         })
@@ -163,6 +166,20 @@ fn container_app_name(name: &str, labels: &HashMap<String, String>) -> String {
         (_, Some(svc)) => format!("{svc}/{name}"),
         _ => name.to_string(),
     }
+}
+
+fn should_forward_container_logs(name: &str, labels: &HashMap<String, String>) -> bool {
+    if name == "cortex" {
+        return false;
+    }
+
+    !matches!(
+        (
+            labels.get("com.docker.compose.project").map(String::as_str),
+            labels.get("com.docker.compose.service").map(String::as_str),
+        ),
+        (Some("cortex"), Some("cortex"))
+    )
 }
 
 fn connect(docker_url: &str) -> Result<Docker> {
