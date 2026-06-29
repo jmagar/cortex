@@ -5,8 +5,8 @@ use crate::app::{
     GraphExplainRequest, IncidentContextRequest, SimilarIncidentsRequest,
 };
 
-use super::AppState;
-use super::tools::{action_payload, string_arg};
+use super::super::AppState;
+use super::{action_payload, string_arg};
 
 pub(super) async fn tool_similar_incidents(state: &AppState, args: Value) -> anyhow::Result<Value> {
     let req: SimilarIncidentsRequest = action_payload(args, "similar_incidents")?;
