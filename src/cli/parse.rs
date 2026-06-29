@@ -60,7 +60,7 @@ pub(crate) fn parse_command(args: Vec<String>) -> Result<CliCommand> {
         "apps" => commands::apps::parse_apps(rest),
         "__complete" => Ok(CliCommand::Complete(rest.to_vec())),
         "completions" => Ok(CliCommand::Completions(rest.to_vec())),
-        _ if cortex::surface_registry::removed_cli_surface(command).is_some() => {
+        _ if cortex::surfaces::removed_cli_surface(command).is_some() => {
             bail!("{}", removed_command_message(command))
         }
         _ => bail!(
@@ -168,8 +168,7 @@ fn parse_stats_domain(args: &[String]) -> Result<CliCommand> {
 }
 
 fn removed_command_message(command: &str) -> String {
-    let surface =
-        cortex::surface_registry::removed_cli_surface(command).expect("checked by caller");
+    let surface = cortex::surfaces::removed_cli_surface(command).expect("checked by caller");
     let replacement = surface
         .replacement
         .expect("removed CLI surfaces must carry replacement");

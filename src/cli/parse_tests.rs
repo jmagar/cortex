@@ -6,14 +6,13 @@ use super::super::{
 use super::*;
 
 #[test]
-fn parser_top_level_commands_are_classified_in_surface_registry() {
+fn parser_top_level_commands_are_classified_in_surfaces() {
     for command in TOP_LEVEL_COMMANDS {
-        let spec =
-            cortex::surface_registry::find(cortex::surface_registry::SurfaceKind::Cli, command)
-                .unwrap_or_else(|| panic!("{command} missing from surface registry"));
+        let spec = cortex::surfaces::find(cortex::surfaces::SurfaceKind::Cli, command)
+            .unwrap_or_else(|| panic!("{command} missing from surfaces registry"));
         assert_ne!(
             spec.disposition,
-            cortex::surface_registry::SurfaceDisposition::RemovedCleanBreak,
+            cortex::surfaces::SurfaceDisposition::RemovedCleanBreak,
             "{command} is still accepted by the parser and cannot be marked removed"
         );
     }

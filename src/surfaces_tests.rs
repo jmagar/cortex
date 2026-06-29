@@ -67,7 +67,7 @@ fn every_current_mcp_action_is_classified() {
     for name in mcp::action_names() {
         assert!(
             find(SurfaceKind::McpAction, name).is_some(),
-            "MCP action {name} is missing from surface registry"
+            "MCP action {name} is missing from surfaces catalog"
         );
     }
 }
@@ -94,7 +94,7 @@ fn every_current_api_route_is_classified() {
     for route in CURRENT_API_ROUTES {
         assert!(
             find(SurfaceKind::ApiRoute, route).is_some(),
-            "API route {route} is missing from surface registry"
+            "API route {route} is missing from surfaces catalog"
         );
     }
 }
