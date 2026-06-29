@@ -57,7 +57,7 @@ use crate::assessment::{GeminiAssessConfig, build_assessment_prompt, run_gemini_
 use crate::command_log::{self, CommandLogImportResult};
 use crate::config::StorageConfig;
 use crate::db::{self, Bucket, ContextRef, DbPool, SearchParams, TimelineGroupBy};
-use crate::file_tail::{FileTailRegistry, FileTailStatus};
+use crate::filetail::{FileTailRegistry, FileTailStatus};
 use crate::scanner;
 
 mod ai;

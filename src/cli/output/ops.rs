@@ -6,9 +6,9 @@ use cortex::app::{
 use cortex::compose::{CommandOutput, ComposeCommandResult, ComposeStatus};
 use serde::Serialize;
 
-use super::color::{cyan, error, muted, primary, success, warn};
-use super::output_common::print_json;
-use super::setup::{SetupPhase, SetupStatus};
+use super::super::color::{cyan, error, muted, primary, success, warn};
+use super::super::setup::{SetupPhase, SetupStatus};
+use super::common::print_json;
 
 #[derive(Debug, Clone, Serialize)]
 struct DbStatusReport<'a> {
@@ -423,5 +423,5 @@ fn phase_status_colored(status: &SetupStatus) -> String {
 }
 
 #[cfg(test)]
-#[path = "output_ops_tests.rs"]
+#[path = "ops_tests.rs"]
 mod tests;

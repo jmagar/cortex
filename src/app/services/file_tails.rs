@@ -1,6 +1,6 @@
 use crate::app::{ServiceError, ServiceResult};
-use crate::file_tail::path_policy::validate_file_tail_path;
-use crate::file_tail::{FileTailOp, FileTailRequest, FileTailResponse, FileTailSource};
+use crate::filetail::path_policy::validate_file_tail_path;
+use crate::filetail::{FileTailOp, FileTailRequest, FileTailResponse, FileTailSource};
 
 use super::CortexService;
 
@@ -104,7 +104,7 @@ impl CortexService {
         Ok(FileTailResponse { sources, statuses })
     }
 
-    pub(crate) fn file_tail_statuses_snapshot(&self) -> Vec<crate::file_tail::FileTailStatus> {
+    pub(crate) fn file_tail_statuses_snapshot(&self) -> Vec<crate::filetail::FileTailStatus> {
         self.file_tail_statuses
             .as_ref()
             .map(|statuses| statuses())

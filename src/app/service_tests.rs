@@ -1842,7 +1842,7 @@ async fn file_tails_add_list_disable_enable_remove_round_trip() {
     let temp = tempfile::tempdir().unwrap();
     let storage = StorageConfig::for_test(temp.path().join("file-tail-test.db"));
     let pool = Arc::new(init_pool(&storage).unwrap());
-    let registry = Arc::new(crate::file_tail::FileTailRegistry::new(
+    let registry = Arc::new(crate::filetail::FileTailRegistry::new(
         temp.path().join("file-tails.json"),
     ));
     let service = CortexService::new(pool, storage).with_file_tail_control(
@@ -1911,7 +1911,7 @@ async fn file_tails_list_and_status_do_not_reconcile() {
     let temp = tempfile::tempdir().unwrap();
     let storage = StorageConfig::for_test(temp.path().join("file-tail-test.db"));
     let pool = Arc::new(init_pool(&storage).unwrap());
-    let registry = Arc::new(crate::file_tail::FileTailRegistry::new(
+    let registry = Arc::new(crate::filetail::FileTailRegistry::new(
         temp.path().join("file-tails.json"),
     ));
     let reconcile_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -1961,7 +1961,7 @@ async fn file_tails_duplicate_add_is_rejected_without_resetting_checkpoint() {
     let temp = tempfile::tempdir().unwrap();
     let storage = StorageConfig::for_test(temp.path().join("file-tail-test.db"));
     let pool = Arc::new(init_pool(&storage).unwrap());
-    let registry = Arc::new(crate::file_tail::FileTailRegistry::new(
+    let registry = Arc::new(crate::filetail::FileTailRegistry::new(
         temp.path().join("file-tails.json"),
     ));
     let service = CortexService::new(pool, storage).with_file_tail_control(
@@ -2002,7 +2002,7 @@ async fn file_tails_reconcile_failure_reports_committed_mutation() {
     let temp = tempfile::tempdir().unwrap();
     let storage = StorageConfig::for_test(temp.path().join("file-tail-test.db"));
     let pool = Arc::new(init_pool(&storage).unwrap());
-    let registry = Arc::new(crate::file_tail::FileTailRegistry::new(
+    let registry = Arc::new(crate::filetail::FileTailRegistry::new(
         temp.path().join("file-tails.json"),
     ));
     let service = CortexService::new(pool, storage).with_file_tail_control(
@@ -2040,7 +2040,7 @@ async fn file_tails_mutations_reject_registry_only_query_mode() {
     let temp = tempfile::tempdir().unwrap();
     let storage = StorageConfig::for_test(temp.path().join("file-tail-test.db"));
     let pool = Arc::new(init_pool(&storage).unwrap());
-    let registry = Arc::new(crate::file_tail::FileTailRegistry::new(
+    let registry = Arc::new(crate::filetail::FileTailRegistry::new(
         temp.path().join("file-tails.json"),
     ));
     let service = CortexService::new(pool, storage).with_file_tail_registry(registry);
@@ -2073,7 +2073,7 @@ async fn file_tails_missing_source_maps_to_not_found() {
     let temp = tempfile::tempdir().unwrap();
     let storage = StorageConfig::for_test(temp.path().join("file-tail-test.db"));
     let pool = Arc::new(init_pool(&storage).unwrap());
-    let registry = Arc::new(crate::file_tail::FileTailRegistry::new(
+    let registry = Arc::new(crate::filetail::FileTailRegistry::new(
         temp.path().join("file-tails.json"),
     ));
     let service = CortexService::new(pool, storage).with_file_tail_control(
@@ -2118,7 +2118,7 @@ async fn file_tails_rejects_invalid_facility_severity_and_disallowed_paths() {
     let temp = tempfile::tempdir().unwrap();
     let storage = StorageConfig::for_test(temp.path().join("file-tail-test.db"));
     let pool = Arc::new(init_pool(&storage).unwrap());
-    let registry = Arc::new(crate::file_tail::FileTailRegistry::new(
+    let registry = Arc::new(crate::filetail::FileTailRegistry::new(
         temp.path().join("file-tails.json"),
     ));
     let service = CortexService::new(pool, storage).with_file_tail_control(

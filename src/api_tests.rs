@@ -64,7 +64,7 @@ fn test_state_full(
     let dir = tempfile::tempdir().unwrap();
     let storage = StorageConfig::for_test(dir.path().join("api-test.db"));
     let pool = Arc::new(db::init_pool(&storage).unwrap());
-    let file_tail_registry = Arc::new(crate::file_tail::FileTailRegistry::new(
+    let file_tail_registry = Arc::new(crate::filetail::FileTailRegistry::new(
         dir.path().join("file-tails.json"),
     ));
     let service = crate::app::CortexService::new(Arc::clone(&pool), storage)

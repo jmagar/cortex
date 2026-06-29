@@ -1,7 +1,7 @@
-use super::color::{cyan, muted, primary, warn};
-use super::dispatch::http_or_cancel;
-use super::output_common::print_json;
-use super::sparkline::sparkline;
+use super::super::color::{cyan, muted, primary, warn};
+use super::super::output::common::print_json;
+use super::super::sparkline::sparkline;
+use super::http_or_cancel;
 
 use anyhow::{Result, bail};
 use cortex::app::{
@@ -9,7 +9,7 @@ use cortex::app::{
     UnackErrorRequest, UnaddressedErrorsRequest,
 };
 
-use super::{
+use super::super::{
     CliMode, IngestRateArgs, NotifyRecentArgs, NotifyTestArgs, PatternsArgs, SigAckArgs,
     SigListArgs, SigUnackArgs, SourceIpsArgs, TimelineArgs,
 };
@@ -391,14 +391,17 @@ pub(crate) async fn run_notify_test(mode: &CliMode, args: NotifyTestArgs) -> Res
     Ok(())
 }
 
-pub(crate) use super::dispatch_surface_analytics::{
+mod analytics;
+mod gap;
+
+pub(crate) use self::analytics::{
     run_anomalies, run_apps, run_clock_skew, run_compare, run_silent_hosts,
 };
-pub(crate) use super::dispatch_surface_gap::{
+pub(crate) use self::gap::{
     run_correlate_state, run_entity_lookup, run_fleet_state, run_graph_around, run_graph_evidence,
     run_graph_explain, run_graph_rebuild, run_graph_status, run_host_state, run_topic_correlate,
 };
 
 #[cfg(test)]
-#[path = "dispatch_surface_tests.rs"]
+#[path = "surface_tests.rs"]
 mod tests;

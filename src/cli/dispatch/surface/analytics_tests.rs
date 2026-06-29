@@ -2,7 +2,7 @@
 //!
 //! Each `*Args::into_request()` is exercised to confirm CLI flags map onto the
 //! request fields the query surface expects. Split out of
-//! `dispatch_surface_gap_tests` alongside the analytics commands themselves.
+//! `gap_tests` alongside the analytics commands themselves.
 
 use super::*;
 

@@ -6,8 +6,11 @@ use super::parse_logs::{
     parse_correlate, parse_errors, parse_filter, parse_hosts, parse_incident,
     parse_ingest_rate_args, parse_patterns, parse_search, parse_tail, parse_timeline,
 };
-use super::parse_sessions::parse_sessions_command;
 use super::{CliCommand, commands, parse_config, suggest};
+
+mod sessions;
+
+use self::sessions::parse_sessions_command;
 
 pub(crate) const TOP_LEVEL_COMMANDS: &[&str] = &[
     "search",

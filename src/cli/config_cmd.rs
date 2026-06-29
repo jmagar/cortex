@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::config_toml::{list_toml_entries, read_toml_value, remove_toml_value, write_toml_value};
-use super::output_common::print_json;
+use super::output::common::print_json;
 use super::{
     ConfigCommand, ConfigGetArgs, ConfigListArgs, ConfigSetArgs, ConfigTarget, ConfigUnsetArgs,
 };

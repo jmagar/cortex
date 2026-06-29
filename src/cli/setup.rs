@@ -3,7 +3,7 @@ use serde::Serialize;
 use std::net::TcpListener;
 use std::path::PathBuf;
 
-use super::output_common::print_json;
+use super::output::common::print_json;
 use super::{PluginHookArgs, SetupCommand};
 
 mod plugin_options;

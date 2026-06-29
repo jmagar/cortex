@@ -5,9 +5,9 @@ use cortex::app::{
 };
 use serde_json::{Value, json};
 
-use super::SessionsOutputDetail;
-use super::color::{cyan, muted, primary, severity, violet, warn};
-use super::output_common::{local_ts, print_json, truncate, truncate_bytes};
+use super::super::super::SessionsOutputDetail;
+use super::super::super::color::{cyan, muted, primary, severity, violet, warn};
+use super::super::common::{local_ts, print_json, truncate, truncate_bytes};
 
 pub(crate) fn print_similar_incidents_response(
     response: &SimilarIncidentsResponse,
@@ -429,5 +429,5 @@ fn compact_logs(logs: &[LogEntry], max_bytes: usize) -> Vec<Value> {
 }
 
 #[cfg(test)]
-#[path = "output_sessions_more_tests.rs"]
+#[path = "more_tests.rs"]
 mod tests;

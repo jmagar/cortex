@@ -5,9 +5,9 @@ use cortex::app::{
     SearchLogsResponse, SearchSessionsResponse, UsageBlocksResponse,
 };
 
-use super::SessionsOutputDetail;
-use super::color::{cyan, muted, primary, severity, violet};
-use super::output_common::{local_ts, print_json, print_log, truncate};
+use super::super::SessionsOutputDetail;
+use super::super::color::{cyan, muted, primary, severity, violet};
+use super::common::{local_ts, print_json, print_log, truncate};
 
 pub(crate) fn print_search_response(response: &SearchLogsResponse, json: bool) -> Result<()> {
     if json {
@@ -475,5 +475,5 @@ pub(crate) fn print_stats_response(stats: &DbStats, json: bool) -> Result<()> {
 }
 
 #[cfg(test)]
-#[path = "output_logs_tests.rs"]
+#[path = "logs_tests.rs"]
 mod tests;

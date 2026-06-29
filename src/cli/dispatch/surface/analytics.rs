@@ -1,18 +1,20 @@
 //! CLI dispatch for log-analytics commands (hosts silent, clock-skew,
-//! anomalies, compare, apps). Split out of `dispatch_surface_gap` to keep each
+//! anomalies, compare, apps). Split out of `gap` to keep each
 //! module under the production module-size budget; the heartbeat/graph state
-//! commands remain in `dispatch_surface_gap`.
+//! commands remain in `gap`.
 
-use super::dispatch::http_or_cancel;
-use super::output_common::print_json;
+use super::super::super::output::common::print_json;
+use super::super::http_or_cancel;
 
 use anyhow::Result;
 use cortex::app::{
     AnomaliesRequest, ClockSkewRequest, CompareRequest, ListAppsRequest, SilentHostsRequest,
 };
 
-use super::CliMode;
-use super::args::{AnomaliesArgs, AppsArgs, ClockSkewArgs, CompareArgs, SilentHostsArgs};
+use super::super::super::CliMode;
+use super::super::super::args::{
+    AnomaliesArgs, AppsArgs, ClockSkewArgs, CompareArgs, SilentHostsArgs,
+};
 
 impl SilentHostsArgs {
     pub(crate) fn into_request(self) -> SilentHostsRequest {
@@ -199,5 +201,5 @@ pub(crate) async fn run_apps(mode: &CliMode, args: AppsArgs) -> Result<()> {
 }
 
 #[cfg(test)]
-#[path = "dispatch_surface_analytics_tests.rs"]
+#[path = "analytics_tests.rs"]
 mod tests;
