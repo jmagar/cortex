@@ -240,12 +240,19 @@ fn heartbeat_agent_unit(
     host_id_path: &Path,
 ) -> io::Result<String> {
     let read_write_dir = setup_path_value(host_id_path.parent().unwrap_or_else(|| Path::new("/")))?;
+    let read_write_bin_dir =
+        setup_path_value(cortex_bin.parent().unwrap_or_else(|| Path::new("/")))?;
+    let read_write_paths = if read_write_bin_dir == read_write_dir {
+        read_write_dir.clone()
+    } else {
+        format!("{read_write_dir} {read_write_bin_dir}")
+    };
     let cortex_bin = setup_path_value(cortex_bin)?;
     let env_path = setup_path_value(env_path)?;
     let host_id_path = setup_path_value(host_id_path)?;
     Ok(format!(
         "[Unit]\nDescription=cortex heartbeat agent\nDocumentation=https://github.com/jmagar/cortex\nAfter=network-online.target\nWants=network-online.target\nStartLimitIntervalSec=300\nStartLimitBurst=5\n\n[Service]\nType=simple\nEnvironmentFile={env_path}\nExecStart={cortex_bin} heartbeat agent --host-id-path {host_id_path}\nRestart=on-failure\nRestartSec=5\nUMask=0077\nNoNewPrivileges=true\nPrivateTmp=true\nProtectSystem=strict\nProtectHome=read-only\nReadWritePaths={}\n\n[Install]\nWantedBy=default.target\n",
-        read_write_dir
+        read_write_paths
     ))
 }
 

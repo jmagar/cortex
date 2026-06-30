@@ -71,7 +71,7 @@ pub fn from_sample(sample: &HeartbeatSampleState) -> HeartbeatStateFlags {
     let max_disk = sample
         .disks
         .iter()
-        .filter_map(|d| d["used_percent"].as_f64())
+        .filter_map(disk_pressure_used_percent)
         .fold(None::<f64>, |acc, v| Some(acc.map_or(v, |a: f64| a.max(v))));
     let net_errors: i64 = sample
         .network
@@ -207,5 +207,105 @@ fn swap_ratio(swap_total: Option<i64>, swap_used: Option<i64>) -> bool {
             (used as f64 / total as f64) > SWAP_PRESSURE_RATIO
         }
         _ => false,
+    }
+}
+
+fn disk_pressure_used_percent(disk: &Value) -> Option<f64> {
+    if !is_pressure_relevant_disk(disk) {
+        return None;
+    }
+    disk["used_percent"].as_f64()
+}
+
+pub(crate) fn is_pressure_relevant_disk(disk: &Value) -> bool {
+    let fs = disk["filesystem"]
+        .as_str()
+        .or_else(|| disk["fs_type"].as_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let mount = disk["mountpoint"]
+        .as_str()
+        .or_else(|| disk["name"].as_str())
+        .unwrap_or("");
+
+    if matches!(
+        fs.as_str(),
+        "autofs"
+            | "binfmt_misc"
+            | "bpf"
+            | "cgroup"
+            | "cgroup2"
+            | "configfs"
+            | "debugfs"
+            | "devpts"
+            | "devtmpfs"
+            | "efivarfs"
+            | "fuse.snapfuse"
+            | "fusectl"
+            | "hugetlbfs"
+            | "iso9660"
+            | "mqueue"
+            | "nsfs"
+            | "overlay"
+            | "proc"
+            | "pstore"
+            | "ramfs"
+            | "rootfs"
+            | "securityfs"
+            | "squashfs"
+            | "sysfs"
+            | "tmpfs"
+            | "tracefs"
+    ) {
+        return false;
+    }
+
+    !matches!(mount, "" | "/init")
+        && !mount.starts_with("/snap/")
+        && !mount.starts_with("/mnt/wsl/docker-desktop/")
+        && !mount.starts_with("/mnt/wslg/")
+        && !mount.starts_with("/usr/lib/modules/")
+        && !mount.starts_with("/usr/lib/wsl/")
+        && !mount.starts_with("/run/")
+        && !mount.starts_with("/var/run/")
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn disk_pressure_ignores_read_only_image_mounts() {
+        let disk = json!({
+            "filesystem": "iso9660",
+            "mountpoint": "/mnt/wsl/docker-desktop/cli-tools",
+            "used_percent": 100.0
+        });
+
+        assert_eq!(disk_pressure_used_percent(&disk), None);
+    }
+
+    #[test]
+    fn disk_pressure_keeps_real_writable_mounts() {
+        let disk = json!({
+            "filesystem": "ext4",
+            "mountpoint": "/",
+            "used_percent": 95.0
+        });
+
+        assert_eq!(disk_pressure_used_percent(&disk), Some(95.0));
+    }
+
+    #[test]
+    fn disk_pressure_keeps_unraid_user_share_mounts() {
+        let disk = json!({
+            "filesystem": "fuse.shfs",
+            "mountpoint": "/mnt/user/appdata/cortex",
+            "used_percent": 95.0
+        });
+
+        assert_eq!(disk_pressure_used_percent(&disk), Some(95.0));
     }
 }

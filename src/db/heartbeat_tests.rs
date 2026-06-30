@@ -305,6 +305,64 @@ fn heartbeat_metric_snapshot_returns_aggregates() {
     );
 }
 
+#[test]
+fn heartbeat_metric_snapshot_ignores_pseudo_mounts_for_disk_pressure() {
+    let (pool, _dir) = test_pool();
+    let hb_id = insert_heartbeat(
+        &pool,
+        "host-a",
+        "vivobook",
+        1,
+        "2026-05-25T00:00:00Z",
+        false,
+    );
+    let conn = pool.get().unwrap();
+    conn.execute(
+        "INSERT INTO heartbeat_disks
+             (heartbeat_id, mountpoint, filesystem, total_bytes, available_bytes, used_percent)
+         VALUES (?1, '/', 'ext4', 1000000000, 800000000, 20.0)",
+        [hb_id],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO heartbeat_disks
+             (heartbeat_id, mountpoint, filesystem, total_bytes, available_bytes, used_percent)
+         VALUES (?1, '/mnt/wsl/docker-desktop/cli-tools', 'iso9660', 800000000, 0, 100.0)",
+        [hb_id],
+    )
+    .unwrap();
+    drop(conn);
+
+    let snap = heartbeat_metric_snapshot(&pool, hb_id).unwrap();
+    assert_eq!(snap.max_disk_used_percent, Some(20.0));
+
+    let batch = heartbeat_metric_snapshot_batch(&pool, &[hb_id]).unwrap();
+    assert_eq!(
+        batch
+            .get(&hb_id)
+            .and_then(|snap| snap.max_disk_used_percent),
+        Some(20.0)
+    );
+}
+
+#[test]
+fn heartbeat_metric_snapshot_keeps_unraid_user_share_pressure() {
+    let (pool, _dir) = test_pool();
+    let hb_id = insert_heartbeat(&pool, "host-a", "tootie", 1, "2026-05-25T00:00:00Z", false);
+    let conn = pool.get().unwrap();
+    conn.execute(
+        "INSERT INTO heartbeat_disks
+             (heartbeat_id, mountpoint, filesystem, total_bytes, available_bytes, used_percent)
+         VALUES (?1, '/mnt/user/appdata/cortex', 'fuse.shfs', 1000000000, 40000000, 96.0)",
+        [hb_id],
+    )
+    .unwrap();
+    drop(conn);
+
+    let snap = heartbeat_metric_snapshot(&pool, hb_id).unwrap();
+    assert_eq!(snap.max_disk_used_percent, Some(96.0));
+}
+
 fn insert_cpu(pool: &DbPool, heartbeat_id: i64, usage_percent: f64) {
     let conn = pool.get().unwrap();
     conn.execute(

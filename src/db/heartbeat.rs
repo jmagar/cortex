@@ -7,6 +7,46 @@ use tracing::warn;
 
 use super::pool::DbPool;
 
+const DISK_PRESSURE_SQL_FILTER: &str = "
+    used_percent IS NOT NULL
+    AND COALESCE(filesystem, '') NOT IN (
+        'autofs',
+        'binfmt_misc',
+        'bpf',
+        'cgroup',
+        'cgroup2',
+        'configfs',
+        'debugfs',
+        'devpts',
+        'devtmpfs',
+        'efivarfs',
+        'fuse.snapfuse',
+        'fusectl',
+        'hugetlbfs',
+        'iso9660',
+        'mqueue',
+        'nsfs',
+        'overlay',
+        'proc',
+        'pstore',
+        'ramfs',
+        'rootfs',
+        'securityfs',
+        'squashfs',
+        'sysfs',
+        'tmpfs',
+        'tracefs'
+    )
+    AND COALESCE(mountpoint, '') NOT IN ('', '/init')
+    AND COALESCE(mountpoint, '') NOT LIKE '/snap/%'
+    AND COALESCE(mountpoint, '') NOT LIKE '/mnt/wsl/docker-desktop/%'
+    AND COALESCE(mountpoint, '') NOT LIKE '/mnt/wslg/%'
+    AND COALESCE(mountpoint, '') NOT LIKE '/usr/lib/modules/%'
+    AND COALESCE(mountpoint, '') NOT LIKE '/usr/lib/wsl/%'
+    AND COALESCE(mountpoint, '') NOT LIKE '/run/%'
+    AND COALESCE(mountpoint, '') NOT LIKE '/var/run/%'
+";
+
 #[derive(Debug, Clone)]
 pub enum HeartbeatHostLookup {
     HostId(String),
@@ -162,7 +202,10 @@ pub fn heartbeat_metric_snapshot(
 
     let max_disk: Option<f64> = conn
         .query_row(
-            "SELECT MAX(used_percent) FROM heartbeat_disks WHERE heartbeat_id = ?1",
+            &format!(
+                "SELECT MAX(used_percent) FROM heartbeat_disks \
+                 WHERE heartbeat_id = ?1 AND {DISK_PRESSURE_SQL_FILTER}"
+            ),
             [heartbeat_id],
             |row| row.get(0),
         )
@@ -256,7 +299,8 @@ pub fn heartbeat_metric_snapshot_batch(
 
     let disk_sql = format!(
         "SELECT heartbeat_id, MAX(used_percent) FROM heartbeat_disks \
-         WHERE heartbeat_id IN ({placeholders}) GROUP BY heartbeat_id"
+         WHERE heartbeat_id IN ({placeholders}) AND {DISK_PRESSURE_SQL_FILTER} \
+         GROUP BY heartbeat_id"
     );
     let mut stmt = conn.prepare(&disk_sql)?;
     let rows = stmt.query_map([], |row| {

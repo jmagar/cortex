@@ -157,6 +157,7 @@ fn write_heartbeat_agent_unit_creates_parent_and_expected_content() {
     assert!(raw.contains(
         "ExecStart=/usr/local/bin/cortex heartbeat agent --host-id-path /home/me/.cortex/heartbeat-host-id"
     ));
+    assert!(raw.contains("ReadWritePaths=/home/me/.cortex /usr/local/bin"));
 }
 
 #[test]
