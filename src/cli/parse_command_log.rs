@@ -107,6 +107,7 @@ fn parse_agent_command_ingest_spool(args: &[String]) -> Result<AgentCommandComma
 
 fn parse_agent_command_wrap(args: &[String]) -> Result<AgentCommandCommand> {
     let mut spool = None;
+    let mut probe = false;
     let mut command_start = None;
     let mut i = 0usize;
     while i < args.len() {
@@ -115,6 +116,9 @@ fn parse_agent_command_wrap(args: &[String]) -> Result<AgentCommandCommand> {
                 i += 1;
                 spool = Some(required_value(args, i, "--spool")?);
             }
+            "--probe" => {
+                probe = true;
+            }
             "--" => {
                 command_start = Some(i + 1);
                 break;
@@ -122,6 +126,15 @@ fn parse_agent_command_wrap(args: &[String]) -> Result<AgentCommandCommand> {
             other => bail!("unknown agent-command wrap argument: {other}"),
         }
         i += 1;
+    }
+    // A probe is a liveness check the generated wrapper runs before delegating;
+    // it needs neither a spool nor a command.
+    if probe {
+        return Ok(AgentCommandCommand::Wrap(AgentCommandWrapArgs {
+            spool: spool.unwrap_or_default(),
+            command: Vec::new(),
+            probe: true,
+        }));
     }
     let spool = spool.ok_or_else(|| anyhow::anyhow!("agent-command wrap requires --spool PATH"))?;
     let start =
@@ -133,6 +146,7 @@ fn parse_agent_command_wrap(args: &[String]) -> Result<AgentCommandCommand> {
     Ok(AgentCommandCommand::Wrap(AgentCommandWrapArgs {
         spool,
         command,
+        probe: false,
     }))
 }
 

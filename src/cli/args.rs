@@ -180,6 +180,10 @@ pub(crate) struct AgentCommandIngestSpoolArgs {
 pub(crate) struct AgentCommandWrapArgs {
     pub spool: String,
     pub command: Vec<String>,
+    /// Liveness probe used by the generated shell wrapper: when true, the command
+    /// resolves and exits 0 without reading the spool or running anything, so the
+    /// wrapper can confirm this subcommand path is runnable before delegating.
+    pub probe: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
