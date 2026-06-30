@@ -127,6 +127,23 @@ async fn linux_probe_collectors_read_proc_and_statvfs_successfully() {
 }
 
 #[test]
+fn disk_mount_discovery_skips_runtime_pseudo_filesystems() {
+    for fs_type in [
+        "efivarfs",
+        "fuse.portal",
+        "iso9660",
+        "nsfs",
+        "overlay",
+        "squashfs",
+    ] {
+        assert!(is_pseudo_fs(fs_type), "{fs_type} should not be probed");
+    }
+    for fs_type in ["ext4", "fuse.shfs", "xfs", "zfs"] {
+        assert!(!is_pseudo_fs(fs_type), "{fs_type} should stay probeable");
+    }
+}
+
+#[test]
 #[serial]
 fn config_from_env_honors_agent_stream_flags_and_fallbacks() {
     let _target = EnvGuard::set("CORTEX_HEARTBEAT_TARGET", "https://cortex.example.test");
