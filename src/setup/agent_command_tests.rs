@@ -137,7 +137,7 @@ fn agent_command_wrapper_script_execs_cortex_with_spool_and_passthrough_args() {
     );
 
     assert!(script.starts_with("#!/usr/bin/env sh\n"));
-    assert!(script.contains("exec /home/me/.local/bin/cortex agent-command wrap"));
+    assert!(script.contains("exec /home/me/.local/bin/cortex ingest agent-command wrap"));
     assert!(script.contains("--spool /home/me/.local/state/cortex/agent-command.jsonl -- \"$@\""));
 }
 

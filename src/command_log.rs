@@ -405,9 +405,17 @@ fn is_agent_command_ingest_spool_invocation(command_args: &[String]) -> bool {
         .file_name()
         .and_then(|value| value.to_str())
         .unwrap_or(program);
-    program_name == "cortex"
-        && command_args.get(1).map(String::as_str) == Some("agent-command")
-        && command_args.get(2).map(String::as_str) == Some("ingest-spool")
+    if program_name != "cortex" {
+        return false;
+    }
+    let rest: Vec<&str> = command_args[1..].iter().map(String::as_str).collect();
+    // New grouped grammar: `cortex ingest agent-command ingest-spool`.
+    // Legacy pre-move grammar (`cortex agent-command ingest-spool`) is accepted
+    // defensively so a lingering caller can never be self-ingested.
+    matches!(
+        rest.as_slice(),
+        ["ingest", "agent-command", "ingest-spool", ..]
+    ) || matches!(rest.as_slice(), ["agent-command", "ingest-spool", ..])
 }
 
 fn shell_quote(value: &str) -> String {

@@ -259,7 +259,7 @@ fn agent_command_wrapper_script(cortex_bin: &Path, spool_path: &Path) -> String 
     let spool_path = setup_path_value(spool_path).expect("validated agent command spool path");
     format!(
         r#"#!/usr/bin/env sh
-exec {cortex_bin} agent-command wrap --spool {spool_path} -- "$@"
+exec {cortex_bin} ingest agent-command wrap --spool {spool_path} -- "$@"
 "#
     )
 }
