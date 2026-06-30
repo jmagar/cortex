@@ -414,8 +414,8 @@ fn is_agent_command_ingest_spool_invocation(command_args: &[String]) -> bool {
     // defensively so a lingering caller can never be self-ingested.
     matches!(
         rest.as_slice(),
-        ["ingest", "agent-command", "ingest-spool", ..]
-    ) || matches!(rest.as_slice(), ["agent-command", "ingest-spool", ..])
+        ["ingest", "agent-command", "ingest-spool", ..] | ["agent-command", "ingest-spool", ..]
+    )
 }
 
 fn shell_quote(value: &str) -> String {

@@ -10,11 +10,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [3.1.0] - 2026-06-30
 
 ### Fixed
+
 - `setup agent-command` generated a wrapper using the removed `cortex agent-command wrap`
   grammar, which bricked every shell using `CLAUDE_CODE_SHELL_PREFIX`. The wrapper and the
   self-ingest guard now use the `ingest agent-command` grammar.
 
 ### Added
+
 - The generated agent-command wrapper is now fail-open: it probes the subcommand
   (`ingest agent-command wrap --probe`) and execs the command directly if cortex is missing
   or its CLI changed, so logging can never brick the shell.
