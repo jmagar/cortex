@@ -12,7 +12,7 @@ fn refresh_interval_secs_parses_env_with_default_fallback() {
     let previous = std::env::var(key).ok();
 
     unsafe { std::env::remove_var(key) };
-    assert_eq!(refresh_interval_secs(), GRAPH_REFRESH_INTERVAL_SECS);
+    assert_eq!(refresh_interval_secs(), 0);
 
     unsafe { std::env::set_var(key, "45") };
     assert_eq!(refresh_interval_secs(), 45);
@@ -24,9 +24,9 @@ fn refresh_interval_secs_parses_env_with_default_fallback() {
     unsafe { std::env::set_var(key, "0") };
     assert_eq!(refresh_interval_secs(), 0);
 
-    // Garbage falls back to the default.
+    // Garbage falls back to the disabled-by-default scheduler.
     unsafe { std::env::set_var(key, "not-a-number") };
-    assert_eq!(refresh_interval_secs(), GRAPH_REFRESH_INTERVAL_SECS);
+    assert_eq!(refresh_interval_secs(), 0);
 
     match previous {
         Some(value) => unsafe { std::env::set_var(key, value) },

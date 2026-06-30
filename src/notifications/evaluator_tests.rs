@@ -86,6 +86,41 @@ fn fetch_recent_logs_respects_limit_offset_and_newest_first_order() {
 }
 
 #[test]
+fn fetch_recent_logs_orders_by_received_at_not_row_id() {
+    let (pool, _dir) = test_pool();
+    insert_logs_batch(
+        &pool,
+        &[
+            log_entry("2999-01-01T00:00:01Z", "host-a", "oldest-received"),
+            log_entry("2999-01-01T00:00:02Z", "host-b", "newest-received"),
+            log_entry("2999-01-01T00:00:03Z", "host-c", "middle-received"),
+        ],
+    )
+    .unwrap();
+
+    let conn = pool.get().unwrap();
+    conn.execute(
+        "UPDATE logs SET received_at = CASE message
+             WHEN 'oldest-received' THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-30 seconds')
+             WHEN 'newest-received' THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-10 seconds')
+             WHEN 'middle-received' THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-20 seconds')
+             ELSE received_at
+         END",
+        [],
+    )
+    .unwrap();
+
+    let rows = fetch_recent_logs(&conn, 60, 3, 0).unwrap();
+
+    assert_eq!(
+        rows.iter()
+            .map(|row| row.message.as_str())
+            .collect::<Vec<_>>(),
+        vec!["newest-received", "middle-received", "oldest-received"]
+    );
+}
+
+#[test]
 fn newest_row_age_secs_returns_none_for_empty_logs_table() {
     let (pool, _dir) = test_pool();
     let conn = pool.get().unwrap();
