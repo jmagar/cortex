@@ -30,6 +30,30 @@ fn remote_docker_events_default_to_disabled() {
 }
 
 #[test]
+fn inventory_graph_projection_defaults_to_disabled() {
+    let _guard = env_lock().lock().unwrap();
+    unsafe {
+        std::env::remove_var("CORTEX_INVENTORY_GRAPH_PROJECTION_ENABLED");
+    }
+    assert!(!inventory_graph_projection_enabled());
+    unsafe {
+        std::env::set_var("CORTEX_INVENTORY_GRAPH_PROJECTION_ENABLED", "true");
+    }
+    assert!(inventory_graph_projection_enabled());
+    unsafe {
+        std::env::set_var("CORTEX_INVENTORY_GRAPH_PROJECTION_ENABLED", "1");
+    }
+    assert!(inventory_graph_projection_enabled());
+    unsafe {
+        std::env::set_var("CORTEX_INVENTORY_GRAPH_PROJECTION_ENABLED", "false");
+    }
+    assert!(!inventory_graph_projection_enabled());
+    unsafe {
+        std::env::remove_var("CORTEX_INVENTORY_GRAPH_PROJECTION_ENABLED");
+    }
+}
+
+#[test]
 fn inventory_watch_env_accepts_common_false_values() {
     let _guard = env_lock().lock().unwrap();
     for value in ["0", "false", "FALSE", "no", " No "] {

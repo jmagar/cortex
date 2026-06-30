@@ -151,7 +151,8 @@ CORTEX_SQLITE_PAGE_CACHE_MB=128   # total SQLite page-cache budget across pool
 CORTEX_SQLITE_MMAP_MB=256         # bounded mmap; resident mapped pages may count toward cgroup memory
 CORTEX_HEAVY_READ_CONCURRENCY=1   # shared service-layer limiter for expensive reads
 CORTEX_WAL_CHECKPOINT_MB=256      # WAL size threshold for bounded PASSIVE checkpoint attempts
-CORTEX_GRAPH_REFRESH_INTERVAL_SECS=300  # in-server graph projection scheduler; 0 disables (CLI rebuild still works)
+CORTEX_GRAPH_REFRESH_INTERVAL_SECS=0    # in-server graph projection scheduler; disabled by default, CLI rebuild still works
+CORTEX_INVENTORY_GRAPH_PROJECTION_ENABLED=false # inventory cache refresh still runs; graph projection is opt-in
 CORTEX_RETENTION_DAYS=90     # 0 = keep forever; hourly purge, err+ exempt (see Retention)
 CORTEX_MAX_DB_SIZE_MB=1024        # 0 = disable logical DB size guard (breach deletes oldest)
 CORTEX_RECOVERY_DB_SIZE_MB=900    # cleanup target after DB-size breach

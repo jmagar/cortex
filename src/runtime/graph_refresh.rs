@@ -6,13 +6,14 @@
 //! stale until an operator ran a full rebuild by hand — and running that CLI as
 //! a second process against the live DB risked dual-writer contention.
 //!
-//! This task keeps the graph current from inside the server process, where it
-//! shares the process-global `write_lock` with the ingest writer:
+//! This opt-in task keeps the graph current from inside the server process,
+//! where it shares the process-global `write_lock` with the ingest writer:
 //!
 //! - On startup it does an eager pass: a full build if the projection has never
 //!   been built (or is degraded), otherwise an incremental delta.
 //! - Thereafter it runs an incremental pass every
-//!   `CORTEX_GRAPH_REFRESH_INTERVAL_SECS` (default 300; `0` disables the task).
+//!   `CORTEX_GRAPH_REFRESH_INTERVAL_SECS` (`0` disables the task and is the
+//!   default).
 //!
 //! Incremental passes process only logs newer than the recorded watermark plus
 //! the bounded heartbeat/signature snapshots, so steady-state cost is small. The
@@ -32,10 +33,11 @@ use crate::observability::RuntimeObservability;
 
 use super::background_interval;
 
-/// Default cadence for incremental graph projection refreshes. Set
-/// `CORTEX_GRAPH_REFRESH_INTERVAL_SECS=0` to disable the scheduler entirely
-/// (the `cortex graph rebuild` CLI remains available for manual reconciles).
-const GRAPH_REFRESH_INTERVAL_SECS: u64 = 300;
+/// Default cadence for incremental graph projection refreshes. Keep this
+/// disabled unless explicitly enabled: even "incremental" passes can spend
+/// minutes merging snapshot-derived graph rows on large production databases.
+/// The `cortex graph rebuild` CLI remains available for manual reconciles.
+const GRAPH_REFRESH_INTERVAL_SECS: u64 = 0;
 
 /// Delay before the eager startup pass, so it does not contend with the burst of
 /// schema/migration and other startup work.

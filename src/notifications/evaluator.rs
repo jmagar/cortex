@@ -209,7 +209,7 @@ fn fetch_recent_logs(
         "SELECT app_name, message, hostname, severity, metadata_json, timestamp
          FROM logs
          WHERE received_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', printf('-%d seconds', ?1))
-         ORDER BY id DESC
+         ORDER BY received_at DESC
          LIMIT ?2 OFFSET ?3",
     )?;
     let rows = stmt
