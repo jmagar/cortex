@@ -121,6 +121,11 @@ async fn run_cli(invocation: CliInvocation) -> Result<()> {
         cli::AgentCommandCommand::Wrap(args),
     )) = command
     {
+        // Liveness probe from the generated wrapper: succeed fast, run nothing.
+        // Keep this ahead of the http-flag check so a probe never errors.
+        if args.probe {
+            std::process::exit(0);
+        }
         if let Some(trigger) = flags.http_flag_trigger() {
             anyhow::bail!(
                 "{} has no effect on `ingest agent-command wrap` (wrapper command); remove --http / --server / --token",

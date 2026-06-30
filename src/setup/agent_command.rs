@@ -259,7 +259,13 @@ fn agent_command_wrapper_script(cortex_bin: &Path, spool_path: &Path) -> String 
     let spool_path = setup_path_value(spool_path).expect("validated agent command spool path");
     format!(
         r#"#!/usr/bin/env sh
-exec {cortex_bin} ingest agent-command wrap --spool {spool_path} -- "$@"
+# Best-effort agent-command logging. The probe confirms `ingest agent-command
+# wrap` is runnable; if cortex is missing or its CLI changed, fall through and
+# exec the command directly so logging can never brick the shell.
+if {cortex_bin} ingest agent-command wrap --probe >/dev/null 2>&1; then
+  exec {cortex_bin} ingest agent-command wrap --spool {spool_path} -- "$@"
+fi
+exec "$@"
 "#
     )
 }
