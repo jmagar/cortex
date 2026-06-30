@@ -51,6 +51,16 @@ fn command_args_to_shell_command_quotes_multi_arg_invocations() {
 
 #[test]
 fn agent_command_ingest_spool_guard_is_argv_scoped() {
+    // New grouped grammar: `cortex ingest agent-command ingest-spool`.
+    assert!(is_agent_command_ingest_spool_invocation(&[
+        "/usr/local/bin/cortex".to_string(),
+        "ingest".to_string(),
+        "agent-command".to_string(),
+        "ingest-spool".to_string(),
+        "--path".to_string(),
+        "/tmp/spool.jsonl".to_string(),
+    ]));
+    // Legacy pre-move grammar is still accepted defensively.
     assert!(is_agent_command_ingest_spool_invocation(&[
         "/usr/local/bin/cortex".to_string(),
         "agent-command".to_string(),

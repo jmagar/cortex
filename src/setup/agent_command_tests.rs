@@ -137,8 +137,13 @@ fn agent_command_wrapper_script_execs_cortex_with_spool_and_passthrough_args() {
     );
 
     assert!(script.starts_with("#!/usr/bin/env sh\n"));
-    assert!(script.contains("exec /home/me/.local/bin/cortex agent-command wrap"));
+    // Fail-open: probe the subcommand first, only delegate when it is runnable.
+    assert!(script.contains("ingest agent-command wrap --probe >/dev/null 2>&1"));
+    assert!(script.contains("exec /home/me/.local/bin/cortex ingest agent-command wrap"));
     assert!(script.contains("--spool /home/me/.local/state/cortex/agent-command.jsonl -- \"$@\""));
+    // ...and run the command directly if the probe fails, so logging can never
+    // brick the shell.
+    assert!(script.contains("fi\nexec \"$@\"\n"));
 }
 
 #[test]

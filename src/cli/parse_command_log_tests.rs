@@ -77,6 +77,22 @@ fn parses_agent_command_wrap_after_separator() {
         AgentCommandCommand::Wrap(args) => {
             assert_eq!(args.spool, "/tmp/commands.jsonl");
             assert_eq!(args.command, vec!["echo", "hello"]);
+            assert!(!args.probe);
+        }
+        other => panic!("unexpected command: {other:?}"),
+    }
+}
+
+#[test]
+fn parses_agent_command_wrap_probe_without_spool_or_command() {
+    let args = vec!["wrap".to_string(), "--probe".to_string()];
+
+    let command = parse_agent_command_command(&args).unwrap();
+
+    match command {
+        AgentCommandCommand::Wrap(args) => {
+            assert!(args.probe);
+            assert!(args.command.is_empty());
         }
         other => panic!("unexpected command: {other:?}"),
     }
