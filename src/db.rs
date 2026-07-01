@@ -8,6 +8,7 @@ pub mod graph_findings;
 pub mod graph_inventory;
 mod heartbeat;
 mod ingest;
+pub(crate) mod llm_invocations;
 mod maintenance;
 mod models;
 pub(crate) mod notifications;

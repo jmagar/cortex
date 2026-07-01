@@ -403,7 +403,7 @@ fn append_bounded_tail(buffer: &mut Vec<u8>, chunk: &[u8]) {
     }
 }
 
-fn redact_secrets(text: &str) -> String {
+pub(crate) fn redact_secrets(text: &str) -> String {
     text.split_whitespace()
         .map(|token| {
             if looks_secretish(token) {
@@ -416,7 +416,7 @@ fn redact_secrets(text: &str) -> String {
         .join(" ")
 }
 
-fn looks_secretish(token: &str) -> bool {
+pub(crate) fn looks_secretish(token: &str) -> bool {
     let upper = token.to_ascii_uppercase();
     upper.contains("API_KEY=")
         || upper.contains("TOKEN=")
