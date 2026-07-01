@@ -1838,3 +1838,77 @@ fn full_migration_chain_upgrades_populated_v0_2_6_database() {
         .unwrap();
     assert_eq!(count, 3);
 }
+
+#[test]
+fn migration_37_creates_llm_invocations_table() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("test.db");
+    let config = test_storage_config(db_path);
+    let pool = init_pool(&config).expect("init_pool should succeed");
+    let conn = pool.get().unwrap();
+
+    // Table exists with the exact locked column set.
+    let mut stmt = conn
+        .prepare(
+            "SELECT COUNT(*) FROM pragma_table_info('llm_invocations') WHERE name IN (
+                'id','started_at','finished_at','duration_ms','caller_surface','action',
+                'provider','model','program','incident_id','ai_tool','ai_project',
+                'ai_session_id','evidence_counts_json','prompt_bytes','output_bytes',
+                'status','error','metadata_json'
+            )",
+        )
+        .unwrap();
+    let count: i64 = stmt.query_row([], |row| row.get(0)).unwrap();
+    assert_eq!(count, 19, "llm_invocations must have all 19 locked columns");
+    drop(stmt);
+
+    // Migration is recorded and idempotent.
+    let version: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM schema_migrations WHERE version = 37",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(version, 1);
+
+    // Re-running init_pool (simulating a restart) must not error or duplicate the row.
+    drop(conn);
+    drop(pool);
+    let pool2 = init_pool(&config).expect("second init_pool should succeed");
+    let conn2 = pool2.get().unwrap();
+    let version2: i64 = conn2
+        .query_row(
+            "SELECT COUNT(*) FROM schema_migrations WHERE version = 37",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        version2, 1,
+        "migration 37 must be idempotent across restarts"
+    );
+}
+
+#[test]
+fn migration_37_indexes_exist() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("test.db");
+    let config = test_storage_config(db_path);
+    let pool = init_pool(&config).expect("init_pool should succeed");
+    let conn = pool.get().unwrap();
+    for idx in [
+        "idx_llm_invocations_started",
+        "idx_llm_invocations_action_started",
+        "idx_llm_invocations_status_started",
+    ] {
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name = ?1",
+                [idx],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1, "expected index {idx} to exist");
+    }
+}
