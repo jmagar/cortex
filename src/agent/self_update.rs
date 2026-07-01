@@ -153,11 +153,7 @@ pub async fn maybe_update(
     }
 
     // 5. Keep a rollback copy of the current binary, then atomically swap.
-    let bak = dir.join(format!("cortex.bak-{current}"));
-    let _ = std::fs::remove_file(&bak);
-    std::fs::hard_link(&exe, &bak)
-        .or_else(|_| std::fs::copy(&exe, &bak).map(|_| ()))
-        .with_context(|| format!("back up current binary to {bak:?}"))?;
+    let bak = backup_current_binary(&exe, &dir, current)?;
 
     // Record the in-flight update before the swap so a boot-crash is recoverable.
     write_marker(
@@ -177,6 +173,39 @@ pub async fn maybe_update(
         "agent binary updated; re-executing"
     );
     reexec(&exe)
+}
+
+fn backup_current_binary(exe: &Path, dir: &Path, current: &str) -> Result<PathBuf> {
+    let base = unique_backup_path_base(dir, current);
+    for attempt in 0..100 {
+        let bak = if attempt == 0 {
+            base.clone()
+        } else {
+            dir.join(format!(
+                "{}-{attempt}",
+                base.file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("cortex.bak")
+            ))
+        };
+        match std::fs::hard_link(exe, &bak).or_else(|_| std::fs::copy(exe, &bak).map(|_| ())) {
+            Ok(()) => return Ok(bak),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => {
+                return Err(error).with_context(|| format!("back up current binary to {bak:?}"));
+            }
+        }
+    }
+    bail!("could not allocate a unique backup path for agent self-update")
+}
+
+fn unique_backup_path_base(dir: &Path, current: &str) -> PathBuf {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let pid = std::process::id();
+    dir.join(format!("cortex.bak-{current}-{pid}-{now}"))
 }
 
 /// Confirm a just-installed update is healthy, or roll back if it never settled.
