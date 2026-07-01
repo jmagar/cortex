@@ -94,6 +94,7 @@ pub(super) enum ActionHandler {
     NotificationsRecent,
     FileTails,
     NotificationsTest,
+    LlmInvocations,
     SimilarIncidents,
     AskHistory,
     IncidentContext,
@@ -533,6 +534,13 @@ pub(super) const ACTION_SPECS: &[ActionSpec] = &[
         "Send a test notification via Apprise",
         Write,
         NotificationsTest
+    ),
+    action_spec!(
+        "llm_invocations",
+        Admin,
+        "Recent LLM invocation audit records (concurrency/rate-limit/circuit-breaker denials included) — admin-scoped: exposes operational kill-switch/circuit-breaker state",
+        Cheap,
+        LlmInvocations
     ),
     // ── Informational (auth required, no scope gate) ───────────────────────
     action_spec!(

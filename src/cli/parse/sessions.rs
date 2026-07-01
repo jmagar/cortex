@@ -2,7 +2,8 @@ use anyhow::{Result, bail};
 
 use self::more::{
     parse_sessions_ask_history, parse_sessions_assess, parse_sessions_incident_context,
-    parse_sessions_incidents, parse_sessions_investigate, parse_sessions_similar,
+    parse_sessions_incidents, parse_sessions_investigate, parse_sessions_llm_invocations,
+    parse_sessions_similar,
 };
 use self::ops::{
     parse_sessions_add, parse_sessions_checkpoints, parse_sessions_doctor, parse_sessions_errors,
@@ -43,6 +44,7 @@ const SESSIONS_SUBCOMMANDS: &[&str] = &[
     "incidents",
     "investigate",
     "assess",
+    "llm-invocations",
 ];
 
 pub(crate) fn parse_sessions_command(args: &[String]) -> Result<CliCommand> {
@@ -79,6 +81,7 @@ pub(crate) fn parse_sessions_command(args: &[String]) -> Result<CliCommand> {
         "incidents" => parse_sessions_incidents(rest),
         "investigate" => parse_sessions_investigate(rest),
         "assess" => parse_sessions_assess(rest),
+        "llm-invocations" => parse_sessions_llm_invocations(rest),
         _ => bail!(
             "{}",
             super::suggest::unknown_command(

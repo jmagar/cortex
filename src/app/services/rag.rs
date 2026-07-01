@@ -35,6 +35,31 @@ impl CortexService {
         .await
     }
 
+    /// List recent `llm_invocations` audit records (concurrency/rate-limit/
+    /// circuit-breaker denials included). Read-only over the audit table
+    /// `LlmRunner` writes — no scope gate at the service layer; MCP/REST
+    /// callers gate this at their own transport layer (cortex:admin /
+    /// X-Cortex-Admin-Token) since it exposes operational kill-switch/
+    /// circuit-breaker state, not just log content.
+    pub async fn llm_invocations_checked(
+        &self,
+        req: LlmInvocationsRequest,
+    ) -> ServiceResult<Vec<crate::db::llm_invocations::LlmInvocationRow>> {
+        let limit = req.effective_limit();
+        self.run_db("llm_invocations", move |pool| {
+            let conn = pool.get()?;
+            crate::db::llm_invocations::list_llm_invocations(
+                &conn,
+                limit,
+                req.since.as_deref(),
+                req.action.as_deref(),
+                req.status.as_deref(),
+            )
+            .map_err(anyhow::Error::from)
+        })
+        .await
+    }
+
     /// Send a test notification via configured Apprise destinations.
     ///
     /// Rate-limited to 10/min per actor using an in-memory counter that resets

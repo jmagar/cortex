@@ -55,6 +55,7 @@ A single MCP tool, `mcp__cortex__cortex`, dispatches on a required `action` argu
 | `file_tails` | Manage Cortex-owned file-tail ingest sources |
 | `notifications_recent` | List recent notification firings |
 | `notifications_test` | Send a test notification via Apprise |
+| `llm_invocations` | Recent LLM invocation audit records (concurrency/rate-limit/circuit-breaker denials included) |
 | `similar_incidents` | FTS5 cluster search over historical system logs matching a query |
 | `ask_history` | Search AI transcript history for sessions related to a topic |
 | `incident_context` | Full log context bundle for a known time window |
@@ -118,6 +119,7 @@ Start with **cheap** bounded calls, narrow scope with **moderate** actions, and 
 - moderate: `map`, `correlate`, `topic_correlate`, `ai_correlate`, `host_state`, `silent_hosts`, `unaddressed_errors`, `incident_context`, …
 - expensive: `fleet_state`, `correlate_state`, `stats`, `patterns`, `anomalies`, `compare`, `compose_doctor`, `graph`.
 - write (admin scope): `ack_error`, `unack_error`, `file_tails`, `notifications_test`.
+- read (admin scope, exposes operational state): `llm_invocations`.
 
 ---
 

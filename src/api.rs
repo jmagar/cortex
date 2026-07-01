@@ -1,7 +1,7 @@
 //! Always-on non-MCP REST API (`/api/*`) for the log intelligence core —
 //! the default transport for the CLI since v0.26 (`CORTEX_USE_HTTP=true`).
 //!
-//! 57 routes mirroring the MCP action surface one-for-one (see
+//! 58 routes mirroring the MCP action surface one-for-one (see
 //! `docs/api.md` for the endpoint matrix). Every route requires the
 //! `CORTEX_API_TOKEN` bearer; route mounting fails at startup when the token
 //! is absent, so the surface is never silently open.
@@ -37,10 +37,10 @@ use crate::app::{
     GetLogRequest, GraphAroundRequest, GraphEntityLookupRequest, GraphEvidenceLookupRequest,
     GraphExplainRequest, HostStateRequest, IncidentContextRequest, IngestRateRequest,
     ListAiProjectsRequest, ListAiToolsRequest, ListAppsRequest, ListSessionsRequest,
-    ListSourceIpsRequest, NotificationsRecentRequest, PatternsRequest, ProjectContextRequest,
-    RequestActor, SearchLogsRequest, SearchSessionsRequest, ServiceError, SilentHostsRequest,
-    SimilarIncidentsRequest, TailLogsRequest, TimelineRequest, TopicCorrelateRequest,
-    UnackErrorRequest, UnaddressedErrorsRequest, UsageBlocksRequest,
+    ListSourceIpsRequest, LlmInvocationsRequest, NotificationsRecentRequest, PatternsRequest,
+    ProjectContextRequest, RequestActor, SearchLogsRequest, SearchSessionsRequest, ServiceError,
+    SilentHostsRequest, SimilarIncidentsRequest, TailLogsRequest, TimelineRequest,
+    TopicCorrelateRequest, UnackErrorRequest, UnaddressedErrorsRequest, UsageBlocksRequest,
 };
 use crate::config::ApiConfig;
 use crate::mcp::{AuthPolicy, build_auth_layer};
@@ -264,6 +264,7 @@ pub fn router(state: ApiState) -> anyhow::Result<Router> {
         .route("/api/sessions/ask-history", get(ai_ask_history))
         .route("/api/sessions/incidents", get(ai_incidents))
         .route("/api/sessions/investigate", get(ai_investigate))
+        .route("/api/sessions/llm-invocations", get(ai_llm_invocations))
         .route("/api/compose/status", get(compose_status))
         .route("/api/compose/doctor", get(compose_doctor))
         // --- ai session queries ---
@@ -793,6 +794,25 @@ async fn notifications_recent(
     Query(req): Query<NotificationsRecentRequest>,
 ) -> impl IntoResponse {
     respond(state.service.alerts().notifications(req).await)
+}
+
+/// `GET /api/sessions/llm-invocations` — admin-gated, unlike the plain
+/// `notifications_recent` handler above: `llm_invocations` exposes
+/// circuit-breaker/kill-switch/rate-limit operational state (see eng review
+/// Fix 4 in the LLM invocation guard plan), so it requires
+/// `CORTEX_API_ADMIN_TOKEN` / `X-Cortex-Admin-Token`, matching the existing
+/// `ack_error`/`unack_error` admin handlers.
+async fn ai_llm_invocations(
+    State(state): State<ApiState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Query(req): Query<LlmInvocationsRequest>,
+) -> axum::response::Response {
+    if let Some(resp) = require_api_admin_token(&state, &headers) {
+        return resp;
+    }
+    tracing::warn!(caller_ip = %peer.ip(), "admin: llm_invocations invoked");
+    respond(state.service.llm_invocations_checked(req).await)
 }
 
 async fn notifications_test() -> impl IntoResponse {

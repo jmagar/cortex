@@ -258,6 +258,42 @@ fn parse_sessions_more_reports_required_query_and_unexpected_argument_errors() {
     assert!(err.contains("requires an <incident_id>"));
 }
 
+#[test]
+fn parse_sessions_llm_invocations_collects_flags() {
+    let args = strings(&[
+        "--since",
+        "24h",
+        "--action",
+        "ai_assess",
+        "--status",
+        "success",
+        "--limit",
+        "50",
+        "--json",
+    ]);
+
+    let command = parse_sessions_llm_invocations(&args).unwrap();
+
+    match command {
+        crate::cli::CliCommand::Sessions(crate::cli::SessionsCommand::LlmInvocations(args)) => {
+            assert_eq!(args.action.as_deref(), Some("ai_assess"));
+            assert_eq!(args.status.as_deref(), Some("success"));
+            assert_eq!(args.limit, Some(50));
+            assert!(args.json);
+            assert!(args.since.is_some());
+        }
+        other => panic!("expected SessionsCommand::LlmInvocations, got {other:?}"),
+    }
+}
+
+#[test]
+fn parse_sessions_llm_invocations_rejects_unknown_flag() {
+    let err = parse_sessions_llm_invocations(&strings(&["--bogus"]))
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("unknown flag for sessions llm-invocations"));
+}
+
 fn strings(values: &[&str]) -> Vec<String> {
     values.iter().map(|value| (*value).to_string()).collect()
 }

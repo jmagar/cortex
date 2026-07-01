@@ -139,6 +139,9 @@ pub(crate) async fn run(mode: CliMode, command: CliCommand) -> Result<()> {
                 dispatch::run_ai_investigate(&mode, args).await
             }
             super::SessionsCommand::Assess(args) => dispatch::run_ai_assess(&mode, args).await,
+            super::SessionsCommand::LlmInvocations(args) => {
+                dispatch::run_ai_llm_invocations(&mode, args).await
+            }
         },
         CliCommand::Heartbeat(command) => {
             super::heartbeat_agent::run_heartbeat_no_db(command).await

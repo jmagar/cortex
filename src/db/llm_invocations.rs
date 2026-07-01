@@ -83,14 +83,6 @@ pub fn finish_llm_invocation(
 }
 
 /// A row from `llm_invocations`, as returned to CLI/MCP/REST readers.
-///
-/// `#[allow(dead_code)]`: not yet constructed outside tests — the read
-/// surfaces (CLI `sessions llm-invocations`, MCP `llm_invocations` action,
-/// REST `GET /api/sessions/llm-invocations`) are wired up in a later task
-/// in the same plan/PR; this type and `list_llm_invocations` below are
-/// deliberately landed alongside the writer path first so the DB layer is
-/// reviewable as one cohesive unit.
-#[allow(dead_code)]
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LlmInvocationRow {
     pub id: String,
@@ -117,10 +109,6 @@ pub struct LlmInvocationRow {
 /// Fetch recent invocations, optionally filtered by `action`/`status` and
 /// bounded to those started at or after `since` (ISO8601). `limit` is
 /// clamped to `[1, 500]`, matching `notifications::firings_recent`.
-///
-/// `#[allow(dead_code)]`: wired to CLI/MCP/REST read surfaces in a later
-/// task in this same plan/PR (see the note on `LlmInvocationRow` above).
-#[allow(dead_code)]
 pub fn list_llm_invocations(
     conn: &rusqlite::Connection,
     limit: i64,

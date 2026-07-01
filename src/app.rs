@@ -146,6 +146,7 @@ pub use models::{
     ListSessionsResponse,
     ListSourceIpsRequest,
     ListSourceIpsResponse,
+    LlmInvocationsRequest,
     LogEntry,
     MaintenanceJobStatus,
     NotificationsRecentRequest,

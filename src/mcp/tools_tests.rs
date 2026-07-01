@@ -1170,6 +1170,7 @@ fn sample_args_for_action(action: &str) -> Option<serde_json::Value> {
         | "unaddressed_errors"
         | "notifications_recent"
         | "notifications_test"
+        | "llm_invocations"
         | "help" => json!({"action": action}),
         _ => return None,
     })

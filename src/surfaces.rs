@@ -296,6 +296,7 @@ pub const SURFACE_SPECS: &[SurfaceSpec] = &[
         RetainedProtocolCompatibility,
         Admin
     ),
+    mcp!("llm_invocations", Sessions, Canonical, Admin),
     mcp!(
         "similar_incidents",
         Analysis,

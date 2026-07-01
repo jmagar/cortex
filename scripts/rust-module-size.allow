@@ -1,5 +1,6 @@
 src/api.rs
 src/agent_deploy.rs
+src/cli/dispatch_sessions.rs
 src/cli/help.rs
 src/cli/http_client.rs
 src/cli/parse_ai.rs

@@ -79,7 +79,7 @@ Action registry covered by live/script references: `search`, `filter`, `tail`, `
 `source_ips`, `timeline`, `patterns`, `context`, `get`, `ingest_rate`,
 `silent_hosts`, `clock_skew`, `anomalies`, `compare`, `compose_status`,
 `compose_doctor`, `unaddressed_errors`, `ack_error`, `unack_error`,
-`notifications_recent`, `file_tails`, `notifications_test`,
+`notifications_recent`, `file_tails`, `notifications_test`, `llm_invocations`,
 `similar_incidents`, `ask_history`, `incident_context`, `graph`, `help`.
 
 ### mcporter-based testing

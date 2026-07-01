@@ -1710,6 +1710,43 @@ async fn ai_assess_writes_llm_invocation_audit_row_via_runner() {
     assert_eq!(count, 1, "run_gemini_assess must audit through LlmRunner");
 }
 
+#[tokio::test]
+async fn llm_invocations_checked_returns_recent_rows_filtered() {
+    let (service, pool, _dir) = test_service();
+    let conn = pool.get().unwrap();
+    let params = crate::db::llm_invocations::LlmInvocationInsertParams {
+        caller_surface: "test".to_string(),
+        action: "ai_assess".to_string(),
+        provider: "gemini-cli".to_string(),
+        model: Some("m".to_string()),
+        program: Some("gemini".to_string()),
+        incident_id: None,
+        ai_tool: None,
+        ai_project: None,
+        ai_session_id: None,
+        evidence_counts_json: None,
+        prompt_bytes: Some(10),
+        status: "running".to_string(),
+        metadata_json: None,
+    };
+    crate::db::llm_invocations::insert_llm_invocation_running(&conn, "llm-x", &params).unwrap();
+    crate::db::llm_invocations::finish_llm_invocation(&conn, "llm-x", "success", None, 5, Some(20))
+        .unwrap();
+    drop(conn);
+
+    let rows = service
+        .llm_invocations_checked(crate::app::LlmInvocationsRequest {
+            limit: Some(10),
+            since: None,
+            action: Some("ai_assess".to_string()),
+            status: None,
+        })
+        .await
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].id, "llm-x");
+}
+
 // `tracing_test::traced_test` captures TRACE-level events by default, so the
 // `tracing::debug!` calls emitted by `run_db` are visible to `logs_contain`.
 // We verify both the message tag and the structured timing fields are present.

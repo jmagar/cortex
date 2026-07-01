@@ -12,6 +12,7 @@
 #   cortex anomalies, cortex compare, cortex compose_status,
 #   cortex compose_doctor, cortex unaddressed_errors, cortex ack_error,
 #   cortex unack_error, cortex notifications_recent, cortex file_tails, cortex notifications_test,
+#   cortex llm_invocations,
 #   cortex similar_incidents, cortex ask_history, cortex incident_context, cortex graph,
 #   cortex help
 #
