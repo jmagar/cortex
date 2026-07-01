@@ -5,6 +5,7 @@ src/cli/http_client.rs
 src/cli/parse_ai.rs
 src/cli/parse_logs.rs
 src/command_log.rs
+src/config.rs
 src/db/pool.rs
 src/main.rs
 src/mcp/actions.rs

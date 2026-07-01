@@ -1436,3 +1436,54 @@ fn env_override_populates_apprise_urls_list() {
     unsafe { std::env::remove_var("CORTEX_NOTIFICATIONS_APPRISE_URLS") };
     assert_eq!(urls, vec!["gotify://host/a", "ntfy://ntfy.sh/b"]);
 }
+
+#[test]
+fn llm_config_defaults_match_locked_table() {
+    let cfg = crate::config::LlmConfig::default();
+    assert!(cfg.enabled);
+    assert_eq!(cfg.max_concurrent, 1);
+    assert_eq!(cfg.max_per_action_concurrent, 1);
+    assert_eq!(cfg.max_invocations_per_minute, 3);
+    assert_eq!(cfg.max_invocations_per_hour, 30);
+    assert_eq!(cfg.failure_threshold, 3);
+    assert_eq!(cfg.cooldown_secs, 300);
+    assert_eq!(cfg.timeout_secs, 120);
+    assert_eq!(cfg.max_prompt_bytes, 1_048_576);
+    assert_eq!(cfg.max_output_bytes, 262_144);
+    assert!(!cfg.background_enrichment_enabled);
+    assert!(
+        cfg.actions.is_empty(),
+        "no actions configured by default until config.toml declares them"
+    );
+}
+
+#[test]
+fn llm_config_parses_from_toml_with_action_subtables() {
+    let toml_str = r#"
+        [llm]
+        enabled = true
+        max_concurrent = 2
+
+        [llm.actions.ai_assess]
+        enabled = true
+
+        [llm.actions.background_enrich]
+        enabled = false
+    "#;
+    let parsed: crate::config::Config = toml::from_str(toml_str).unwrap();
+    assert_eq!(parsed.llm.max_concurrent, 2);
+    // Fields not set in the [llm] table still take their defaults.
+    assert_eq!(parsed.llm.max_invocations_per_minute, 3);
+    assert!(parsed.llm.actions.get("ai_assess").unwrap().enabled);
+    assert!(!parsed.llm.actions.get("background_enrich").unwrap().enabled);
+}
+
+#[test]
+#[serial]
+fn cortex_llm_enabled_env_var_overrides_config() {
+    unsafe { std::env::set_var("CORTEX_LLM_ENABLED", "false") };
+    let mut cfg = crate::config::LlmConfig::default();
+    env_override_bool("CORTEX_LLM_ENABLED", &mut cfg.enabled).unwrap();
+    assert!(!cfg.enabled);
+    unsafe { std::env::remove_var("CORTEX_LLM_ENABLED") };
+}
