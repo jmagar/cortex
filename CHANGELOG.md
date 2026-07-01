@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.2.0] - 2026-07-01
+
+### Added
+
+- Shared `LlmRunner` invocation guard for all LLM-backed assessment features: global/per-action concurrency limits, per-action rate limiting, cooldown circuit breaker, per-invocation timeout, prompt/output byte caps, dry-run preview mode, and a global + per-action kill switch (`[llm]` config section, `CORTEX_LLM_ENABLED` env override).
+- `llm_invocations` audit table (migration 37) recording every LLM invocation attempt, including denials (rate-limited, circuit-open, disabled, concurrency-limited).
+- New read surfaces for the audit trail: CLI `cortex sessions llm-invocations`, MCP action `llm_invocations` (requires `cortex:admin` scope), REST `GET /api/sessions/llm-invocations` (requires the admin API token).
+- `cortex sessions assess` (the Gemini CLI subprocess assessment path) now routes through `LlmRunner` instead of invoking the Gemini subprocess directly.
+
+### Changed
+
+- **Behavior change:** `cortex sessions assess` now enforces `[llm].max_concurrent=1` / `[llm].max_per_action_concurrent=1` by default. Two overlapping interactive `assess` invocations will now hard-fail the second with a concurrency-limited error, where previously they ran concurrently with no guard. Raise `[llm].max_concurrent` / `[llm].max_per_action_concurrent` if your workflow depends on concurrent assessments.
+- `GeminiAssessConfig::from_env` no longer reads `CORTEX_LLM_COMPLETION_TIMEOUT_SECS` for the `cortex sessions assess` path; the Gemini subprocess timeout is now driven solely by `[llm].timeout_secs`, eliminating a silent dual-timeout-source bug. Setting `CORTEX_LLM_COMPLETION_TIMEOUT_SECS` now logs a deprecation warning and has no effect on this path.
+
+### Security
+
+- The `llm_invocations` audit read surface (CLI/MCP/REST) is scoped `cortex:admin`, not `cortex:read` — its `status`/`error`/`metadata_json` fields expose circuit-breaker and kill-switch operational state that is not appropriate for the broad `cortex:read` trust tier.
+
 ## [3.1.3] - 2026-06-30
 
 ### Fixed
