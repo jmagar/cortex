@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.1.1] - 2026-06-30
+
+### Fixed
+
+- Release dispatch now publishes real GitHub Releases when `auto-tag` creates a
+  version tag, instead of running `release.yml` in dry-run mode.
+- Added a local systemd auto-deploy timer for the source-built Cortex Compose
+  stack so the server can fast-forward `main`, rebuild, recreate, and verify
+  itself instead of waiting for manual deploys.
+
 ## [3.1.0] - 2026-06-30
 
 ### Fixed

@@ -25,6 +25,27 @@ curl -sf http://localhost:3100/health
 cortex compose logs --tail 20
 ```
 
+## Automatic Local Deploy
+
+The active dookie deployment is the local source-built Compose stack
+(`docker-compose.yml`, image `cortex-cortex`). GitHub publishes GHCR images, but
+that does not update this local stack by itself. Install the user timer below to
+keep the server aligned with `origin/main`:
+
+```bash
+mkdir -p ~/.config/systemd/user
+cp config/systemd/cortex-auto-deploy.{service,timer} ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now cortex-auto-deploy.timer
+systemctl --user start cortex-auto-deploy.service
+systemctl --user status cortex-auto-deploy.timer cortex-auto-deploy.service
+```
+
+The service runs `scripts/auto-deploy.sh`: it refuses dirty/non-`main`
+checkouts, fast-forwards from `origin/main`, rebuilds the local image, recreates
+the `cortex` service, waits for `/health`, and verifies the in-container
+`cortex --version` matches `Cargo.toml`.
+
 ## Rollback
 
 Which rollback path applies depends on the compose file in use:
