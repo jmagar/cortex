@@ -25,7 +25,7 @@ if [[ -n "$(git status --porcelain)" ]]; then
   exit 1
 fi
 
-git fetch origin main --tags
+git fetch --no-tags origin main
 before="$(git rev-parse HEAD)"
 git pull --ff-only
 after="$(git rev-parse HEAD)"
