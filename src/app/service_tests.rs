@@ -1,10 +1,40 @@
 use std::sync::Arc;
 
+use serial_test::serial;
+
 use crate::app::UnaddressedErrorsRequest;
 use crate::config::StorageConfig;
 use crate::db::{DbPool, LogBatchEntry, init_pool, insert_logs_batch};
 
 use super::*;
+
+/// Env-var guard for tests that must set/restore process env vars.
+/// Mirrors `src/assessment_tests.rs`'s private `EnvGuard` — kept local
+/// rather than shared since both are test-only and crate-private.
+struct EnvGuard {
+    name: &'static str,
+    old: Option<std::ffi::OsString>,
+}
+
+impl EnvGuard {
+    fn set(name: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
+        let old = std::env::var_os(name);
+        // TODO: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var(name, value) };
+        Self { name, old }
+    }
+}
+
+impl Drop for EnvGuard {
+    fn drop(&mut self) {
+        match &self.old {
+            // TODO: Audit that the environment access only happens in single-threaded code.
+            Some(value) => unsafe { std::env::set_var(self.name, value) },
+            // TODO: Audit that the environment access only happens in single-threaded code.
+            None => unsafe { std::env::remove_var(self.name) },
+        }
+    }
+}
 
 fn test_service() -> (CortexService, Arc<DbPool>, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
@@ -1577,6 +1607,107 @@ async fn run_gemini_assess_rejects_missing_incident_before_gemini() {
         }
         other => panic!("expected invalid input, got {other:?}"),
     }
+}
+
+#[tokio::test]
+#[serial]
+async fn ai_assess_writes_llm_invocation_audit_row_via_runner() {
+    let (service, pool, _dir) = test_service();
+
+    // Seed AI-transcript log rows containing an abuse term so
+    // investigate_ai_incidents finds a real, deterministic incident_id
+    // (a DefaultHasher digest of project/tool/session/hostname/anchor ids —
+    // must be read back, never hardcoded).
+    let entries: Vec<LogBatchEntry> = (0..3)
+        .map(|i| LogBatchEntry {
+            timestamp: format!("2026-01-01T00:0{i}:00Z"),
+            hostname: "host-a".into(),
+            facility: Some("local0".into()),
+            severity: "info".into(),
+            app_name: Some("ai-transcript".into()),
+            process_id: None,
+            message: "this shit needs assessment".into(),
+            raw: "this shit needs assessment".into(),
+            source_ip: "127.0.0.1:514".into(),
+            docker_checkpoint: None,
+            ai_tool: Some("codex".into()),
+            ai_project: Some("/tmp/project".into()),
+            ai_session_id: Some(format!("sess-{i:02}")),
+            ai_transcript_path: Some(format!("/tmp/project/sess-{i:02}.jsonl")),
+            metadata_json: None,
+            http_status: None,
+            auth_outcome: None,
+            dns_blocked: None,
+            event_action: None,
+            parse_error: None,
+        })
+        .collect();
+    insert_logs_batch(&pool, &entries).unwrap();
+
+    let listed = service
+        .investigate_ai_incidents(AiInvestigateRequest {
+            project: Some("/tmp/project".into()),
+            tool: Some("codex".into()),
+            limit: Some(10),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let incident_id = listed.evidence[0].incident.incident_id.clone();
+
+    // Point CORTEX_HEADLESS_GEMINI_CMD at a fake "gemini" script that emits
+    // a minimal valid stream-json assistant text event, so
+    // run_gemini_assessment succeeds without needing a real Gemini CLI —
+    // same fake-script-on-PATH pattern used by
+    // src/assessment_tests.rs::gemini_assessment_timeout_kills_and_reaps_child.
+    let source = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(source.path().join(".gemini")).unwrap();
+    std::fs::write(source.path().join(".gemini").join("settings.json"), "{}").unwrap();
+    let script = source.path().join("fake-gemini.sh");
+    std::fs::write(
+        &script,
+        "#!/usr/bin/env bash\necho '{\"type\":\"message\",\"role\":\"assistant\",\"content\":\"ok\"}'\necho '{\"type\":\"result\",\"status\":\"success\"}'\n",
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(&script).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&script, perms).unwrap();
+    }
+    let _cmd = EnvGuard::set("CORTEX_HEADLESS_GEMINI_CMD", script.display().to_string());
+    let _home = EnvGuard::set(
+        "CORTEX_HEADLESS_GEMINI_HOME",
+        source.path().display().to_string(),
+    );
+
+    let response = service
+        .run_gemini_assess(AiAssessRequest {
+            incident_id: incident_id.clone(),
+            model: None,
+            project: None,
+            tool: None,
+            since: None,
+            until: None,
+            window_minutes: None,
+            correlation_window_minutes: None,
+            terms: Vec::new(),
+            limit: None,
+        })
+        .await
+        .unwrap();
+    assert_eq!(response.incident_id, incident_id);
+
+    let conn = pool.get().unwrap();
+    let count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM llm_invocations WHERE action = 'ai_assess' AND status = 'success'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(count, 1, "run_gemini_assess must audit through LlmRunner");
 }
 
 // `tracing_test::traced_test` captures TRACE-level events by default, so the

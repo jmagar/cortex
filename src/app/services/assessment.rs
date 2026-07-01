@@ -1,4 +1,5 @@
 use super::*;
+use crate::app::llm_runner::{LlmCallerSurface, LlmEvidenceCounts, LlmInvocationSpec};
 
 impl CortexService {
     pub async fn run_gemini_assess(&self, req: AiAssessRequest) -> ServiceResult<AiAssessResponse> {
@@ -8,23 +9,27 @@ impl CortexService {
     pub async fn run_gemini_assess_with_delta<F>(
         &self,
         req: AiAssessRequest,
-        on_delta: F,
+        mut on_delta: F,
     ) -> ServiceResult<AiAssessResponse>
     where
         F: FnMut(&str) -> anyhow::Result<()> + Send,
     {
         let incident_id = req.incident_id.clone();
-        let gemini_config = GeminiAssessConfig::from_env(req.model);
+        // Eng review fix (Fix 1): pass LlmRunner's own resolved timeout
+        // through instead of letting GeminiAssessConfig::from_env
+        // independently re-read CORTEX_LLM_COMPLETION_TIMEOUT_SECS.
+        let gemini_config =
+            GeminiAssessConfig::from_env(req.model.clone(), self.llm().timeout_secs());
         let invest_req = AiInvestigateRequest {
             incident_id: Some(incident_id.clone()),
-            project: req.project,
-            tool: req.tool,
-            since: req.since,
-            until: req.until,
+            project: req.project.clone(),
+            tool: req.tool.clone(),
+            since: req.since.clone(),
+            until: req.until.clone(),
             limit: Some(req.limit.unwrap_or(200).max(200)),
             window_minutes: req.window_minutes,
             correlation_window_minutes: req.correlation_window_minutes,
-            terms: req.terms,
+            terms: req.terms.clone(),
         };
         let invest_resp = self.investigate_ai_incidents(invest_req).await?;
 
@@ -51,9 +56,60 @@ impl CortexService {
             total_anchors: matching.iter().map(|e| e.anchors.len()).sum(),
         };
 
-        let assessment = run_gemini_assessment(&prompt, &gemini_config, on_delta)
-            .await
-            .map_err(ServiceError::Internal)?;
+        // `on_delta` is `FnMut` and borrows the caller's stack, so it cannot
+        // cross into the `'static` `run_fn` closure `LlmRunner::run`
+        // requires. Stream deltas through a channel instead: the run_fn
+        // task forwards each parsed delta line, and this function drains
+        // the channel concurrently with awaiting the run.
+        let (delta_tx, mut delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        let gemini_config_owned = gemini_config.clone();
+        let run_fut = self.llm().run(
+            LlmInvocationSpec {
+                caller_surface: LlmCallerSurface::Cli,
+                action: "ai_assess".to_string(),
+                incident_id: Some(incident_id.clone()),
+                ai_tool: req.tool.clone(),
+                ai_project: req.project.clone(),
+                ai_session_id: None,
+                evidence_counts: LlmEvidenceCounts {
+                    total_incidents: evidence_summary.total_incidents,
+                    evidence_bundle_count: evidence_summary.evidence_bundle_count,
+                    total_anchors: evidence_summary.total_anchors,
+                    truncated: invest_resp.truncated,
+                },
+                prompt: prompt.clone(),
+                provider: "gemini-cli".to_string(),
+                model: gemini_config_owned.model.clone(),
+                program: gemini_config_owned.program.clone(),
+                extra_metadata: serde_json::json!({}),
+            },
+            move |prompt| async move {
+                run_gemini_assessment(&prompt, &gemini_config_owned, move |delta: &str| {
+                    let _ = delta_tx.send(delta.to_string());
+                    Ok(())
+                })
+                .await
+            },
+        );
+        tokio::pin!(run_fut);
+
+        let assessment = loop {
+            tokio::select! {
+                biased;
+                Some(delta) = delta_rx.recv() => {
+                    on_delta(&delta).map_err(ServiceError::Internal)?;
+                }
+                result = &mut run_fut => {
+                    // Drain any remaining buffered deltas before returning.
+                    while let Ok(delta) = delta_rx.try_recv() {
+                        on_delta(&delta).map_err(ServiceError::Internal)?;
+                    }
+                    break result;
+                }
+            }
+        }
+        .map_err(|err| ServiceError::Internal(anyhow::anyhow!(err)))?
+        .output;
 
         Ok(AiAssessResponse {
             incident_id,

@@ -283,9 +283,27 @@ async fn gemini_assessment_reports_child_stderr_before_stdin_pipe_error() {
 fn env_config_uses_syslog_specific_knobs() {
     let _cmd = EnvGuard::set("CORTEX_HEADLESS_GEMINI_CMD", "custom-gemini");
     let _model = EnvGuard::set("CORTEX_HEADLESS_GEMINI_MODEL", "gemini-custom");
-    let _timeout = EnvGuard::set("CORTEX_LLM_COMPLETION_TIMEOUT_SECS", "7");
-    let config = GeminiAssessConfig::from_env(None);
+    let config = GeminiAssessConfig::from_env(None, 42);
     assert_eq!(config.program, "custom-gemini");
     assert_eq!(config.model, "gemini-custom");
-    assert_eq!(config.timeout_secs, 7);
+    assert_eq!(config.timeout_secs, 42);
+}
+
+// Eng review fix (Fix 1 — architecture + performance reviewers): the
+// caller-supplied timeout is now the SINGLE source of truth end to end —
+// `GeminiAssessConfig::from_env` must not re-read
+// `CORTEX_LLM_COMPLETION_TIMEOUT_SECS`, or the outer `LlmRunner::run`
+// timeout ([llm].timeout_secs) and the inner Gemini-subprocess timeout
+// could silently disagree (effective timeout becomes min(both)).
+#[test]
+#[serial]
+fn from_env_uses_the_passed_timeout_not_the_legacy_env_var() {
+    let _timeout = EnvGuard::set("CORTEX_LLM_COMPLETION_TIMEOUT_SECS", "5");
+    let cfg = GeminiAssessConfig::from_env(None, 77);
+    assert_eq!(
+        cfg.timeout_secs, 77,
+        "GeminiAssessConfig must use the passed-in resolved timeout, \
+         NOT re-read CORTEX_LLM_COMPLETION_TIMEOUT_SECS, so it can never \
+         silently disagree with LlmRunner's own outer timeout"
+    );
 }
