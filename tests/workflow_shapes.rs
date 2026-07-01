@@ -88,6 +88,7 @@ fn local_cortex_server_has_auto_deploy_timer_contract() {
         "auto-deploy timer must schedule the service"
     );
     for required in [
+        "git fetch --no-tags origin main",
         "git pull --ff-only",
         "docker compose build cortex",
         "docker compose up -d --no-deps --force-recreate cortex",
@@ -99,6 +100,10 @@ fn local_cortex_server_has_auto_deploy_timer_contract() {
             "auto-deploy script must contain {required:?}"
         );
     }
+    assert!(
+        !script.contains("--tags"),
+        "auto-deploy must not fetch tags; stale local tag conflicts must not block deploy"
+    );
 }
 
 fn workflow_job_block<'a>(workflow: &'a str, job_name: &str) -> &'a str {
