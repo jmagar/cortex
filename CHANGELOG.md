@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.1.3] - 2026-06-30
+
+### Fixed
+
+- Agent self-update now writes rollback backups to unique paths, so stale
+  backup filenames cannot wedge an otherwise valid retry.
+
 ## [3.1.2] - 2026-06-30
 
 ### Fixed

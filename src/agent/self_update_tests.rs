@@ -78,6 +78,27 @@ fn read_marker_absent_returns_none() {
     assert!(read_marker(&dir.path().join("nope.json")).is_none());
 }
 
+#[test]
+fn backup_current_binary_uses_unique_backup_paths() {
+    let dir = tempfile::tempdir().unwrap();
+    let exe = dir.path().join("cortex");
+    std::fs::write(&exe, b"current").unwrap();
+    std::fs::write(dir.path().join("cortex.bak-3.1.0"), b"stale").unwrap();
+
+    let first = backup_current_binary(&exe, dir.path(), "3.1.0").unwrap();
+    let second = backup_current_binary(&exe, dir.path(), "3.1.0").unwrap();
+
+    assert_ne!(first, dir.path().join("cortex.bak-3.1.0"));
+    assert_ne!(second, dir.path().join("cortex.bak-3.1.0"));
+    assert_ne!(first, second);
+    assert_eq!(std::fs::read(first).unwrap(), b"current");
+    assert_eq!(std::fs::read(second).unwrap(), b"current");
+    assert_eq!(
+        std::fs::read(dir.path().join("cortex.bak-3.1.0")).unwrap(),
+        b"stale"
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn validate_binary_accepts_matching_version_and_rejects_mismatch() {
