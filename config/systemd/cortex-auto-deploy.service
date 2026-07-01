@@ -1,0 +1,11 @@
+[Unit]
+Description=cortex local server auto-deploy
+Documentation=https://github.com/jmagar/cortex
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/jmagar/workspace/cortex
+Environment=PATH=/home/jmagar/.local/bin:/home/linuxbrew/.linuxbrew/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/home/jmagar/workspace/cortex/scripts/auto-deploy.sh
