@@ -1710,6 +1710,106 @@ async fn ai_assess_writes_llm_invocation_audit_row_via_runner() {
     assert_eq!(count, 1, "run_gemini_assess must audit through LlmRunner");
 }
 
+// Eng review fix (code-simplicity-reviewer, GH issue #94): `LlmRunner::dry_run`
+// was fully implemented and unit-tested but had zero CLI/MCP/REST callers.
+// `dry_run_gemini_assess` wires it into `cortex sessions assess --dry-run`.
+// This test proves the dry-run path short-circuits before any subprocess
+// spawn: deliberately do NOT set CORTEX_HEADLESS_GEMINI_CMD/HOME (unlike
+// the sibling `ai_assess_writes_llm_invocation_audit_row_via_runner` test
+// above) — if `dry_run_gemini_assess` ever tried to spawn Gemini, it would
+// fail loudly (missing binary) rather than silently succeed, since no fake
+// script is on PATH here.
+#[tokio::test]
+#[serial]
+async fn ai_assess_dry_run_previews_without_spawning_gemini_subprocess() {
+    let (service, pool, _dir) = test_service();
+
+    let entries: Vec<LogBatchEntry> = (0..3)
+        .map(|i| LogBatchEntry {
+            timestamp: format!("2026-01-01T00:0{i}:00Z"),
+            hostname: "host-a".into(),
+            facility: Some("local0".into()),
+            severity: "info".into(),
+            app_name: Some("ai-transcript".into()),
+            process_id: None,
+            message: "this shit needs assessment".into(),
+            raw: "this shit needs assessment".into(),
+            source_ip: "127.0.0.1:514".into(),
+            docker_checkpoint: None,
+            ai_tool: Some("codex".into()),
+            ai_project: Some("/tmp/project-dry-run".into()),
+            ai_session_id: Some(format!("sess-dr-{i:02}")),
+            ai_transcript_path: Some(format!("/tmp/project-dry-run/sess-dr-{i:02}.jsonl")),
+            metadata_json: None,
+            http_status: None,
+            auth_outcome: None,
+            dns_blocked: None,
+            event_action: None,
+            parse_error: None,
+        })
+        .collect();
+    insert_logs_batch(&pool, &entries).unwrap();
+
+    let listed = service
+        .investigate_ai_incidents(AiInvestigateRequest {
+            project: Some("/tmp/project-dry-run".into()),
+            tool: Some("codex".into()),
+            limit: Some(10),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let incident_id = listed.evidence[0].incident.incident_id.clone();
+
+    // No CORTEX_HEADLESS_GEMINI_CMD/HOME set — if dry_run_gemini_assess
+    // spawned a real subprocess it would fail to find `gemini` on PATH
+    // (or hang), not silently pass.
+    let outcome = service
+        .dry_run_gemini_assess(AiAssessRequest {
+            incident_id: incident_id.clone(),
+            model: None,
+            project: None,
+            tool: None,
+            since: None,
+            until: None,
+            window_minutes: None,
+            correlation_window_minutes: None,
+            terms: Vec::new(),
+            limit: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(outcome.prompt_bytes > 0);
+    assert!(!outcome.would_exceed_prompt_limit);
+    assert_eq!(outcome.evidence_counts.evidence_bundle_count, 1);
+
+    let conn = pool.get().unwrap();
+    let (status, incident_col): (String, Option<String>) = conn
+        .query_row(
+            "SELECT status, incident_id FROM llm_invocations WHERE id = ?1",
+            [&outcome.invocation_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(status, "dry_run");
+    assert_eq!(incident_col.as_deref(), Some(incident_id.as_str()));
+
+    // No "running" or "success" row should exist for this action — proves
+    // the real run_fn path (which would create those statuses) never ran.
+    let real_run_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM llm_invocations WHERE action = 'ai_assess' AND status IN ('running', 'success')",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        real_run_count, 0,
+        "dry-run must never produce a running/success row (that would mean a real invocation happened)"
+    );
+}
+
 #[tokio::test]
 async fn llm_invocations_checked_returns_recent_rows_filtered() {
     let (service, pool, _dir) = test_service();

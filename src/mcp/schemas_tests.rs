@@ -387,3 +387,57 @@ fn schema_source_kinds_enum_matches_source_kind_wire_names() {
         .collect();
     assert_eq!(string_enum, expected);
 }
+
+// Eng review fix (agent-native-reviewer): `since`/`limit` enumerate every
+// action that consumes them by name, but omitted `llm_invocations` even
+// though this PR added it as a filterable action. There was also no
+// `status` schema property at all, so an MCP client introspecting the
+// tool schema could not discover that `llm_invocations` accepts a
+// `status` filter.
+#[test]
+fn schema_llm_invocations_since_and_limit_are_documented() {
+    let tools = tool_definitions();
+    let props = &tools[0]["inputSchema"]["properties"];
+    let since_desc = props["since"]["description"].as_str().unwrap();
+    let limit_desc = props["limit"]["description"].as_str().unwrap();
+    assert!(
+        since_desc.contains("llm_invocations"),
+        "since description must document action=llm_invocations, got: {since_desc}"
+    );
+    assert!(
+        limit_desc.contains("llm_invocations"),
+        "limit description must document action=llm_invocations, got: {limit_desc}"
+    );
+}
+
+#[test]
+fn schema_exposes_llm_invocations_status_property() {
+    let tools = tool_definitions();
+    let props = &tools[0]["inputSchema"]["properties"];
+    let status = &props["status"];
+    assert_eq!(status["type"], "string");
+    let status_desc = status["description"].as_str().unwrap();
+    assert!(
+        status_desc.contains("llm_invocations"),
+        "status description must document action=llm_invocations, got: {status_desc}"
+    );
+    // Verify the documented status values match the exact set written by
+    // LlmRunner::run/dry_run (src/app/llm_runner.rs write_start_row/
+    // write_finish_row call sites) — not a guessed superset.
+    for expected_status in [
+        "running",
+        "success",
+        "error",
+        "denied",
+        "rate_limited",
+        "circuit_open",
+        "disabled",
+        "dry_run",
+        "timeout",
+    ] {
+        assert!(
+            status_desc.contains(expected_status),
+            "status description must mention '{expected_status}', got: {status_desc}"
+        );
+    }
+}

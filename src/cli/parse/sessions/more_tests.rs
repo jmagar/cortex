@@ -207,6 +207,23 @@ fn parse_sessions_assess_accepts_incident_and_investigation_filters() {
             assert_eq!(args.correlation_window_minutes, Some(9));
             assert_eq!(args.terms, vec!["auth"]);
             assert!(args.json);
+            assert!(!args.dry_run);
+        }
+        other => panic!("unexpected command: {other:?}"),
+    }
+}
+
+// Eng review fix (code-simplicity-reviewer, GH issue #94): `LlmRunner::dry_run`
+// had zero CLI/MCP/REST callers despite being fully implemented and
+// unit-tested. `cortex sessions assess --dry-run` is the wired-up caller.
+#[test]
+fn parse_sessions_assess_accepts_dry_run_flag() {
+    let command = parse_sessions_assess(&strings(&["incident-1", "--dry-run"])).unwrap();
+
+    match command {
+        crate::cli::CliCommand::Sessions(crate::cli::SessionsCommand::Assess(args)) => {
+            assert_eq!(args.incident_id, "incident-1");
+            assert!(args.dry_run);
         }
         other => panic!("unexpected command: {other:?}"),
     }

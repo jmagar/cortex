@@ -396,8 +396,7 @@ impl LlmRunner {
         match run_result {
             Ok(Ok(output)) => {
                 entry.consecutive_failures = 0;
-                let truncated_output: String =
-                    output.chars().take(self.config.max_output_bytes).collect();
+                let truncated_output = truncate_utf8_bytes(&output, self.config.max_output_bytes);
                 let output_bytes = truncated_output.len();
                 drop(state);
                 self.write_finish_row_with_output(
@@ -423,14 +422,20 @@ impl LlmRunner {
                         Some(Instant::now() + Duration::from_secs(self.config.cooldown_secs));
                 }
                 drop(state);
-                self.write_finish_row(
-                    &invocation_id,
-                    "error",
-                    Some(&sanitize_error(&err)),
-                    duration_ms,
-                )
-                .await?;
-                Err(LlmRunnerError::Internal(err))
+                // Eng review fix (architecture reviewer): the audit row and
+                // the caller-facing error MUST be redacted with the same
+                // pass. Previously only the persisted `error` column was
+                // sanitized here; the raw `err` was still wrapped and
+                // returned to the caller via `LlmRunnerError::Internal`,
+                // so a secret-shaped string in (e.g.) Gemini subprocess
+                // stderr could reach the CLI/MCP/REST caller directly even
+                // though the DB audit trail was clean. Sanitize once and
+                // reuse the same redacted text for both the DB write and
+                // the returned error.
+                let sanitized = sanitize_error(&err);
+                self.write_finish_row(&invocation_id, "error", Some(&sanitized), duration_ms)
+                    .await?;
+                Err(LlmRunnerError::Internal(anyhow::anyhow!(sanitized)))
             }
             Err(_elapsed) => {
                 entry.consecutive_failures += 1;
@@ -571,9 +576,9 @@ impl LlmRunner {
 }
 
 /// Build the `metadata_json` column value: merge caller-supplied
-/// `extra_metadata` with runner-added `host`/`pid`, then run the WHOLE
-/// serialized object through the same `redact_secrets` pass used for
-/// error messages, then enforce `LLM_METADATA_MAX_BYTES`.
+/// `extra_metadata` with runner-added `host`/`pid`, redact each string
+/// LEAF of the JSON tree individually (see `redact_json_value_strings`),
+/// then serialize and enforce `LLM_METADATA_MAX_BYTES`.
 ///
 /// Eng review fix (security reviewer V3): `extra_metadata` is
 /// caller-supplied and, per the `extra_metadata` contract documented on
@@ -582,18 +587,28 @@ impl LlmRunner {
 /// Redacting + size-capping here is the enforcement backstop: secret-
 /// shaped strings never reach the column, and oversized metadata is
 /// truncated with an explicit marker rather than silently stored in full.
+///
+/// Eng review fix (security-sentinel): redacting the WHOLE serialized
+/// JSON string (as this used to do) tokenizes on `split_whitespace()`.
+/// A secret supplied as a JSON *value* (e.g.
+/// `{"token":"sk-realsecret"}`) serializes to a single whitespace-free
+/// token like `{"token":"sk-realsecret",...}`, so `looks_secretish`'s
+/// `token.starts_with("sk-")` check misses it (the token actually starts
+/// with `{`). Walking the `Value` tree and redacting each string leaf
+/// BEFORE serialization means `looks_secretish` sees the real token
+/// boundaries, so prefix-based checks work correctly. It also guarantees
+/// `metadata_json` stays valid JSON — the old blob-redaction approach
+/// could in principle replace a token overlapping a quote character with
+/// `[REDACTED]` and corrupt the JSON structure.
 fn build_metadata_json(extra: &serde_json::Value) -> String {
     let host = hostname_best_effort();
     let pid = std::process::id();
     let mut obj = extra.as_object().cloned().unwrap_or_default();
     obj.insert("host".to_string(), serde_json::json!(host));
     obj.insert("pid".to_string(), serde_json::json!(pid));
-    let raw = serde_json::Value::Object(obj).to_string();
-
-    // Redact FIRST (same heuristic as error sanitization), THEN bound
-    // size — never truncate before redacting, or a secret can be split
-    // across the boundary and its surviving half leak.
-    let redacted = redact_secrets(&raw);
+    let mut value = serde_json::Value::Object(obj);
+    redact_json_value_strings(&mut value);
+    let redacted = value.to_string();
 
     if redacted.len() <= LLM_METADATA_MAX_BYTES {
         return redacted;
@@ -617,6 +632,30 @@ fn build_metadata_json(extra: &serde_json::Value) -> String {
     .to_string()
 }
 
+/// Recursively redact every string leaf in a `serde_json::Value` tree
+/// in place, using the same per-token `redact_secrets` heuristic used
+/// for error sanitization. Object keys are left untouched (only values
+/// are caller-controlled data); array elements and nested
+/// objects/arrays are visited recursively.
+fn redact_json_value_strings(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::String(s) => {
+            *s = redact_secrets(s);
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                redact_json_value_strings(item);
+            }
+        }
+        serde_json::Value::Object(map) => {
+            for (_, v) in map.iter_mut() {
+                redact_json_value_strings(v);
+            }
+        }
+        _ => {}
+    }
+}
+
 fn hostname_best_effort() -> String {
     std::env::var("HOSTNAME")
         .ok()
@@ -634,6 +673,29 @@ fn sanitize_error(err: &anyhow::Error) -> String {
     let text = err.to_string();
     let redacted = redact_secrets(&text);
     redacted.chars().take(2048).collect()
+}
+
+/// Truncate `s` to at most `max_bytes` BYTES on a valid UTF-8 char
+/// boundary. `max_output_bytes` is documented and named as a byte limit,
+/// but `.chars().take(n)` (the previous implementation) limits to `n`
+/// *characters*, not bytes — for multi-byte UTF-8 output (very common in
+/// LLM text: emoji, non-ASCII scripts, smart punctuation) actual byte
+/// size could exceed the configured limit by up to ~4x. This walks
+/// `char_indices()` and stops at the last boundary whose byte offset is
+/// `<= max_bytes`, which is always a valid UTF-8 boundary by construction.
+fn truncate_utf8_bytes(s: &str, max_bytes: usize) -> String {
+    if s.len() <= max_bytes {
+        return s.to_string();
+    }
+    let mut end = 0;
+    for (idx, ch) in s.char_indices() {
+        let next_end = idx + ch.len_utf8();
+        if next_end > max_bytes {
+            break;
+        }
+        end = next_end;
+    }
+    s[..end].to_string()
 }
 
 /// Stable-across-start/finish invocation id. Timestamp-prefixed for sort

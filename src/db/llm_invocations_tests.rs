@@ -82,3 +82,136 @@ fn list_respects_limit_and_orders_newest_first() {
     let rows = list_llm_invocations(&conn, 2, None, None, None).unwrap();
     assert_eq!(rows.len(), 2);
 }
+
+// --- Eng review fix (performance-oracle + data-migration-expert): the
+// dynamic WHERE-builder rewrite must preserve exact correctness across
+// every filter combination — no filters, each filter alone, and all
+// filters combined — while also making the composite indexes usable.
+// These tests cover correctness; `explain_query_plan_uses_composite_indexes_for_filtered_queries`
+// below asserts the index usage itself via `EXPLAIN QUERY PLAN`.
+
+#[test]
+fn list_with_no_filters_returns_everything_newest_first() {
+    let (conn, _dir) = test_conn();
+    insert_llm_invocation_running(&conn, "llm-a", &sample_params()).unwrap();
+    finish_llm_invocation(&conn, "llm-a", "success", None, 10, Some(1)).unwrap();
+    let mut other = sample_params();
+    other.action = "skill_assess".to_string();
+    insert_llm_invocation_running(&conn, "llm-b", &other).unwrap();
+    finish_llm_invocation(&conn, "llm-b", "error", Some("boom"), 20, None).unwrap();
+
+    let rows = list_llm_invocations(&conn, 500, None, None, None).unwrap();
+    assert_eq!(rows.len(), 2);
+}
+
+#[test]
+fn list_action_only_filter_returns_correct_rows() {
+    let (conn, _dir) = test_conn();
+    insert_llm_invocation_running(&conn, "llm-a", &sample_params()).unwrap();
+    finish_llm_invocation(&conn, "llm-a", "success", None, 10, Some(1)).unwrap();
+    let mut other = sample_params();
+    other.action = "skill_assess".to_string();
+    insert_llm_invocation_running(&conn, "llm-b", &other).unwrap();
+    finish_llm_invocation(&conn, "llm-b", "success", None, 10, Some(1)).unwrap();
+
+    let rows = list_llm_invocations(&conn, 500, None, Some("skill_assess"), None).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].id, "llm-b");
+}
+
+#[test]
+fn list_status_only_filter_returns_correct_rows() {
+    let (conn, _dir) = test_conn();
+    insert_llm_invocation_running(&conn, "llm-a", &sample_params()).unwrap();
+    finish_llm_invocation(&conn, "llm-a", "success", None, 10, Some(1)).unwrap();
+    insert_llm_invocation_running(&conn, "llm-b", &sample_params()).unwrap();
+    finish_llm_invocation(&conn, "llm-b", "error", Some("boom"), 10, None).unwrap();
+
+    let rows = list_llm_invocations(&conn, 500, None, None, Some("error")).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].id, "llm-b");
+}
+
+#[test]
+fn list_since_only_filter_returns_correct_rows() {
+    let (conn, _dir) = test_conn();
+    insert_llm_invocation_running(&conn, "llm-a", &sample_params()).unwrap();
+    finish_llm_invocation(&conn, "llm-a", "success", None, 10, Some(1)).unwrap();
+
+    // since in the far future: excludes everything.
+    let future =
+        list_llm_invocations(&conn, 500, Some("2999-01-01T00:00:00Z"), None, None).unwrap();
+    assert!(future.is_empty());
+
+    // since in the far past: includes everything.
+    let past = list_llm_invocations(&conn, 500, Some("2000-01-01T00:00:00Z"), None, None).unwrap();
+    assert_eq!(past.len(), 1);
+}
+
+#[test]
+fn list_combined_filters_intersect_correctly() {
+    let (conn, _dir) = test_conn();
+    // Matches all three filters.
+    insert_llm_invocation_running(&conn, "llm-match", &sample_params()).unwrap();
+    finish_llm_invocation(&conn, "llm-match", "success", None, 10, Some(1)).unwrap();
+
+    // Wrong action.
+    let mut wrong_action = sample_params();
+    wrong_action.action = "skill_assess".to_string();
+    insert_llm_invocation_running(&conn, "llm-wrong-action", &wrong_action).unwrap();
+    finish_llm_invocation(&conn, "llm-wrong-action", "success", None, 10, Some(1)).unwrap();
+
+    // Wrong status.
+    insert_llm_invocation_running(&conn, "llm-wrong-status", &sample_params()).unwrap();
+    finish_llm_invocation(&conn, "llm-wrong-status", "error", Some("boom"), 10, None).unwrap();
+
+    let rows = list_llm_invocations(
+        &conn,
+        500,
+        Some("2000-01-01T00:00:00Z"),
+        Some("ai_assess"),
+        Some("success"),
+    )
+    .unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].id, "llm-match");
+}
+
+/// Assert (via `EXPLAIN QUERY PLAN`) that filtered queries actually use
+/// the composite indexes created in migration 37, not a full scan. The
+/// old `(?N IS NULL OR col = ?N)` idiom was not sargable and always fell
+/// back to scanning `idx_llm_invocations_started` (or the table)
+/// regardless of which filters were supplied.
+#[test]
+fn explain_query_plan_uses_composite_indexes_for_filtered_queries() {
+    let (conn, _dir) = test_conn();
+
+    let plan_uses_index = |sql: &str, index_name: &str| -> bool {
+        let explain_sql = format!("EXPLAIN QUERY PLAN {sql}");
+        let mut stmt = conn.prepare(&explain_sql).unwrap();
+        let details: Vec<String> = stmt
+            .query_map([], |row| row.get::<_, String>(3))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        details.iter().any(|d| d.contains(index_name))
+    };
+
+    // action-only filter should use idx_llm_invocations_action_started.
+    assert!(
+        plan_uses_index(
+            "SELECT id FROM llm_invocations WHERE action = 'ai_assess' ORDER BY started_at DESC LIMIT 10",
+            "idx_llm_invocations_action_started"
+        ),
+        "action-only query must use idx_llm_invocations_action_started"
+    );
+
+    // status-only filter should use idx_llm_invocations_status_started.
+    assert!(
+        plan_uses_index(
+            "SELECT id FROM llm_invocations WHERE status = 'success' ORDER BY started_at DESC LIMIT 10",
+            "idx_llm_invocations_status_started"
+        ),
+        "status-only query must use idx_llm_invocations_status_started"
+    );
+}

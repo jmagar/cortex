@@ -499,6 +499,8 @@ pub(crate) async fn run_ai_assess(mode: &CliMode, args: SessionsAssessArgs) -> R
         }
         CliMode::Local(service) => service,
     };
+    let dry_run = args.dry_run;
+    let json = args.json;
     let req = AiAssessRequest {
         incident_id: args.incident_id,
         model: args.model,
@@ -511,7 +513,31 @@ pub(crate) async fn run_ai_assess(mode: &CliMode, args: SessionsAssessArgs) -> R
         terms: args.terms,
         limit: args.limit,
     };
-    if args.json {
+    if dry_run {
+        // GH issue #94: preview the prompt/evidence bundle via
+        // `LlmRunner::dry_run` without invoking Gemini. Writes a
+        // "dry_run"-status audit row but spawns no subprocess.
+        let outcome = service.dry_run_gemini_assess(req).await?;
+        if json {
+            println!("{}", serde_json::to_string_pretty(&outcome)?);
+        } else {
+            println!("[dry-run] invocation_id={}", outcome.invocation_id);
+            println!("[dry-run] prompt_bytes={}", outcome.prompt_bytes);
+            println!(
+                "[dry-run] evidence: total_incidents={} evidence_bundle_count={} total_anchors={} truncated={}",
+                outcome.evidence_counts.total_incidents,
+                outcome.evidence_counts.evidence_bundle_count,
+                outcome.evidence_counts.total_anchors,
+                outcome.evidence_counts.truncated,
+            );
+            println!(
+                "[dry-run] would_exceed_prompt_limit={}",
+                outcome.would_exceed_prompt_limit
+            );
+        }
+        return Ok(());
+    }
+    if json {
         let response = service.run_gemini_assess(req).await?;
         println!("{}", serde_json::to_string_pretty(&response)?);
     } else {
@@ -556,6 +582,24 @@ fn format_llm_invocation_line(
             .map(|d| d.to_string())
             .unwrap_or_else(|| "-".to_string()),
     )
+}
+
+// Eng review fix (pattern-recognition-specialist): `into_request` for CLI
+// args belongs in `dispatch_sessions.rs`, not `args/sessions.rs` — every
+// other sibling `Sessions*Args::into_request()` (11 of them, e.g.
+// `SessionsIncidentsArgs`/`SessionsInvestigateArgs` immediately above)
+// lives here, placed right before the `run_ai_*` function that consumes
+// it. `args/sessions.rs` is otherwise pure struct/enum definitions with
+// no business logic.
+impl SessionsLlmInvocationsArgs {
+    pub(crate) fn into_request(self) -> cortex::app::LlmInvocationsRequest {
+        cortex::app::LlmInvocationsRequest {
+            limit: self.limit,
+            since: self.since,
+            action: self.action,
+            status: self.status,
+        }
+    }
 }
 
 /// `cortex sessions llm-invocations` — list recent LLM invocation audit

@@ -395,6 +395,135 @@ async fn extra_metadata_over_byte_cap_is_truncated_not_silently_dropped() {
 // asserts both complete without a `database is locked` error — the
 // observable symptom the invariant exists to prevent. See "Eng Review
 // Fixes Applied" (Fix 2).
+// --- Eng review fix (architecture-strategist): the error returned to the
+// CALLER must be redacted, not just the copy persisted to the DB. Before
+// this fix, `run`'s error path persisted `sanitize_error(&err)` to
+// `llm_invocations.error` but returned the ORIGINAL `err` wrapped in
+// `LlmRunnerError::Internal`, so a secret-shaped string in run_fn's error
+// (e.g. leaked auth token in subprocess stderr) reached the CLI/MCP/REST
+// caller directly even though the audit trail was clean.
+#[tokio::test]
+async fn caller_facing_error_is_redacted_not_just_the_db_row() {
+    let (pool, _dir) = test_pool();
+    let runner = LlmRunner::new(pool.clone(), LlmConfig::default());
+
+    let result = runner
+        .run(base_spec("ai_assess"), |_prompt| async {
+            Err(anyhow::anyhow!(
+                "gemini auth failed: API_KEY=super-secret-value sk-abc123secretvalue"
+            ))
+        })
+        .await;
+
+    let err = result.expect_err("run_fn error must propagate as an error");
+    let caller_message = err.to_string();
+    assert!(
+        !caller_message.contains("super-secret-value"),
+        "API_KEY value must be redacted in the error returned to the caller, got: {caller_message}"
+    );
+    assert!(
+        !caller_message.contains("sk-abc123secretvalue"),
+        "sk- prefixed token must be redacted in the error returned to the caller, got: {caller_message}"
+    );
+    assert!(
+        caller_message.contains("[REDACTED]"),
+        "expected [REDACTED] marker in the caller-facing error, got: {caller_message}"
+    );
+}
+
+// --- Eng review fix (security-sentinel): a secret supplied as a JSON
+// *value* without a `TOKEN=`/`API_KEY=`/`SECRET=` literal wrapper (just a
+// bare `sk-`/`ghp_`/`atk_` prefix) must still be redacted. The old
+// whole-blob redaction tokenized on whitespace, so
+// `{"key":"sk-bareprefixsecretnodelimiter"}` became a single
+// whitespace-free token starting with `{`, which `looks_secretish` never
+// matched. Walking the JSON value tree and redacting each string leaf
+// fixes this because the leaf value itself (not the surrounding braces)
+// is what gets checked against `starts_with("sk-")`.
+#[tokio::test]
+async fn extra_metadata_bare_prefix_secret_without_key_wrapper_is_redacted() {
+    let (pool, _dir) = test_pool();
+    let runner = LlmRunner::new(pool.clone(), LlmConfig::default());
+
+    let mut spec = base_spec("ai_assess");
+    spec.extra_metadata = serde_json::json!({
+        "key": "sk-bareprefixsecretnodelimiter"
+    });
+
+    let outcome = runner
+        .run(spec, |_prompt| async { Ok("ok".to_string()) })
+        .await
+        .unwrap();
+
+    let conn = pool.get().unwrap();
+    let metadata_json: String = conn
+        .query_row(
+            "SELECT metadata_json FROM llm_invocations WHERE id = ?1",
+            [outcome.invocation_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(
+        !metadata_json.contains("sk-bareprefixsecretnodelimiter"),
+        "bare sk- prefixed value with no TOKEN=/API_KEY= wrapper must still be redacted, got: {metadata_json}"
+    );
+    assert!(
+        metadata_json.contains("[REDACTED]"),
+        "expected [REDACTED] marker, got: {metadata_json}"
+    );
+    // Must still be valid JSON after value-leaf redaction.
+    let parsed: serde_json::Value = serde_json::from_str(&metadata_json)
+        .expect("metadata_json must remain valid JSON after redaction");
+    assert!(parsed.is_object());
+}
+
+// --- Eng review fix (architecture-strategist): `max_output_bytes` is
+// documented and named as a BYTE limit, but the old implementation used
+// `.chars().take(n)`, which limits to `n` characters, not bytes. For
+// multi-byte UTF-8 output this let the actual persisted/returned byte
+// length exceed the configured cap by up to ~4x.
+#[tokio::test]
+async fn output_truncation_respects_byte_limit_not_char_count_for_multibyte_utf8() {
+    let (pool, _dir) = test_pool();
+    // Each 'e' with combining acute (é as 2 codepoints) or, simpler, use a
+    // 4-byte emoji so char count vs byte count diverges sharply.
+    let cfg = LlmConfig {
+        max_output_bytes: 10,
+        ..LlmConfig::default()
+    };
+    let runner = LlmRunner::new(pool.clone(), cfg);
+
+    // 5 emoji, each 4 bytes UTF-8 = 20 bytes, 5 chars. A `.chars().take(10)`
+    // approach would keep all 5 emoji (only 5 chars) = 20 bytes, blowing
+    // past max_output_bytes=10 by 2x.
+    let multibyte_output = "\u{1F600}".repeat(5);
+    assert_eq!(multibyte_output.chars().count(), 5);
+    assert_eq!(multibyte_output.len(), 20);
+
+    let outcome = runner
+        .run(base_spec("ai_assess"), move |_prompt| {
+            let out = multibyte_output.clone();
+            async move { Ok(out) }
+        })
+        .await
+        .unwrap();
+
+    assert!(
+        outcome.output.len() <= 10,
+        "truncated output byte length must respect max_output_bytes=10, got {} bytes: {:?}",
+        outcome.output.len(),
+        outcome.output
+    );
+    assert_eq!(
+        outcome.output_bytes,
+        outcome.output.len(),
+        "output_bytes must reflect actual byte length"
+    );
+    // Truncation must land on a valid UTF-8 boundary — the fact that
+    // `outcome.output` is a valid `String` at all proves this (a
+    // mid-codepoint slice would have panicked when building it).
+}
+
 #[tokio::test]
 async fn audit_write_does_not_race_a_concurrent_write_locked_writer() {
     // Use a larger pool (default `for_test()` pool_size is 1, which starves

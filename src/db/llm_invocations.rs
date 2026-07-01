@@ -109,6 +109,23 @@ pub struct LlmInvocationRow {
 /// Fetch recent invocations, optionally filtered by `action`/`status` and
 /// bounded to those started at or after `since` (ISO8601). `limit` is
 /// clamped to `[1, 500]`, matching `notifications::firings_recent`.
+///
+/// Eng review fix (performance-oracle + data-migration-expert,
+/// independently confirmed via `EXPLAIN QUERY PLAN`): the previous
+/// implementation used a single static query with a
+/// `(?N IS NULL OR col = ?N)` WHERE clause per filter. That idiom is not
+/// sargable — SQLite's query planner cannot use
+/// `idx_llm_invocations_action_started` or
+/// `idx_llm_invocations_status_started` for it under any parameter
+/// combination, so it always fell back to a full scan of
+/// `idx_llm_invocations_started` (or a table scan). This version builds
+/// the WHERE clause dynamically, appending `AND action = ?` / `AND status
+/// = ?` / `AND started_at >= ?` only for filters that are actually
+/// `Some(...)`, matching the dynamic-WHERE-builder idiom already used in
+/// `src/db/queries.rs` (e.g. `get_error_summary_sql`). With no filters,
+/// or with `since` as the only filter, `idx_llm_invocations_started` is
+/// used; with `action` set, `idx_llm_invocations_action_started` is used;
+/// with `status` set, `idx_llm_invocations_status_started` is used.
 pub fn list_llm_invocations(
     conn: &rusqlite::Connection,
     limit: i64,
@@ -117,20 +134,34 @@ pub fn list_llm_invocations(
     status: Option<&str>,
 ) -> rusqlite::Result<Vec<LlmInvocationRow>> {
     let clamped_limit = limit.clamp(1, 500);
-    let mut stmt = conn.prepare(
+
+    let mut sql = String::from(
         "SELECT id, started_at, finished_at, duration_ms, caller_surface, action,
                 provider, model, program, incident_id, ai_tool, ai_project,
                 ai_session_id, evidence_counts_json, prompt_bytes, output_bytes,
                 status, error, metadata_json
-         FROM llm_invocations
-         WHERE (?1 IS NULL OR started_at >= ?1)
-           AND (?2 IS NULL OR action = ?2)
-           AND (?3 IS NULL OR status = ?3)
-         ORDER BY started_at DESC
-         LIMIT ?4",
-    )?;
+         FROM llm_invocations WHERE 1=1",
+    );
+    let mut bindings: Vec<rusqlite::types::Value> = Vec::new();
+
+    if let Some(action) = action {
+        sql.push_str(" AND action = ?");
+        bindings.push(rusqlite::types::Value::Text(action.to_string()));
+    }
+    if let Some(status) = status {
+        sql.push_str(" AND status = ?");
+        bindings.push(rusqlite::types::Value::Text(status.to_string()));
+    }
+    if let Some(since) = since {
+        sql.push_str(" AND started_at >= ?");
+        bindings.push(rusqlite::types::Value::Text(since.to_string()));
+    }
+    sql.push_str(" ORDER BY started_at DESC LIMIT ?");
+    bindings.push(rusqlite::types::Value::Integer(clamped_limit));
+
+    let mut stmt = conn.prepare(&sql)?;
     let rows = stmt
-        .query_map(params![since, action, status, clamped_limit], |row| {
+        .query_map(rusqlite::params_from_iter(bindings.iter()), |row| {
             Ok(LlmInvocationRow {
                 id: row.get(0)?,
                 started_at: row.get(1)?,

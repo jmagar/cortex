@@ -307,12 +307,20 @@ Markdown frustration assessment.
 cortex sessions incidents --limit 10
 cortex sessions assess inc-f9a1d8e70cad13e6 --limit 3
 cortex sessions assess inc-f9a1d8e70cad13e6 --model gemini-3.1-flash-lite-preview --json
+cortex sessions assess inc-f9a1d8e70cad13e6 --dry-run
 ```
 
 `assess` is local-only and rejects `--http` because it spawns Gemini on the
 local host. It can assess any incident ID returned by `cortex sessions incidents`
 within the incident-list cap, even when that incident is outside the top 10
 investigation bundles.
+
+`--dry-run` previews the prompt/evidence bundle that would be sent to
+Gemini — via `LlmRunner::dry_run` — without invoking the LLM. It still
+writes an audit row to `llm_invocations` (status `dry_run`) but spawns no
+subprocess, and prints `invocation_id`, `prompt_bytes`,
+`evidence_counts`, and `would_exceed_prompt_limit` instead of an
+assessment.
 
 ### `cortex sessions blocks`
 

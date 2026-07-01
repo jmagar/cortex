@@ -261,6 +261,9 @@ pub(crate) struct SessionsAssessArgs {
     pub correlation_window_minutes: Option<u32>,
     pub terms: Vec<String>,
     pub limit: Option<u32>,
+    /// When true, preview the prompt/evidence bundle via
+    /// `LlmRunner::dry_run` instead of invoking Gemini — see GH issue #94.
+    pub dry_run: bool,
 }
 
 /// `cortex sessions llm-invocations` — list recent LLM invocation audit
@@ -274,15 +277,4 @@ pub(crate) struct SessionsLlmInvocationsArgs {
     pub status: Option<String>,
     pub limit: Option<i64>,
     pub json: bool,
-}
-
-impl SessionsLlmInvocationsArgs {
-    pub(crate) fn into_request(self) -> cortex::app::LlmInvocationsRequest {
-        cortex::app::LlmInvocationsRequest {
-            limit: self.limit,
-            since: self.since,
-            action: self.action,
-            status: self.status,
-        }
-    }
 }

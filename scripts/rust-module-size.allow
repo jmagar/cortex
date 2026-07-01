@@ -1,5 +1,6 @@
 src/api.rs
 src/agent_deploy.rs
+src/app/llm_runner.rs
 src/cli/dispatch_sessions.rs
 src/cli/help.rs
 src/cli/http_client.rs
@@ -10,4 +11,5 @@ src/config.rs
 src/db/pool.rs
 src/main.rs
 src/mcp/actions.rs
+src/mcp/schemas.rs
 src/runtime.rs

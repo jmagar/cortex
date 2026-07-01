@@ -320,10 +320,12 @@ pub(crate) fn parse_sessions_assess(args: &[String]) -> Result<CliCommand> {
     let mut window_minutes: Option<u32> = None;
     let mut correlation_window_minutes: Option<u32> = None;
     let mut terms: Vec<String> = Vec::new();
+    let mut dry_run = false;
     let mut flags = FlagCursor::new(args);
     while let Some(arg) = flags.next() {
         match arg.as_str() {
             "--json" => json = true,
+            "--dry-run" => dry_run = true,
             "--model" => model = Some(flags.value("--model")?),
             "--project" => project = Some(flags.value("--project")?),
             "--tool" => tool = Some(flags.value("--tool")?),
@@ -397,6 +399,7 @@ pub(crate) fn parse_sessions_assess(args: &[String]) -> Result<CliCommand> {
             correlation_window_minutes,
             terms,
             limit,
+            dry_run,
         },
     )))
 }

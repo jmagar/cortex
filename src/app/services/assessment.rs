@@ -1,9 +1,81 @@
 use super::*;
-use crate::app::llm_runner::{LlmCallerSurface, LlmEvidenceCounts, LlmInvocationSpec};
+use crate::app::llm_runner::{
+    LlmCallerSurface, LlmDryRunOutcome, LlmEvidenceCounts, LlmInvocationSpec,
+};
 
 impl CortexService {
     pub async fn run_gemini_assess(&self, req: AiAssessRequest) -> ServiceResult<AiAssessResponse> {
         self.run_gemini_assess_with_delta(req, |_| Ok(())).await
+    }
+
+    /// Preview the prompt/evidence bundle that `run_gemini_assess` would
+    /// send to Gemini, WITHOUT invoking the LLM — routes through
+    /// `LlmRunner::dry_run` (GH issue #94's acceptance criterion for a
+    /// dry-run/preview mode). Still writes an audit row (status
+    /// "dry_run"), same as `LlmRunner::dry_run` does for every other
+    /// caller, but never spawns the Gemini subprocess.
+    pub async fn dry_run_gemini_assess(
+        &self,
+        req: AiAssessRequest,
+    ) -> ServiceResult<LlmDryRunOutcome> {
+        let incident_id = req.incident_id.clone();
+        let gemini_config =
+            GeminiAssessConfig::from_env(req.model.clone(), self.llm().timeout_secs());
+        let invest_req = AiInvestigateRequest {
+            incident_id: Some(incident_id.clone()),
+            project: req.project.clone(),
+            tool: req.tool.clone(),
+            since: req.since.clone(),
+            until: req.until.clone(),
+            limit: Some(req.limit.unwrap_or(200).max(200)),
+            window_minutes: req.window_minutes,
+            correlation_window_minutes: req.correlation_window_minutes,
+            terms: req.terms.clone(),
+        };
+        let invest_resp = self.investigate_ai_incidents(invest_req).await?;
+
+        let matching: Vec<_> = invest_resp
+            .evidence
+            .iter()
+            .filter(|e| e.incident.incident_id == incident_id)
+            .collect();
+
+        if matching.is_empty() {
+            return Err(ServiceError::InvalidInput(format!(
+                "no incident found with id '{}'; run `cortex sessions incidents` to list available ids",
+                incident_id
+            )));
+        }
+
+        let evidence_json = serde_json::to_string_pretty(&matching)
+            .map_err(|e| ServiceError::Internal(anyhow::anyhow!("json serialize failed: {e}")))?;
+        let prompt = build_assessment_prompt(&evidence_json);
+        let evidence_counts = LlmEvidenceCounts {
+            total_incidents: invest_resp.total_incidents,
+            evidence_bundle_count: matching.len(),
+            total_anchors: matching.iter().map(|e| e.anchors.len()).sum(),
+            truncated: invest_resp.truncated,
+        };
+
+        let spec = LlmInvocationSpec {
+            caller_surface: LlmCallerSurface::Cli,
+            action: "ai_assess".to_string(),
+            incident_id: Some(incident_id.clone()),
+            ai_tool: req.tool.clone(),
+            ai_project: req.project.clone(),
+            ai_session_id: None,
+            evidence_counts,
+            prompt,
+            provider: "gemini-cli".to_string(),
+            model: gemini_config.model.clone(),
+            program: gemini_config.program.clone(),
+            extra_metadata: serde_json::json!({}),
+        };
+
+        self.llm()
+            .dry_run(&spec)
+            .await
+            .map_err(|err| ServiceError::Internal(anyhow::anyhow!(err)))
     }
 
     pub async fn run_gemini_assess_with_delta<F>(
