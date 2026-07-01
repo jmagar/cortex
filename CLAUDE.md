@@ -64,9 +64,9 @@ Tests: unit tests live in sidecar files beside their source modules (e.g. `src/d
 
 ## MCP Tools
 
-One MCP tool: **`cortex`** — dispatches by `action` argument. 47 actions, generated from `ACTION_SPECS` in `src/mcp/actions.rs` (the single authoritative registry — regenerate this table from there).
+One MCP tool: **`cortex`** — dispatches by `action` argument. 48 actions, generated from `ACTION_SPECS` in `src/mcp/actions.rs` (the single authoritative registry — regenerate this table from there).
 
-Scope taxonomy: every action requires `cortex:read` except the four **admin** actions `ack_error`, `unack_error`, `file_tails`, and `notifications_test`, which require `cortex:admin` (static bearer tokens get read-only unless `CORTEX_STATIC_TOKEN_ADMIN=true`); `help` is info-only (no scope gate).
+Scope taxonomy: every action requires `cortex:read` except the five **admin** actions `ack_error`, `unack_error`, `file_tails`, `notifications_test`, and `llm_invocations`, which require `cortex:admin` (static bearer tokens get read-only unless `CORTEX_STATIC_TOKEN_ADMIN=true`); `help` is info-only (no scope gate).
 
 | Action | Description |
 |--------|-------------|
@@ -116,6 +116,7 @@ Scope taxonomy: every action requires `cortex:read` except the four **admin** ac
 | `ack_error` | **(admin)** Acknowledge an error signature |
 | `unack_error` | **(admin)** Revoke an error signature acknowledgement |
 | `notifications_test` | **(admin)** Send a test notification via Apprise |
+| `llm_invocations` | **(admin)** Recent LLM invocation audit records (concurrency/rate-limit/circuit-breaker denials included) |
 | `help` | List available actions and their parameters |
 
 ## Plugin Skills

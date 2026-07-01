@@ -61,6 +61,22 @@ reconnect_max_ms = 30000
 name = "edge-host-a"
 base_url = "http://edge-host-a:2375"
 allow_insecure_http = true
+
+[llm]
+enabled = true
+max_concurrent = 1
+max_per_action_concurrent = 1
+max_invocations_per_minute = 3
+max_invocations_per_hour = 30
+failure_threshold = 3
+cooldown_secs = 300
+timeout_secs = 120
+max_prompt_bytes = 1048576
+max_output_bytes = 262144
+background_enrichment_enabled = false
+
+[llm.actions.ai_assess]
+enabled = true
 ```
 
 Bind host fields (`CORTEX_RECEIVER_HOST` and `CORTEX_HOST`) must be hostnames or IP
@@ -229,7 +245,41 @@ HOME, disables MCP servers/hooks/context-file loading, and parses Gemini's
 | `CORTEX_HEADLESS_GEMINI_CMD` | no | `gemini` | no | Gemini CLI executable path or command name |
 | `CORTEX_HEADLESS_GEMINI_MODEL` | no | `gemini-3.1-flash-lite-preview` | no | Default model for `cortex sessions assess`; `--model` on the CLI overrides this |
 | `CORTEX_HEADLESS_GEMINI_HOME` | no | `$HOME` | maybe | Source home containing `.gemini` auth files to copy into the isolated runtime HOME |
-| `CORTEX_LLM_COMPLETION_TIMEOUT_SECS` | no | `120` | no | Hard timeout for the Gemini assessment subprocess |
+| `CORTEX_LLM_COMPLETION_TIMEOUT_SECS` | no | — | no | **Deprecated, no longer takes effect.** Previously an independent timeout for the Gemini assessment subprocess; now superseded end-to-end by `[llm].timeout_secs`. Setting this var logs a `tracing::warn!` deprecation notice at call time but has no effect. |
+
+### LLM invocation guard (`CORTEX_LLM_*`, `[llm]`)
+
+Shared by every LLM-backed assessment feature (`ai_assess` today). `LlmRunner`
+(`src/app/llm_runner.rs`) enforces global/per-action concurrency limits,
+per-action rate limits, a consecutive-failure circuit breaker, a per-invocation
+timeout, prompt/output byte caps, a global + per-action kill switch, and writes
+every invocation attempt — including denials — to the `llm_invocations` audit
+table (see the `llm_invocations` MCP action / `GET /api/sessions/llm-invocations`
+/ `cortex sessions llm-invocations`).
+
+> **Behavior change:** prior to this release, `cortex sessions assess` had no
+> concurrency guard — multiple overlapping invocations ran in parallel. As of
+> this release it routes through `LlmRunner`, whose defaults
+> (`max_concurrent=1`, `max_per_action_concurrent=1`) mean a second concurrent
+> `assess` call is now REJECTED with a concurrency-limited error instead of
+> running alongside the first. Raise `[llm].max_concurrent` /
+> `[llm].max_per_action_concurrent` if your workflow depends on concurrent
+> assessments.
+
+| Variable | Required | Default | Sensitive | Description |
+| --- | --- | --- | --- | --- |
+| `CORTEX_LLM_ENABLED` | no | `true` | no | Global kill switch — `false` denies every LLM invocation immediately (still audited with status `disabled`) |
+
+Fields without a dedicated env override (`max_concurrent`,
+`max_per_action_concurrent`, `max_invocations_per_minute`,
+`max_invocations_per_hour`, `failure_threshold`, `cooldown_secs`,
+`timeout_secs`, `max_prompt_bytes`, `max_output_bytes`,
+`background_enrichment_enabled`, `[llm.actions.<name>].enabled`) are set via
+`config.toml`'s `[llm]` section — see the sample above. Defaults match the
+sample TOML block; per-action tables (e.g. `[llm.actions.ai_assess]`) default
+to `enabled = true` when omitted, except `background_enrich`, which is gated
+separately by `background_enrichment_enabled` (default `false`) regardless of
+its own table.
 
 ### Storage (`CORTEX_*`)
 

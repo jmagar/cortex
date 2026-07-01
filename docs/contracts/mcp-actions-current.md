@@ -22,13 +22,16 @@ response keys are stable. Renaming, removing, or tightening them is a breaking
 change. Adding optional parameters or optional response fields is non-breaking.
 
 Most actions require `cortex:read` when auth is mounted. `ack_error`,
-`unack_error`, `file_tails`, and `notifications_test` require
-`cortex:admin`. `help` has no action-level scope requirement, though the
+`unack_error`, `file_tails`, `notifications_test`, and `llm_invocations`
+require `cortex:admin` (`llm_invocations` is read-only but admin-scoped
+because it exposes `LlmRunner` circuit-breaker/kill-switch operational
+state). `help` has no action-level scope requirement, though the
 protected endpoint still requires transport auth when configured.
 
 ## Current Action Index
 
-The live registry currently contains 46 actions:
+The live registry currently contains 48 actions (this snapshot may lag
+`src/mcp/actions.rs::ACTION_SPECS`, the authoritative source):
 
 | Action | Scope | Cost | Purpose |
 | --- | --- | --- | --- |
@@ -77,6 +80,7 @@ The live registry currently contains 46 actions:
 | `unack_error` | `cortex:admin` | write | Revoke an error acknowledgement |
 | `file_tails` | `cortex:admin` | write | Manage local file-tail ingest sources |
 | `notifications_test` | `cortex:admin` | write | Send a test Apprise notification |
+| `llm_invocations` | `cortex:admin` | cheap | Recent LLM invocation audit records (concurrency/rate-limit/circuit-breaker denials included) |
 | `help` | none | cheap | Markdown action reference |
 
 ## Schema Shape

@@ -18,7 +18,7 @@
 
 ## Endpoint matrix
 
-57 routes total. Scope is `read` (mounted via `axum::routing::get`,
+58 routes total. Scope is `read` (mounted via `axum::routing::get`,
 hits read-side `db_permits`) or `admin` (POST + `MAINTENANCE_PERMIT`
 single-flight, audited via `tracing::warn!` before the service call).
 All responses are JSON; error bodies are `{"error": "<message>"}`
@@ -54,13 +54,14 @@ to them by default.
 | GET | `/api/sessions/tools` | read | query: `project?`, `from?`, `to?` | `ListAiToolsResponse { total_tools, truncated, tools: [AiToolEntry] }` | 200, 400, 401, 503, 500 | Y | Tool inventory. |
 | GET | `/api/sessions/projects` | read | query: `tool?`, `from?`, `to?` | `ListAiProjectsResponse { total_projects, truncated, projects: [AiProjectEntry] }` | 200, 400, 401, 503, 500 | Y | Project inventory. |
 
-### AI diagnostic + admin (3) — bead `.3`
+### AI diagnostic + admin (4) — bead `.3`
 
 | Method | Path | Scope | Request | Response (top-level) | Status codes | Idempotent | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | GET | `/api/sessions/checkpoints` | read | query: `errors_only?` (bool), `missing_only?` (bool), `limit?` (u32). `deny_unknown_fields`. | service-shaped (list of checkpoint records with parse-error metadata) | 200, 400, 401, 503, 500 | Y | Diagnostic inventory of indexed AI transcript checkpoints. |
 | GET | `/api/sessions/errors` | read | query: `limit?`. `deny_unknown_fields`. | service-shaped (list of recent transcript parse errors) | 200, 400, 401, 503, 500 | Y | Surfaces parse failures from the AI indexer. |
 | POST | `/api/sessions/prune-checkpoints` | **admin** | body: `{ "dry_run": bool (REQUIRED), "missing_only"?: bool, "limit"?: u32 }`. `deny_unknown_fields`. | service-shaped (count of pruned/would-prune rows) | 200, 400, 401, **403**, **409**, 500 | **N** | Requires the admin header. Single-flight via `MAINTENANCE_PERMIT`; 409 on contention with `/api/db/vacuum` or `/api/db/checkpoint`. `dry_run` is **REQUIRED and explicit** — a missing key returns 400 (defends against `POST {}` mass-delete, eng-review C3). `caller_ip` audit-logged via `tracing::warn!` BEFORE the service call. |
+| GET | `/api/sessions/llm-invocations` | **admin** | query: `limit?` (i64), `since?`, `action?`, `status?` | `Vec<LlmInvocationRow>` (id, started_at, finished_at, duration_ms, caller_surface, action, provider, model, program, incident_id, ai_tool, ai_project, ai_session_id, evidence_counts_json, prompt_bytes, output_bytes, status, error, metadata_json) | 200, 400, 401, **403**, 500 | Y | Requires `X-Cortex-Admin-Token`, unlike the plain-read routes above — `llm_invocations` exposes `LlmRunner` concurrency/rate-limit/circuit-breaker/kill-switch operational state, not just log content. `caller_ip` audit-logged via `tracing::warn!` before the service call, matching `ack_error`/`unack_error`. Backed by the `llm_invocations` audit table (migration 37); MCP action: `llm_invocations` (`cortex:admin`); CLI: `cortex sessions llm-invocations`. |
 
 ### File-tail admin (1)
 
