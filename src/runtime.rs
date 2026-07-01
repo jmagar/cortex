@@ -261,7 +261,8 @@ impl RuntimeCore {
             CancellationToken::new(),
             config.receiver.max_message_size,
         );
-        let mut service = CortexService::new(Arc::clone(&pool), config.storage.clone());
+        let mut service = CortexService::new(Arc::clone(&pool), config.storage.clone())
+            .with_llm_config(config.llm.clone());
         if is_stdio {
             service = service.with_file_tail_registry(file_tail_registry);
         } else {

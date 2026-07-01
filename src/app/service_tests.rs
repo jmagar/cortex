@@ -2162,3 +2162,32 @@ async fn file_tails_rejects_invalid_facility_severity_and_disallowed_paths() {
         .unwrap_err();
     assert!(disallowed.to_string().contains("allowed roots"));
 }
+
+#[tokio::test]
+async fn service_exposes_llm_runner_with_configured_defaults() {
+    let (service, _pool, _dir) = test_service();
+    // Exercise the accessor exists and is wired to a real DbPool by running
+    // a trivial audited call end to end. Full LlmRunner behavior coverage
+    // lives in app::llm_runner_tests; this test only proves CortexService
+    // wires a working runner through to a real pool.
+    let spec = crate::app::llm_runner::LlmInvocationSpec {
+        caller_surface: crate::app::llm_runner::LlmCallerSurface::Test,
+        action: "ai_assess".to_string(),
+        incident_id: None,
+        ai_tool: None,
+        ai_project: None,
+        ai_session_id: None,
+        evidence_counts: crate::app::llm_runner::LlmEvidenceCounts::default(),
+        prompt: "ping".to_string(),
+        provider: "test".to_string(),
+        model: "test".to_string(),
+        program: "test".to_string(),
+        extra_metadata: serde_json::json!({}),
+    };
+    let outcome = service
+        .llm()
+        .run(spec, |_p| async { Ok("pong".to_string()) })
+        .await
+        .unwrap();
+    assert_eq!(outcome.output, "pong");
+}
