@@ -1,9 +1,8 @@
 use anyhow::Result;
 use cortex::app::{
     AbuseSearchResponse, AiCorrelateResponse, CorrelateEventsResponse, DbStats, GetErrorsResponse,
-    ListAiProjectsResponse, ListAiToolsResponse, ListHookEventsResponse, ListHostsResponse,
-    ListSkillEventsResponse, ProjectContextResponse, SearchLogsResponse, SearchSessionsResponse,
-    UsageBlocksResponse,
+    ListAiProjectsResponse, ListAiToolsResponse, ListHostsResponse, ProjectContextResponse,
+    SearchLogsResponse, SearchSessionsResponse, UsageBlocksResponse,
 };
 
 use super::super::SessionsOutputDetail;
@@ -327,91 +326,6 @@ pub(crate) fn print_project_context_response(
 /// the database, so by the time a row gets here it cannot contain an ANSI
 /// escape or embedded newline. Do not re-add sanitization here; the fix
 /// belongs at the extraction boundary, not the printer.
-pub(crate) fn print_skill_events_response(
-    response: &ListSkillEventsResponse,
-    json: bool,
-) -> Result<()> {
-    if json {
-        return print_json(response);
-    }
-    if response.events.is_empty() {
-        println!("No skill events found.");
-        return Ok(());
-    }
-    println!(
-        "{} event(s) shown{}",
-        cyan(&response.events.len().to_string()),
-        if response.truncated {
-            " (truncated)"
-        } else {
-            ""
-        }
-    );
-    for event in &response.events {
-        let plugin = event
-            .skill_plugin
-            .as_deref()
-            .map(|p| format!(" plugin={p}"))
-            .unwrap_or_default();
-        println!(
-            "{}  {}{}  {}  tool={} project={}",
-            muted(&local_ts(&event.timestamp)),
-            violet(&event.skill_name),
-            plugin,
-            primary(&event.event_kind),
-            cyan(&event.ai_tool),
-            event.ai_project.as_deref().unwrap_or("-")
-        );
-    }
-    if response.truncated {
-        println!("{}", muted("(truncated — refine filters or raise --limit)"));
-    }
-    Ok(())
-}
-
-pub(crate) fn print_hook_events_response(
-    response: &ListHookEventsResponse,
-    json: bool,
-) -> Result<()> {
-    if json {
-        return print_json(response);
-    }
-    if response.events.is_empty() {
-        println!("No hook events found.");
-        return Ok(());
-    }
-    println!(
-        "{} event(s) shown{}",
-        cyan(&response.events.len().to_string()),
-        if response.truncated {
-            " (truncated)"
-        } else {
-            ""
-        }
-    );
-    for event in &response.events {
-        let name = event
-            .hook_name
-            .as_deref()
-            .map(|n| format!(" name={n}"))
-            .unwrap_or_default();
-        println!(
-            "{}  {}{}  status={}  evidence={}  tool={} project={}",
-            muted(&local_ts(&event.timestamp)),
-            violet(&event.hook_event),
-            name,
-            primary(&event.status),
-            cyan(&event.evidence_kind),
-            cyan(&event.ai_tool),
-            event.ai_project.as_deref().unwrap_or("-")
-        );
-    }
-    if response.truncated {
-        println!("{}", muted("(truncated — refine filters or raise --limit)"));
-    }
-    Ok(())
-}
-
 pub(crate) fn print_ai_tools_response(response: &ListAiToolsResponse, json: bool) -> Result<()> {
     if json {
         return print_json(response);
@@ -566,6 +480,9 @@ pub(crate) fn print_stats_response(stats: &DbStats, json: bool) -> Result<()> {
     println!("{}: {}", muted("phantom_fts_rows"), cyan(&phantom));
     Ok(())
 }
+
+mod ai_events;
+pub(crate) use ai_events::{print_hook_events_response, print_skill_events_response};
 
 #[cfg(test)]
 #[path = "logs_tests.rs"]
