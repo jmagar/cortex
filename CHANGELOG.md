@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.2.2] - 2026-07-01
+
+### Fixed
+
+- GitHub Copilot PR review fixes for the `llm_invocations` retention/circuit-breaker/background-enrichment work (PR #106):
+  - `purge_old_llm_invocations` now formats its retention cutoff with millisecond fractional-second precision (matching `started_at`'s `strftime('%Y-%m-%dT%H:%M:%fZ','now')` format), instead of a coarser `%Y-%m-%dT%H:%M:%SZ` cutoff. The prior cutoff format could misorder rows within the same wall-clock second under lexicographic string comparison, since a shorter cutoff string does not compare consistently against a longer, fractional-seconds `started_at` value.
+  - `LlmRunnerError::CircuitOpen`'s `retry_after` field now reports the number of seconds remaining until the circuit closes (e.g. `"47s"`) instead of `Instant`'s opaque, platform-dependent Debug output, which was not actionable for a caller trying to know how long to wait.
+  - `LlmRunner::run`'s enablement check now gates `background_enrichment_enabled` on `spec.caller_surface == LlmCallerSurface::Background`, matching its documented contract, in addition to the existing `action == "background_enrich"` name check (kept as defense in depth). Previously a Background-surface call under a different action name could bypass the background-enrichment kill switch entirely.
+  - MCP schema: the `status` field description for `action=llm_invocations` now documents the `interrupted` terminal status (assigned by orphaned-row reconciliation in `init_pool` on restart), which was previously omitted from the enum.
+
 ## [3.2.1] - 2026-07-01
 
 ### Fixed
