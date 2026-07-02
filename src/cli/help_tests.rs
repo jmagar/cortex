@@ -10,6 +10,7 @@ const PARSER_TOKENS: &[&str] = &[
     "tail",
     "hosts",
     "sessions",
+    "assess",
     "analysis",
     "state",
     "ingest",

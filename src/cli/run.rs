@@ -153,6 +153,16 @@ pub(crate) async fn run(mode: CliMode, command: CliCommand) -> Result<()> {
                 dispatch::run_ai_skill_investigate(&mode, args).await
             }
         },
+        CliCommand::Assess(command) => match command {
+            super::AssessCommand::Skill(args) => dispatch::run_assess_skill(&mode, args).await,
+            super::AssessCommand::Abuse(args) => dispatch::run_assess_abuse(&mode, args).await,
+            super::AssessCommand::Mcp(_) => {
+                Err(anyhow!("cortex assess mcp is not yet implemented"))
+            }
+            super::AssessCommand::Hooks(_) => {
+                Err(anyhow!("cortex assess hooks is not yet implemented"))
+            }
+        },
         CliCommand::Heartbeat(command) => {
             super::heartbeat_agent::run_heartbeat_no_db(command).await
         }

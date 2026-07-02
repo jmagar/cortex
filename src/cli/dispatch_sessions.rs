@@ -31,11 +31,11 @@ use super::output::sessions::{
 };
 use super::sessions_watch::ai_smoke_watch;
 use super::{
-    CliMode, OutputArgs, SessionsAbuseArgs, SessionsAddArgs, SessionsAskHistoryArgs,
-    SessionsAssessArgs, SessionsBlocksArgs, SessionsCheckpointsArgs, SessionsContextArgs,
-    SessionsCorrelateArgs, SessionsDoctorArgs, SessionsErrorsArgs, SessionsIncidentContextArgs,
-    SessionsIncidentsArgs, SessionsIndexArgs, SessionsInvestigateArgs, SessionsListArgs,
-    SessionsLlmInvocationsArgs, SessionsPruneCheckpointsArgs, SessionsSearchArgs,
+    AssessAbuseArgs, AssessSkillArgs, CliMode, OutputArgs, SessionsAbuseArgs, SessionsAddArgs,
+    SessionsAskHistoryArgs, SessionsAssessArgs, SessionsBlocksArgs, SessionsCheckpointsArgs,
+    SessionsContextArgs, SessionsCorrelateArgs, SessionsDoctorArgs, SessionsErrorsArgs,
+    SessionsIncidentContextArgs, SessionsIncidentsArgs, SessionsIndexArgs, SessionsInvestigateArgs,
+    SessionsListArgs, SessionsLlmInvocationsArgs, SessionsPruneCheckpointsArgs, SessionsSearchArgs,
     SessionsSimilarArgs, SessionsSkillIncidentsArgs, SessionsSkillInvestigateArgs,
     SessionsSkillsBackfillArgs, SessionsSkillsListArgs, SessionsWatchArgs,
 };
@@ -802,6 +802,16 @@ pub(crate) async fn run_ai_llm_invocations(
         }
     }
     Ok(())
+}
+
+// temporary stub bodies — replaced by the real implementations that call
+// `CortexService::run_skill_assessment_with_delta` /
+// `CortexService::assess_top_abuse_incident_with_delta`.
+pub(crate) async fn run_assess_skill(_mode: &CliMode, _args: AssessSkillArgs) -> Result<()> {
+    bail!("cortex assess skill is not yet implemented")
+}
+pub(crate) async fn run_assess_abuse(_mode: &CliMode, _args: AssessAbuseArgs) -> Result<()> {
+    bail!("cortex assess abuse is not yet implemented")
 }
 
 #[cfg(test)]

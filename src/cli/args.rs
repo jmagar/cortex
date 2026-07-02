@@ -2,6 +2,7 @@ use super::args_config::ConfigCommand;
 use cortex::compose::{ComposeTarget, MutationOptions};
 
 mod alerts;
+mod assess;
 mod sessions;
 mod surface;
 
@@ -9,6 +10,7 @@ pub(crate) use alerts::{
     AlertsCommand, NotifyCommand, NotifyRecentArgs, NotifyTestArgs, SigAckArgs, SigCommand,
     SigListArgs, SigUnackArgs,
 };
+pub(crate) use assess::{AssessAbuseArgs, AssessCommand, AssessSkillArgs};
 pub(crate) use sessions::{
     SessionsAbuseArgs, SessionsAddArgs, SessionsAskHistoryArgs, SessionsAssessArgs,
     SessionsBlocksArgs, SessionsCheckpointsArgs, SessionsCommand, SessionsContextArgs,
@@ -32,6 +34,7 @@ pub(crate) enum CliCommand {
     Errors(TimeRangeArgs),
     Hosts(HostsCommand),
     Sessions(SessionsCommand),
+    Assess(AssessCommand),
     Incident(IncidentArgs),
     Correlate(CorrelateArgs),
     State(StateCommand),
