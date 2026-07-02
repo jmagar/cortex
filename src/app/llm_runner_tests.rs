@@ -312,15 +312,19 @@ async fn circuit_opens_after_failure_threshold_and_audits_denial() {
 /// `circuit_opens_after_failure_threshold_and_audits_denial` only asserts
 /// `seconds > 0`, which happens to hold with the default 300s cooldown but
 /// does not exercise the truncation-vs-rounding boundary; this test uses a
-/// 1s cooldown so the remaining time is checked well under a second after
+/// long cooldown so the remaining time is checked well under a second after
 /// the circuit opens, which `.as_secs()` (truncate) would misreport as
-/// `"0s"` but `.as_secs_f64().ceil()` (round up) correctly reports as `"1s"`.
+/// `"0s"` but `.as_secs_f64().ceil()` (round up) correctly reports as
+/// non-"0s". The cooldown is deliberately large (not 1s) so a wide sub-second
+/// remainder survives scheduler jitter under a fully-loaded parallel test
+/// run — a short cooldown made this test flaky when the gap between the two
+/// `.run()` calls occasionally exceeded the cooldown window.
 #[tokio::test]
 async fn circuit_open_retry_after_rounds_up_sub_second_remainder() {
     let (pool, _dir) = test_pool();
     let cfg = LlmConfig {
         failure_threshold: 1,
-        cooldown_secs: 1,
+        cooldown_secs: 300,
         max_invocations_per_minute: 100,
         max_invocations_per_hour: 100,
         ..LlmConfig::default()
