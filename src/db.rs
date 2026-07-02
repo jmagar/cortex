@@ -15,6 +15,8 @@ pub(crate) mod notifications;
 mod pool;
 mod queries;
 mod skill_events;
+mod skill_incident_evidence;
+mod skill_incidents;
 
 pub(crate) use analytics::PATTERN_SCAN_LIMIT_MAX;
 pub use analytics::{
@@ -86,4 +88,12 @@ pub(crate) use skill_events::insert_skill_events_in_tx;
 pub use skill_events::{
     AiSkillEventEntry, AiSkillEventParams, ListSkillEventsResult, SkillEventInsert,
     insert_skill_events, list_skill_events,
+};
+pub use skill_incident_evidence::{
+    AiSkillInvestigateParams, AiSkillInvestigateResult, SkillIncidentEvidence,
+    investigate_ai_skill_incidents,
+};
+pub use skill_incidents::{
+    AiSkillIncidentParams, AiSkillIncidentResult, SkillIncident, SkillSignalCounts,
+    search_ai_skill_incidents,
 };
