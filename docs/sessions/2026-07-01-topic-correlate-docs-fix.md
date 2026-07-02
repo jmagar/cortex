@@ -101,7 +101,7 @@ No bead activity observed. This task was treated as a small, self-contained docu
 | `git push -u origin claude/quirky-euclid-37627e` | Pushed; pre-push hooks (version-sync, clippy) passed |
 | `gh pr create --title "docs: ..." --body "..."` | Created PR #107 |
 | `git rebase origin/main` | Conflicts in 9 files |
-| `git xtask bump-version patch` (second run, after fixing `Cargo.toml` to 3.2.0) | `Bumped cortex 3.2.0 → 3.2.1` |
+| `cargo xtask bump-version patch` (second run, after fixing `Cargo.toml` to 3.2.0) | `Bumped cortex 3.2.0 → 3.2.1` |
 | `cargo xtask check-release-versions` (second run) | `OK: 8 version-bearing file(s) in sync at 3.2.1.` |
 | `cargo test --lib public_action_references_cover_schema_registry` (second run) | `test result: ok. 1 passed` |
 | `git push --force-with-lease origin claude/quirky-euclid-37627e` | Forced update accepted; pre-push hooks passed |
