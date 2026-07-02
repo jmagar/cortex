@@ -54,6 +54,11 @@ to them by default.
 | GET | `/api/sessions/tools` | read | query: `project?`, `from?`, `to?` | `ListAiToolsResponse { total_tools, truncated, tools: [AiToolEntry] }` | 200, 400, 401, 503, 500 | Y | Tool inventory. |
 | GET | `/api/sessions/projects` | read | query: `tool?`, `from?`, `to?` | `ListAiProjectsResponse { total_projects, truncated, projects: [AiProjectEntry] }` | 200, 400, 401, 503, 500 | Y | Project inventory. |
 | GET | `/api/sessions/skills` | read | query: `skill?`, `plugin?`, `tool?`, `project?`, `session_id?`, `hostname?`, `from?`, `to?`, `limit?` (u32) | `ListSkillEventsResponse { total, truncated, events: [SkillEventEntry] }` | 200, 400, 401, 503, 500 | Y | `limit` clamped at **500**. Extracted AI skill-invocation events (Claude `attributionSkill` structured fields, Codex `<skill><name>` transcript tags). Backed by the `ai_skill_events` table (migration 38); MCP action: `skill_events` (`cortex:read`); CLI: `cortex sessions skills`. `caller_ip` + query filters audit-logged via `tracing::info!` before the service call (lighter than the admin-scoped `warn!` above, since this route is `cortex:read` not `cortex:admin`). |
+| GET | `/api/sessions/skill-incidents` | read | query: `skill?`, `plugin?`, `tool?`, `project?`, `session_id?`, `hostname?`, `from?`, `to?`, `limit?`, `window_minutes?`, **`signals?`** (repeated), `min_score?` (f64) | `AiSkillIncidentResponse { incidents, total_incidents, candidate_event_rows, candidate_cap, candidate_window_truncated, truncated }` | 200, 400, 401, 503, 500 | Y | Decoded via `serde_qs::axum::QsQuery` for `signals[]=`. Grouped skill-usage incident candidates; MCP action: `skill_incidents` (`cortex:read`); CLI: `cortex sessions skill-incidents`. |
+| GET | `/api/sessions/skill-investigate` | read | query: `skill?`, `plugin?`, `tool?`, `project?`, `from?`, `to?`, `limit?`, `window_minutes?`, `correlation_window_minutes?` | `AiSkillInvestigateResponse { evidence, total_incidents, truncated, other_matching_incidents, no_incident_low_severity_summary, no_data, suggested_filters }` | 200, 400, 401, 503, 500 | Y | Deterministic (never LLM) skill-usage-incident evidence bundles, skill-first. `incident_id` narrowing is CLI/MCP-only in this route (always `None` over REST). MCP action: `skill_investigate` (`cortex:read`); CLI: `cortex sessions skill-investigate`. |
+| GET | `/api/sessions/hooks` | read | query: `hook_event?`, `hook_name?`, `hook_source?`, `status?`, `evidence_kind?`, `tool?`, `project?`, `session_id?`, `hostname?`, `from?`, `to?`, `limit?` (u32) | `ListHookEventsResponse { total, truncated, events: [HookEventEntry] }` | 200, 400, 401, 503, 500 | Y | `limit` clamped at **500**. Extracted/collected AI hook events: Claude runtime hook-execution attachments (`evidence_kind=runtime_transcript`) and Claude/Codex config/trust-state inventory (`evidence_kind=config_inventory`/`trusted_hash_state`). Backed by the `ai_hook_events` table (migration 39); MCP action: `hook_events` (`cortex:read`); CLI: `cortex sessions hook-events`. |
+| GET | `/api/sessions/hook-incidents` | read | query: `hook_event?`, `hook_name?`, `hook_source?`, `tool?`, `project?`, `session_id?`, `hostname?`, `evidence_kind?`, `from?`, `to?`, `limit?`, `window_minutes?`, **`signals?`** (repeated), `min_score?` (f64) | `AiHookIncidentResponse { incidents, total_incidents, candidate_event_rows, candidate_cap, candidate_window_truncated, truncated }` | 200, 400, 401, 503, 500 | Y | Decoded via `serde_qs::axum::QsQuery` for `signals[]=`. Grouped hook-usage incident candidates (failures, timeouts, output-parse errors, too-frequent invocation, post-hook user correction). Each incident carries `has_runtime_evidence` so callers can tell proven execution from config-only evidence. MCP action: `hook_incidents` (`cortex:read`). |
+| GET | `/api/sessions/hook-investigate` | read | query: `hook_event?`, `hook_name?`, `hook_source?`, `tool?`, `project?`, `from?`, `to?`, `limit?`, `window_minutes?`, `correlation_window_minutes?` | `AiHookInvestigateResponse { evidence, total_incidents, truncated, other_matching_incidents, no_incident_low_severity_summary, no_data, suggested_filters }` | 200, 400, 401, 503, 500 | Y | Deterministic (never LLM) hook-usage-incident evidence bundles, hook-first. Each `findings.evidence_basis` explicitly states whether the bundle is backed by runtime execution or config/trust-state evidence only. `incident_id` narrowing is CLI/MCP-only (always `None` over REST). MCP action: `hook_investigate` (`cortex:read`). |
 
 ### AI diagnostic + admin (4) — bead `.3`
 
@@ -98,14 +103,16 @@ to them by default.
 | GET | `/api/graph/explain` | read | query: entity selector, `depth?` (clamped to 3), `beam_width?`, `max_chains?`, `evidence_sample_limit?`, `payload_budget?` | `GraphExplainResponse { resolved_entity, chains, narrative, open_questions, missing_evidence, next_queries, metadata }` | 200, 400, 401, 404, 503, 500 | Y | Deterministic evidence-backed explanation; weak evidence becomes open questions, not causal claims. |
 | GET | `/api/graph/evidence` | read | query: `evidence_id` (REQUIRED, minimum 1), `payload_budget?` | `GraphEvidenceLookupResponse { evidence, relationship, src_entity, dst_entity, source_log_summary?, missing_source_reason?, metadata }` | 200, 400, 401, 404, 503, 500 | Y | Proof lookup for one evidence row. Source summaries are redacted/truncated and exclude raw frames and raw metadata. |
 
-**Total: 58 routes** (current `src/api.rs` router surface, including syslog,
-surface-parity, AI, graph, compose, notification, error-ack, and DB routes).
+**Total: 63 routes** (current `src/api.rs` router surface, including syslog,
+surface-parity, AI, graph, compose, notification, error-ack, and DB routes;
+includes the 3 hook routes above, added alongside the `ai_hook_events`
+subsystem).
 
-`cortex assess skill` / `cortex assess abuse` are CLI-only in this phase
-(no REST route) — see README "Skill and abuse assessment". LLM assessment
-spawns Gemini on the local host via `LlmRunner` and is never exposed over
-MCP or REST; this mirrors the existing `cortex sessions assess` (no
-`/api/sessions/assess` route either).
+`cortex assess skill` / `cortex assess abuse` / `cortex assess hooks` are
+CLI-only in this phase (no REST route) — see README "Skill, abuse, and hook
+assessment". LLM assessment spawns Gemini on the local host via `LlmRunner`
+and is never exposed over MCP or REST; this mirrors the existing
+`cortex sessions assess` (no `/api/sessions/assess` route either).
 
 ---
 

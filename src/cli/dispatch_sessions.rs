@@ -13,8 +13,8 @@ use std::io::Write;
 use super::output::common::print_json;
 use super::output::logs::{
     UsageBlocksPrintOptions, print_abuse_search_response, print_ai_correlate_response,
-    print_ai_projects_response, print_ai_tools_response, print_project_context_response,
-    print_hook_events_response, print_search_sessions_response, print_skill_events_response,
+    print_ai_projects_response, print_ai_tools_response, print_hook_events_response,
+    print_project_context_response, print_search_sessions_response, print_skill_events_response,
     print_usage_blocks_response_with_options,
 };
 use super::output::sessions::more::{
@@ -33,13 +33,13 @@ use super::output::sessions::{
 use super::sessions_watch::ai_smoke_watch;
 use super::{
     AssessAbuseArgs, AssessHooksArgs, AssessSkillArgs, CliMode, OutputArgs, SessionsAbuseArgs,
-    SessionsAddArgs,
-    SessionsAskHistoryArgs, SessionsAssessArgs, SessionsBlocksArgs, SessionsCheckpointsArgs,
-    SessionsContextArgs, SessionsCorrelateArgs, SessionsDoctorArgs, SessionsErrorsArgs,
-    SessionsIncidentContextArgs, SessionsIncidentsArgs, SessionsIndexArgs, SessionsInvestigateArgs,
-    SessionsListArgs, SessionsLlmInvocationsArgs, SessionsPruneCheckpointsArgs, SessionsSearchArgs,
-    SessionsSimilarArgs, SessionsSkillIncidentsArgs, SessionsSkillInvestigateArgs,
-    SessionsSkillsBackfillArgs, SessionsSkillsListArgs, SessionsWatchArgs,
+    SessionsAddArgs, SessionsAskHistoryArgs, SessionsAssessArgs, SessionsBlocksArgs,
+    SessionsCheckpointsArgs, SessionsContextArgs, SessionsCorrelateArgs, SessionsDoctorArgs,
+    SessionsErrorsArgs, SessionsIncidentContextArgs, SessionsIncidentsArgs, SessionsIndexArgs,
+    SessionsInvestigateArgs, SessionsListArgs, SessionsLlmInvocationsArgs,
+    SessionsPruneCheckpointsArgs, SessionsSearchArgs, SessionsSimilarArgs,
+    SessionsSkillIncidentsArgs, SessionsSkillInvestigateArgs, SessionsSkillsBackfillArgs,
+    SessionsSkillsListArgs, SessionsWatchArgs,
 };
 
 // ─── AI Arg → Request conversions (bead 0p8r.8) ─────────────────────────────

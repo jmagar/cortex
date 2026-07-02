@@ -9,8 +9,8 @@ mod args_config;
 pub(crate) use args::{
     AgentCommandCommand, AgentCommandIngestSpoolArgs, AgentCommandWrapArgs, AssessAbuseArgs,
     AssessCommand, AssessHooksArgs, AssessSkillArgs, CliCommand, ComposeArgs, ComposeCommand,
-    ComposeLogsArgs, ComposeMutationArgs, CorrelateArgs, DbBackupArgs, DbCheckpointArgs,
-    DbCommand, DbIntegrityArgs, DbIntegrityStatusArgs, DbStatusArgs, DbVacuumArgs, EntityArgs,
+    ComposeLogsArgs, ComposeMutationArgs, CorrelateArgs, DbBackupArgs, DbCheckpointArgs, DbCommand,
+    DbIntegrityArgs, DbIntegrityStatusArgs, DbStatusArgs, DbVacuumArgs, EntityArgs,
     FileTailAddArgs, FileTailCommand, FileTailIdArgs, FileTailListArgs, FilterArgs,
     GraphAroundArgs, GraphCommand, GraphEvidenceArgs, GraphExplainArgs, GraphRebuildArgs,
     GraphStatusArgs, HeartbeatAgentArgs, HeartbeatCommand, HostsCommand, IncidentArgs,

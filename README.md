@@ -35,7 +35,7 @@ MCP is an exposure surface, not the owner of log-intelligence business policy. S
 
 ## Tools
 
-One MCP tool, `cortex`, is exposed. Use the required `action` argument to run `search`, `filter`, `tail`, `errors`, `hosts`, `map`, `sessions`, `search_sessions`, `abuse`, `abuse_incidents`, `abuse_investigate`, `ai_correlate`, `topic_correlate`, `usage_blocks`, `project_context`, `list_ai_tools`, `list_ai_projects`, `correlate`, `stats`, `status`, `apps`, `source_ips`, `timeline`, `patterns`, `context`, `get`, `ingest_rate`, `silent_hosts`, `clock_skew`, `anomalies`, `compare`, `compose_status`, `compose_doctor`, `unaddressed_errors`, `ack_error`, `unack_error`, `notifications_recent`, `notifications_test`, `llm_invocations`, `similar_incidents`, `ask_history`, `incident_context`, `graph`, `skill_events`, `skill_incidents`, `skill_investigate`, or `help`.
+One MCP tool, `cortex`, is exposed. Use the required `action` argument to run `search`, `filter`, `tail`, `errors`, `hosts`, `map`, `sessions`, `search_sessions`, `abuse`, `abuse_incidents`, `abuse_investigate`, `ai_correlate`, `topic_correlate`, `usage_blocks`, `project_context`, `list_ai_tools`, `list_ai_projects`, `correlate`, `stats`, `status`, `apps`, `source_ips`, `timeline`, `patterns`, `context`, `get`, `ingest_rate`, `silent_hosts`, `clock_skew`, `anomalies`, `compare`, `compose_status`, `compose_doctor`, `unaddressed_errors`, `ack_error`, `unack_error`, `notifications_recent`, `notifications_test`, `llm_invocations`, `similar_incidents`, `ask_history`, `incident_context`, `graph`, `skill_events`, `skill_incidents`, `skill_investigate`, `hook_events`, `hook_incidents`, `hook_investigate`, or `help`.
 
 For the complete action-specific parameter reference, see [`docs/mcp/SCHEMA.md`](docs/mcp/SCHEMA.md). For correlation behavior and AI/non-AI inclusion rules, see [`docs/mcp/CORRELATION.md`](docs/mcp/CORRELATION.md).
 
@@ -87,6 +87,9 @@ For the complete action-specific parameter reference, see [`docs/mcp/SCHEMA.md`]
 | `skill_events` | List extracted AI skill-invocation events |
 | `skill_incidents` | Groups negative-signal transcript hits following a skill invocation into scored incident candidates |
 | `skill_investigate` | Expands skill-usage incidents into deterministic evidence bundles, skill-first |
+| `hook_events` | List extracted/collected AI hook events (runtime execution and config inventory) |
+| `hook_incidents` | Groups hook failures/timeouts and other negative signals into scored incident candidates |
+| `hook_investigate` | Expands hook-usage incidents into deterministic evidence bundles, hook-first |
 | `help` | Markdown reference for all actions |
 
 ## Homelab Inventory
@@ -1027,13 +1030,14 @@ cortex analysis compare     --a-from 2026-05-20T00:00:00Z --a-to 2026-05-20T23:5
 cortex apps         --host dookie --limit 50
 ```
 
-### Skill and abuse assessment (`cortex assess`)
+### Skill, abuse, and hook assessment (`cortex assess`)
 
 `cortex assess` is the primary UX for LLM-guarded incident assessment. It
 runs through the LLM invocation guard (`LlmRunner` — rate-limited,
 circuit-breaker-protected, fully audited in `llm_invocations`) and, for
-`assess skill`, sources evidence from `investigate_ai_skill_incidents` — a
-purpose-built skill-incident detector, not a repurposed abuse-incident
+`assess skill`/`assess hooks`, sources evidence from
+`investigate_ai_skill_incidents`/`investigate_ai_hook_incidents` — a
+purpose-built skill/hook-incident detector, not a repurposed abuse-incident
 search.
 
 ```bash
@@ -1058,15 +1062,41 @@ cortex assess abuse
 
 # Or assess a specific incident id
 cortex assess abuse --incident-id <id>
+
+# Hook assessment: auto-picks the top matching hook incident
+cortex assess hooks
+
+# Narrow to a known hook name / hook event
+cortex assess hooks --hook format-on-save --since 24h
+cortex assess hooks --hook-event PostToolUse --since 7d
+
+# Collect a fresh point-in-time hook config/trust-state inventory from the
+# local host BEFORE assessing (~/.claude/settings.json, ~/.codex/hooks.json,
+# ~/.codex/config.toml [hooks.state]) so config/trust evidence is available
+# alongside any runtime evidence
+cortex assess hooks --collect-config
+
+# Deterministic findings only
+cortex assess hooks --hook format-on-save --no-llm
 ```
 
-Both `assess skill` and `assess abuse` run the guarded Gemini assessment
-step **by default** (matching `cortex sessions assess`'s existing
-behavior) — pass `--no-llm` to get deterministic findings only. The LLM
-step is **local-CLI-only**: `--http` mode is rejected unless `--no-llm` is
-also passed, since it spawns a Gemini subprocess on the local host via
-`LlmRunner`. `cortex assess mcp` and `cortex assess hooks` are reserved
-subcommands, not yet implemented.
+`assess skill`, `assess abuse`, and `assess hooks` all run the guarded
+Gemini assessment step **by default** (matching `cortex sessions assess`'s
+existing behavior) — pass `--no-llm` to get deterministic findings only.
+The LLM step is **local-CLI-only**: `--http` mode is rejected unless
+`--no-llm` is also passed, since it spawns a Gemini subprocess on the local
+host via `LlmRunner`. `cortex assess mcp` is a reserved subcommand, not yet
+implemented.
+
+Hook assessment findings always include an `evidence_basis` field stating
+whether the incident is backed by proven `runtime_transcript` hook
+execution (Claude transcript `attachment.type = hook_*` rows) or only by
+`config_inventory`/`trusted_hash_state` evidence (configured/trusted hooks
+from `~/.claude/settings.json`, `~/.codex/hooks.json`, or
+`~/.codex/config.toml [hooks.state]`) — a configured hook is never treated
+as proof it executed. Codex has no observed runtime hook-execution shape
+yet, so Codex hook assessment is config/trust-state evidence only until a
+real structured runtime event shape is confirmed.
 
 Related commands:
 - `cortex sessions assess <incident_id>` — abuse-incident assessment by
@@ -1075,6 +1105,12 @@ Related commands:
 - `cortex sessions skill-investigate <skill>` — deterministic-only
   skill-incident evidence command (no LLM step, ever); use this to inspect
   evidence before deciding whether to spend an `assess skill` call.
+- `cortex sessions hook-events [--hook NAME] [--hook-event EVENT]` —
+  list raw `ai_hook_events` rows (runtime + config inventory).
+- `cortex sessions hooks-backfill [--since TIME] [--dry-run]` — bounded,
+  idempotent backfill of Claude runtime hook events from existing
+  transcript history (config-inventory rows are not backfilled — they are
+  a point-in-time host read via `--collect-config`).
 
 ### REST endpoints (2026-05-22 surface parity)
 

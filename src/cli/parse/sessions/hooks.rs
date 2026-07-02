@@ -59,7 +59,10 @@ pub(crate) fn parse_sessions_hook_events(args: &[String]) -> Result<CliCommand> 
                 parsed.until = Some(norm_time(value_after_equals(arg, "--until")?)?)
             }
             _ if arg.starts_with("--limit=") => {
-                parsed.limit = Some(parse_u32_flag("--limit", value_after_equals(arg, "--limit")?)?)
+                parsed.limit = Some(parse_u32_flag(
+                    "--limit",
+                    value_after_equals(arg, "--limit")?,
+                )?)
             }
             _ => bail!("unknown sessions hook-events option: {arg}"),
         }

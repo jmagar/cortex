@@ -95,7 +95,15 @@ pub enum HookEvidenceKind {
     RuntimeTranscript,
     ConfigInventory,
     TrustedHashState,
+    /// Reserved (GH #105): a hook event inferred by correlating hook activity
+    /// with surrounding syslog. No extractor emits this yet; kept so the
+    /// `evidence_kind` taxonomy is stable and callers can already branch on it.
+    #[allow(dead_code)]
     LogCorrelation,
+    /// Reserved (GH #105): a hook event inferred from an observed side effect
+    /// (e.g. a config/file mutation) rather than a direct execution record. No
+    /// extractor emits this yet.
+    #[allow(dead_code)]
     SideEffectInference,
 }
 

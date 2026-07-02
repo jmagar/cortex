@@ -72,6 +72,7 @@ pub fn collect_hook_config(hostname: &str, timestamp: &str) -> Vec<CollectedHook
     out
 }
 
+#[allow(clippy::too_many_arguments)]
 fn push_event(
     out: &mut Vec<CollectedHookConfig>,
     ai_tool: &str,

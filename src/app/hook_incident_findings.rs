@@ -312,10 +312,11 @@ pub fn derive_hook_incident_findings(
         });
         findings.prevention_hints.push(HookPreventionHint {
             category: HOOK_NOT_INVOKED.to_owned(),
-            hint: "This hook is configured/trusted but shows no runtime execution evidence in this \
+            hint:
+                "This hook is configured/trusted but shows no runtime execution evidence in this \
                    window. Confirm it is wired to fire for the expected event, and compare against \
                    runtime evidence for the same session before concluding it never ran."
-                .to_owned(),
+                    .to_owned(),
         });
     }
 

@@ -19,10 +19,10 @@ use super::super::{
 };
 use skill_incidents::{parse_sessions_skill_incidents, parse_sessions_skill_investigate};
 
+mod hooks;
 mod more;
 mod ops;
 mod skill_incidents;
-mod hooks;
 mod skills;
 
 const SESSIONS_SUBCOMMANDS: &[&str] = &[
