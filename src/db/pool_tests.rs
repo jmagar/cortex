@@ -1980,3 +1980,58 @@ fn init_pool_reconciles_orphaned_running_llm_invocations_on_restart() {
         "reconciliation must not touch rows that already reached a terminal status"
     );
 }
+
+#[test]
+fn migration_38_creates_ai_skill_events_table() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("test.db");
+    let config = test_storage_config(db_path);
+    let pool = init_pool(&config).expect("init_pool should succeed");
+    let conn = pool.get().unwrap();
+
+    let table_exists: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ai_skill_events'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(table_exists, 1);
+
+    let indexes: Vec<String> = {
+        let mut stmt = conn
+            .prepare(
+                "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'ai_skill_events' ORDER BY name",
+            )
+            .unwrap();
+        stmt.query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap()
+    };
+    assert!(indexes.contains(&"idx_ai_skill_events_timestamp".to_string()));
+    assert!(indexes.contains(&"idx_ai_skill_events_skill_time".to_string()));
+    assert!(indexes.contains(&"idx_ai_skill_events_plugin_time".to_string()));
+    assert!(indexes.contains(&"idx_ai_skill_events_hostname_time".to_string()));
+    assert!(indexes.contains(&"idx_ai_skill_events_session_time".to_string()));
+    assert!(indexes.contains(&"idx_ai_skill_events_project_skill_time".to_string()));
+
+    // Eng review Fix 5: idx_logs_ai_tool_id lives on the EXISTING `logs`
+    // table (backfill keyset-pagination support), not `ai_skill_events`.
+    let logs_index_exists: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_logs_ai_tool_id'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(logs_index_exists, 1);
+
+    // UNIQUE constraint + idempotent re-run of the whole insert on identical
+    // (log_id, skill_name, event_kind, evidence_kind) is exercised in Task 6;
+    // here we only assert the migration ran and version advanced.
+    let version = crate::db::read_schema_version_info_conn(&conn)
+        .unwrap()
+        .version;
+    assert_eq!(version, 38);
+}
