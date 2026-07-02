@@ -1601,20 +1601,20 @@ fn transcript_row_with_no_skill_reference_creates_no_skill_event() {
 
 #[tokio::test]
 async fn end_to_end_ingest_then_backfill_is_idempotent_across_both_paths() {
-    // Row 1 uses Codex, not Claude: `logs.message` for a Codex row IS the
-    // scannable transcript text (the `<skill><name>` regex reads it
-    // directly), so it stays intact through `scrub_ai_message` and remains
-    // recoverable by the backfill's `row.message` re-scan. A Claude row's
-    // `logs.message` is `extract_message`'s plain-text `content` extraction
-    // (e.g. "hi"), which NEVER contains the raw `attributionSkill` JSON
-    // field — that data exists only in the source JSONL file, never
-    // persisted to the DB. This is a real, confirmed constraint of the
-    // shipped backfill design (it re-scans `logs.message`/`logs.raw`, and
-    // neither ever holds raw JSON for Claude rows), not a limitation of this
-    // test. See PR2 handoff notes for the follow-up bead tracking this gap.
+    // Codex row: `logs.message` for a Codex row IS the scannable transcript
+    // text (the `<skill><name>` regex reads it directly), so it stays intact
+    // through `scrub_ai_message` and remains recoverable by the backfill's
+    // `row.message` re-scan. Claude rows are different: `logs.message` is
+    // `extract_message`'s plain-text `content` extraction (e.g. "hi"), which
+    // NEVER contains the raw `attributionSkill` JSON field. The backfill
+    // recovers Claude rows instead by re-reading the source transcript file
+    // via the persisted `ai_transcript_path` column and the `line_no`
+    // recorded in `metadata_json` at ingest time — see
+    // `src/app/services/skill_backfill.rs`'s module doc comment.
     let (pool, dir) = test_pool();
 
-    // Row 1: indexed normally (picks up the skill event via flush_chunk).
+    // Row 1 (Codex, ingested normally): picks up the skill event via
+    // flush_chunk at ingest time.
     let codex_file = dir.path().join("codex.jsonl");
     std::fs::write(
         &codex_file,
@@ -1626,12 +1626,12 @@ async fn end_to_end_ingest_then_backfill_is_idempotent_across_both_paths() {
     .unwrap();
     index_file(&pool, &codex_file, "codex_session").unwrap();
 
-    // Row 2: inserted directly into `logs` bypassing the scanner entirely,
-    // simulating a Codex transcript row ingested BEFORE this phase shipped
-    // — this is exactly what `sessions skills backfill` exists to catch up.
-    // Codex's `message` column already holds the raw transcript text (never
-    // JSON-extracted away), so a pre-existing Codex row's skill tag is
-    // genuinely recoverable via backfill, unlike Claude's.
+    // Row 2 (Codex, pre-existing/legacy): inserted directly into `logs`
+    // bypassing the scanner entirely, simulating a Codex transcript row
+    // ingested BEFORE this phase shipped. Codex's `message` column already
+    // holds the raw transcript text (never JSON-extracted away), so a
+    // pre-existing Codex row's skill tag is recoverable straight from
+    // `logs.message` via backfill.
     {
         let conn = pool.get().unwrap();
         conn.execute(
@@ -1642,17 +1642,56 @@ async fn end_to_end_ingest_then_backfill_is_idempotent_across_both_paths() {
         .unwrap();
     }
 
+    // Row 3 (Claude, ingested normally): picks up the skill event via
+    // flush_chunk at ingest time, same as row 1.
+    let claude_file = dir.path().join("claude.jsonl");
+    std::fs::write(
+        &claude_file,
+        concat!(
+            r#"{"sessionId":"sess-3","attributionSkill":"cortex-troubleshoot","attributionPlugin":"cortex","content":"ran troubleshoot"}"#,
+            "\n"
+        ),
+    )
+    .unwrap();
+    index_file(&pool, &claude_file, "explicit_file").unwrap();
+
+    // Row 4 (Claude, pre-existing/legacy): inserted directly into `logs`
+    // with a real `ai_transcript_path` + `metadata_json.line_no` pointing at
+    // a source file on disk, simulating a row ingested before this phase's
+    // ingest-time skill extraction existed but whose transcript file is
+    // still present — exactly the case the backfill's file re-read recovers.
+    let legacy_claude_file = dir.path().join("legacy-claude.jsonl");
+    std::fs::write(
+        &legacy_claude_file,
+        concat!(
+            r#"{"sessionId":"sess-4","attributionSkill":"cortex-report","content":"ran report"}"#,
+            "\n"
+        ),
+    )
+    .unwrap();
+    {
+        let conn = pool.get().unwrap();
+        let metadata_json = serde_json::json!({ "line_no": 0 }).to_string();
+        conn.execute(
+            "INSERT INTO logs (timestamp, hostname, severity, message, raw, source_ip, ai_tool, ai_project, ai_session_id, ai_transcript_path, metadata_json)
+             VALUES ('2026-06-01T00:00:00.000Z', 'dookie', 'info', 'ran report', 'ran report', 'transcript://claude_project', 'claude', 'cortex', 'sess-4', ?1, ?2)",
+            rusqlite::params![legacy_claude_file.to_string_lossy().to_string(), metadata_json],
+        )
+        .unwrap();
+    }
+
     let conn = pool.get().unwrap();
     let pre_backfill_count: i64 = conn
         .query_row("SELECT COUNT(*) FROM ai_skill_events", [], |row| row.get(0))
         .unwrap();
     assert_eq!(
-        pre_backfill_count, 1,
-        "only the scanner-ingested row should have a skill event pre-backfill"
+        pre_backfill_count, 2,
+        "only the scanner-ingested rows (1 and 3) should have a skill event pre-backfill"
     );
     drop(conn);
 
-    // Backfill catches the pre-existing row 2 without duplicating row 1's event.
+    // Backfill catches the pre-existing rows 2 and 4 without duplicating
+    // rows 1 and 3's events.
     let service = crate::app::CortexService::new(
         std::sync::Arc::new(pool.clone()),
         StorageConfig::for_test(dir.path().join("unused.db")),
@@ -1665,18 +1704,20 @@ async fn end_to_end_ingest_then_backfill_is_idempotent_across_both_paths() {
         })
         .await
         .unwrap();
-    assert_eq!(result.scanned, 2, "both codex rows should be scanned");
-    assert_eq!(result.inserted, 1, "only row 2's event is new");
+    assert_eq!(result.scanned, 4, "all four rows should be scanned");
+    assert_eq!(result.inserted, 2, "rows 2 and 4's events are new");
     assert_eq!(
-        result.skipped_duplicates, 1,
-        "row 1's event was already present from ingest-time extraction"
+        result.skipped_duplicates, 2,
+        "rows 1 and 3's events were already present from ingest-time extraction"
     );
+    assert_eq!(result.source_unavailable, 0);
+    assert_eq!(result.parse_errors, 0);
 
     let conn = pool.get().unwrap();
     let total: i64 = conn
         .query_row("SELECT COUNT(*) FROM ai_skill_events", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(total, 2);
+    assert_eq!(total, 4);
     drop(conn);
 
     // Running backfill again is fully idempotent.
@@ -1689,5 +1730,31 @@ async fn end_to_end_ingest_then_backfill_is_idempotent_across_both_paths() {
         .await
         .unwrap();
     assert_eq!(second.inserted, 0);
-    assert_eq!(second.skipped_duplicates, 2);
+    assert_eq!(second.skipped_duplicates, 4);
+}
+
+#[test]
+fn read_transcript_lines_recovers_requested_lines_and_skips_oversized() {
+    // Exercises the shared bounded-read helper the skill-event backfill uses to
+    // recover Claude rows: requested 0-based lines are returned with trailing
+    // newlines trimmed, a line exceeding MAX_RECORD_SIZE_BYTES is omitted (not
+    // read unbounded into memory), line_no counting stays aligned across the
+    // oversized line, and a request beyond EOF is simply absent.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("transcript.jsonl");
+    let oversized = "x".repeat(MAX_RECORD_SIZE_BYTES + 16);
+    let contents = format!("line-zero\n{oversized}\nline-two\n");
+    std::fs::write(&path, contents).unwrap();
+
+    // Want every line plus one past EOF.
+    let wanted: HashSet<usize> = [0usize, 1, 2, 3].into_iter().collect();
+    let got = read_transcript_lines(&path, &wanted).unwrap();
+
+    assert_eq!(got.get(&0).map(String::as_str), Some("line-zero"));
+    assert_eq!(got.get(&2).map(String::as_str), Some("line-two"));
+    // Oversized line 1 is skipped rather than buffered into memory.
+    assert!(!got.contains_key(&1), "oversized line must be omitted");
+    // Line 3 is beyond EOF.
+    assert!(!got.contains_key(&3), "out-of-range line must be omitted");
+    assert_eq!(got.len(), 2);
 }
