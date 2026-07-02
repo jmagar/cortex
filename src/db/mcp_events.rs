@@ -39,6 +39,10 @@ pub struct McpEventInsert {
     pub event: ExtractedMcpEvent,
 }
 
+/// Resolved `(tool_name, mcp_server, mcp_tool)` for a result event copied
+/// forward from its paired call row.
+type ResolvedCallIdentity = (String, Option<String>, Option<String>);
+
 /// Look up `tool_name`/`mcp_server`/`mcp_tool` from the paired call row for
 /// a result event that didn't carry its own tool name (Claude's
 /// `tool_result` shape never repeats the tool name — only Codex's
@@ -53,8 +57,8 @@ fn resolve_result_tool_name_in_tx(
     ai_tool: &str,
     ai_session_id: Option<&str>,
     call_id: &str,
-) -> Result<Option<(String, Option<String>, Option<String>)>> {
-    let row: Option<(String, Option<String>, Option<String>)> = tx
+) -> Result<Option<ResolvedCallIdentity>> {
+    let row: Option<ResolvedCallIdentity> = tx
         .query_row(
             "SELECT tool_name, mcp_server, mcp_tool FROM ai_mcp_events
              WHERE ai_tool = ?1 AND ai_session_id IS ?2 AND call_id = ?3 AND event_kind = 'call'

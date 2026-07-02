@@ -9,11 +9,12 @@ use sha2::{Digest, Sha256};
 use crate::ai_project::normalize_local_ai_project_path;
 use crate::config::StorageConfig;
 use crate::db::{
-    DbPool, LogBatchEntry, SkillEventInsert, enforce_storage_budget, insert_logs_batch_in_tx,
-    insert_skill_events_in_tx,
+    DbPool, LogBatchEntry, McpEventInsert, SkillEventInsert, enforce_storage_budget,
+    insert_logs_batch_in_tx, insert_mcp_events_in_tx, insert_skill_events_in_tx,
 };
 use crate::ingest_metadata::bounded_metadata_json;
 use crate::receiver::enrichment::{project_from_transcript_path, scrub_ai_message};
+use crate::scanner::mcp_events::{extract_claude_mcp_events, extract_codex_mcp_events};
 use crate::scanner::skill_events::{extract_claude_skill_events, extract_codex_skill_events};
 
 mod checkpoint;
@@ -80,6 +81,23 @@ pub struct IndexFileOptions {
 enum ChunkSkillSource {
     Claude(serde_json::Value),
     Codex(String),
+    None,
+}
+
+/// Raw MCP-extraction source paired 1:1 with each `LogBatchEntry` pushed
+/// into a chunk's `batch` vector, mirroring `ChunkSkillSource` above. Both
+/// Claude and Codex carry `raw_value` on every record now (see
+/// `codex::parse_line`'s doc comment), so this is populated whenever a
+/// parsed record's raw JSON is available — extraction itself
+/// short-circuits internally on shape (no `tool_use`/`function_call`
+/// content) rather than filtering here, so unlike `ChunkSkillSource` there
+/// is no cheap substring pre-check to gate on: `tool_use`/`function_call`
+/// don't have one distinguishing literal substring the way `<skill>` or
+/// `attributionSkill` do.
+#[derive(Debug, Clone)]
+enum ChunkMcpSource {
+    Claude(serde_json::Value),
+    Codex(serde_json::Value),
     None,
 }
 
@@ -506,6 +524,7 @@ pub fn index_file_with_options(
     let mut imports = Vec::new();
     let mut batch = Vec::new();
     let mut skill_sources = Vec::new();
+    let mut mcp_sources = Vec::new();
     let mut chunk_bytes = 0usize;
     let mut project_normalizer = ProjectNormalizer::default();
     let file = fs::File::open(&canonical_path)?;
@@ -578,6 +597,22 @@ pub fn index_file_with_options(
                     }
                     SourceKind::GeminiSession => ChunkSkillSource::None,
                 };
+                // Unlike skill extraction, MCP extraction has no cheap
+                // substring pre-check to gate on (see `ChunkMcpSource`'s
+                // doc comment), so this simply forwards `raw_value`
+                // whenever the parser populated it.
+                let mcp_source = match source_kind {
+                    SourceKind::CodexSession => match &parsed.raw_value {
+                        Some(value) => ChunkMcpSource::Codex(value.clone()),
+                        None => ChunkMcpSource::None,
+                    },
+                    SourceKind::ClaudeProject | SourceKind::ExplicitFile => match &parsed.raw_value
+                    {
+                        Some(value) => ChunkMcpSource::Claude(value.clone()),
+                        None => ChunkMcpSource::None,
+                    },
+                    SourceKind::GeminiSession => ChunkMcpSource::None,
+                };
                 let message = scrub_ai_message(&parsed.message, None);
                 let project_candidate = parsed
                     .ai_project
@@ -643,6 +678,7 @@ pub fn index_file_with_options(
                 batch.push(entry);
                 imports.push(record_key);
                 skill_sources.push(skill_source);
+                mcp_sources.push(mcp_source);
                 if batch.len() >= MAX_INDEX_CHUNK_RECORDS || chunk_bytes >= MAX_INDEX_CHUNK_BYTES {
                     if !flush_chunk(
                         pool,
@@ -651,6 +687,7 @@ pub fn index_file_with_options(
                         &mut batch,
                         &mut imports,
                         &mut skill_sources,
+                        &mut mcp_sources,
                         None,
                         &mut result,
                     )? {
@@ -688,6 +725,7 @@ pub fn index_file_with_options(
             &mut batch,
             &mut imports,
             &mut skill_sources,
+            &mut mcp_sources,
             None,
             &mut result,
         )?;
@@ -707,6 +745,7 @@ pub fn index_file_with_options(
         &mut batch,
         &mut imports,
         &mut skill_sources,
+        &mut mcp_sources,
         completion_metadata.as_ref(),
         &mut result,
     )?;
@@ -825,11 +864,13 @@ fn flush_chunk(
     batch: &mut Vec<LogBatchEntry>,
     imports: &mut Vec<String>,
     skill_sources: &mut Vec<ChunkSkillSource>,
+    mcp_sources: &mut Vec<ChunkMcpSource>,
     completion_metadata: Option<&FileMetadata>,
     result: &mut IndexResult,
 ) -> Result<bool> {
     if batch.is_empty() {
         skill_sources.clear();
+        mcp_sources.clear();
         if let Some(file_metadata) = completion_metadata {
             let mut conn = pool.get()?;
             let _write_guard = crate::db::write_lock();
@@ -848,6 +889,7 @@ fn flush_chunk(
             batch.clear();
             imports.clear();
             skill_sources.clear();
+            mcp_sources.clear();
             return Ok(false);
         }
     }
@@ -858,13 +900,18 @@ fn flush_chunk(
     let claimed = checkpoint::claim_imports_in_tx(&tx, source_id, imports)?;
     let mut claimed_batch = Vec::with_capacity(batch.len());
     let mut claimed_skill_sources = Vec::with_capacity(skill_sources.len());
+    let mut claimed_mcp_sources = Vec::with_capacity(mcp_sources.len());
     let mut skipped_dupes = 0usize;
-    for ((entry, claimed), skill_source) in
-        batch.drain(..).zip(claimed).zip(skill_sources.drain(..))
+    for (((entry, claimed), skill_source), mcp_source) in batch
+        .drain(..)
+        .zip(claimed)
+        .zip(skill_sources.drain(..))
+        .zip(mcp_sources.drain(..))
     {
         if claimed {
             claimed_batch.push(entry);
             claimed_skill_sources.push(skill_source);
+            claimed_mcp_sources.push(mcp_source);
         } else {
             skipped_dupes += 1;
         }
@@ -872,10 +919,12 @@ fn flush_chunk(
     if !claimed_batch.is_empty() {
         let log_ids = insert_logs_batch_in_tx(&tx, &claimed_batch)?;
         let mut skill_inserts = Vec::new();
-        for ((entry, log_id), skill_source) in claimed_batch
+        let mut mcp_inserts = Vec::new();
+        for (((entry, log_id), skill_source), mcp_source) in claimed_batch
             .iter()
             .zip(log_ids.iter().copied())
             .zip(claimed_skill_sources.iter())
+            .zip(claimed_mcp_sources.iter())
         {
             let extracted = match skill_source {
                 ChunkSkillSource::Claude(value) => extract_claude_skill_events(value),
@@ -893,9 +942,28 @@ fn flush_chunk(
                     event,
                 });
             }
+            let extracted_mcp = match mcp_source {
+                ChunkMcpSource::Claude(value) => extract_claude_mcp_events(value),
+                ChunkMcpSource::Codex(value) => extract_codex_mcp_events(value),
+                ChunkMcpSource::None => Vec::new(),
+            };
+            for event in extracted_mcp {
+                mcp_inserts.push(McpEventInsert {
+                    log_id,
+                    ai_tool: entry.ai_tool.clone().unwrap_or_default(),
+                    ai_project: entry.ai_project.clone(),
+                    ai_session_id: entry.ai_session_id.clone(),
+                    hostname: entry.hostname.clone(),
+                    timestamp: entry.timestamp.clone(),
+                    event,
+                });
+            }
         }
         if !skill_inserts.is_empty() {
             insert_skill_events_in_tx(&tx, &skill_inserts)?;
+        }
+        if !mcp_inserts.is_empty() {
+            insert_mcp_events_in_tx(&tx, &mcp_inserts)?;
         }
     }
     if let Some(file_metadata) = completion_metadata {
@@ -1142,11 +1210,13 @@ fn index_gemini_file(
 
     let mut batch = Vec::new();
     let mut imports = Vec::new();
-    // Gemini rows never produce skill events — Gemini extraction is
-    // explicitly out of scope for this phase. This vector stays empty
-    // (one ChunkSkillSource::None pushed per record) purely so flush_chunk's
-    // shared signature is satisfied uniformly across all source kinds.
+    // Gemini rows never produce skill or MCP events — Gemini extraction is
+    // explicitly out of scope for this phase. These vectors stay empty
+    // (one ChunkSkillSource::None / ChunkMcpSource::None pushed per record)
+    // purely so flush_chunk's shared signature is satisfied uniformly
+    // across all source kinds.
     let mut skill_sources: Vec<ChunkSkillSource> = Vec::new();
+    let mut mcp_sources: Vec<ChunkMcpSource> = Vec::new();
     let mut chunk_bytes = 0usize;
     let host = local_hostname();
     let tool = SourceKind::GeminiSession.tool_name();
@@ -1231,6 +1301,7 @@ fn index_gemini_file(
         batch.push(entry);
         imports.push(record_key);
         skill_sources.push(ChunkSkillSource::None);
+        mcp_sources.push(ChunkMcpSource::None);
         if batch.len() >= MAX_INDEX_CHUNK_RECORDS || chunk_bytes >= MAX_INDEX_CHUNK_BYTES {
             if !flush_chunk(
                 pool,
@@ -1239,6 +1310,7 @@ fn index_gemini_file(
                 &mut batch,
                 &mut imports,
                 &mut skill_sources,
+                &mut mcp_sources,
                 None,
                 &mut result,
             )? {
@@ -1260,6 +1332,7 @@ fn index_gemini_file(
             &mut batch,
             &mut imports,
             &mut skill_sources,
+            &mut mcp_sources,
             None,
             &mut result,
         )?;
@@ -1279,6 +1352,7 @@ fn index_gemini_file(
         &mut batch,
         &mut imports,
         &mut skill_sources,
+        &mut mcp_sources,
         completion_metadata.as_ref(),
         &mut result,
     )?;

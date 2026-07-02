@@ -28,6 +28,7 @@ COPY src/ src/
 COPY web/ web/
 COPY plugins/cortex/skills/cortex-frustration-assessment/ plugins/cortex/skills/cortex-frustration-assessment/
 COPY plugins/cortex/skills/cortex-skill-improvement-assessment/ plugins/cortex/skills/cortex-skill-improvement-assessment/
+COPY plugins/cortex/skills/cortex-mcp-friction-assessment/ plugins/cortex/skills/cortex-mcp-friction-assessment/
 COPY docker-compose.yml docker-compose.prod.yml ./
 COPY config/Dockerfile config/Dockerfile
 RUN --mount=type=cache,id=cortex-cargo-registry-v2,target=/usr/local/cargo/registry,sharing=locked \

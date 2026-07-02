@@ -22,6 +22,7 @@ pub mod heartbeat_agent;
 pub mod inventory;
 pub mod logging;
 pub mod mcp;
+pub(crate) mod mcp_assessment;
 pub(crate) mod normalize;
 pub(crate) mod notifications;
 pub mod observability;
