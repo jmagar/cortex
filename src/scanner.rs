@@ -20,6 +20,7 @@ mod checkpoint;
 mod claude;
 mod codex;
 mod gemini;
+pub(crate) mod mcp_events;
 pub(crate) mod skill_events;
 
 pub use checkpoint::CheckpointStore;

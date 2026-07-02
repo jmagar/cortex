@@ -1,0 +1,308 @@
+use super::*;
+use serde_json::json;
+
+#[test]
+fn claude_tool_use_builtin_extracts_call_with_no_mcp_classification() {
+    let value = json!({
+        "message": {
+            "content": [
+                {
+                    "type": "tool_use",
+                    "id": "toolu_01KeJaqayCJ1gCMx955pnF5u",
+                    "name": "Bash",
+                    "input": {"command": "ls"}
+                }
+            ]
+        }
+    });
+    let events = extract_claude_mcp_events(&value);
+    assert_eq!(events.len(), 1);
+    let event = &events[0];
+    assert_eq!(event.call_id, "toolu_01KeJaqayCJ1gCMx955pnF5u");
+    assert_eq!(event.tool_name, "Bash");
+    assert_eq!(event.mcp_server, None);
+    assert_eq!(event.mcp_tool, None);
+    assert_eq!(event.event_kind, McpEventKind::Call);
+    assert!(event.arguments_json.is_some());
+}
+
+#[test]
+fn claude_tool_use_mcp_style_name_classifies_server_and_tool() {
+    let value = json!({
+        "message": {
+            "content": [
+                {
+                    "type": "tool_use",
+                    "id": "toolu_abc",
+                    "name": "mcp__lumen__semantic_search",
+                    "input": {"query": "foo"}
+                }
+            ]
+        }
+    });
+    let events = extract_claude_mcp_events(&value);
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].mcp_server.as_deref(), Some("lumen"));
+    assert_eq!(events[0].mcp_tool.as_deref(), Some("semantic_search"));
+}
+
+#[test]
+fn claude_tool_result_string_content_links_via_tool_use_id() {
+    let value = json!({
+        "message": {
+            "content": [
+                {
+                    "tool_use_id": "toolu_01KeJaqayCJ1gCMx955pnF5u",
+                    "type": "tool_result",
+                    "content": "some output text",
+                    "is_error": false
+                }
+            ]
+        }
+    });
+    let events = extract_claude_mcp_events(&value);
+    assert_eq!(events.len(), 1);
+    let event = &events[0];
+    assert_eq!(event.call_id, "toolu_01KeJaqayCJ1gCMx955pnF5u");
+    assert_eq!(event.event_kind, McpEventKind::Result);
+    assert_eq!(event.is_error, Some(false));
+    assert_eq!(event.status.as_deref(), Some("ok"));
+    assert_eq!(event.output_preview.as_deref(), Some("some output text"));
+    assert!(event.error_text.is_none());
+}
+
+#[test]
+fn claude_tool_result_error_populates_error_text_not_output_preview() {
+    let value = json!({
+        "message": {
+            "content": [
+                {
+                    "tool_use_id": "toolu_xyz",
+                    "type": "tool_result",
+                    "content": "permission denied",
+                    "is_error": true
+                }
+            ]
+        }
+    });
+    let events = extract_claude_mcp_events(&value);
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].is_error, Some(true));
+    assert_eq!(events[0].status.as_deref(), Some("error"));
+    assert_eq!(events[0].error_text.as_deref(), Some("permission denied"));
+    assert!(events[0].output_preview.is_none());
+}
+
+#[test]
+fn claude_tool_result_array_content_joins_text_items() {
+    let value = json!({
+        "message": {
+            "content": [
+                {
+                    "tool_use_id": "toolu_arr",
+                    "type": "tool_result",
+                    "content": [
+                        {"type": "text", "text": "line one"},
+                        {"type": "text", "text": "line two"}
+                    ],
+                    "is_error": false
+                }
+            ]
+        }
+    });
+    let events = extract_claude_mcp_events(&value);
+    assert_eq!(events.len(), 1);
+    assert_eq!(
+        events[0].output_preview.as_deref(),
+        Some("line one line two")
+    );
+}
+
+#[test]
+fn claude_multiple_tool_use_blocks_produce_multiple_events() {
+    let value = json!({
+        "message": {
+            "content": [
+                {"type": "tool_use", "id": "toolu_1", "name": "Read", "input": {}},
+                {"type": "tool_use", "id": "toolu_2", "name": "Bash", "input": {}}
+            ]
+        }
+    });
+    let events = extract_claude_mcp_events(&value);
+    assert_eq!(events.len(), 2);
+}
+
+#[test]
+fn claude_no_content_array_returns_empty() {
+    let value = json!({"message": {"role": "user", "content": "hello"}});
+    assert!(extract_claude_mcp_events(&value).is_empty());
+}
+
+#[test]
+fn claude_secrets_in_arguments_are_redacted() {
+    // redact_secrets splits on whitespace, so a token embedded in a
+    // whitespace-separated value (e.g. a command string) is what actually
+    // gets caught in practice — mirrors how `LlmRunner::sanitize_error` and
+    // the skill-assessment prompt builder rely on the same helper.
+    let value = json!({
+        "message": {
+            "content": [
+                {
+                    "type": "tool_use",
+                    "id": "toolu_secret",
+                    "name": "mcp__gh__auth",
+                    "input": {"command": "curl -H Authorization: ghp_FAKE_TEST_TOKEN_DO_NOT_USE_00000000 https://api.github.com"}
+                }
+            ]
+        }
+    });
+    let events = extract_claude_mcp_events(&value);
+    assert_eq!(events.len(), 1);
+    let args = events[0].arguments_json.as_deref().unwrap();
+    assert!(!args.contains("ghp_FAKE_TEST_TOKEN_DO_NOT_USE_00000000"));
+    assert!(args.contains("[REDACTED]"));
+}
+
+#[test]
+fn codex_function_call_extracts_call_event() {
+    let value = json!({
+        "timestamp": "2025-11-15T03:32:12.634Z",
+        "type": "response_item",
+        "payload": {
+            "type": "function_call",
+            "name": "shell",
+            "arguments": "{\"command\":[\"pwd\"]}",
+            "call_id": "call_uQHXzobqXG53qZ0hpqMTGMmj"
+        }
+    });
+    let events = extract_codex_mcp_events(&value);
+    assert_eq!(events.len(), 1);
+    let event = &events[0];
+    assert_eq!(event.call_id, "call_uQHXzobqXG53qZ0hpqMTGMmj");
+    assert_eq!(event.tool_name, "shell");
+    assert_eq!(event.mcp_server, None);
+    assert_eq!(event.event_kind, McpEventKind::Call);
+    assert!(event.arguments_json.is_some());
+}
+
+#[test]
+fn codex_function_call_mcp_style_name_classifies() {
+    let value = json!({
+        "type": "response_item",
+        "payload": {
+            "type": "function_call",
+            "name": "mcp__happy__change_title",
+            "arguments": "{\"title\":\"x\"}",
+            "call_id": "call_w1nH5eCmzI3GAg4HpGnSzQwp"
+        }
+    });
+    let events = extract_codex_mcp_events(&value);
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].mcp_server.as_deref(), Some("happy"));
+    assert_eq!(events[0].mcp_tool.as_deref(), Some("change_title"));
+}
+
+#[test]
+fn codex_function_call_output_success_links_via_call_id() {
+    let value = json!({
+        "timestamp": "2025-11-15T03:32:12.635Z",
+        "type": "response_item",
+        "payload": {
+            "type": "function_call_output",
+            "call_id": "call_uQHXzobqXG53qZ0hpqMTGMmj",
+            "output": "{\"output\":\"/compose/pulse\\n\",\"metadata\":{\"exit_code\":0,\"duration_seconds\":0.0}}"
+        }
+    });
+    let events = extract_codex_mcp_events(&value);
+    assert_eq!(events.len(), 1);
+    let event = &events[0];
+    assert_eq!(event.call_id, "call_uQHXzobqXG53qZ0hpqMTGMmj");
+    assert_eq!(event.event_kind, McpEventKind::Result);
+    assert_eq!(event.is_error, Some(false));
+    assert_eq!(event.status.as_deref(), Some("0"));
+    assert!(event.output_preview.is_some());
+    assert!(event.error_text.is_none());
+}
+
+#[test]
+fn codex_function_call_output_nonzero_exit_is_error() {
+    let value = json!({
+        "type": "response_item",
+        "payload": {
+            "type": "function_call_output",
+            "call_id": "call_fail",
+            "output": "{\"output\":\"permission denied\\n\",\"metadata\":{\"exit_code\":1}}"
+        }
+    });
+    let events = extract_codex_mcp_events(&value);
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].is_error, Some(true));
+    assert!(events[0].error_text.is_some());
+    assert!(events[0].output_preview.is_none());
+}
+
+#[test]
+fn codex_function_call_output_plain_string_without_metadata() {
+    let value = json!({
+        "type": "response_item",
+        "payload": {
+            "type": "function_call_output",
+            "call_id": "call_plain",
+            "output": "plain text output, not json"
+        }
+    });
+    let events = extract_codex_mcp_events(&value);
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].is_error, None);
+    assert_eq!(
+        events[0].output_preview.as_deref(),
+        Some("plain text output, not json")
+    );
+}
+
+#[test]
+fn codex_turn_id_is_captured_when_present() {
+    let value = json!({
+        "type": "response_item",
+        "payload": {
+            "type": "function_call",
+            "name": "shell",
+            "arguments": "{}",
+            "call_id": "call_turn",
+            "metadata": {"turn_id": "turn-42"}
+        }
+    });
+    let events = extract_codex_mcp_events(&value);
+    assert_eq!(events[0].turn_id.as_deref(), Some("turn-42"));
+}
+
+#[test]
+fn codex_non_response_item_returns_empty() {
+    let value = json!({"type": "session_meta", "payload": {}});
+    assert!(extract_codex_mcp_events(&value).is_empty());
+}
+
+#[test]
+fn codex_other_payload_types_return_empty() {
+    let value = json!({
+        "type": "response_item",
+        "payload": {"type": "message", "content": "hi"}
+    });
+    assert!(extract_codex_mcp_events(&value).is_empty());
+}
+
+#[test]
+fn classify_tool_name_rejects_malformed_mcp_prefix() {
+    assert_eq!(classify_tool_name("mcp__onlyserver"), (None, None));
+    assert_eq!(classify_tool_name("mcp____"), (None, None));
+    assert_eq!(classify_tool_name("exec_command"), (None, None));
+    assert_eq!(classify_tool_name("Bash"), (None, None));
+}
+
+#[test]
+fn classify_tool_name_accepts_extra_double_underscore_segments() {
+    // mcp__server__tool__extra -> split_once keeps tool as "tool__extra"
+    let (server, tool) = classify_tool_name("mcp__labby__search__v2");
+    assert_eq!(server.as_deref(), Some("labby"));
+    assert_eq!(tool.as_deref(), Some("search__v2"));
+}

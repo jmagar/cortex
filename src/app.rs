@@ -4,6 +4,8 @@ pub(crate) mod error_detection;
 pub(crate) mod heartbeat_flags;
 pub(crate) mod incident_findings;
 pub mod llm_runner;
+pub(crate) mod mcp_incident_findings;
+pub mod mcp_signal_detectors;
 mod models;
 mod os_adapter;
 mod services;

@@ -2097,9 +2097,16 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
     // `"function_call_output"` linked by `payload.call_id`). Schema matches
     // GH #94's "MCP assessment design" section verbatim.
     //
-    // UNIQUE(ai_tool, ai_session_id, call_id, event_kind) makes
-    // `INSERT OR IGNORE` idempotent across re-ingest and backfill re-runs,
-    // mirroring the ai_skill_events idempotency pattern from migration 38.
+    // Idempotency key is `(ai_tool, ai_session_id, call_id, event_kind)`,
+    // enforced via an expression index over `COALESCE(ai_session_id, '')`
+    // rather than a plain `UNIQUE(...)` table constraint — SQLite (like
+    // standard SQL) never treats two NULLs as equal in a UNIQUE index, so a
+    // plain constraint on a nullable `ai_session_id` would silently let
+    // duplicate rows back in for sessionless transcripts (verified by a
+    // regression test in `mcp_events_tests.rs`). This makes `INSERT OR
+    // IGNORE` idempotent across re-ingest and backfill re-runs, mirroring
+    // the ai_skill_events idempotency pattern from migration 38 (whose own
+    // UNIQUE key is safe because its `log_id` column is NOT NULL).
     //
     // Index set is designed against the actual shipped query filter surface
     // (search_ai_mcp_incidents groups/filters on mcp_server+mcp_tool+time,
@@ -2133,10 +2140,11 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
                output_preview     TEXT,
                error_text         TEXT,
                metadata_json      TEXT,
-               created_at         TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-               UNIQUE(ai_tool, ai_session_id, call_id, event_kind)
+               created_at         TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
              );
 
+             CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_mcp_events_dedupe
+                 ON ai_mcp_events(ai_tool, COALESCE(ai_session_id, ''), call_id, event_kind);
              CREATE INDEX IF NOT EXISTS idx_ai_mcp_events_tool_time
                  ON ai_mcp_events(tool_name, timestamp);
              CREATE INDEX IF NOT EXISTS idx_ai_mcp_events_server_time
