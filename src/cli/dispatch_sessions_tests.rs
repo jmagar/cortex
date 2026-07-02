@@ -21,7 +21,7 @@ fn ai_search_args_into_request_keeps_filters() {
 
 mod assess {
     use crate::cli::http_client::HttpClient;
-    use crate::cli::{AssessSkillArgs, CliMode, dispatch};
+    use crate::cli::{AssessAbuseArgs, AssessSkillArgs, CliMode, dispatch};
     use wiremock::{Mock, MockServer, ResponseTemplate, matchers::any};
 
     async fn http_mode() -> (MockServer, CliMode) {
@@ -70,5 +70,18 @@ mod assess {
             .await
             .unwrap_err();
         assert!(!format!("{err}").contains("spawns Gemini CLI on the local host"));
+    }
+
+    #[tokio::test]
+    async fn run_assess_abuse_rejects_http_mode_when_llm_requested() {
+        let (_server, http_mode) = http_mode().await;
+        let args = AssessAbuseArgs {
+            no_llm: false,
+            ..Default::default()
+        };
+        let err = dispatch::run_assess_abuse(&http_mode, args)
+            .await
+            .unwrap_err();
+        assert!(format!("{err}").contains("spawns Gemini CLI on the local host"));
     }
 }

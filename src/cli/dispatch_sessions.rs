@@ -901,11 +901,75 @@ pub(crate) async fn run_assess_skill(mode: &CliMode, args: AssessSkillArgs) -> R
 }
 
 /// `cortex assess abuse` — thin UX wrapper around the existing
-/// abuse-incident assessment pipeline. Real implementation lands with the
-/// `abuse` task; kept as an explicit stub here so the dispatcher compiles
-/// end to end while `assess skill` above is wired up first.
-pub(crate) async fn run_assess_abuse(_mode: &CliMode, _args: AssessAbuseArgs) -> Result<()> {
-    bail!("cortex assess abuse is not yet implemented")
+/// abuse-incident assessment pipeline (`list_ai_incidents` +
+/// `run_gemini_assess_with_delta`, itself already `LlmRunner`-guarded).
+/// Auto-picks the top-priority matching incident when `--incident-id` is
+/// omitted. LLM assessment is local-only, mirroring `run_assess_skill`'s
+/// and `run_ai_assess`'s guard exactly.
+pub(crate) async fn run_assess_abuse(mode: &CliMode, args: AssessAbuseArgs) -> Result<()> {
+    let run_llm = !args.no_llm;
+    let service = match mode {
+        CliMode::Http(_) if run_llm => {
+            bail!(
+                "cortex assess abuse spawns Gemini CLI on the local host; omit --http or pass --no-llm"
+            )
+        }
+        CliMode::Http(_) => {
+            bail!("cortex assess abuse --http is not yet implemented for --no-llm; run locally")
+        }
+        CliMode::Local(service) => service,
+    };
+    let req = cortex::app::AbuseAssessRequest {
+        incident_id: args.incident_id.clone(),
+        model: args.model.clone(),
+        project: args.project.clone(),
+        tool: args.tool.clone(),
+        since: args.since.clone(),
+        until: args.until.clone(),
+        window_minutes: args.window_minutes,
+        correlation_window_minutes: args.correlation_window_minutes,
+        terms: vec![],
+        limit: args.limit,
+    };
+    let mut streamed = false;
+    let response = service
+        .assess_top_abuse_incident_with_delta(req, run_llm, |delta| {
+            streamed = true;
+            print!("{delta}");
+            std::io::stdout().flush()?;
+            Ok(())
+        })
+        .await?;
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&response)?);
+        return Ok(());
+    }
+    if !streamed {
+        if response.assessed.assessment.is_empty() {
+            println!(
+                "[deterministic-only: incident {} — pass without --no-llm for a full assessment]",
+                response.assessed.incident_id
+            );
+        } else {
+            println!("{}", response.assessed.assessment);
+        }
+    } else if !response.assessed.assessment.ends_with('\n') {
+        println!();
+    }
+    eprintln!(
+        "\n[assessed incident={} anchors={} bundles={}]",
+        response.assessed.incident_id,
+        response.assessed.evidence_summary.total_anchors,
+        response.assessed.evidence_summary.evidence_bundle_count,
+    );
+    if !response.other_matching_incidents.is_empty() {
+        eprintln!(
+            "[{} other matching incident(s): {}]",
+            response.other_matching_incidents.len(),
+            response.other_matching_incidents.join(", ")
+        );
+    }
+    Ok(())
 }
 
 #[cfg(test)]
