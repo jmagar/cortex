@@ -177,6 +177,110 @@ fn list_combined_filters_intersect_correctly() {
     assert_eq!(rows[0].id, "llm-match");
 }
 
+// PR #106 reconciliation fix (pr-test-analyzer): the existing coverage above
+// exercises no-filter, each single filter alone, and all three filters
+// combined, but skips the three two-filter combinations. Add those so every
+// pairwise intersection of `action`/`status`/`since` is proven, not just the
+// full-combination and single-filter extremes.
+
+#[test]
+fn list_action_and_status_combined_filters_intersect_correctly() {
+    let (conn, _dir) = test_conn();
+    // Matches action=ai_assess AND status=success.
+    insert_llm_invocation_running(&conn, "llm-match", &sample_params()).unwrap();
+    finish_llm_invocation(&conn, "llm-match", "success", None, 10, Some(1)).unwrap();
+
+    // Right action, wrong status.
+    insert_llm_invocation_running(&conn, "llm-wrong-status", &sample_params()).unwrap();
+    finish_llm_invocation(&conn, "llm-wrong-status", "error", Some("boom"), 10, None).unwrap();
+
+    // Wrong action, right status.
+    let mut wrong_action = sample_params();
+    wrong_action.action = "skill_assess".to_string();
+    insert_llm_invocation_running(&conn, "llm-wrong-action", &wrong_action).unwrap();
+    finish_llm_invocation(&conn, "llm-wrong-action", "success", None, 10, Some(1)).unwrap();
+
+    let rows = list_llm_invocations(&conn, 500, None, Some("ai_assess"), Some("success")).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].id, "llm-match");
+}
+
+#[test]
+fn list_action_and_since_combined_filters_intersect_correctly() {
+    let (conn, _dir) = test_conn();
+    // Matches action=ai_assess and is within the since window (far past).
+    insert_llm_invocation_running(&conn, "llm-match", &sample_params()).unwrap();
+    finish_llm_invocation(&conn, "llm-match", "success", None, 10, Some(1)).unwrap();
+
+    // Wrong action, but still within the since window.
+    let mut wrong_action = sample_params();
+    wrong_action.action = "skill_assess".to_string();
+    insert_llm_invocation_running(&conn, "llm-wrong-action", &wrong_action).unwrap();
+    finish_llm_invocation(&conn, "llm-wrong-action", "success", None, 10, Some(1)).unwrap();
+
+    // Right action, but excluded by a since window in the far future.
+    let future_rows = list_llm_invocations(
+        &conn,
+        500,
+        Some("2999-01-01T00:00:00Z"),
+        Some("ai_assess"),
+        None,
+    )
+    .unwrap();
+    assert!(
+        future_rows.is_empty(),
+        "future since must exclude even action-matching rows"
+    );
+
+    let rows = list_llm_invocations(
+        &conn,
+        500,
+        Some("2000-01-01T00:00:00Z"),
+        Some("ai_assess"),
+        None,
+    )
+    .unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].id, "llm-match");
+}
+
+#[test]
+fn list_status_and_since_combined_filters_intersect_correctly() {
+    let (conn, _dir) = test_conn();
+    // Matches status=error and is within the since window (far past).
+    insert_llm_invocation_running(&conn, "llm-match", &sample_params()).unwrap();
+    finish_llm_invocation(&conn, "llm-match", "error", Some("boom"), 10, None).unwrap();
+
+    // Wrong status, but still within the since window.
+    insert_llm_invocation_running(&conn, "llm-wrong-status", &sample_params()).unwrap();
+    finish_llm_invocation(&conn, "llm-wrong-status", "success", None, 10, Some(1)).unwrap();
+
+    // Right status, but excluded by a since window in the far future.
+    let future_rows = list_llm_invocations(
+        &conn,
+        500,
+        Some("2999-01-01T00:00:00Z"),
+        None,
+        Some("error"),
+    )
+    .unwrap();
+    assert!(
+        future_rows.is_empty(),
+        "future since must exclude even status-matching rows"
+    );
+
+    let rows = list_llm_invocations(
+        &conn,
+        500,
+        Some("2000-01-01T00:00:00Z"),
+        None,
+        Some("error"),
+    )
+    .unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].id, "llm-match");
+}
+
 /// Assert (via `EXPLAIN QUERY PLAN`) that filtered queries actually use
 /// the composite indexes created in migration 37, not a full scan. The
 /// old `(?N IS NULL OR col = ?N)` idiom was not sargable and always fell

@@ -138,8 +138,6 @@ pub enum LlmRunnerError {
     CircuitOpen { action: String, retry_after: String },
     #[error("LLM invocation '{0}' timed out after {1}s")]
     Timeout(String, u64),
-    #[error("LLM invocation '{0}' was cancelled")]
-    Cancelled(String),
     #[error(transparent)]
     Internal(#[from] anyhow::Error),
 }
@@ -399,6 +397,19 @@ impl LlmRunner {
                 let truncated_output = truncate_utf8_bytes(&output, self.config.max_output_bytes);
                 let output_bytes = truncated_output.len();
                 drop(state);
+                // Intentional tradeoff, not an oversight: `run_fn` already
+                // succeeded at this point, but the `?` below means a failure
+                // to write the finish row (DB pool exhaustion, disk full,
+                // write-lock timeout) discards the successful LLM output and
+                // returns an error to the caller instead. This favors audit-
+                // trail completeness (every invocation that started has a
+                // matching finish row, or the caller finds out immediately
+                // that the audit trail is broken) over result delivery. A
+                // "best-effort audit, always return the result" design was
+                // considered and rejected: it would let a caller act on an
+                // LLM result with no corresponding audit record, silently
+                // undermining the entire point of routing every invocation
+                // through `LlmRunner`.
                 self.write_finish_row_with_output(
                     &invocation_id,
                     "success",
@@ -669,6 +680,13 @@ fn hostname_best_effort() -> String {
 /// load-bearing: bounding first can split a secret across the truncation
 /// boundary and let the surviving half leak into the persisted `error`
 /// column.
+///
+/// The returned string is reused for two purposes, not just persistence:
+/// `LlmRunner::run`'s error branch writes it into the audit row's `error`
+/// column AND wraps it into the `LlmRunnerError::Internal` returned to the
+/// caller. Both sinks share this single sanitized string so a secret-shaped
+/// value can't leak through the caller-facing error path while staying
+/// clean in the DB (see the call site in `run` for the full rationale).
 fn sanitize_error(err: &anyhow::Error) -> String {
     let text = err.to_string();
     let redacted = redact_secrets(&text);

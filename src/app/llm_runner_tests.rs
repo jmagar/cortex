@@ -586,3 +586,102 @@ async fn audit_write_does_not_race_a_concurrent_write_locked_writer() {
 
     ingest_handle.await.unwrap();
 }
+
+// PR #106 reconciliation fix (type-design reviewer): `redact_json_value_strings`
+// walks the whole `serde_json::Value` tree recursively (see its doc comment),
+// but every existing `extra_metadata` test only ever exercises one level of
+// nesting (a flat `{"key": "..."}` object). Prove the recursion actually
+// reaches secrets buried inside nested arrays/objects, not just top-level
+// string values.
+#[tokio::test]
+async fn extra_metadata_nested_secret_is_redacted_at_every_depth() {
+    let (pool, _dir) = test_pool();
+    let runner = LlmRunner::new(pool.clone(), LlmConfig::default());
+
+    let mut spec = base_spec("ai_assess");
+    // Three levels deep: object -> array -> object -> string leaf.
+    spec.extra_metadata = serde_json::json!({
+        "tags": [
+            {"note": "TOKEN=leak-me-please"},
+            {"nested": {"deeper": "API_KEY=also-leak-me"}}
+        ]
+    });
+
+    let outcome = runner
+        .run(spec, |_prompt| async { Ok("ok".to_string()) })
+        .await
+        .unwrap();
+
+    let conn = pool.get().unwrap();
+    let metadata_json: String = conn
+        .query_row(
+            "SELECT metadata_json FROM llm_invocations WHERE id = ?1",
+            [outcome.invocation_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(
+        !metadata_json.contains("leak-me-please"),
+        "secret nested inside an array element must be redacted, got: {metadata_json}"
+    );
+    assert!(
+        !metadata_json.contains("also-leak-me"),
+        "secret nested three levels deep (array -> object -> object) must be redacted, got: {metadata_json}"
+    );
+    assert!(
+        metadata_json.matches("[REDACTED]").count() >= 2,
+        "expected a [REDACTED] marker for each nested secret, got: {metadata_json}"
+    );
+    let parsed: serde_json::Value = serde_json::from_str(&metadata_json)
+        .expect("metadata_json must remain valid JSON after nested redaction");
+    assert!(parsed.is_object());
+}
+
+// PR #106 reconciliation fix (code-reviewer): `global_concurrency_limit_denies_second_concurrent_call`
+// isolates the GLOBAL limiter from the per-action one (max_per_action_concurrent
+// set high). This test does the inverse — isolate the PER-ACTION limiter from
+// the global one (max_concurrent set high) — so a second concurrent call to
+// the SAME action is denied with `ActionConcurrencyLimited`, not swallowed by
+// (or confused with) the global limiter. Uses the same oneshot-channel
+// start/release synchronization pattern; no sleeps.
+#[tokio::test]
+async fn action_concurrency_limit_denies_second_concurrent_call_for_same_action() {
+    let (pool, _dir) = test_pool();
+    let cfg = LlmConfig {
+        max_concurrent: 100, // isolate per-action limit from the global limit
+        max_per_action_concurrent: 1,
+        ..LlmConfig::default()
+    };
+    let runner = Arc::new(LlmRunner::new(pool.clone(), cfg));
+
+    let (release_tx, release_rx) = tokio::sync::oneshot::channel::<()>();
+    let (started_tx, started_rx) = tokio::sync::oneshot::channel::<()>();
+    let runner_a = runner.clone();
+    let handle = tokio::spawn(async move {
+        runner_a
+            .run(base_spec("ai_assess"), move |_prompt| async move {
+                started_tx.send(()).ok();
+                release_rx.await.ok();
+                Ok("first".to_string())
+            })
+            .await
+    });
+    started_rx.await.unwrap();
+
+    // Same action name as the in-flight call above — must be denied by the
+    // per-action limiter even though the global limiter has ample headroom.
+    let second = runner
+        .run(base_spec("ai_assess"), |_prompt| async {
+            Ok("second".to_string())
+        })
+        .await;
+    assert!(matches!(
+        second,
+        Err(LlmRunnerError::ActionConcurrencyLimited { ref action, limit: 1 })
+            if action == "ai_assess"
+    ));
+
+    release_tx.send(()).ok();
+    let first = handle.await.unwrap();
+    assert!(first.is_ok());
+}

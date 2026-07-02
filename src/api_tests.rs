@@ -3011,3 +3011,108 @@ async fn unknown_query_param_returns_400_on_correlate_state() {
     .await;
     assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
 }
+
+// ── PR #106 reconciliation: GET /api/sessions/llm-invocations admin gating ──
+//
+// `ai_llm_invocations` is admin-gated like `file_tails`/`ack_error`/
+// `unack_error` (see the doc comment on the handler in `src/api.rs`), but
+// unlike those it's a GET route with no body, so it needs its own request
+// builder rather than reusing `post_json_with_admin`.
+
+async fn get_json_with_admin(
+    app: axum::Router,
+    uri: &str,
+    token: Option<&str>,
+    admin_token: Option<&str>,
+) -> (axum::http::StatusCode, serde_json::Value) {
+    let mut builder = Request::builder().method("GET").uri(uri);
+    if let Some(token) = token {
+        builder = builder.header("Authorization", format!("Bearer {token}"));
+    }
+    if let Some(admin_token) = admin_token {
+        builder = builder.header("X-Cortex-Admin-Token", admin_token);
+    }
+    let response = app
+        .oneshot(builder.body(axum::body::Body::empty()).unwrap())
+        .await
+        .unwrap();
+    let status = response.status();
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let value = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
+    (status, value)
+}
+
+#[tokio::test]
+async fn llm_invocations_route_rejects_when_server_admin_token_unconfigured() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+
+    let (status, value) = get_json_with_admin(
+        app,
+        "/api/sessions/llm-invocations",
+        Some("secret"),
+        Some("admin-secret"),
+    )
+    .await;
+
+    assert_eq!(status, axum::http::StatusCode::FORBIDDEN);
+    assert_eq!(
+        value["error"],
+        "CORTEX_API_ADMIN_TOKEN required for admin API actions"
+    );
+}
+
+#[tokio::test]
+async fn llm_invocations_route_rejects_wrong_admin_token() {
+    let (mut state, _pool, _dir) = test_state(Some("secret".into()));
+    state.config.admin_token = crate::config::Secret(Some("admin-secret".into()));
+    let app = test_router(state);
+
+    let (status, value) = get_json_with_admin(
+        app,
+        "/api/sessions/llm-invocations",
+        Some("secret"),
+        Some("wrong-secret"),
+    )
+    .await;
+
+    assert_eq!(status, axum::http::StatusCode::FORBIDDEN);
+    assert_eq!(
+        value["error"],
+        "X-Cortex-Admin-Token required for admin API actions"
+    );
+}
+
+#[tokio::test]
+async fn llm_invocations_route_rejects_plain_bearer_without_admin_token() {
+    let (state, _pool, _dir) = test_state_with_admin(Some("secret".into()), "admin-secret");
+    let app = test_router(state);
+
+    let (status, value) = get_json(app, "/api/sessions/llm-invocations", Some("secret")).await;
+
+    assert_eq!(status, axum::http::StatusCode::FORBIDDEN, "body: {value}");
+    assert_eq!(
+        value["error"],
+        "X-Cortex-Admin-Token required for admin API actions"
+    );
+}
+
+#[tokio::test]
+async fn llm_invocations_route_accepts_correct_admin_token() {
+    let (state, _pool, _dir) = test_state_with_admin(Some("secret".into()), "admin-secret");
+    let app = test_router(state);
+
+    let (status, value) = get_json_with_admin(
+        app,
+        "/api/sessions/llm-invocations",
+        Some("secret"),
+        Some("admin-secret"),
+    )
+    .await;
+
+    assert_eq!(status, axum::http::StatusCode::OK, "body: {value}");
+    assert!(
+        value.is_array(),
+        "expected a JSON array of invocation rows, got: {value}"
+    );
+}

@@ -322,6 +322,25 @@ subprocess, and prints `invocation_id`, `prompt_bytes`,
 `evidence_counts`, and `would_exceed_prompt_limit` instead of an
 assessment.
 
+### `cortex sessions llm-invocations`
+
+List audit rows recorded by `LlmRunner` for every LLM invocation attempt
+(dry runs, denials, and real Gemini calls alike).
+
+```bash
+cortex sessions llm-invocations --limit 20
+cortex sessions llm-invocations --action ai_assess --status error --json
+cortex sessions llm-invocations --since 2026-06-01 --json
+```
+
+All flags are optional filters: `--since` (normalized time expression,
+same parsing as other `sessions` commands), `--action` (exact match on
+the recorded action name, e.g. `ai_assess`), `--status` (exact match on
+the recorded status, e.g. `running`, `success`, `error`, `dry_run`,
+`denied`), and `--limit` (defaults to 50, clamped to `1..=500`). This is
+an **admin-scoped** action — it requires `cortex:admin`, not just
+`cortex:read`.
+
 ### `cortex sessions blocks`
 
 Bucket AI activity into 5-hour UTC windows.

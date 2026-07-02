@@ -122,7 +122,10 @@ pub struct LlmInvocationRow {
 /// the WHERE clause dynamically, appending `AND action = ?` / `AND status
 /// = ?` / `AND started_at >= ?` only for filters that are actually
 /// `Some(...)`, matching the dynamic-WHERE-builder idiom already used in
-/// `src/db/queries.rs` (e.g. `get_error_summary_sql`). With no filters,
+/// `src/db/queries.rs` (e.g. `tail_logs_sql`'s `WHERE 1=1` + conditionally
+/// appended `AND col = ?` clauses; NOT `get_error_summary_sql`, which just
+/// picks between two static query templates and has no per-filter dynamic
+/// WHERE clause at all). With no filters,
 /// or with `since` as the only filter, `idx_llm_invocations_started` is
 /// used; with `action` set, `idx_llm_invocations_action_started` is used;
 /// with `status` set, `idx_llm_invocations_status_started` is used.

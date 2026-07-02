@@ -2032,6 +2032,23 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
           WHERE status = 'running';",
     )?;
 
+    // Same reconciliation, same rationale, for `llm_invocations`: if the
+    // process is killed between `write_start_row` (status='running') and
+    // the matching `write_finish_row*` call — e.g. the `run_fn` future is
+    // dropped/cancelled by a server crash or forced shutdown — the audit
+    // row is stuck 'running' forever with no process left to finish it. A
+    // fresh process start means nothing from a prior process can still
+    // legitimately be running, so reconcile unconditionally on every
+    // startup. Idempotent and a no-op in the common case (clean restart,
+    // no in-flight invocations).
+    conn.execute_batch(
+        "UPDATE llm_invocations
+            SET status = 'interrupted',
+                finished_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+                error = 'interrupted by server restart'
+          WHERE status = 'running';",
+    )?;
+
     conn.execute_batch(
         "CREATE INDEX IF NOT EXISTS idx_logs_ai_project_time
              ON logs(ai_project, timestamp)

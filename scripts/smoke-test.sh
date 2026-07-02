@@ -514,6 +514,16 @@ else
     skip "file_tails: status requires cortex:admin (set CORTEX_STATIC_TOKEN_ADMIN=true or CORTEX_SMOKE_ADMIN=true)"
 fi
 
+# ── llm_invocations ──────────────────────────────────────────────────────────
+echo ""
+echo "Action: llm_invocations"
+if mcp_admin_scope_available; then
+    LLM_INVOCATIONS=$(mcp_call llm_invocations "limit=5" 2>&1)
+    assert_no_error "llm_invocations: no error" "$LLM_INVOCATIONS"
+else
+    skip "llm_invocations: requires cortex:admin (set CORTEX_STATIC_TOKEN_ADMIN=true or CORTEX_SMOKE_ADMIN=true)"
+fi
+
 # ── stats ─────────────────────────────────────────────────────────────────────
 echo ""
 echo "Action: stats"
