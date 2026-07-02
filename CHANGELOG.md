@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.5.2] - 2026-07-02
+
+### Fixed
+
+- Dropped the `gitleaks` "Secret Scan" job from the required `ci-gate` checklist. `gitleaks-action` now requires a paid `GITLEAKS_LICENSE` secret this repo doesn't have configured, so the job fails on every PR regardless of content, blocking all merges. The job still runs and reports its own status as a non-blocking advisory check; re-add it to the gate once a license is configured or the action is swapped/pinned.
+
 ## [3.5.1] - 2026-07-02
 
 ### Fixed

@@ -41,13 +41,21 @@ fn ci_uses_changed_path_classifier_and_stable_gate() {
         "coverage",
         "deny",
         "mcp-integration",
-        "gitleaks",
     ] {
         assert!(
             gate.contains(&format!("require_success_or_skipped {job}")),
             "ci-gate must cover {job}"
         );
     }
+
+    // gitleaks is intentionally excluded: gitleaks-action requires a paid
+    // GITLEAKS_LICENSE secret this repo doesn't have configured, so the job
+    // fails on every PR regardless of content. It still runs and reports its
+    // own status as a non-blocking advisory check.
+    assert!(
+        !gate.contains("require_success_or_skipped gitleaks"),
+        "gitleaks is intentionally non-blocking until a license is configured"
+    );
 }
 
 #[test]
