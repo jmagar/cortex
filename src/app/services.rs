@@ -85,6 +85,7 @@ mod map;
 mod map_answers;
 mod map_findings;
 mod rag;
+mod skill_assessment;
 mod skill_backfill;
 mod skill_events;
 mod skill_incidents;

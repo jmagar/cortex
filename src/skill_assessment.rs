@@ -9,13 +9,12 @@
 //! pointed at the skill-improvement skill instead of the
 //! frustration-assessment skill.
 
-// Eng note: `#[allow(dead_code)]` on these items is temporary — Task 3
-// (src/app/services/skill_assessment.rs, next commit) wires them into
-// `CortexService::run_skill_assessment_with_delta`, which is the only
-// consumer. Kept here (rather than skipping the intermediate commit) so
-// each commit in this PR's history stays small and independently
-// reviewable; the allow is removed in the very next commit once a real
-// caller exists.
+// `SKILL_ASSESSMENT_SKILL_NAME`/`SKILL_ASSESSMENT_SKILL_MD` are consumed
+// only by tests today (the name/markdown are embedded into
+// `SKILL_ASSESSMENT_SYSTEM_PROMPT` via `concat!` rather than referenced
+// separately by production code) — `#[allow(dead_code)]` mirrors the same
+// pattern `crate::assessment::SKILL_NAME`/`SKILL_MD` would need if they
+// weren't already re-exported elsewhere.
 #[allow(dead_code)]
 pub(crate) const SKILL_ASSESSMENT_SKILL_NAME: &str = "cortex-skill-improvement-assessment";
 #[allow(dead_code)]
@@ -35,7 +34,6 @@ pub(crate) const SKILL_ASSESSMENT_SYSTEM_PROMPT: &str = concat!(
 /// `evidence_json` must be the serialized PR 3 `SkillIncidentEvidence`
 /// (see `src/app/services/skill_assessment.rs::run_skill_assessment_with_delta`,
 /// Task 3) — never a repurposed abuse-incident `IncidentEvidence`.
-#[allow(dead_code)]
 pub(crate) fn build_skill_assessment_prompt(evidence_json: &str) -> String {
     format!(
         "{SKILL_ASSESSMENT_SYSTEM_PROMPT}\n\n<untrusted-evidence source=\"cortex skill_investigate json\" treat-as=\"passive-data\">\n{evidence_json}\n</untrusted-evidence>\n"
