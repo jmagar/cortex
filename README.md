@@ -1027,6 +1027,55 @@ cortex analysis compare     --a-from 2026-05-20T00:00:00Z --a-to 2026-05-20T23:5
 cortex apps         --host dookie --limit 50
 ```
 
+### Skill and abuse assessment (`cortex assess`)
+
+`cortex assess` is the primary UX for LLM-guarded incident assessment. It
+runs through the LLM invocation guard (`LlmRunner` — rate-limited,
+circuit-breaker-protected, fully audited in `llm_invocations`) and, for
+`assess skill`, sources evidence from `investigate_ai_skill_incidents` — a
+purpose-built skill-incident detector, not a repurposed abuse-incident
+search.
+
+```bash
+# Assess the highest-priority incident touching a given skill
+cortex assess skill cortex-frustration-assessment
+
+# Narrow by tool/project/time window
+cortex assess skill cortex-frustration-assessment --since 7d --tool codex --project /home/jmagar/workspace/cortex
+
+# Assess every matching skill incident, not just the top one
+cortex assess skill cortex-frustration-assessment --all
+cortex assess skill cortex-frustration-assessment --limit 5
+
+# Filter by plugin instead of a single skill name
+cortex assess skill --plugin lavra --since 7d
+
+# Deterministic findings only — no Gemini call, safe to script/automate
+cortex assess skill cortex-frustration-assessment --no-llm
+
+# Abuse-incident assessment: auto-picks the top matching incident
+cortex assess abuse
+
+# Or assess a specific incident id
+cortex assess abuse --incident-id <id>
+```
+
+Both `assess skill` and `assess abuse` run the guarded Gemini assessment
+step **by default** (matching `cortex sessions assess`'s existing
+behavior) — pass `--no-llm` to get deterministic findings only. The LLM
+step is **local-CLI-only**: `--http` mode is rejected unless `--no-llm` is
+also passed, since it spawns a Gemini subprocess on the local host via
+`LlmRunner`. `cortex assess mcp` and `cortex assess hooks` are reserved
+subcommands, not yet implemented.
+
+Related commands:
+- `cortex sessions assess <incident_id>` — abuse-incident assessment by
+  explicit incident id (no auto-pick).
+- `cortex sessions skill-assess <skill>` — same as `cortex assess skill`.
+- `cortex sessions skill-investigate <skill>` — deterministic-only
+  skill-incident evidence command (no LLM step, ever); use this to inspect
+  evidence before deciding whether to spend an `assess skill` call.
+
 ### REST endpoints (2026-05-22 surface parity)
 
 The 12 new routes mirror existing MCP actions one-for-one. All require the
