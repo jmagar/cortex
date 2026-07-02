@@ -55,6 +55,8 @@ cortex exposes one MCP tool named `cortex`. The required
 | `incident_context` | Full context bundle for a known time window — logs + AI sessions |
 | `graph` | Resolve graph entities, neighborhoods, evidence-backed explanations, and evidence proof rows |
 | `skill_events` | List extracted AI skill-invocation events |
+| `skill_incidents` | Groups negative-signal transcript hits following a skill invocation into scored incident candidates |
+| `skill_investigate` | Expands skill-usage incidents into deterministic evidence bundles, skill-first |
 | `help` | Markdown reference for all actions |
 
 ## cortex search
@@ -281,6 +283,56 @@ Target override arguments such as `project_dir`, `compose_file`, `project_name`,
 Run strict deployment-health checks for the canonical cortex Compose deployment. It returns the same redacted diagnostic shape as `compose_status` when healthy, and returns a tool error when Docker/Compose ownership or runtime checks are not ready for lifecycle work. Compose lifecycle mutations are CLI-only.
 
 Required argument: `action = "compose_doctor"`
+
+## cortex skill_incidents
+
+Groups `ai_skill_events` rows into incident candidates by `(skill_name,
+skill_plugin, tool, project, session_id, hostname, window_bucket)`, scanning
+the surrounding transcript for five deterministic negative-signal anchors:
+`user_correction_after_skill`, `tool_failure_after_skill`,
+`scope_or_source_confusion`, `ignored_skill_or_policy_instruction`, and
+`overlong_loop_after_skill` (which requires both high tool-call volume AND a
+co-occurring negative signal — long-but-successful work never triggers it
+alone). Each incident carries a stable `incident_id` (`skill-inc-{hash}`), a
+`priority_score`/`priority_label`, and `signal_counts`/`signals_present`.
+
+Response includes `incidents`, `total_incidents`, `candidate_event_rows`,
+`candidate_cap`, `candidate_window_truncated`, `truncated`.
+
+Optional arguments: `skill`, `plugin`, `tool`, `project`, `session_id`,
+`hostname`, `since`, `until`, `limit` (default 20, max 100), `window_minutes`
+(default 10, max 120), `signals` (filter to these anchor categories only),
+`min_score`.
+
+## cortex skill_investigate
+
+Deep-dive investigation of skill-usage incidents. When filtered by `skill` or
+`plugin` (without an exact `incident_id`), resolves **skill-first**: looks up
+all matching incidents, returns the top-priority one(s) in `evidence`
+(count controlled by `limit`, default 1), and summarizes the rest into
+`other_matching_incidents`. A single zero-signal match is still returned
+(never an error) but flagged via `no_incident_low_severity_summary`. Each
+evidence bundle includes the underlying skill events, the transcript rows
+that triggered anchor signals, transcript context before/after, and nearby
+non-AI logs split into tool-failure/user-correction/error subsets — every
+collection carries an explicit truncation flag.
+
+Each bundle also carries a `findings` object — **deterministic, rule-based**
+failure hypotheses derived locally from the evidence (never an external LLM
+analysis), following the same pattern as `abuse_investigate`'s `findings`.
+Categories include `skill_scope_mismatch`, `missing_prerequisite_check`,
+`wrong_source_of_truth`, `overly_broad_research_loop`,
+`tool_policy_mismatch`, `missing_verification_step`,
+`ambiguous_skill_trigger`, `stale_or_conflicting_skill_instruction`,
+`assistant_overexplained_simple_answer`, and `unknown`.
+
+Response includes `evidence`, `total_incidents`, `truncated`,
+`other_matching_incidents`, `no_incident_low_severity_summary`, `no_data`,
+`suggested_filters` (populated only when `no_data` is true).
+
+Optional arguments: `incident_id`, `skill`, `plugin`, `tool`, `project`,
+`since`, `until`, `limit`, `window_minutes` (default 10, max 120),
+`correlation_window_minutes` (default 5, max 120).
 
 ## cortex help
 

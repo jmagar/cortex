@@ -64,7 +64,7 @@ Tests: unit tests live in sidecar files beside their source modules (e.g. `src/d
 
 ## MCP Tools
 
-One MCP tool: **`cortex`** — dispatches by `action` argument. 49 actions, generated from `ACTION_SPECS` in `src/mcp/actions.rs` (the single authoritative registry — regenerate this table from there).
+One MCP tool: **`cortex`** — dispatches by `action` argument. 51 actions, generated from `ACTION_SPECS` in `src/mcp/actions.rs` (the single authoritative registry — regenerate this table from there).
 
 Scope taxonomy: every action requires `cortex:read` except the five **admin** actions `ack_error`, `unack_error`, `file_tails`, `notifications_test`, and `llm_invocations`, which require `cortex:admin` (static bearer tokens get read-only unless `CORTEX_STATIC_TOKEN_ADMIN=true`); `help` is info-only (no scope gate).
 
@@ -113,6 +113,8 @@ Scope taxonomy: every action requires `cortex:read` except the five **admin** ac
 | `incident_context` | Full context for an incident |
 | `graph` | Resolve graph entities, neighborhoods, and evidence-backed explanations |
 | `skill_events` | List extracted AI skill-invocation events |
+| `skill_incidents` | List detected skill-usage incidents (negative signals after a skill loaded) |
+| `skill_investigate` | Deep-dive investigation of a skill-usage incident, skill-first (accepts a skill name directly) |
 | `file_tails` | **(admin)** Manage Cortex-owned file-tail ingest sources |
 | `ack_error` | **(admin)** Acknowledge an error signature |
 | `unack_error` | **(admin)** Revoke an error signature acknowledgement |
@@ -200,7 +202,7 @@ RUST_LOG=info
 | `docker-compose.yml` | Production deployment (ports 1514, 3100) |
 | `docs/SETUP.md` | Setup guide (clone, build, configure, deploy, verify); per-host forwarder configs (rsyslog, UniFi, ATT router, WSL) live in README "Syslog Forwarder Setup" |
 | `src/db/queries.rs` | All SQL queries and FTS5 search implementation |
-| `src/mcp/actions.rs` | `ACTION_SPECS` — authoritative registry of all 48 MCP actions and their scopes |
+| `src/mcp/actions.rs` | `ACTION_SPECS` — authoritative registry of all 51 MCP actions and their scopes |
 | `src/mcp/tools.rs` | Single `cortex` tool with action dispatch |
 | `config/mcporter.json` | mcporter config (HTTP transport to localhost:3100) |
 | `config/systemd/` | `cortex-backup.service` / `.timer` — daily WAL-safe backup units |

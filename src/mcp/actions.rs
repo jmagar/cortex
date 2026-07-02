@@ -545,7 +545,9 @@ pub(super) const ACTION_SPECS: &[ActionSpec] = &[
             "cortex sessions skill-investigate lavra:lavra-plan --since 7d",
             "cortex sessions skill-investigate lavra:lavra-plan --tool codex --project /home/jmagar/workspace/cortex",
             "cortex sessions skill-investigate --plugin lavra --all --limit 5",
-        ]
+        ],
+        positional: Some("--skill"),
+        defaults: Defaults::new()
     ),
     // ── Admin / write actions ──────────────────────────────────────────────
     action_spec!(
