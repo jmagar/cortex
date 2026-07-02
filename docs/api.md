@@ -18,7 +18,7 @@
 
 ## Endpoint matrix
 
-58 routes total. Scope is `read` (mounted via `axum::routing::get`,
+59 routes total. Scope is `read` (mounted via `axum::routing::get`,
 hits read-side `db_permits`) or `admin` (POST + `MAINTENANCE_PERMIT`
 single-flight, audited via `tracing::warn!` before the service call).
 All responses are JSON; error bodies are `{"error": "<message>"}`
@@ -41,7 +41,7 @@ to them by default.
 | GET | `/api/stats` | read | (none) | `DbStats { total_logs, total_hosts, oldest_log?, newest_log?, logical_db_size_mb, physical_db_size_mb, free_disk_mb?, max_db_size_mb, min_free_disk_mb, write_blocked, phantom_fts_rows? }` | 200, 401, 503, 500 | Y | Hot path; no PRAGMA per request. `phantom_fts_rows` is `null` by default — its `COUNT(*) FROM logs_fts` scan is skipped to stay fast on large DBs; computed only via the opt-in diagnostic path. |
 | GET | `/api/version` | read | (none) | `VersionInfo { version, git_sha?, schema_version }` | 200, 401 | Y | **Cached at startup** — never touches SQLite per request (eng-review #A3). Returns 404 if older server lacks the route (see Versioning policy). |
 
-### AI session queries (8) — bead `.2`
+### AI session queries (9) — bead `.2`
 
 | Method | Path | Scope | Request | Response (top-level) | Status codes | Idempotent | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -53,6 +53,7 @@ to them by default.
 | GET | `/api/sessions/context` | read | query: `project` (REQUIRED, non-empty — handler 400s on empty per eng-review #A7), `tool?`, `limit?` | `ProjectContextResponse { project, tools, sessions, hostnames, first_seen?, last_seen?, event_count, recent_entries_truncated, recent_entries: [LogEntry] }` | 200, 400, 401, 503, 500 | Y | Empty `project=` rejected with explicit 400. |
 | GET | `/api/sessions/tools` | read | query: `project?`, `from?`, `to?` | `ListAiToolsResponse { total_tools, truncated, tools: [AiToolEntry] }` | 200, 400, 401, 503, 500 | Y | Tool inventory. |
 | GET | `/api/sessions/projects` | read | query: `tool?`, `from?`, `to?` | `ListAiProjectsResponse { total_projects, truncated, projects: [AiProjectEntry] }` | 200, 400, 401, 503, 500 | Y | Project inventory. |
+| GET | `/api/sessions/skills` | read | query: `skill?`, `plugin?`, `tool?`, `project?`, `session_id?`, `hostname?`, `from?`, `to?`, `limit?` (u32) | `ListSkillEventsResponse { total, truncated, events: [SkillEventEntry] }` | 200, 400, 401, 503, 500 | Y | `limit` clamped at **500**. Extracted AI skill-invocation events (Claude `attributionSkill` structured fields, Codex `<skill><name>` transcript tags). Backed by the `ai_skill_events` table (migration 38); MCP action: `skill_events` (`cortex:read`); CLI: `cortex sessions skills`. `caller_ip` + query filters audit-logged via `tracing::info!` before the service call (lighter than the admin-scoped `warn!` above, since this route is `cortex:read` not `cortex:admin`). |
 
 ### AI diagnostic + admin (4) — bead `.3`
 
@@ -97,7 +98,7 @@ to them by default.
 | GET | `/api/graph/explain` | read | query: entity selector, `depth?` (clamped to 3), `beam_width?`, `max_chains?`, `evidence_sample_limit?`, `payload_budget?` | `GraphExplainResponse { resolved_entity, chains, narrative, open_questions, missing_evidence, next_queries, metadata }` | 200, 400, 401, 404, 503, 500 | Y | Deterministic evidence-backed explanation; weak evidence becomes open questions, not causal claims. |
 | GET | `/api/graph/evidence` | read | query: `evidence_id` (REQUIRED, minimum 1), `payload_budget?` | `GraphEvidenceLookupResponse { evidence, relationship, src_entity, dst_entity, source_log_summary?, missing_source_reason?, metadata }` | 200, 400, 401, 404, 503, 500 | Y | Proof lookup for one evidence row. Source summaries are redacted/truncated and exclude raw frames and raw metadata. |
 
-**Total: 57 routes** (current `src/api.rs` router surface, including syslog,
+**Total: 58 routes** (current `src/api.rs` router surface, including syslog,
 surface-parity, AI, graph, compose, notification, error-ack, and DB routes).
 
 ---
