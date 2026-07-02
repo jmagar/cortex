@@ -39,7 +39,7 @@ pub fn write_lock() -> parking_lot::ReentrantMutexGuard<'static, ()> {
     WRITE_LOCK.lock()
 }
 
-pub const KNOWN_SCHEMA_VERSION: i64 = 38;
+pub const KNOWN_SCHEMA_VERSION: i64 = 39;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SchemaVersionInfo {
@@ -2076,6 +2076,60 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
              COMMIT;",
         )?;
         tracing::info!("Migration 38: created ai_skill_events table + idx_logs_ai_tool_id");
+    }
+
+    // Migration 39: ai_hook_events — one row per detected hook signal, either
+    // a Claude runtime hook-execution attachment (`evidence_kind =
+    // 'runtime_transcript'`) or a Claude/Codex hook config-inventory /
+    // trust-state entry (`evidence_kind = 'config_inventory'` /
+    // `'trusted_hash_state'`). `log_id` is nullable because config-inventory
+    // rows are collected from local host config files, not a transcript log
+    // row — see GH #105's "Hook assessment design" section.
+    // UNIQUE(ai_tool, ai_session_id, hook_event, hook_name, timestamp,
+    // evidence_kind) makes INSERT OR IGNORE idempotent across re-ingest,
+    // backfill re-runs, and repeated config collector scans.
+    if !migration_applied(&conn, 39)? {
+        conn.execute_batch(
+            "BEGIN IMMEDIATE;
+
+             CREATE TABLE IF NOT EXISTS ai_hook_events (
+               id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+               log_id                 INTEGER REFERENCES logs(id) ON DELETE SET NULL,
+               ai_tool                TEXT NOT NULL,
+               ai_project             TEXT,
+               ai_session_id          TEXT,
+               hostname               TEXT NOT NULL,
+               timestamp              TEXT NOT NULL,
+               hook_event             TEXT NOT NULL,
+               hook_name              TEXT,
+               hook_source            TEXT,
+               hook_command           TEXT,
+               status                 TEXT NOT NULL,
+               exit_code              INTEGER,
+               duration_ms            INTEGER,
+               stdout_preview         TEXT,
+               stderr_preview         TEXT,
+               persisted_output_path  TEXT,
+               trusted_hash           TEXT,
+               evidence_kind          TEXT NOT NULL,
+               metadata_json          TEXT,
+               created_at             TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+               UNIQUE(ai_tool, ai_session_id, hook_event, hook_name, timestamp, evidence_kind)
+             );
+
+             CREATE INDEX IF NOT EXISTS idx_ai_hook_events_hook_time
+                 ON ai_hook_events(hook_event, hook_name, timestamp);
+             CREATE INDEX IF NOT EXISTS idx_ai_hook_events_status_time
+                 ON ai_hook_events(status, timestamp);
+             CREATE INDEX IF NOT EXISTS idx_ai_hook_events_session_time
+                 ON ai_hook_events(ai_tool, ai_project, ai_session_id, timestamp);
+             CREATE INDEX IF NOT EXISTS idx_ai_hook_events_evidence_time
+                 ON ai_hook_events(evidence_kind, timestamp);
+
+             INSERT OR IGNORE INTO schema_migrations (version) VALUES (39);
+             COMMIT;",
+        )?;
+        tracing::info!("Migration 39: created ai_hook_events table");
     }
 
     // A server crash/restart mid-check leaves an orphaned 'running' maintenance
