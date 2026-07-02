@@ -15,6 +15,13 @@ pub struct SkillBackfillResult {
     pub inserted: u64,
     pub skipped_duplicates: u64,
     pub parse_errors: u64,
+    /// Claude rows whose raw JSON could not be recovered from the source
+    /// transcript file — `ai_transcript_path`/`line_no` metadata missing, the
+    /// source file no longer exists, or the recorded line number is out of
+    /// range (e.g. file rotated/truncated since ingest). Distinct from
+    /// `parse_errors`, which counts lines that WERE located but failed to
+    /// parse as JSON.
+    pub source_unavailable: u64,
     pub truncated: bool,
     pub dry_run: bool,
 }

@@ -24,13 +24,55 @@
 //! `api.rs`'s `SHARED_MAINTENANCE_PERMIT`) because this method is also
 //! reachable from the CLI's local mode and MCP, neither of which goes
 //! through `api.rs`.
+//!
+//! **Claude row recovery**: `logs.message` for a Claude row is
+//! `claude::extract_message()`'s plain-text `content` extraction (e.g. "hi")
+//! — it never carries the raw `attributionSkill`/`attributionPlugin` JSON
+//! fields, unlike Codex where the transcript text itself (including the
+//! `<skill><name>` tag) survives `scrub_ai_message` intact. The only place
+//! that data still exists is the original JSONL file on disk, so Claude rows
+//! are recovered by re-reading the specific source line (via the shared
+//! `scanner::read_transcript_lines` helper, which applies the same bounded,
+//! newline-delimited record semantics as the ingest path) located by the
+//! persisted `ai_transcript_path` column and the `line_no` scanner.rs recorded
+//! in `metadata_json` at ingest time. Rows whose source file or line can no
+//! longer be located (deleted/rotated/legacy metadata predating `line_no`, or
+//! a line now exceeding the record-size bound) are counted in
+//! `source_unavailable` rather than treated as an error.
+//!
+//! **Idempotency caveat**: re-running the backfill is a no-op *only while the
+//! source transcript files are unchanged*. Because the recovered `skill_name`
+//! is part of the `ai_skill_events` uniqueness key and is re-derived from the
+//! file on each run, editing a transcript line in place between runs can yield
+//! a second, differently-named event for the same `log_id` (the `INSERT OR
+//! IGNORE` sees a new key, not a conflict). Transcript files are append-only
+//! in practice, so this is an edge case, but the "always safe to re-run" claim
+//! is conditional on that. See the follow-up bead for optional content-hash
+//! verification if this ever needs a hard guarantee.
+//!
+//! **Memory bound**: each recovered line is capped at `MAX_RECORD_SIZE_BYTES`
+//! by the shared reader (oversized lines are skipped, not buffered), so no
+//! single line can blow up memory. The per-chunk working set (`resolved`) is
+//! *not* separately budgeted, so the theoretical transient ceiling is
+//! `CHUNK_SIZE` recovered lines held at once — pathological only if a whole
+//! chunk of rows each point at a distinct near-`MAX_RECORD_SIZE_BYTES` line.
+//! Real transcript records are far smaller (KB-scale JSON), and `resolved` is
+//! rebuilt-and-dropped per chunk (never accumulated across the run), so this
+//! is bounded and self-freeing rather than a leak. A hard per-chunk byte
+//! budget was considered and rejected: skipping over-budget rows would advance
+//! `last_id` past them and drop them permanently (they are not truly
+//! unavailable), so a correct cap would require dynamic chunk resizing — not
+//! worth the complexity for an offline, single-flight, operator-triggered job.
 
+use std::collections::{HashMap, HashSet};
+use std::path::Path;
 use std::sync::{Arc, OnceLock};
 
 use anyhow::Result;
 use tokio::sync::Semaphore;
 
 use crate::db::{DbPool, SkillEventInsert, insert_skill_events};
+use crate::scanner::read_transcript_lines;
 use crate::scanner::skill_events::{extract_claude_skill_events, extract_codex_skill_events};
 
 use super::super::models::{SkillBackfillRequest, SkillBackfillResult};
@@ -67,6 +109,8 @@ struct CandidateRow {
     hostname: String,
     timestamp: String,
     message: String,
+    ai_transcript_path: Option<String>,
+    metadata_json: Option<String>,
 }
 
 impl CortexService {
@@ -127,19 +171,80 @@ fn run_backfill(
         result.scanned += rows.len() as u64;
         remaining = remaining.saturating_sub(rows.len() as u64);
 
+        // Resolve every Claude row's source line up front, grouped by file so
+        // rows sharing a transcript file open and scan it once per chunk. Two
+        // borrowed maps over `rows` (no owned-String clones): `row_source` maps
+        // each row id to its `(path, line_no)`, and `wanted_by_file` collects
+        // the distinct line numbers to pull from each file. See the "Claude row
+        // recovery" note at the top of this file for why `row.message` can't be
+        // used directly.
+        let mut row_source: HashMap<i64, (&str, usize)> = HashMap::new();
+        let mut wanted_by_file: HashMap<&str, HashSet<usize>> = HashMap::new();
+        for row in &rows {
+            if row.ai_tool != "claude" {
+                continue;
+            }
+            match (
+                row.ai_transcript_path.as_deref(),
+                row.metadata_json.as_deref().and_then(line_no_from_metadata),
+            ) {
+                (Some(path), Some(line_no)) => {
+                    row_source.insert(row.id, (path, line_no));
+                    wanted_by_file.entry(path).or_default().insert(line_no);
+                }
+                _ => {
+                    result.source_unavailable += 1;
+                    tracing::debug!(
+                        log_id = row.id,
+                        "skill backfill: claude row missing ai_transcript_path/line_no metadata; unrecoverable"
+                    );
+                }
+            }
+        }
+        let mut resolved: HashMap<(&str, usize), String> = HashMap::new();
+        for (path, wanted) in &wanted_by_file {
+            match read_transcript_lines(Path::new(*path), wanted) {
+                Ok(lines) => {
+                    for (line_no, text) in lines {
+                        resolved.insert((*path, line_no), text);
+                    }
+                }
+                Err(err) => {
+                    // File gone/unreadable — every row wanting this file falls
+                    // through to source_unavailable in the loop below.
+                    tracing::debug!(
+                        path = *path,
+                        error = %err,
+                        "skill backfill: could not read transcript file for claude row recovery"
+                    );
+                }
+            }
+        }
+
         let mut inserts = Vec::new();
         for row in &rows {
-            // Eng review Fix 1: the backfill reads `row.message` straight
-            // from the `logs` table (there is no pre-parsed Value to reuse
-            // here, unlike the ingest hot path — this is a one-time
-            // historical scan, not the per-request ingest loop), so a JSON
-            // parse is unavoidable for Claude rows that DO have a skill
-            // event. The substring short-circuit still applies: skip the
-            // parse entirely for the common case where the row has no
-            // attributionSkill field at all.
             let extracted = match row.ai_tool.as_str() {
-                "claude" if row.message.contains("attributionSkill") => {
-                    match serde_json::from_str::<serde_json::Value>(&row.message) {
+                "claude" => {
+                    let Some(&(path, line_no)) = row_source.get(&row.id) else {
+                        // Already counted in `source_unavailable` above.
+                        continue;
+                    };
+                    let Some(line_text) = resolved.get(&(path, line_no)) else {
+                        result.source_unavailable += 1;
+                        tracing::debug!(
+                            log_id = row.id,
+                            path,
+                            line_no,
+                            "skill backfill: transcript line unavailable (missing file or line out of range)"
+                        );
+                        continue;
+                    };
+                    // Cheap short-circuit on the actual raw JSON line (not
+                    // the scrubbed `row.message`) before parsing.
+                    if !line_text.contains("attributionSkill") {
+                        continue;
+                    }
+                    match serde_json::from_str::<serde_json::Value>(line_text) {
                         Ok(value) => extract_claude_skill_events(&value),
                         Err(_) => {
                             result.parse_errors += 1;
@@ -147,7 +252,6 @@ fn run_backfill(
                         }
                     }
                 }
-                "claude" => continue,
                 "codex" => extract_codex_skill_events(&row.message),
                 _ => continue,
             };
@@ -171,10 +275,10 @@ fn run_backfill(
             result.skipped_duplicates += attempted - inserted;
         }
         // Dry-run does not report a "would insert N" count — scanned /
-        // parse_errors are the only meaningful dry-run signal per the CLI
-        // contract (`--dry-run` reports scanned rows and parse errors
-        // without touching the table). Callers that need a precise
-        // "would insert N" count should drop --dry-run.
+        // parse_errors / source_unavailable are the only meaningful dry-run
+        // signal per the CLI contract (`--dry-run` reports scanned rows and
+        // parse errors without touching the table). Callers that need a
+        // precise "would insert N" count should drop --dry-run.
 
         if (rows.len() as i64) < chunk_limit {
             break;
@@ -193,7 +297,8 @@ fn fetch_candidate_chunk(
 ) -> Result<Vec<CandidateRow>> {
     let (sql, bindings): (&str, Vec<rusqlite::types::Value>) = match since {
         Some(since) => (
-            "SELECT id, ai_tool, ai_project, ai_session_id, hostname, timestamp, message
+            "SELECT id, ai_tool, ai_project, ai_session_id, hostname, timestamp, message,
+                    ai_transcript_path, metadata_json
              FROM logs
              WHERE ai_tool IN ('claude', 'codex')
                AND id > ?1
@@ -207,7 +312,8 @@ fn fetch_candidate_chunk(
             ],
         ),
         None => (
-            "SELECT id, ai_tool, ai_project, ai_session_id, hostname, timestamp, message
+            "SELECT id, ai_tool, ai_project, ai_session_id, hostname, timestamp, message,
+                    ai_transcript_path, metadata_json
              FROM logs
              WHERE ai_tool IN ('claude', 'codex')
                AND id > ?1
@@ -230,10 +336,26 @@ fn fetch_candidate_chunk(
                 hostname: row.get(4)?,
                 timestamp: row.get(5)?,
                 message: row.get(6)?,
+                ai_transcript_path: row.get(7)?,
+                metadata_json: row.get(8)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(rows)
+}
+
+/// Extract the `line_no` scanner.rs's `flush_chunk` records in `metadata_json`
+/// at ingest time (`{"line_no": N, ...}`). `line_no` is 0-based, matching the
+/// scanner's own counter (recorded before incrementing, starting from 0 for
+/// the first line of a file), so it feeds directly into
+/// `scanner::read_transcript_lines`. Returns `None` for legacy rows ingested
+/// before this field existed, malformed JSON, a metadata blob truncated by
+/// `bounded_metadata_json`'s size guard, or a `line_no` that doesn't fit in
+/// `usize` (corrupt/adversarial value — routed to `source_unavailable` rather
+/// than silently truncated).
+fn line_no_from_metadata(metadata_json: &str) -> Option<usize> {
+    let value: serde_json::Value = serde_json::from_str(metadata_json).ok()?;
+    usize::try_from(value.get("line_no")?.as_u64()?).ok()
 }
 
 #[cfg(test)]
