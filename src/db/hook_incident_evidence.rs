@@ -98,6 +98,7 @@ pub fn investigate_ai_hook_incidents(
             ai_project: params.ai_project.clone(),
             ai_session_id: None,
             hostname: None,
+            evidence_kind: None,
             since: params.since.clone(),
             until: params.until.clone(),
             limit: Some(incident_lookup_limit),

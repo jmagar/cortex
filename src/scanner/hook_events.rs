@@ -48,6 +48,13 @@ pub enum HookStatus {
     Blocked,
     Error,
     Unknown,
+    /// Not a runtime status: marks a config-inventory / trusted-hash-state row
+    /// produced by `crate::hook_config`. A `Configured` row is proof only that
+    /// a hook is *configured*/*trusted*, never that it executed. Kept in this
+    /// enum (rather than a bare string) so the DB `status` column has a single
+    /// authoritative source and config rows are excluded from runtime failure
+    /// anchors (`hook_signal_detectors::is_hook_failure_status`).
+    Configured,
 }
 
 impl HookStatus {
@@ -58,6 +65,7 @@ impl HookStatus {
             Self::Blocked => "blocked",
             Self::Error => "error",
             Self::Unknown => "unknown",
+            Self::Configured => "configured",
         }
     }
 

@@ -22,7 +22,9 @@ fn output_parse_error_phrases_detected() {
     assert!(detect_hook_output_parse_error(
         "Error: invalid JSON in hook output"
     ));
-    assert!(detect_hook_output_parse_error("SyntaxError: Unexpected token"));
+    assert!(detect_hook_output_parse_error(
+        "SyntaxError: Unexpected token"
+    ));
     assert!(!detect_hook_output_parse_error("hook ran fine"));
 }
 

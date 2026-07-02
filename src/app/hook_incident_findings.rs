@@ -58,12 +58,10 @@ pub struct HookIncidentFindings {
     pub evidence_basis: String,
 }
 
-const RUNTIME_EVIDENCE_BASIS: &str =
-    "This incident is backed by at least one runtime_transcript hook event \
+const RUNTIME_EVIDENCE_BASIS: &str = "This incident is backed by at least one runtime_transcript hook event \
      (a Claude transcript hook-execution attachment) — findings reflect \
      proven hook execution, not just configuration.";
-const CONFIG_ONLY_EVIDENCE_BASIS: &str =
-    "This incident is backed ONLY by config_inventory/trusted_hash_state \
+const CONFIG_ONLY_EVIDENCE_BASIS: &str = "This incident is backed ONLY by config_inventory/trusted_hash_state \
      evidence (hook configuration/trust files, not a transcript-proven \
      execution). Do not treat these findings as proof the hook actually ran \
      — they describe what is configured/trusted, not what executed.";
@@ -205,9 +203,13 @@ pub fn derive_hook_incident_findings(
     )
     .filter(|entry| {
         let lower = entry.message.to_ascii_lowercase();
-        ["unexpected config change", "unexpected file change", "mutated state"]
-            .iter()
-            .any(|kw| lower.contains(kw))
+        [
+            "unexpected config change",
+            "unexpected file change",
+            "mutated state",
+        ]
+        .iter()
+        .any(|kw| lower.contains(kw))
     })
     .map(|e| e.id)
     .collect();

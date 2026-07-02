@@ -54,9 +54,7 @@ const OUTPUT_PARSE_ERROR_PHRASES: &[&str] = &[
 
 pub fn detect_hook_output_parse_error(preview: &str) -> bool {
     let lower = preview.to_ascii_lowercase();
-    OUTPUT_PARSE_ERROR_PHRASES
-        .iter()
-        .any(|p| lower.contains(p))
+    OUTPUT_PARSE_ERROR_PHRASES.iter().any(|p| lower.contains(p))
 }
 
 /// Phrases indicating the user is correcting or pushing back on the

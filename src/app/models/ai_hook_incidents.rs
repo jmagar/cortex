@@ -10,6 +10,9 @@ pub struct AiHookIncidentRequest {
     pub project: Option<String>,
     pub session_id: Option<String>,
     pub hostname: Option<String>,
+    /// Restrict candidate hook events to a single `evidence_kind` (e.g.
+    /// `"runtime_transcript"` to only consider proven-executed hooks).
+    pub evidence_kind: Option<String>,
     pub since: Option<String>,
     pub until: Option<String>,
     pub limit: Option<u32>,
@@ -192,6 +195,7 @@ pub struct HookIncidentSummary {
     pub last_seen: String,
     pub priority_score: f64,
     pub priority_label: String,
+    pub has_runtime_evidence: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

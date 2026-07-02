@@ -31,6 +31,10 @@ pub struct AiHookIncidentParams {
     pub ai_project: Option<String>,
     pub ai_session_id: Option<String>,
     pub hostname: Option<String>,
+    /// Restrict candidate hook events to a single `evidence_kind` (e.g.
+    /// `"runtime_transcript"` to only consider proven-executed hooks).
+    /// `None` = no filter (all evidence kinds considered).
+    pub evidence_kind: Option<String>,
     pub since: Option<String>,
     pub until: Option<String>,
     /// Max incidents to return. Default 20, clamp 1..=100.
@@ -172,6 +176,11 @@ pub fn search_ai_hook_incidents(
     }
     if let Some(v) = &params.hostname {
         sql.push_str(&format!(" AND hostname = ?{idx}"));
+        bindings.push(rusqlite::types::Value::Text(v.clone()));
+        idx += 1;
+    }
+    if let Some(v) = &params.evidence_kind {
+        sql.push_str(&format!(" AND evidence_kind = ?{idx}"));
         bindings.push(rusqlite::types::Value::Text(v.clone()));
         idx += 1;
     }

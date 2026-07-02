@@ -14,7 +14,8 @@ use super::correlate::{group_by_host, severity_at_or_above};
 use super::models::{
     AbuseAssessRequest, AbuseAssessResponse, AbuseSearchRequest, AbuseSearchResponse,
     AiAssessEvidenceSummary, AiAssessRequest, AiAssessResponse, AiCorrelateLimitPolicy,
-    AiCorrelateRequest, AiCorrelateResponse, AiCorrelationAnchor, AiIncidentRequest,
+    AiCorrelateRequest, AiCorrelateResponse, AiCorrelationAnchor, AiHookIncidentRequest,
+    AiHookIncidentResponse, AiHookInvestigateRequest, AiHookInvestigateResponse, AiIncidentRequest,
     AiIncidentResponse, AiInvestigateRequest, AiInvestigateResponse, AiLimitPolicy, AiSessionEntry,
     AiSkillIncidentRequest, AiSkillIncidentResponse, AiSkillInvestigateRequest,
     AiSkillInvestigateResponse, AnomaliesRequest, AnomaliesResponse, AppGraphResponse,
@@ -34,14 +35,14 @@ use super::models::{
     GraphRelationship, GraphResponseMetadata, GraphSessionCorrelation, GraphSourceLogSummary,
     HomelabMapAnswerRow, HomelabMapAnswerTruncation, HomelabMapGraphAnswer, HomelabMapGraphTarget,
     HomelabMapNextQuery, HomelabMapNode, HomelabMapProofQuery, HomelabMapRequest,
-    HomelabMapResponse, HomelabMapSummary, INVESTIGATION_UI_VERSION, IncidentContextRequest,
-    IncidentContextResponse, IncidentEvent, IncidentRequest, IncidentResponse, IngestRateRequest,
-    IngestRateResponse, InvestigationBudget, InvestigationBudgetUsed, InvestigationClaim,
-    InvestigationClaimType, InvestigationEnvelope, InvestigationMetadata, ListAiProjectsRequest,
-    ListAiProjectsResponse, ListAiToolsRequest, ListAiToolsResponse, ListAppsRequest,
-    ListAppsResponse, ListHostsResponse, ListSessionsRequest, ListSessionsResponse,
-    ListSourceIpsRequest, ListSourceIpsResponse, LlmInvocationsRequest, LogEntry,
-    MaintenanceJobStatus, NotificationsRecentRequest, PatternsRequest, PatternsResponse,
+    HomelabMapResponse, HomelabMapSummary, HookIncidentEvidence, HookIncidentSummary,
+    INVESTIGATION_UI_VERSION, IncidentContextRequest, IncidentContextResponse, IncidentEvent,
+    IncidentRequest, IncidentResponse, IngestRateRequest, IngestRateResponse, InvestigationBudget,
+    InvestigationBudgetUsed, InvestigationClaim, InvestigationClaimType, InvestigationEnvelope,
+    InvestigationMetadata, ListAiProjectsRequest, ListAiProjectsResponse, ListAiToolsRequest,
+    ListAiToolsResponse, ListAppsRequest, ListAppsResponse, ListHostsResponse, ListSessionsRequest,
+    ListSessionsResponse, ListSourceIpsRequest, ListSourceIpsResponse, LlmInvocationsRequest,
+    LogEntry, MaintenanceJobStatus, NotificationsRecentRequest, PatternsRequest, PatternsResponse,
     ProjectContextRequest, ProjectContextResponse, RequestActor, ResolvedTopicEntity,
     SearchLogsRequest, SearchLogsResponse, SearchSessionsRequest, SearchSessionsResponse,
     ServiceJournalEntry, ServiceLogsRequest, ServiceLogsResponse, SilentHostsRequest,
@@ -76,6 +77,10 @@ mod graph;
 mod graph_limits;
 mod graph_safety;
 mod graph_support;
+mod hook_assessment;
+mod hook_backfill;
+mod hook_events;
+mod hook_incidents;
 mod imports;
 mod incidents;
 mod investigation;

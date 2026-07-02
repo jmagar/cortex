@@ -46,6 +46,19 @@ pub use heartbeat::{
     HeartbeatSampleState, HeartbeatStateFlags, HeartbeatWindowSummary, heartbeat_host_state,
     heartbeat_latest_all, heartbeat_metric_snapshot_batch, heartbeat_window_summaries,
 };
+pub(crate) use hook_events::insert_hook_events_in_tx;
+pub use hook_events::{
+    AiHookEventEntry, AiHookEventParams, HookEventInsert, ListHookEventsResult, insert_hook_events,
+    list_hook_events,
+};
+pub use hook_incident_evidence::{
+    AiHookInvestigateParams, AiHookInvestigateResult, HookIncidentEvidence,
+    investigate_ai_hook_incidents,
+};
+pub use hook_incidents::{
+    AiHookIncidentParams, AiHookIncidentResult, HookIncident, HookSignalCounts,
+    search_ai_hook_incidents,
+};
 pub use ingest::insert_logs_batch;
 pub(crate) use ingest::insert_logs_batch_in_tx;
 pub use maintenance::{
@@ -86,19 +99,6 @@ pub use queries::{
     search_ai_related_logs, search_ai_sessions, search_logs,
     search_logs_from_graph_related_entities, severity_to_num, similar_incidents_clusters,
     tail_logs, timeline_rollup_status, topic_correlate_inputs, validate_fts_query,
-};
-pub(crate) use hook_events::insert_hook_events_in_tx;
-pub use hook_events::{
-    AiHookEventEntry, AiHookEventParams, HookEventInsert, ListHookEventsResult,
-    insert_hook_events, list_hook_events,
-};
-pub use hook_incident_evidence::{
-    AiHookInvestigateParams, AiHookInvestigateResult, HookIncidentEvidence,
-    investigate_ai_hook_incidents,
-};
-pub use hook_incidents::{
-    AiHookIncidentParams, AiHookIncidentResult, HookIncident, HookSignalCounts,
-    search_ai_hook_incidents,
 };
 pub(crate) use skill_events::insert_skill_events_in_tx;
 pub use skill_events::{

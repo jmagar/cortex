@@ -134,7 +134,8 @@ pub struct ListHookEventsResult {
 const DEFAULT_LIMIT: u32 = 50;
 const MAX_LIMIT: u32 = 500;
 
-const HOOK_EVENT_COLUMNS: &str = "id, log_id, ai_tool, ai_project, ai_session_id, hostname, timestamp,
+const HOOK_EVENT_COLUMNS: &str =
+    "id, log_id, ai_tool, ai_project, ai_session_id, hostname, timestamp,
      hook_event, hook_name, hook_source, hook_command, status, exit_code,
      duration_ms, stdout_preview, stderr_preview, persisted_output_path,
      trusted_hash, evidence_kind, metadata_json";
