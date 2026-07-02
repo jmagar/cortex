@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.2.3] - 2026-07-02
+
+### Fixed
+
+- Fixed a flaky unit test: `ai_assess_writes_llm_invocation_audit_row_via_runner` intermittently failed under heavy parallel `cargo test --lib` load with `failed to write Gemini stdin: Broken pipe (os error 32)`. The test's fake-`gemini` script never read stdin before exiting, racing against `run_gemini_assessment`'s concurrent stdin-writer task under scheduler pressure. The script now drains stdin to EOF before responding, removing the race deterministically. Test-only change; no production code affected.
+
 ## [3.2.2] - 2026-07-01
 
 ### Fixed
