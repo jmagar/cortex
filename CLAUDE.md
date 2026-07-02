@@ -221,6 +221,7 @@ RUST_LOG=info
 - `CORTEX_RETENTION_DAYS=0` disables the global age purge entirely.
 - **err+ exemption**: `severity IN (err, crit, alert, emerg)` rows are never aged out by retention. They are deletable only under DB-size pressure, and even then only outside the err+ floor (`CORTEX_ERR_FLOOR_WINDOW_HOURS=24`, `CORTEX_ERR_FLOOR_PER_SOURCE_CAP=10000` rows per source IP). Permanent err+ retention is therefore only guaranteed while `max_db_size_mb` is not breached.
 - **AdGuard tags** (`adguard-allowed`/`adguard-query`/`adguard-rewrite`) are hard-capped at **7 days** regardless of `retention_days`; **heartbeats** at **14 days**.
+- **`llm_invocations`** (migration 37, the LLM-call audit table — see `src/db/llm_invocations.rs`) rides the same `CORTEX_RETENTION_DAYS` knob as `logs` (0 disables it too), purged by `started_at` age via `purge_old_llm_invocations`. No severity concept, so no err+-style exemption; no dedicated short cap like AdGuard/heartbeats since invocation volume is bounded by `LlmRunner`'s own per-minute/per-hour caps.
 - Deletes run in 10,000-row chunks, releasing the write lock between chunks; an incremental FTS5 merge follows.
 
 ## Gotchas

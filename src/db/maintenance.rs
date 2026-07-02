@@ -747,6 +747,69 @@ pub fn purge_by_tag_window(
     Ok(total_deleted)
 }
 
+/// Purge `llm_invocations` audit rows older than N days.
+///
+/// `llm_invocations` (migration 37, `src/db/llm_invocations.rs`) is the
+/// shared audit trail for every LLM-backed assessment call (`ai_assess`
+/// today; `skill_assess`/`mcp_assess`/`hook_assess` in later phases). Unlike
+/// `logs`, rows here carry no severity concept, so there is no err+-style
+/// exemption — retention applies uniformly to every row. Reuses the global
+/// `CORTEX_RETENTION_DAYS` setting (0 disables, same as [`purge_old_logs`])
+/// rather than a dedicated hardcoded cap like the AdGuard tags or heartbeats:
+/// those exist to override the global policy because their volume would
+/// otherwise dominate it, but invocation volume is bounded by `LlmRunner`'s
+/// own per-minute/per-hour caps and is far lower than logs/heartbeats.
+///
+/// Same chunked-DELETE pattern as [`purge_old_logs`] (`chunk_size` rows per
+/// iteration, WAL write lock released between chunks) keyed on `started_at`
+/// (set from the server clock at invocation start, not a caller-supplied
+/// value) rather than a client-controlled field. No FTS5 merge is needed —
+/// `llm_invocations` is not indexed by `logs_fts`.
+pub fn purge_old_llm_invocations(
+    pool: &DbPool,
+    retention_days: u32,
+    chunk_size: usize,
+) -> Result<usize> {
+    if retention_days == 0 {
+        return Ok(0);
+    }
+
+    let cutoff = Utc::now()
+        .checked_sub_signed(chrono::TimeDelta::days(retention_days as i64))
+        .ok_or_else(|| {
+            anyhow::anyhow!("date arithmetic overflow for retention_days={retention_days}")
+        })?
+        .format("%Y-%m-%dT%H:%M:%SZ")
+        .to_string();
+
+    let mut total_deleted: usize = 0;
+    loop {
+        let conn = pool.get()?;
+        let _write_guard = crate::db::write_lock();
+        let chunk = conn.execute(
+            "DELETE FROM llm_invocations WHERE id IN (
+                 SELECT id FROM llm_invocations
+                 WHERE started_at < ?1
+                 LIMIT ?2
+             )",
+            params![cutoff, chunk_size as i64],
+        )?;
+        total_deleted += chunk;
+        drop(conn); // release back to pool before sleeping
+        if chunk == 0 {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+
+    tracing::info!(
+        deleted = total_deleted,
+        cutoff = %cutoff,
+        "Purged old llm_invocations rows"
+    );
+    Ok(total_deleted)
+}
+
 #[derive(Debug)]
 struct DeletedChunk {
     deleted_rows: usize,

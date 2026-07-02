@@ -291,7 +291,7 @@ its own table.
 | `CORTEX_SQLITE_MMAP_MB` | no | `256` | no | Bounded SQLite mmap size; resident mapped pages may still count toward cgroup memory |
 | `CORTEX_HEAVY_READ_CONCURRENCY` | no | `1` | no | Shared service-layer limiter for SQLite-heavy reads |
 | `CORTEX_WAL_CHECKPOINT_MB` | no | `256` | no | WAL size threshold for bounded PASSIVE checkpoint attempts |
-| `CORTEX_RETENTION_DAYS` | no | `90` | no | Days to retain logs before automatic hourly purge (0 = keep forever) |
+| `CORTEX_RETENTION_DAYS` | no | `90` | no | Days to retain logs and `llm_invocations` audit rows before automatic hourly purge (0 = keep forever for both) |
 
 ### Storage budget (`CORTEX_*`)
 
