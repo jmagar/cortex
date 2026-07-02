@@ -68,7 +68,10 @@ fn insert_or_ignore_is_idempotent_on_duplicate() {
         timestamp: "2026-06-01T00:00:00.000Z".to_string(),
         event: sample_event("cortex-troubleshoot"),
     };
-    assert_eq!(insert_skill_events(&pool, &[insert.clone()]).unwrap(), 1);
+    assert_eq!(
+        insert_skill_events(&pool, std::slice::from_ref(&insert)).unwrap(),
+        1
+    );
     assert_eq!(insert_skill_events(&pool, &[insert]).unwrap(), 0);
 
     let result = list_skill_events(&pool, &AiSkillEventParams::default()).unwrap();

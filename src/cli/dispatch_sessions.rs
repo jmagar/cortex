@@ -13,7 +13,8 @@ use super::output::common::print_json;
 use super::output::logs::{
     UsageBlocksPrintOptions, print_abuse_search_response, print_ai_correlate_response,
     print_ai_projects_response, print_ai_tools_response, print_project_context_response,
-    print_search_sessions_response, print_usage_blocks_response_with_options,
+    print_search_sessions_response, print_skill_events_response,
+    print_usage_blocks_response_with_options,
 };
 use super::output::sessions::more::{
     AiInvestigatePrintOptions, print_ai_incidents_response,
@@ -351,11 +352,24 @@ pub(crate) async fn run_ai_skills_backfill(
     Ok(())
 }
 
-// TODO(Task 9): replace with the real read/list implementation once
-// list_skill_events / ListSkillEventsRequest land — this stub only keeps
-// the SessionsCommand::Skills dispatch arm compiling for Task 8.
-pub(crate) async fn run_ai_skills(_mode: &CliMode, _args: SessionsSkillsListArgs) -> Result<()> {
-    bail!("not yet implemented")
+pub(crate) async fn run_ai_skills(mode: &CliMode, args: SessionsSkillsListArgs) -> Result<()> {
+    let json = args.json;
+    let req = cortex::app::ListSkillEventsRequest {
+        skill: args.skill,
+        plugin: args.plugin,
+        tool: args.tool,
+        project: args.project,
+        session_id: args.session_id,
+        hostname: args.host,
+        from: args.since,
+        to: args.until,
+        limit: args.limit,
+    };
+    let response = match mode {
+        CliMode::Local(service) => service.list_skill_events(req).await?,
+        CliMode::Http(client) => http_or_cancel(client.ai_skills(&req)).await?,
+    };
+    print_skill_events_response(&response, json)
 }
 
 pub(crate) async fn run_ai_index(mode: &CliMode, args: SessionsIndexArgs) -> Result<()> {

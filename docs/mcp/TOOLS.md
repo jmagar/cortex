@@ -54,6 +54,7 @@ cortex exposes one MCP tool named `cortex`. The required
 | `ask_history` | Search AI transcript history for past work related to a topic |
 | `incident_context` | Full context bundle for a known time window — logs + AI sessions |
 | `graph` | Resolve graph entities, neighborhoods, evidence-backed explanations, and evidence proof rows |
+| `skill_events` | List extracted AI skill-invocation events |
 | `help` | Markdown reference for all actions |
 
 ## cortex search

@@ -77,13 +77,14 @@ use cortex::app::{
     IncidentContextRequest, IncidentContextResponse, IngestRateRequest, IngestRateResponse,
     ListAiProjectsRequest, ListAiProjectsResponse, ListAiToolsRequest, ListAiToolsResponse,
     ListAppsRequest, ListAppsResponse, ListHostsResponse, ListSessionsRequest,
-    ListSessionsResponse, ListSourceIpsRequest, ListSourceIpsResponse, MaintenanceJobStatus,
-    PatternsRequest, PatternsResponse, ProjectContextRequest, ProjectContextResponse,
-    SearchLogsRequest, SearchLogsResponse, SearchSessionsRequest, SearchSessionsResponse,
-    SilentHostsRequest, SilentHostsResponse, SimilarIncidentsRequest, SimilarIncidentsResponse,
-    TailLogsRequest, TimelineRequest, TimelineResponse, TopicCorrelateRequest,
-    TopicCorrelateResponse, UnackErrorRequest, UnackErrorResponse, UnaddressedErrorsRequest,
-    UnaddressedErrorsResponse, UsageBlocksRequest, UsageBlocksResponse,
+    ListSessionsResponse, ListSkillEventsRequest, ListSkillEventsResponse, ListSourceIpsRequest,
+    ListSourceIpsResponse, MaintenanceJobStatus, PatternsRequest, PatternsResponse,
+    ProjectContextRequest, ProjectContextResponse, SearchLogsRequest, SearchLogsResponse,
+    SearchSessionsRequest, SearchSessionsResponse, SilentHostsRequest, SilentHostsResponse,
+    SimilarIncidentsRequest, SimilarIncidentsResponse, TailLogsRequest, TimelineRequest,
+    TimelineResponse, TopicCorrelateRequest, TopicCorrelateResponse, UnackErrorRequest,
+    UnackErrorResponse, UnaddressedErrorsRequest, UnaddressedErrorsResponse, UsageBlocksRequest,
+    UsageBlocksResponse,
 };
 use cortex::scanner::{CheckpointEntry, ParseErrorEntry, PruneCheckpointsResult};
 
@@ -570,6 +571,10 @@ impl HttpClient {
 
     pub async fn ai_tools(&self, req: &ListAiToolsRequest) -> Result<ListAiToolsResponse> {
         self.get_json("/api/sessions/tools", Some(req)).await
+    }
+
+    pub async fn ai_skills(&self, req: &ListSkillEventsRequest) -> Result<ListSkillEventsResponse> {
+        self.get_json("/api/ai/skills", Some(req)).await
     }
 
     pub async fn ai_projects(&self, req: &ListAiProjectsRequest) -> Result<ListAiProjectsResponse> {

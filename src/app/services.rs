@@ -84,6 +84,7 @@ mod map_answers;
 mod map_findings;
 mod rag;
 mod skill_backfill;
+mod skill_events;
 mod topic_correlate;
 
 pub use compose::run_compose_status;

@@ -37,10 +37,11 @@ use crate::app::{
     GetLogRequest, GraphAroundRequest, GraphEntityLookupRequest, GraphEvidenceLookupRequest,
     GraphExplainRequest, HostStateRequest, IncidentContextRequest, IngestRateRequest,
     ListAiProjectsRequest, ListAiToolsRequest, ListAppsRequest, ListSessionsRequest,
-    ListSourceIpsRequest, LlmInvocationsRequest, NotificationsRecentRequest, PatternsRequest,
-    ProjectContextRequest, RequestActor, SearchLogsRequest, SearchSessionsRequest, ServiceError,
-    SilentHostsRequest, SimilarIncidentsRequest, TailLogsRequest, TimelineRequest,
-    TopicCorrelateRequest, UnackErrorRequest, UnaddressedErrorsRequest, UsageBlocksRequest,
+    ListSkillEventsRequest, ListSourceIpsRequest, LlmInvocationsRequest,
+    NotificationsRecentRequest, PatternsRequest, ProjectContextRequest, RequestActor,
+    SearchLogsRequest, SearchSessionsRequest, ServiceError, SilentHostsRequest,
+    SimilarIncidentsRequest, TailLogsRequest, TimelineRequest, TopicCorrelateRequest,
+    UnackErrorRequest, UnaddressedErrorsRequest, UsageBlocksRequest,
 };
 use crate::config::ApiConfig;
 use crate::mcp::{AuthPolicy, build_auth_layer};
@@ -265,6 +266,7 @@ pub fn router(state: ApiState) -> anyhow::Result<Router> {
         .route("/api/sessions/incidents", get(ai_incidents))
         .route("/api/sessions/investigate", get(ai_investigate))
         .route("/api/sessions/llm-invocations", get(ai_llm_invocations))
+        .route("/api/ai/skills", get(ai_skills))
         .route("/api/compose/status", get(compose_status))
         .route("/api/compose/doctor", get(compose_doctor))
         // --- ai session queries ---
@@ -813,6 +815,34 @@ async fn ai_llm_invocations(
     }
     tracing::warn!(caller_ip = %peer.ip(), "admin: llm_invocations invoked");
     respond(state.service.llm_invocations_checked(req).await)
+}
+
+/// `GET /api/ai/skills` — `cortex:read`-scoped per GH #94's explicit
+/// decision (not admin, unlike `ai_llm_invocations` above). As cheap
+/// defense-in-depth this handler logs the caller IP and query filters at
+/// `tracing::info!` before serving the response — matching the logging
+/// LEVEL convention of `Read`-scoped AI-transcript routes in this file (the
+/// admin-scoped `ai_llm_invocations` uses `tracing::warn!` because it
+/// exposes kill-switch/circuit-breaker operational state; a plain
+/// `Read`-scoped route like this one uses `info!` instead, so there's at
+/// least a trace record of who queried skill-usage history without the
+/// noise level of a `warn!` on every normal read).
+async fn ai_skills(
+    State(state): State<ApiState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    Query(req): Query<ListSkillEventsRequest>,
+) -> impl IntoResponse {
+    tracing::info!(
+        caller_ip = %peer.ip(),
+        skill = ?req.skill,
+        plugin = ?req.plugin,
+        tool = ?req.tool,
+        project = ?req.project,
+        session_id = ?req.session_id,
+        hostname = ?req.hostname,
+        "read: skill_events queried"
+    );
+    respond(state.service.list_skill_events(req).await)
 }
 
 async fn notifications_test() -> impl IntoResponse {

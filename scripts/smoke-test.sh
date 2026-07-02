@@ -22,6 +22,7 @@
 #   mcp_call notifications_recent, mcp_call file_tails, mcp_call notifications_test,
 #   mcp_call llm_invocations,
 #   mcp_call similar_incidents, mcp_call ask_history, mcp_call incident_context, mcp_call graph,
+#   mcp_call skill_events,
 #   mcp_call help
 
 set -euo pipefail
@@ -1105,6 +1106,12 @@ print('ok')
 " "$HELP_FILE" 2>/dev/null || echo "error")
 rm -f "$HELP_FILE"
 assert_eq "help: contains all action sections" "$HELP_VALID" "ok"
+
+# ── skill_events ─────────────────────────────────────────────────────────────
+echo ""
+echo "Action: skill_events"
+SKILL_EVENTS=$(mcp_call skill_events "limit=5" 2>&1)
+assert_no_error "skill_events: no error" "$SKILL_EVENTS"
 
 # ── graph proof UX (optional: requires known seeded graph evidence id) ───────
 echo ""

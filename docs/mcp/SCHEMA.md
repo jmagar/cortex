@@ -66,6 +66,7 @@ selects one of these 48 actions:
 | `ask_history` | `cortex:read` | moderate | AI transcript history with nearby log context |
 | `incident_context` | `cortex:read` | moderate | Window bundle: log aggregates, errors, AI sessions |
 | `graph` | `cortex:read` | moderate | Entity lookup and one-hop graph neighborhoods |
+| `skill_events` | `cortex:read` | cheap | List extracted AI skill-invocation events |
 | `ack_error` | `cortex:admin` | write | Acknowledge an error signature |
 | `unack_error` | `cortex:admin` | write | Revoke an error acknowledgement |
 | `file_tails` | `cortex:admin` | write | Manage Cortex-owned file-tail ingest sources |
