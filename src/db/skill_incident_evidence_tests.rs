@@ -43,6 +43,7 @@ fn make_ai_entry(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn insert_skill_event(
     pool: &DbPool,
     log_id: i64,

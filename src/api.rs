@@ -30,16 +30,16 @@ use tower_http::cors::CorsLayer;
 use crate::app::{
     AbuseSearchRequest, AckErrorRequest, AiCheckpointsRequest, AiCorrelateLimitPolicy,
     AiCorrelateRequest, AiIncidentRequest, AiInvestigateRequest, AiLimitPolicy,
-    AiParseErrorsRequest, AiPruneCheckpointsRequest, AnomaliesRequest, AskHistoryRequest,
-    ClockSkewRequest, CompareRequest, ContextRequest, CorrelateEventsRequest,
-    CorrelateStateRequest, CortexService, DbBackupRequest, DbCheckpointRequest, DbIntegrityRequest,
-    DbVacuumRequest, FileTailRequest, FilterLogsRequest, FleetStateRequest, GetErrorsRequest,
-    GetLogRequest, GraphAroundRequest, GraphEntityLookupRequest, GraphEvidenceLookupRequest,
-    GraphExplainRequest, HostStateRequest, IncidentContextRequest, IngestRateRequest,
-    ListAiProjectsRequest, ListAiToolsRequest, ListAppsRequest, ListSessionsRequest,
-    ListSkillEventsRequest, ListSourceIpsRequest, LlmInvocationsRequest,
-    NotificationsRecentRequest, PatternsRequest, ProjectContextRequest, RequestActor,
-    SearchLogsRequest, SearchSessionsRequest, ServiceError, SilentHostsRequest,
+    AiParseErrorsRequest, AiPruneCheckpointsRequest, AiSkillIncidentRequest,
+    AiSkillInvestigateRequest, AnomaliesRequest, AskHistoryRequest, ClockSkewRequest,
+    CompareRequest, ContextRequest, CorrelateEventsRequest, CorrelateStateRequest, CortexService,
+    DbBackupRequest, DbCheckpointRequest, DbIntegrityRequest, DbVacuumRequest, FileTailRequest,
+    FilterLogsRequest, FleetStateRequest, GetErrorsRequest, GetLogRequest, GraphAroundRequest,
+    GraphEntityLookupRequest, GraphEvidenceLookupRequest, GraphExplainRequest, HostStateRequest,
+    IncidentContextRequest, IngestRateRequest, ListAiProjectsRequest, ListAiToolsRequest,
+    ListAppsRequest, ListSessionsRequest, ListSkillEventsRequest, ListSourceIpsRequest,
+    LlmInvocationsRequest, NotificationsRecentRequest, PatternsRequest, ProjectContextRequest,
+    RequestActor, SearchLogsRequest, SearchSessionsRequest, ServiceError, SilentHostsRequest,
     SimilarIncidentsRequest, TailLogsRequest, TimelineRequest, TopicCorrelateRequest,
     UnackErrorRequest, UnaddressedErrorsRequest, UsageBlocksRequest,
 };
@@ -267,6 +267,8 @@ pub fn router(state: ApiState) -> anyhow::Result<Router> {
         .route("/api/sessions/investigate", get(ai_investigate))
         .route("/api/sessions/llm-invocations", get(ai_llm_invocations))
         .route("/api/sessions/skills", get(ai_skills))
+        .route("/api/sessions/skill-incidents", get(ai_skill_incidents))
+        .route("/api/sessions/skill-investigate", get(ai_skill_investigate))
         .route("/api/compose/status", get(compose_status))
         .route("/api/compose/doctor", get(compose_doctor))
         // --- ai session queries ---
@@ -1171,6 +1173,89 @@ async fn ai_investigate(
                 window_minutes: q.window_minutes,
                 correlation_window_minutes: q.correlation_window_minutes,
                 terms: q.terms,
+            })
+            .await,
+    )
+}
+
+/// Skill incidents — uses `QsQuery` because `signals: Vec<String>` cannot be
+/// deserialized from a URL query string via `axum::extract::Query`. Mirrors
+/// `ai_incidents` above.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AiSkillIncidentsQuery {
+    skill: Option<String>,
+    plugin: Option<String>,
+    tool: Option<String>,
+    project: Option<String>,
+    session_id: Option<String>,
+    hostname: Option<String>,
+    since: Option<String>,
+    until: Option<String>,
+    limit: Option<u32>,
+    window_minutes: Option<u32>,
+    #[serde(default)]
+    signals: Vec<String>,
+    min_score: Option<f64>,
+}
+
+async fn ai_skill_incidents(
+    State(state): State<ApiState>,
+    serde_qs::axum::QsQuery(q): serde_qs::axum::QsQuery<AiSkillIncidentsQuery>,
+) -> impl IntoResponse {
+    respond(
+        state
+            .service
+            .list_ai_skill_incidents(AiSkillIncidentRequest {
+                skill: q.skill,
+                plugin: q.plugin,
+                tool: q.tool,
+                project: q.project,
+                session_id: q.session_id,
+                hostname: q.hostname,
+                since: q.since,
+                until: q.until,
+                limit: q.limit,
+                window_minutes: q.window_minutes,
+                signals: q.signals,
+                min_score: q.min_score,
+            })
+            .await,
+    )
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AiSkillInvestigateQuery {
+    skill: Option<String>,
+    plugin: Option<String>,
+    tool: Option<String>,
+    project: Option<String>,
+    since: Option<String>,
+    until: Option<String>,
+    limit: Option<u32>,
+    window_minutes: Option<u32>,
+    correlation_window_minutes: Option<u32>,
+}
+
+async fn ai_skill_investigate(
+    State(state): State<ApiState>,
+    serde_qs::axum::QsQuery(q): serde_qs::axum::QsQuery<AiSkillInvestigateQuery>,
+) -> impl IntoResponse {
+    respond(
+        state
+            .service
+            .investigate_ai_skill_incidents(AiSkillInvestigateRequest {
+                incident_id: None,
+                skill: q.skill,
+                plugin: q.plugin,
+                tool: q.tool,
+                project: q.project,
+                since: q.since,
+                until: q.until,
+                limit: q.limit,
+                window_minutes: q.window_minutes,
+                correlation_window_minutes: q.correlation_window_minutes,
             })
             .await,
     )

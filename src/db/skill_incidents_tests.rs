@@ -42,6 +42,7 @@ fn make_ai_entry(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn insert_skill_event(
     pool: &DbPool,
     log_id: i64,
@@ -243,7 +244,7 @@ fn search_ai_skill_incidents_sorts_by_score_with_total_cmp() {
     assert!(result.incidents[0].priority_score > result.incidents[1].priority_score);
     // Regression guard: scores must be a total order even in pathological
     // cases (NaN would break partial_cmp/unwrap_or(Equal) but not total_cmp).
-    let mut scores = vec![f64::NAN, 3.0, 1.0, f64::NAN, 2.0];
+    let mut scores = [f64::NAN, 3.0, 1.0, f64::NAN, 2.0];
     scores.sort_by(|a, b| b.total_cmp(a));
     assert_eq!(
         scores.len(),
