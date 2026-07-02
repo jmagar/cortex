@@ -168,6 +168,8 @@ pub use models::{
     SilentHostsResponse,
     SimilarIncidentsRequest,
     SimilarIncidentsResponse,
+    SkillBackfillRequest,
+    SkillBackfillResult,
     TailLogsRequest,
     TimelineRequest,
     TimelineResponse,
