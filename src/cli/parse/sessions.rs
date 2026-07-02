@@ -20,6 +20,7 @@ use super::super::{
 
 mod more;
 mod ops;
+mod skills;
 
 const SESSIONS_SUBCOMMANDS: &[&str] = &[
     "search",
@@ -45,6 +46,7 @@ const SESSIONS_SUBCOMMANDS: &[&str] = &[
     "investigate",
     "assess",
     "llm-invocations",
+    "skills",
 ];
 
 pub(crate) fn parse_sessions_command(args: &[String]) -> Result<CliCommand> {
@@ -82,6 +84,7 @@ pub(crate) fn parse_sessions_command(args: &[String]) -> Result<CliCommand> {
         "investigate" => parse_sessions_investigate(rest),
         "assess" => parse_sessions_assess(rest),
         "llm-invocations" => parse_sessions_llm_invocations(rest),
+        "skills" => self::skills::parse_sessions_skills(rest),
         _ => bail!(
             "{}",
             super::suggest::unknown_command(

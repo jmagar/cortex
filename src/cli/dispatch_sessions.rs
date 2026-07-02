@@ -32,7 +32,7 @@ use super::{
     SessionsCorrelateArgs, SessionsDoctorArgs, SessionsErrorsArgs, SessionsIncidentContextArgs,
     SessionsIncidentsArgs, SessionsIndexArgs, SessionsInvestigateArgs, SessionsListArgs,
     SessionsLlmInvocationsArgs, SessionsPruneCheckpointsArgs, SessionsSearchArgs,
-    SessionsSimilarArgs, SessionsWatchArgs,
+    SessionsSimilarArgs, SessionsSkillsBackfillArgs, SessionsSkillsListArgs, SessionsWatchArgs,
 };
 
 // ─── AI Arg → Request conversions (bead 0p8r.8) ─────────────────────────────
@@ -319,6 +319,44 @@ pub(crate) async fn run_ai_prune_checkpoints(
 }
 
 // ─── LOCAL-only session commands (6) — error in HTTP mode ───────────────────
+
+pub(crate) async fn run_ai_skills_backfill(
+    mode: &CliMode,
+    args: SessionsSkillsBackfillArgs,
+) -> Result<()> {
+    let service = match mode {
+        CliMode::Http(_) => bail!("sessions skills backfill runs local DB scans; omit --http"),
+        CliMode::Local(service) => service,
+    };
+    let response = service
+        .backfill_skill_events(cortex::app::SkillBackfillRequest {
+            since: args.since,
+            limit: args.limit,
+            dry_run: args.dry_run,
+        })
+        .await?;
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&response)?);
+    } else {
+        println!(
+            "scanned={} inserted={} skipped_duplicates={} parse_errors={} truncated={} dry_run={}",
+            response.scanned,
+            response.inserted,
+            response.skipped_duplicates,
+            response.parse_errors,
+            response.truncated,
+            response.dry_run
+        );
+    }
+    Ok(())
+}
+
+// TODO(Task 9): replace with the real read/list implementation once
+// list_skill_events / ListSkillEventsRequest land — this stub only keeps
+// the SessionsCommand::Skills dispatch arm compiling for Task 8.
+pub(crate) async fn run_ai_skills(_mode: &CliMode, _args: SessionsSkillsListArgs) -> Result<()> {
+    bail!("not yet implemented")
+}
 
 pub(crate) async fn run_ai_index(mode: &CliMode, args: SessionsIndexArgs) -> Result<()> {
     let service = match mode {
