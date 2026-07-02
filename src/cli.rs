@@ -20,9 +20,10 @@ pub(crate) use args::{
     SessionsCorrelateArgs, SessionsDoctorArgs, SessionsErrorsArgs, SessionsIncidentContextArgs,
     SessionsIncidentsArgs, SessionsIndexArgs, SessionsInvestigateArgs, SessionsListArgs,
     SessionsLlmInvocationsArgs, SessionsOutputDetail, SessionsPruneCheckpointsArgs,
-    SessionsSearchArgs, SessionsSimilarArgs, SessionsWatchArgs, SetupArgs, SetupCommand,
-    ShellAtuinIndexArgs, ShellCommand, ShellIndexArgs, SigAckArgs, SigListArgs, SigUnackArgs,
-    SilentHostsArgs, SourceIpsArgs, TailArgs, TimeRangeArgs, TimelineArgs,
+    SessionsSearchArgs, SessionsSimilarArgs, SessionsSkillsBackfillArgs, SessionsSkillsListArgs,
+    SessionsWatchArgs, SetupArgs, SetupCommand, ShellAtuinIndexArgs, ShellCommand, ShellIndexArgs,
+    SigAckArgs, SigListArgs, SigUnackArgs, SilentHostsArgs, SourceIpsArgs, TailArgs, TimeRangeArgs,
+    TimelineArgs,
 };
 #[cfg(test)]
 pub(crate) use args::{StateCommand, StatsCommand};

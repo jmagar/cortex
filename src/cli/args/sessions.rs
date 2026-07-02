@@ -24,6 +24,30 @@ pub(crate) enum SessionsCommand {
     Investigate(SessionsInvestigateArgs),
     Assess(SessionsAssessArgs),
     LlmInvocations(SessionsLlmInvocationsArgs),
+    Skills(SessionsSkillsListArgs),
+    SkillsBackfill(SessionsSkillsBackfillArgs),
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct SessionsSkillsListArgs {
+    pub json: bool,
+    pub skill: Option<String>,
+    pub plugin: Option<String>,
+    pub tool: Option<String>,
+    pub project: Option<String>,
+    pub session_id: Option<String>,
+    pub host: Option<String>,
+    pub since: Option<String>,
+    pub until: Option<String>,
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct SessionsSkillsBackfillArgs {
+    pub json: bool,
+    pub since: Option<String>,
+    pub limit: Option<u64>,
+    pub dry_run: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

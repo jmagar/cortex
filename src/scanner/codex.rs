@@ -28,6 +28,7 @@ pub fn parse_line(
         message,
         session_id,
         ai_project,
+        raw_value: None,
     }))
 }
 

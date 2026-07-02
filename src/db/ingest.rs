@@ -35,7 +35,7 @@ fn insert_logs_batch_once(pool: &DbPool, entries: &[LogBatchEntry]) -> Result<us
     let mut conn = pool.get()?;
     let _write_guard = crate::db::write_lock();
     let tx = conn.transaction()?;
-    insert_logs_batch_in_tx(&tx, entries)?;
+    let _ids = insert_logs_batch_in_tx(&tx, entries)?;
     tx.commit()?;
     tracing::debug!(
         entry_count = entries.len(),
@@ -47,7 +47,8 @@ fn insert_logs_batch_once(pool: &DbPool, entries: &[LogBatchEntry]) -> Result<us
 pub(crate) fn insert_logs_batch_in_tx(
     tx: &Transaction<'_>,
     entries: &[LogBatchEntry],
-) -> Result<()> {
+) -> Result<Vec<i64>> {
+    let mut ids = Vec::with_capacity(entries.len());
     {
         let mut stmt = tx.prepare_cached(
             "INSERT INTO logs (
@@ -79,6 +80,7 @@ pub(crate) fn insert_logs_batch_in_tx(
                 entry.event_action,
                 entry.parse_error,
             ])?;
+            ids.push(tx.last_insert_rowid());
         }
 
         // Batch upsert hosts — group by hostname to avoid one upsert per log entry
@@ -122,7 +124,7 @@ pub(crate) fn insert_logs_batch_in_tx(
             "Prepared batch insert transaction"
         );
     }
-    Ok(())
+    Ok(ids)
 }
 
 fn is_transient_sqlite_lock(err: &anyhow::Error) -> bool {

@@ -100,6 +100,7 @@ pub fn parse_file(raw: &str, path: &Path) -> Result<GeminiParse> {
             message: content,
             session_id: session_id.clone(),
             ai_project: ai_project.clone(),
+            raw_value: None,
         });
     }
     Ok(GeminiParse {

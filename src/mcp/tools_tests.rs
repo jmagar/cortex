@@ -323,6 +323,31 @@ async fn host_state_action_returns_bounded_heartbeat_state() {
 }
 
 #[tokio::test]
+async fn skill_events_action_returns_inserted_rows() {
+    let h = TestHarness::new();
+    let conn = h.pool.get().unwrap();
+    conn.execute(
+        "INSERT INTO logs (timestamp, hostname, severity, message, raw, source_ip)
+         VALUES ('2026-06-01T00:00:00.000Z', 'dookie', 'info', 'm', 'm', 'transcript://claude_project')",
+        [],
+    )
+    .unwrap();
+    let log_id = conn.last_insert_rowid();
+    conn.execute(
+        "INSERT INTO ai_skill_events (log_id, ai_tool, ai_project, ai_session_id, hostname, timestamp, skill_name, event_kind, evidence_kind)
+         VALUES (?1, 'claude', 'cortex', 'sess-1', 'dookie', '2026-06-01T00:00:00.000Z', 'cortex-troubleshoot', 'claude_attribution', 'structured_json_field')",
+        rusqlite::params![log_id],
+    )
+    .unwrap();
+    drop(conn);
+
+    let args = json!({"action": "skill_events", "project": "cortex"});
+    let response = execute_tool(&h.state, "cortex", args, None).await.unwrap();
+    assert_eq!(response["total"], 1);
+    assert_eq!(response["events"][0]["skill_name"], "cortex-troubleshoot");
+}
+
+#[tokio::test]
 async fn fleet_state_action_returns_fleet_snapshot() {
     let h = TestHarness::new();
     let value = execute_tool(&h.state, "cortex", json!({"action": "fleet_state"}), None)
@@ -1171,6 +1196,7 @@ fn sample_args_for_action(action: &str) -> Option<serde_json::Value> {
         | "notifications_recent"
         | "notifications_test"
         | "llm_invocations"
+        | "skill_events"
         | "help" => json!({"action": action}),
         _ => return None,
     })

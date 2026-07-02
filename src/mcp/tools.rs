@@ -22,10 +22,10 @@ use crate::app::{
     CorrelateEventsRequest, CorrelateStateRequest, FilterLogsRequest, FleetStateRequest,
     GetErrorsRequest, GetLogRequest, HomelabMapRequest, HostStateRequest, IngestRateRequest,
     ListAiProjectsRequest, ListAiToolsRequest, ListAppsRequest, ListSessionsRequest,
-    ListSourceIpsRequest, LlmInvocationsRequest, NotificationsRecentRequest, PatternsRequest,
-    ProjectContextRequest, RequestActor, SearchLogsRequest, SearchSessionsRequest,
-    SilentHostsRequest, TailLogsRequest, TimelineRequest, TopicCorrelateRequest, UnackErrorRequest,
-    UnaddressedErrorsRequest, UsageBlocksRequest,
+    ListSkillEventsRequest, ListSourceIpsRequest, LlmInvocationsRequest,
+    NotificationsRecentRequest, PatternsRequest, ProjectContextRequest, RequestActor,
+    SearchLogsRequest, SearchSessionsRequest, SilentHostsRequest, TailLogsRequest, TimelineRequest,
+    TopicCorrelateRequest, UnackErrorRequest, UnaddressedErrorsRequest, UsageBlocksRequest,
 };
 
 use super::AppState;
@@ -121,6 +121,7 @@ async fn dispatch_cortex_action(
         H::AskHistory => context::tool_ask_history(state, args).await,
         H::IncidentContext => context::tool_incident_context(state, args).await,
         H::Graph => context::tool_graph(state, args).await,
+        H::SkillEvents => tool_skill_events(state, args).await,
         H::Help => help::tool_cortex_help().await,
     }
 }
@@ -262,6 +263,12 @@ async fn tool_project_context(state: &AppState, args: Value) -> anyhow::Result<V
 async fn tool_list_ai_tools(state: &AppState, args: Value) -> anyhow::Result<Value> {
     let req: ListAiToolsRequest = action_payload(args, "list_ai_tools")?;
     let response = state.service.list_ai_tools(req).await?;
+    Ok(serde_json::to_value(response)?)
+}
+
+async fn tool_skill_events(state: &AppState, args: Value) -> anyhow::Result<Value> {
+    let req: ListSkillEventsRequest = action_payload(args, "skill_events")?;
+    let response = state.service.list_skill_events(req).await?;
     Ok(serde_json::to_value(response)?)
 }
 

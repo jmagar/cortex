@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.3.0] - 2026-07-02
+
+### Added
+
+- Skill-event extraction, ingest, and backfill (GH #94 PR 2/4): a new `ai_skill_events` table (migration 38) stores one row per detected skill invocation, extracted from AI transcripts by two independent extractors — Claude's structured `attributionSkill`/`attributionPlugin` JSON fields, and Codex's `<skill><name>` transcript tags.
+  - Ingest-time extraction runs inline inside the existing transcript-ingest transaction (`flush_chunk` in `src/scanner.rs`), so new transcripts pick up skill events automatically with no extra full-table scan and no double JSON-parse on the hot path.
+  - A new `skill_events` MCP action (`cortex:read`), `GET /api/sessions/skills` REST route, and `cortex sessions skills` CLI command expose the extracted events, filterable by `--skill`, `--plugin`, `--tool`, `--project`, `--session-id`, `--host`, `--since`, `--until`, and `--limit`.
+  - `cortex sessions skills backfill` (`CortexService::backfill_skill_events`) chunked-scans existing `logs` rows to catch up data ingested before this phase shipped — bounded, dry-run-capable, idempotent (`INSERT OR IGNORE`), hard-capped at 1,000,000 rows per call, and single-flighted process-wide so only one backfill can run at a time.
+  - Note: the backfill's Claude-row recovery path is limited to rows whose `logs.message` column happens to contain the raw `attributionSkill` JSON — this does not occur for rows ingested through the normal scanner (which stores only the extracted plain-text message), so in practice the backfill primarily benefits Codex rows. Tracked as a known follow-up.
+
 ## [3.2.4] - 2026-07-02
 
 ### Fixed
