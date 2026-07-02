@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.6.0] - 2026-07-02
+
+### Fixed
+
+- `cortex-sessions-watch.service` no longer gets stuck permanently `failed` after a burst of transient crashes: widened `StartLimitBurst`/`StartLimitIntervalSec` from `5`/`300s` to `20`/`600s`. Root cause of the 2026-06-29 incident, where the service crash-looped on SQLite lock contention, exhausted its restart budget, and sat `failed` for 3 days with zero alerting before anyone noticed.
+- Fixed a process-wide test-suite bottleneck in `src/db/pool.rs`: the shared r2d2 background thread pool (`shared_scheduled_thread_pool`) was sized to exactly 1 thread, shared across every `DbPool` instance in the process. In production this is fine (one process, one pool), but under `cargo test --workspace`'s full parallelism, dozens of independently-created test pools queued behind that single thread and exceeded the 6s connection timeout, surfacing as spurious "timed out waiting for connection" failures unrelated to any actual bug. Bumped to 8 threads.
+
+### Added
+
+- A reusable, multi-condition health-check mechanism for `cortex-sessions-watch.service`, with alerting via the existing `AppriseClient` — closes the observability gap from the same incident (a dead service with no alerting). New `cortex setup sessions-watch-health-check` CLI subcommand, backed by a new `cortex-sessions-watch-doctor.timer` (15-minute cadence) auto-installed/removed alongside the watch service itself, and now verified by `SessionsWatchServiceAction::Check`/`cortex setup doctor` so a broken doctor unit can't silently go undetected.
+
 ## [3.5.2] - 2026-07-02
 
 ### Fixed
