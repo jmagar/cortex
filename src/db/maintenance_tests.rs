@@ -1209,9 +1209,9 @@ fn test_purge_old_llm_invocations_chunked() {
 /// without fractional seconds (e.g. `...:50Z`) does not sort consistently
 /// against `started_at` values that DO carry fractional seconds (SQLite
 /// writes `started_at` via `strftime('%Y-%m-%dT%H:%M:%fZ','now')`). Seed two
-/// rows one second apart that straddle a millisecond-precision cutoff, and
-/// confirm the purge honors true chronological order rather than string
-/// comparison.
+/// rows within the same wall-clock second that straddle a
+/// millisecond-precision cutoff, and confirm the purge honors true
+/// chronological order rather than string comparison.
 #[test]
 fn test_purge_old_llm_invocations_millisecond_precision_ordering() {
     let (pool, _dir) = test_pool();
@@ -1262,10 +1262,12 @@ fn test_purge_old_llm_invocations_millisecond_precision_ordering() {
 fn test_purge_old_llm_invocations_cutoff_has_fractional_seconds() {
     let (pool, _dir) = test_pool();
 
-    // A row exactly at the retention boundary, but 1ms before now-90days,
-    // formatted with the same precision SQLite uses for started_at.
+    // A row just past the retention boundary, 1s before now-90days (a 1ms
+    // margin would be too tight here: both the stored timestamp and the
+    // cutoff are formatted at millisecond precision, so rounding/truncation
+    // could collapse a 1ms delta to zero and make this test flaky).
     let boundary =
-        (chrono::Utc::now() - chrono::TimeDelta::days(90) - chrono::TimeDelta::milliseconds(1))
+        (chrono::Utc::now() - chrono::TimeDelta::days(90) - chrono::TimeDelta::seconds(1))
             .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
     insert_llm_invocation(&pool, "at-boundary", &boundary);
 

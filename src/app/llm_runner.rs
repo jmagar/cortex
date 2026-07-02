@@ -134,7 +134,7 @@ pub enum LlmRunnerError {
     ActionConcurrencyLimited { action: String, limit: usize },
     #[error("rate limit exceeded for action '{action}': {detail}")]
     RateLimited { action: String, detail: String },
-    #[error("circuit open for action '{action}' until {retry_after}")]
+    #[error("circuit open for action '{action}', retry after {retry_after}")]
     CircuitOpen { action: String, retry_after: String },
     #[error("LLM invocation '{0}' timed out after {1}s")]
     Timeout(String, u64),
