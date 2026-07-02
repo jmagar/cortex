@@ -7,6 +7,7 @@ pub mod llm_runner;
 mod models;
 mod os_adapter;
 mod services;
+pub mod skill_signal_detectors;
 pub(crate) mod time;
 mod watch_status;
 
