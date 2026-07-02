@@ -7,12 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.5.2] - 2026-07-02
+
+### Fixed
+
+- Dropped the `gitleaks` "Secret Scan" job from the required `ci-gate` checklist. `gitleaks-action` now requires a paid `GITLEAKS_LICENSE` secret this repo doesn't have configured, so the job fails on every PR regardless of content, blocking all merges. The job still runs and reports its own status as a non-blocking advisory check; re-add it to the gate once a license is configured or the action is swapped/pinned.
+
 ## [3.5.1] - 2026-07-02
 
 ### Fixed
 
 - Fixed `cortex sessions skills backfill`'s Claude-row recovery, which was dead code against real ingested data: it checked `logs.message` for the raw `attributionSkill` JSON, but `logs.message` for a Claude row only ever holds the already-extracted plain-text `content` field (never the raw JSON), so the check could never match outside of hand-crafted test fixtures. The backfill now recovers Claude rows by re-reading the specific line of the original transcript file, located via the persisted `ai_transcript_path` column and the `line_no` recorded in `metadata_json` at ingest time. Line recovery goes through a new shared `scanner::read_transcript_lines` helper that reuses the ingest path's own bounded, newline-delimited record reader (`read_bounded_line` / `MAX_RECORD_SIZE_BYTES`) — so `line_no` values resolve to identical physical lines and a pathological/corrupted oversized line is skipped rather than read unbounded into memory. Added a new `source_unavailable` counter to `SkillBackfillResult`/the CLI output to report Claude rows that still can't be recovered (missing path/metadata, deleted/rotated source file, out-of-range line number, or an oversized line) — distinct from `parse_errors`, which now means "found the source line but it wasn't valid JSON"; each unrecoverable row is logged at `debug` with its `log_id`/path/line. Codex-row recovery (which reads directly from `logs.message`, unaffected by this bug) is unchanged. Note: re-running the backfill is idempotent only while source transcript files are unchanged — a Claude transcript line edited in place between runs can produce a second, differently-named event for the same `log_id`, since `skill_name` is re-derived from the file and is part of the `INSERT OR IGNORE` uniqueness key (documented in `docs/CLI.md`; append-only transcripts make this an edge case). See [GH #94](https://github.com/jmagar/cortex/issues/94) follow-up.
-
 ## [3.5.0] - 2026-07-02
 
 ### Added
