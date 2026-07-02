@@ -1660,13 +1660,21 @@ async fn ai_assess_writes_llm_invocation_audit_row_via_runner() {
     // run_gemini_assessment succeeds without needing a real Gemini CLI —
     // same fake-script-on-PATH pattern used by
     // src/assessment_tests.rs::gemini_assessment_timeout_kills_and_reaps_child.
+    //
+    // `cat >/dev/null` drains stdin before the script prints anything: the
+    // parent's stdin_task is writing the prompt concurrently, and under
+    // heavy parallel-test-suite scheduling pressure this script could
+    // otherwise exit (closing its stdin read end) before that write
+    // completed, surfacing a spurious "Broken pipe" from run_gemini_assessment.
+    // Reading stdin to EOF first makes the child block until the parent's
+    // write+shutdown finishes, removing the race deterministically.
     let source = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(source.path().join(".gemini")).unwrap();
     std::fs::write(source.path().join(".gemini").join("settings.json"), "{}").unwrap();
     let script = source.path().join("fake-gemini.sh");
     std::fs::write(
         &script,
-        "#!/usr/bin/env bash\necho '{\"type\":\"message\",\"role\":\"assistant\",\"content\":\"ok\"}'\necho '{\"type\":\"result\",\"status\":\"success\"}'\n",
+        "#!/usr/bin/env bash\ncat >/dev/null\necho '{\"type\":\"message\",\"role\":\"assistant\",\"content\":\"ok\"}'\necho '{\"type\":\"result\",\"status\":\"success\"}'\n",
     )
     .unwrap();
     #[cfg(unix)]
