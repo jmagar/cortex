@@ -173,3 +173,39 @@ fn insert_logs_batch_persists_enrichment_fields() {
     assert_eq!(row.3, Some("http_request".to_string()));
     assert_eq!(row.4, None);
 }
+
+#[test]
+fn insert_logs_batch_in_tx_returns_ids_in_input_order() {
+    let (pool, _dir) = test_pool();
+    let mut conn = pool.get().unwrap();
+    let tx = conn.transaction().unwrap();
+
+    let entries = vec![
+        make_entry("2026-06-01T00:00:00.000Z", "dookie", "info", "first"),
+        make_entry("2026-06-01T00:00:01.000Z", "dookie", "info", "second"),
+    ];
+
+    let ids = insert_logs_batch_in_tx(&tx, &entries).unwrap();
+    tx.commit().unwrap();
+    drop(conn);
+
+    assert_eq!(ids.len(), 2);
+    assert!(
+        ids[1] > ids[0],
+        "second row's id must be greater than first"
+    );
+
+    let conn = pool.get().unwrap();
+    let stored_message: String = conn
+        .query_row("SELECT message FROM logs WHERE id = ?1", [ids[0]], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(stored_message, "first");
+    let stored_message: String = conn
+        .query_row("SELECT message FROM logs WHERE id = ?1", [ids[1]], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(stored_message, "second");
+}

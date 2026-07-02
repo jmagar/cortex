@@ -14,6 +14,7 @@ mod investigation;
 mod log_query;
 mod ops;
 mod rag;
+mod skill_events;
 mod stats;
 
 pub use ai_incidents::*;
@@ -26,6 +27,7 @@ pub use investigation::*;
 pub use log_query::*;
 pub use ops::*;
 pub use rag::*;
+pub use skill_events::*;
 pub use stats::*;
 
 #[cfg(test)]

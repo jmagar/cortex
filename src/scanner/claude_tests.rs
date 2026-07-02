@@ -73,3 +73,18 @@ fn parse_line_ignores_records_without_message_content() {
 
     assert!(parsed.is_none());
 }
+
+#[test]
+fn parse_line_carries_the_raw_parsed_value() {
+    let line = r#"{"sessionId":"sess-1","content":"hi","attributionSkill":"cortex-troubleshoot"}"#;
+    let parsed = parse_line(line, Path::new("/tmp/x.jsonl"), 0)
+        .unwrap()
+        .unwrap();
+    let raw = parsed
+        .raw_value
+        .expect("claude parse_line must carry raw_value");
+    assert_eq!(
+        raw.get("attributionSkill").and_then(|v| v.as_str()),
+        Some("cortex-troubleshoot")
+    );
+}

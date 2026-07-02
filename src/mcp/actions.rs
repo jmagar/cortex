@@ -99,6 +99,7 @@ pub(super) enum ActionHandler {
     AskHistory,
     IncidentContext,
     Graph,
+    SkillEvents,
     Help,
 }
 
@@ -505,6 +506,18 @@ pub(super) const ACTION_SPECS: &[ActionSpec] = &[
         "Resolve graph entities, neighborhoods, and evidence-backed explanations",
         Expensive,
         Graph
+    ),
+    action_spec!(
+        "skill_events",
+        Read,
+        "List extracted AI skill-invocation events",
+        Cheap,
+        SkillEvents,
+        flags: &[],
+        examples: &[
+            "cortex sessions skills --project cortex --limit 20",
+            "cortex sessions skills --skill cortex-troubleshoot --since 1h",
+        ]
     ),
     // ── Admin / write actions ──────────────────────────────────────────────
     action_spec!(

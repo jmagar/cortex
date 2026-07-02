@@ -13,7 +13,8 @@ use super::output::common::print_json;
 use super::output::logs::{
     UsageBlocksPrintOptions, print_abuse_search_response, print_ai_correlate_response,
     print_ai_projects_response, print_ai_tools_response, print_project_context_response,
-    print_search_sessions_response, print_usage_blocks_response_with_options,
+    print_search_sessions_response, print_skill_events_response,
+    print_usage_blocks_response_with_options,
 };
 use super::output::sessions::more::{
     AiInvestigatePrintOptions, print_ai_incidents_response,
@@ -32,7 +33,7 @@ use super::{
     SessionsCorrelateArgs, SessionsDoctorArgs, SessionsErrorsArgs, SessionsIncidentContextArgs,
     SessionsIncidentsArgs, SessionsIndexArgs, SessionsInvestigateArgs, SessionsListArgs,
     SessionsLlmInvocationsArgs, SessionsPruneCheckpointsArgs, SessionsSearchArgs,
-    SessionsSimilarArgs, SessionsWatchArgs,
+    SessionsSimilarArgs, SessionsSkillsBackfillArgs, SessionsSkillsListArgs, SessionsWatchArgs,
 };
 
 // ─── AI Arg → Request conversions (bead 0p8r.8) ─────────────────────────────
@@ -319,6 +320,57 @@ pub(crate) async fn run_ai_prune_checkpoints(
 }
 
 // ─── LOCAL-only session commands (6) — error in HTTP mode ───────────────────
+
+pub(crate) async fn run_ai_skills_backfill(
+    mode: &CliMode,
+    args: SessionsSkillsBackfillArgs,
+) -> Result<()> {
+    let service = match mode {
+        CliMode::Http(_) => bail!("sessions skills backfill runs local DB scans; omit --http"),
+        CliMode::Local(service) => service,
+    };
+    let response = service
+        .backfill_skill_events(cortex::app::SkillBackfillRequest {
+            since: args.since,
+            limit: args.limit,
+            dry_run: args.dry_run,
+        })
+        .await?;
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&response)?);
+    } else {
+        println!(
+            "scanned={} inserted={} skipped_duplicates={} parse_errors={} truncated={} dry_run={}",
+            response.scanned,
+            response.inserted,
+            response.skipped_duplicates,
+            response.parse_errors,
+            response.truncated,
+            response.dry_run
+        );
+    }
+    Ok(())
+}
+
+pub(crate) async fn run_ai_skills(mode: &CliMode, args: SessionsSkillsListArgs) -> Result<()> {
+    let json = args.json;
+    let req = cortex::app::ListSkillEventsRequest {
+        skill: args.skill,
+        plugin: args.plugin,
+        tool: args.tool,
+        project: args.project,
+        session_id: args.session_id,
+        hostname: args.host,
+        from: args.since,
+        to: args.until,
+        limit: args.limit,
+    };
+    let response = match mode {
+        CliMode::Local(service) => service.list_skill_events(req).await?,
+        CliMode::Http(client) => http_or_cancel(client.ai_skills(&req)).await?,
+    };
+    print_skill_events_response(&response, json)
+}
 
 pub(crate) async fn run_ai_index(mode: &CliMode, args: SessionsIndexArgs) -> Result<()> {
     let service = match mode {

@@ -83,6 +83,8 @@ mod map;
 mod map_answers;
 mod map_findings;
 mod rag;
+mod skill_backfill;
+mod skill_events;
 mod topic_correlate;
 
 pub use compose::run_compose_status;
@@ -223,6 +225,14 @@ impl CortexService {
     /// reach into `db::` directly (full-review AL1).
     pub fn schema_version(&self) -> anyhow::Result<i64> {
         Ok(crate::db::read_schema_version_info(&self.pool)?.version)
+    }
+
+    /// Test-only accessor for the underlying pool, used by service submodule
+    /// tests that need to seed fixtures directly via SQL before exercising a
+    /// service method (e.g. `skill_backfill_tests.rs`).
+    #[cfg(test)]
+    pub(crate) fn pool_for_test(&self) -> Arc<DbPool> {
+        Arc::clone(&self.pool)
     }
 
     async fn run_db<F, T>(&self, op: &'static str, f: F) -> ServiceResult<T>

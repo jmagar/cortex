@@ -64,7 +64,7 @@ Tests: unit tests live in sidecar files beside their source modules (e.g. `src/d
 
 ## MCP Tools
 
-One MCP tool: **`cortex`** — dispatches by `action` argument. 48 actions, generated from `ACTION_SPECS` in `src/mcp/actions.rs` (the single authoritative registry — regenerate this table from there).
+One MCP tool: **`cortex`** — dispatches by `action` argument. 49 actions, generated from `ACTION_SPECS` in `src/mcp/actions.rs` (the single authoritative registry — regenerate this table from there).
 
 Scope taxonomy: every action requires `cortex:read` except the five **admin** actions `ack_error`, `unack_error`, `file_tails`, `notifications_test`, and `llm_invocations`, which require `cortex:admin` (static bearer tokens get read-only unless `CORTEX_STATIC_TOKEN_ADMIN=true`); `help` is info-only (no scope gate).
 
@@ -112,6 +112,7 @@ Scope taxonomy: every action requires `cortex:read` except the five **admin** ac
 | `ask_history` | Query AI transcript history |
 | `incident_context` | Full context for an incident |
 | `graph` | Resolve graph entities, neighborhoods, and evidence-backed explanations |
+| `skill_events` | List extracted AI skill-invocation events |
 | `file_tails` | **(admin)** Manage Cortex-owned file-tail ingest sources |
 | `ack_error` | **(admin)** Acknowledge an error signature |
 | `unack_error` | **(admin)** Revoke an error signature acknowledgement |

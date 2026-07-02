@@ -39,7 +39,7 @@ pub fn write_lock() -> parking_lot::ReentrantMutexGuard<'static, ()> {
     WRITE_LOCK.lock()
 }
 
-pub const KNOWN_SCHEMA_VERSION: i64 = 37;
+pub const KNOWN_SCHEMA_VERSION: i64 = 38;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SchemaVersionInfo {
@@ -2018,6 +2018,64 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
              COMMIT;",
         )?;
         tracing::info!("Migration 37: created llm_invocations audit table");
+    }
+
+    // Migration 38: ai_skill_events — one row per detected skill invocation
+    // extracted from an AI transcript log row (Claude `attributionSkill` /
+    // `attributionPlugin` structured fields, Codex `<skill><name>` transcript
+    // tags). UNIQUE(log_id, skill_name, event_kind, evidence_kind) makes
+    // INSERT OR IGNORE idempotent across re-ingest and backfill re-runs.
+    // Eng review Fix 2: no skill_path/metadata_json — neither extractor sets
+    // them in this PR, so they are not part of the shipped schema.
+    // Eng review Fix 4: index set matches the actual shipped CLI filter
+    // surface (--skill, --plugin, --tool, --project, --session-id, --host,
+    // plus the unfiltered default `ORDER BY timestamp DESC`).
+    // Eng review Fix 5: idx_logs_ai_tool_id is added on the EXISTING `logs`
+    // table in this same migration batch — the backfill's `id > ?` keyset
+    // scan needs it and idx_logs_ai_tool_cover (ai_tool, ai_session_id,
+    // timestamp) doesn't include `id`.
+    if !migration_applied(&conn, 38)? {
+        conn.execute_batch(
+            "BEGIN IMMEDIATE;
+
+             CREATE TABLE IF NOT EXISTS ai_skill_events (
+               id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+               log_id             INTEGER NOT NULL REFERENCES logs(id) ON DELETE CASCADE,
+               ai_tool            TEXT NOT NULL,
+               ai_project         TEXT,
+               ai_session_id      TEXT,
+               hostname           TEXT NOT NULL,
+               timestamp          TEXT NOT NULL,
+               skill_name         TEXT NOT NULL,
+               skill_plugin       TEXT,
+               event_kind         TEXT NOT NULL,
+               evidence_kind      TEXT NOT NULL,
+               created_at         TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+               UNIQUE(log_id, skill_name, event_kind, evidence_kind)
+             );
+
+             CREATE INDEX IF NOT EXISTS idx_ai_skill_events_timestamp
+                 ON ai_skill_events(timestamp);
+             CREATE INDEX IF NOT EXISTS idx_ai_skill_events_skill_time
+                 ON ai_skill_events(skill_name, timestamp);
+             CREATE INDEX IF NOT EXISTS idx_ai_skill_events_plugin_time
+                 ON ai_skill_events(skill_plugin, timestamp);
+             CREATE INDEX IF NOT EXISTS idx_ai_skill_events_hostname_time
+                 ON ai_skill_events(hostname, timestamp);
+             CREATE INDEX IF NOT EXISTS idx_ai_skill_events_session_time
+                 ON ai_skill_events(ai_tool, ai_project, ai_session_id, timestamp);
+             CREATE INDEX IF NOT EXISTS idx_ai_skill_events_project_skill_time
+                 ON ai_skill_events(ai_project, skill_name, timestamp)
+                 WHERE ai_project IS NOT NULL;
+
+             CREATE INDEX IF NOT EXISTS idx_logs_ai_tool_id
+                 ON logs(ai_tool, id)
+                 WHERE ai_tool IN ('claude', 'codex');
+
+             INSERT OR IGNORE INTO schema_migrations (version) VALUES (38);
+             COMMIT;",
+        )?;
+        tracing::info!("Migration 38: created ai_skill_events table + idx_logs_ai_tool_id");
     }
 
     // A server crash/restart mid-check leaves an orphaned 'running' maintenance

@@ -19,6 +19,30 @@
 
 ---
 
+## Eng Review Fixes Applied
+
+Four independent review agents (architecture, simplicity, security, performance) reviewed this plan against the live repo after PR 1 ("LLM Invocation Guard") merged as commits bb28230 + 814d033 on `main` (`KNOWN_SCHEMA_VERSION` is live at `37`, confirming this phase's migration 38 is still correct). All 11 findings below were applied directly into the task bodies as real code before implementation starts.
+
+| # | Fix | Reviewer(s) | Task(s) changed |
+|---|---|---|---|
+| 1 | Eliminated the double JSON-parse in the ingest hot path: `ParsedTranscriptRecord` now carries the already-parsed raw value/text so `flush_chunk` never re-parses `line_text` a second time. Added cheap substring short-circuits (`"<skill>"` for Codex, `"attributionSkill"` for Claude) before the real extractor runs. | simplicity, performance (independently); short-circuit suggestion from architecture | Task 2, Task 3, Task 6 |
+| 2 | Dropped the unused `skill_path` and `metadata_json` columns/fields — neither extractor ever sets them in this PR (pure YAGNI, no producer exists). Removed from the table DDL, `ExtractedSkillEvent`, `SkillEventInsert`, `AiSkillEventEntry`, `AiSkillEventParams` (n/a — never had them), the API model, and the schema docs. | simplicity | Task 1, Task 2, Task 3, Task 4, Task 6, Task 7, Task 9, Task 11, Locked interfaces |
+| 3 | Removed the speculative `payload.*` nesting branch from the Claude attribution extractor — no observed transcript sample confirms this shape; kept only `value` (top-level) and `message.*` (confirmed-plausible nesting). Removed the test exercising the deleted branch. | simplicity | Task 2 |
+| 4 | Redesigned `ai_skill_events` indexes to match the actual shipped filter surface (`--skill`, `--plugin`, `--tool`, `--project`, `--session-id`, `--host`, `--since`, `--to`, `--limit`): added a bare `idx_ai_skill_events_timestamp` for the unfiltered default sort, `idx_ai_skill_events_plugin_time` for `--plugin` alone, `idx_ai_skill_events_hostname_time` for `--host` alone, and confirmed `idx_ai_skill_events_session_time`'s `(ai_tool, ai_project, ai_session_id, timestamp)` shape already serves `--tool` alone via its leading column. Kept `idx_ai_skill_events_skill_time` and `idx_ai_skill_events_project_skill_time` unchanged since those are used correctly. | performance (confirmed via EXPLAIN QUERY PLAN reasoning) | Task 1, Task 11 |
+| 5 | Added `idx_logs_ai_tool_id ON logs(ai_tool, id) WHERE ai_tool IN ('claude','codex')` as part of migration 38 (on the existing `logs` table, not `ai_skill_events`) — the existing `idx_logs_ai_tool_cover` doesn't include `id`, so it can't serve the backfill's `id >` keyset pagination + `ORDER BY id ASC` scan efficiently. | performance | Task 1 |
+| 6 | Removed `write_lock()` from around `fetch_candidate_chunk` in the backfill — it's a pure `SELECT`, and WAL mode already gives readers a consistent snapshot without the write lock. The lock is retained only around the actual `INSERT OR IGNORE` step (already correctly scoped inside `insert_skill_events`). | performance, security, architecture (triple-confirmed) | Task 7 |
+| 7 | Added a hard upper clamp to the backfill `limit` (`req.limit.unwrap_or(10_000).clamp(1, 1_000_000)`) and a process-wide single-flight guard (mirroring the `SHARED_MAINTENANCE_PERMIT` / `try_acquire_owned` pattern already used by `POST /api/db/vacuum` in `src/api.rs`, but implemented at the `CortexService` layer via a service-scoped `OnceLock<Arc<Semaphore>>` so it also covers CLI-local and MCP callers that never go through `api.rs`) so only one backfill can run at a time; a second concurrent call returns a clear "backfill already running" error instead of both holding a `run_db` permit for the whole corpus. The more invasive per-chunk `run_db` permit-release restructuring was considered and explicitly deferred — see "Deferred work" below. | security, architecture (cross-confirmed) | Task 7 |
+| 8 | Added control-character rejection to `ExtractedSkillEvent::normalized()` — trimmed skill/plugin names containing any `char::is_control()` character (ANSI escapes, embedded newlines/CR) are now rejected (same `None` return as the empty-name case), closing a terminal-output-spoofing vector in the CLI's `println!`-based printer. Added an adversarial test with an embedded ANSI escape sequence in a Codex `<skill><name>` tag. | security | Task 2, Task 3 |
+| 9 | Added `tracing::info!` audit logging (caller IP + query filters) to the `GET /api/ai/skills` REST handler — matches the logging level of sibling `Read`-scoped AI-transcript routes' cheap defense-in-depth posture (`ai_llm_invocations`'s `warn!` is reserved for the admin-scoped route; a `Read`-scoped route uses `info!`). The `skill_events` MCP action itself stays `cortex:read`-scoped per GH #94's explicit decision — not reconsidered here. | security | Task 9 |
+| 10 | Renamed the migration test function and its `cargo test` invocations from `migration_37_creates_ai_skill_events_table` to `migration_38_creates_ai_skill_events_table` — the surrounding prose already correctly reasoned about migration 38 (PR 1 claimed migration 37 for `llm_invocations`, confirmed live via `KNOWN_SCHEMA_VERSION` in `src/db/pool.rs`), but the test name/invocations were still on the stale `37`. | architecture (real defect) | Task 1 |
+| 11 | Corrected Task 11's false claim that `src/docs_tests.rs` already asserts an action count or cross-checks `ACTION_SPECS` against a doc file. Verified directly: the file contains exactly 4 tests, none of which do either. Softened the confident-but-wrong assertion to "verify first via grep; as of this review it does not exist, so Task 11's doc updates are manual, not test-gated." | architecture (real defect) | Task 11 |
+
+**Also corrected while grounding fixes against the live repo (not one of the 11 numbered findings, but required for the plan to still be accurate):** the live `CLAUDE.md` action count is already **48** (not 47) as of PR 1 merging `llm_invocations`, so this phase's `skill_events` action takes the count to **49**, not 48. Task 11's "47 -> 48" references are corrected to "48 -> 49" throughout.
+
+**Deferred work (out of scope for this fix pass):** per-chunk `run_db` permit-release restructuring for `backfill_skill_events` (i.e. acquiring/releasing the service-level DB semaphore permit once per chunk instead of once for the whole multi-chunk scan) was raised by the security/architecture reviewers as a more thorough fix for Fix 7's DoS concern, but is deliberately NOT implemented in this pass — the hard `limit` clamp + single-flight guard together are judged sufficient for this PR's scope, and the restructuring touches `CortexService::run_db`'s shared contract in a way that deserves its own review. Needs a follow-up bead (to be filed separately).
+
+---
+
 ## Locked interfaces for other phases
 
 These names/shapes are final. The later `skill-incidents` (grouping/scoring)
@@ -37,20 +61,47 @@ CREATE TABLE IF NOT EXISTS ai_skill_events (
   timestamp          TEXT NOT NULL,
   skill_name         TEXT NOT NULL,
   skill_plugin       TEXT,
-  skill_path         TEXT,
   event_kind         TEXT NOT NULL,
   evidence_kind      TEXT NOT NULL,
-  metadata_json      TEXT,
   created_at         TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   UNIQUE(log_id, skill_name, event_kind, evidence_kind)
 );
 
+-- Eng review Fix 4: index set redesigned to match the actual shipped filter
+-- surface (CLI flags --skill, --plugin, --tool, --project, --session-id,
+-- --host, --since, --to, --limit). Each single-filter flag needs an index
+-- whose LEADING column matches it; the unfiltered default list also needs a
+-- bare timestamp index for ORDER BY timestamp DESC without a WHERE clause.
+CREATE INDEX IF NOT EXISTS idx_ai_skill_events_timestamp ON ai_skill_events(timestamp);
 CREATE INDEX IF NOT EXISTS idx_ai_skill_events_skill_time ON ai_skill_events(skill_name, timestamp);
+CREATE INDEX IF NOT EXISTS idx_ai_skill_events_plugin_time ON ai_skill_events(skill_plugin, timestamp);
+CREATE INDEX IF NOT EXISTS idx_ai_skill_events_hostname_time ON ai_skill_events(hostname, timestamp);
 CREATE INDEX IF NOT EXISTS idx_ai_skill_events_session_time ON ai_skill_events(ai_tool, ai_project, ai_session_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_ai_skill_events_project_skill_time ON ai_skill_events(ai_project, skill_name, timestamp) WHERE ai_project IS NOT NULL;
+
+-- Eng review Fix 5: supports the backfill's `id > ?` keyset pagination +
+-- `ORDER BY id ASC` scan over `logs`. The existing idx_logs_ai_tool_cover
+-- (ai_tool, ai_session_id, timestamp) doesn't include `id`, so it can't serve
+-- this scan efficiently. This indexes the EXISTING `logs` table, not the new
+-- `ai_skill_events` table — it ships in the same migration 38 batch because
+-- both are needed by this phase.
+CREATE INDEX IF NOT EXISTS idx_logs_ai_tool_id ON logs(ai_tool, id) WHERE ai_tool IN ('claude', 'codex');
 ```
 
-`KNOWN_SCHEMA_VERSION` bumps from `37` to `38` in `src/db/pool.rs` (PR 1, "LLM Invocation Guard", claims migration 37; this PR must land its migration immediately after whatever PR 1 adds — re-verify the live `KNOWN_SCHEMA_VERSION` at implementation time rather than trusting this hardcoded assumption, since either PR may merge first).
+`skill_plugin` alone (without a project filter) is a realistic single-filter
+case per the locked CLI surface (`--plugin`), so it gets its own leading-column
+index (`idx_ai_skill_events_plugin_time`) rather than relying on a composite
+that doesn't lead with it. `--tool` alone is served by
+`idx_ai_skill_events_session_time`'s leading `ai_tool` column (SQLite can seek
+on a prefix of a composite index even when trailing columns aren't bound).
+`--session-id` alone was considered for its own `(ai_session_id, timestamp)`
+index, but in practice a session id is only ever meaningful scoped to a tool
+(session ids are not globally unique across `ai_tool` values), so the existing
+`(ai_tool, ai_project, ai_session_id, timestamp)` composite is judged
+sufficient — a bare `--session-id` filter without `--tool` is not a supported
+fast path and falls back to a full scan of the (typically small) table.
+
+`KNOWN_SCHEMA_VERSION` bumps from `37` to `38` in `src/db/pool.rs` (PR 1, "LLM Invocation Guard", claims migration 37 — confirmed live in the repo at the time of this eng review pass, so migration 38 is the correct next number; re-verify the live `KNOWN_SCHEMA_VERSION` at implementation time rather than trusting this hardcoded assumption in case another migration lands in the interim).
 
 ### Parser struct (`src/scanner/skill_events.rs`)
 
@@ -71,20 +122,34 @@ pub enum SkillEvidenceKind {
 pub struct ExtractedSkillEvent {
     pub skill_name: String,
     pub skill_plugin: Option<String>,
-    pub skill_path: Option<String>,
     pub event_kind: SkillEventKind,
     pub evidence_kind: SkillEvidenceKind,
-    pub metadata_json: Option<String>,
 }
 
 pub fn extract_claude_skill_events(value: &serde_json::Value) -> Vec<ExtractedSkillEvent>;
 pub fn extract_codex_skill_events(text: &str) -> Vec<ExtractedSkillEvent>;
 ```
 
+(Eng review Fix 2: `skill_path` and `metadata_json` are removed from
+`ExtractedSkillEvent` — neither extractor ever set them, so they were dead
+weight threaded through every downstream struct. If a future phase needs
+either field, add it back with a real producer at that time.)
+
 `SkillEventKind::as_str()` -> `"claude_attribution"` / `"codex_skill_block"`.
 `SkillEvidenceKind::as_str()` -> `"structured_json_field"` / `"transcript_content"`.
 These `as_str()` values are exactly what gets written into the `event_kind` /
 `evidence_kind` TEXT columns.
+
+**Eng review Fix 1 (short-circuit):** both extractors gain a cheap substring
+pre-check before doing any real parsing/regex work, so the common
+no-skill-event case is bounded to a single `str::contains` call:
+- `extract_claude_skill_events` returns `Vec::new()` immediately if the raw
+  JSON text does not contain `"attributionSkill"` as a substring (checked by
+  the caller in `flush_chunk`/backfill before even calling
+  `serde_json::from_str`, since the whole point is avoiding the parse — see
+  Task 6/7).
+- `extract_codex_skill_events` returns `Vec::new()` immediately if `text` does
+  not contain `"<skill>"` as a substring, before touching the regex engine.
 
 ### DB layer (`src/db/skill_events.rs`, new module)
 
@@ -138,10 +203,8 @@ pub struct AiSkillEventEntry {
     pub timestamp: String,
     pub skill_name: String,
     pub skill_plugin: Option<String>,
-    pub skill_path: Option<String>,
     pub event_kind: String,
     pub evidence_kind: String,
-    pub metadata_json: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -215,19 +278,18 @@ impl CortexService {
 
 ## Context notes for implementers (read before starting)
 
-- **Repo migration state**: `KNOWN_SCHEMA_VERSION` is currently `36` in
-  `src/db/pool.rs:42` at the time this plan was drafted. A sibling PR (PR 1,
-  "LLM Invocation Guard") independently claims migration `37`. This phase
-  (PR 2, skill events) claims migration `38` — the next number after PR 1's.
-  **Re-verify `KNOWN_SCHEMA_VERSION` live in `src/db/pool.rs` before writing
-  the migration block** — if PR 1 has not yet merged when this phase is
-  implemented, insert immediately after the migration 36 block for now, but
-  confirm no other migration has claimed 37 or 38 in the interim; if PR 1 has
-  already merged, insert immediately after PR 1's migration 37 block instead.
-  Follow the exact `if !migration_applied(&conn, 38)? { conn.execute_batch("...
-  INSERT OR IGNORE INTO schema_migrations (version) VALUES (38);");
-  tracing::info!(...) }` shape used by migrations 31-36 (see
-  `src/db/pool.rs:1322-1975`).
+- **Repo migration state**: as of this eng review pass, PR 1 ("LLM Invocation
+  Guard") has already merged (commits bb28230 + 814d033 on `main`), and
+  `KNOWN_SCHEMA_VERSION` is confirmed live at `37` (`llm_invocations`,
+  `src/db/pool.rs:42`). This phase (PR 2, skill events) claims migration `38`
+  — the next number after PR 1's — and inserts its migration block immediately
+  after PR 1's migration 37 block. **Still re-verify `KNOWN_SCHEMA_VERSION`
+  live in `src/db/pool.rs` at implementation time** rather than trusting this
+  note, in case another migration lands between this review and
+  implementation. Follow the exact `if !migration_applied(&conn, 38)? {
+  conn.execute_batch("... INSERT OR IGNORE INTO schema_migrations (version)
+  VALUES (38);"); tracing::info!(...) }` shape used by migrations 31-37 (see
+  `src/db/pool.rs:1977-2021` for migration 37's exact block to insert after).
 - **`regex` is already a dependency** (`Cargo.toml:105`, `regex = "1"`) — no
   `Cargo.toml` edit needed for the Codex `<skill><name>...</name>` scanner.
 - **CLI grammar**: `docs/CLI.md` explicitly documents `cortex ai ...` as a
@@ -249,11 +311,21 @@ impl CortexService {
   happen inside `flush_chunk`, in the same `tx`, immediately after
   `insert_logs_batch_in_tx` returns the new `Vec<i64>` log ids — zipped against
   `claimed_batch` (same order, same length) to know which `log_id` each
-  transcript row landed at, then re-parsed from the ORIGINAL raw JSON value
-  (Claude) or the extracted message text (Codex) to find skill events. This
-  means `flush_chunk` needs access to the raw parsed value/text per batch
-  entry, not just the already-scrubbed `LogBatchEntry.message` — see Task 6 for
-  exact plumbing (`ChunkSkillSource` side-channel vector built alongside
+  transcript row landed at, then fed to the extractors to find skill events.
+  **Eng review Fix 1**: `claude::parse_line` / `codex::parse_line` in
+  `src/scanner/claude.rs` / `src/scanner/codex.rs` already parse the line's
+  JSON once internally (`serde_json::from_str::<Value>(line)`) but never
+  return that `Value` to the caller — the original version of this plan had
+  `flush_chunk` call `serde_json::from_str::<serde_json::Value>(line_text)` a
+  SECOND time to get it back, doubling JSON-parse CPU on the hottest path in
+  the system. The fix threads the already-parsed value through
+  `ParsedTranscriptRecord` instead (new field, Claude-only; Codex doesn't need
+  it since `parsed.message` already IS the text the `<skill><name>` regex
+  scans). This means `flush_chunk` needs access to
+  `ParsedTranscriptRecord.raw_value` (Claude) or `parsed.message` (Codex) per
+  batch entry, not just the already-scrubbed `LogBatchEntry.message` — see
+  Task 2 for the `ParsedTranscriptRecord` field addition and Task 6 for exact
+  plumbing (`ChunkSkillSource` side-channel vector built alongside
   `batch`/`imports` in `index_file_with_options`).
 - **Scrubbing**: skill names/plugins are short identifiers, not free text, so
   they do NOT go through `scrub_ai_message` — only `LogBatchEntry.message` is
@@ -263,10 +335,16 @@ impl CortexService {
   the parser design in Task 2/3, which read `parsed.raw_value` / the codex
   message text captured before `scrub_ai_message` runs).
 - **Batch-and-release lock pattern**: mirror `purge_old_logs` in
-  `src/db/maintenance.rs:578-634` — each backfill chunk: `pool.get()`, acquire
-  `crate::db::write_lock()`, run one bounded chunk in one transaction, commit,
-  `drop(conn)`, then loop. Do NOT hold the lock across the whole historical
-  corpus.
+  `src/db/maintenance.rs:578-634` — each backfill chunk: `pool.get()`, run one
+  bounded chunk, `drop(conn)`, then loop. Do NOT hold the lock across the whole
+  historical corpus. **Eng review Fix 6**: unlike `purge_old_logs` (which
+  DELETEs and therefore correctly holds `crate::db::write_lock()` for its
+  chunk), the backfill's per-chunk fetch (`fetch_candidate_chunk`) is a pure
+  `SELECT` — WAL mode already gives readers a consistent snapshot without the
+  write lock, so `write_lock()` must NOT be acquired around the fetch. Only the
+  insert step (`insert_skill_events`, called per chunk) needs the write lock,
+  and it already acquires it internally (see Task 4's `insert_skill_events`).
+  See Task 7 for the exact rewrite.
 
 ---
 
@@ -275,10 +353,10 @@ impl CortexService {
 **Files:**
 - Modify: `src/db/pool.rs:42` (bump `KNOWN_SCHEMA_VERSION`)
 - Modify: `src/db/pool.rs` (insert migration 38 block immediately after the
-  migration block that PR 1 "LLM Invocation Guard" adds as migration 37 — or,
-  if PR 1 has not yet merged, immediately after the migration 36 block at the
-  time of writing, before the orphaned-maintenance-job cleanup comment;
-  re-check line numbers live since PR 1 shifts them)
+  migration 37 block PR 1 "LLM Invocation Guard" already added — confirmed live
+  at `src/db/pool.rs:1977-2021` as of this eng review pass — before the
+  orphaned-maintenance-job cleanup comment that follows it; re-check line
+  numbers live at implementation time since other work may shift them)
 - Test: `src/db/pool_tests.rs` (sidecar convention: `src/db/pool.rs` already has
   `#[cfg(test)] #[path = "pool_tests.rs"] mod tests;` — confirm this hook exists
   near the bottom of `pool.rs`; if it does not yet exist for this file, this task
@@ -287,14 +365,16 @@ impl CortexService {
 **Interfaces:**
 - Consumes: nothing (first task in the phase)
 - Produces: `ai_skill_events` table with columns/indexes exactly as specified
-  in "Locked interfaces" above. `KNOWN_SCHEMA_VERSION = 38`.
+  in "Locked interfaces" above (Fix 2: no `skill_path`/`metadata_json`; Fix 4:
+  redesigned index set; Fix 5: new `idx_logs_ai_tool_id` on the existing
+  `logs` table). `KNOWN_SCHEMA_VERSION = 38`.
 
 - [ ] **Step 1: Write the failing test**
 
   In `src/db/pool_tests.rs`, add:
   ```rust
   #[test]
-  fn migration_37_creates_ai_skill_events_table() {
+  fn migration_38_creates_ai_skill_events_table() {
       let dir = tempfile::tempdir().unwrap();
       let db_path = dir.path().join("test.db");
       let pool = init_pool(&crate::config::StorageConfig::for_test(db_path)).unwrap();
@@ -320,9 +400,23 @@ impl CortexService {
               .collect::<rusqlite::Result<Vec<_>>>()
               .unwrap()
       };
+      assert!(indexes.contains(&"idx_ai_skill_events_timestamp".to_string()));
       assert!(indexes.contains(&"idx_ai_skill_events_skill_time".to_string()));
+      assert!(indexes.contains(&"idx_ai_skill_events_plugin_time".to_string()));
+      assert!(indexes.contains(&"idx_ai_skill_events_hostname_time".to_string()));
       assert!(indexes.contains(&"idx_ai_skill_events_session_time".to_string()));
       assert!(indexes.contains(&"idx_ai_skill_events_project_skill_time".to_string()));
+
+      // Eng review Fix 5: idx_logs_ai_tool_id lives on the EXISTING `logs`
+      // table (backfill keyset-pagination support), not `ai_skill_events`.
+      let logs_index_exists: i64 = conn
+          .query_row(
+              "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_logs_ai_tool_id'",
+              [],
+              |row| row.get(0),
+          )
+          .unwrap();
+      assert_eq!(logs_index_exists, 1);
 
       // UNIQUE constraint + idempotent re-run of the whole insert on identical
       // (log_id, skill_name, event_kind, evidence_kind) is exercised in Task 6;
@@ -336,7 +430,7 @@ impl CortexService {
 
 - [ ] **Step 2: Run test to verify it fails**
   ```bash
-  cargo test --lib db::pool::tests::migration_37_creates_ai_skill_events_table
+  cargo test --lib db::pool::tests::migration_38_creates_ai_skill_events_table
   ```
   Expected: compile error or `assert_eq!(table_exists, 1)` failure (table does
   not exist yet) — confirms the test currently fails for the right reason.
@@ -348,16 +442,24 @@ impl CortexService {
   pub const KNOWN_SCHEMA_VERSION: i64 = 38;
   ```
 
-  Insert immediately after the migration block PR 1 ("LLM Invocation Guard")
-  adds as migration 37 (or, if PR 1 has not yet merged, immediately after the
-  migration 36 block at the time of writing), before the
-  orphaned-maintenance-job cleanup comment:
+  Insert immediately after the migration 37 block PR 1 ("LLM Invocation Guard")
+  already added, before the orphaned-maintenance-job cleanup comment that
+  follows it:
   ```rust
       // Migration 38: ai_skill_events — one row per detected skill invocation
       // extracted from an AI transcript log row (Claude `attributionSkill` /
       // `attributionPlugin` structured fields, Codex `<skill><name>` transcript
       // tags). UNIQUE(log_id, skill_name, event_kind, evidence_kind) makes
       // INSERT OR IGNORE idempotent across re-ingest and backfill re-runs.
+      // Eng review Fix 2: no skill_path/metadata_json — neither extractor sets
+      // them in this PR, so they are not part of the shipped schema.
+      // Eng review Fix 4: index set matches the actual shipped CLI filter
+      // surface (--skill, --plugin, --tool, --project, --session-id, --host,
+      // plus the unfiltered default `ORDER BY timestamp DESC`).
+      // Eng review Fix 5: idx_logs_ai_tool_id is added on the EXISTING `logs`
+      // table in this same migration batch — the backfill's `id > ?` keyset
+      // scan needs it and idx_logs_ai_tool_cover (ai_tool, ai_session_id,
+      // timestamp) doesn't include `id`.
       if !migration_applied(&conn, 38)? {
           conn.execute_batch(
               "BEGIN IMMEDIATE;
@@ -372,26 +474,34 @@ impl CortexService {
                  timestamp          TEXT NOT NULL,
                  skill_name         TEXT NOT NULL,
                  skill_plugin       TEXT,
-                 skill_path         TEXT,
                  event_kind         TEXT NOT NULL,
                  evidence_kind      TEXT NOT NULL,
-                 metadata_json      TEXT,
                  created_at         TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
                  UNIQUE(log_id, skill_name, event_kind, evidence_kind)
                );
 
+               CREATE INDEX IF NOT EXISTS idx_ai_skill_events_timestamp
+                   ON ai_skill_events(timestamp);
                CREATE INDEX IF NOT EXISTS idx_ai_skill_events_skill_time
                    ON ai_skill_events(skill_name, timestamp);
+               CREATE INDEX IF NOT EXISTS idx_ai_skill_events_plugin_time
+                   ON ai_skill_events(skill_plugin, timestamp);
+               CREATE INDEX IF NOT EXISTS idx_ai_skill_events_hostname_time
+                   ON ai_skill_events(hostname, timestamp);
                CREATE INDEX IF NOT EXISTS idx_ai_skill_events_session_time
                    ON ai_skill_events(ai_tool, ai_project, ai_session_id, timestamp);
                CREATE INDEX IF NOT EXISTS idx_ai_skill_events_project_skill_time
                    ON ai_skill_events(ai_project, skill_name, timestamp)
                    WHERE ai_project IS NOT NULL;
 
+               CREATE INDEX IF NOT EXISTS idx_logs_ai_tool_id
+                   ON logs(ai_tool, id)
+                   WHERE ai_tool IN ('claude', 'codex');
+
                INSERT OR IGNORE INTO schema_migrations (version) VALUES (38);
                COMMIT;",
           )?;
-          tracing::info!("Migration 38: created ai_skill_events table");
+          tracing::info!("Migration 38: created ai_skill_events table + idx_logs_ai_tool_id");
       }
   ```
 
@@ -401,9 +511,9 @@ impl CortexService {
 
 - [ ] **Step 4: Run test to verify it passes**
   ```bash
-  cargo test --lib db::pool::tests::migration_37_creates_ai_skill_events_table
+  cargo test --lib db::pool::tests::migration_38_creates_ai_skill_events_table
   ```
-  Expected: `test db::pool::tests::migration_37_creates_ai_skill_events_table ... ok`
+  Expected: `test db::pool::tests::migration_38_creates_ai_skill_events_table ... ok`
 
 - [ ] **Step 5: Commit**
   ```bash
@@ -413,23 +523,78 @@ impl CortexService {
 
 ---
 
-### Task 2: Claude skill-event parser
+### Task 2: Claude skill-event parser + `ParsedTranscriptRecord.raw_value`
 
 **Files:**
 - Create: `src/scanner/skill_events.rs`
+- Modify: `src/scanner.rs` (add `raw_value: Option<serde_json::Value>` field to
+  `ParsedTranscriptRecord`, around line 1424)
+- Modify: `src/scanner/claude.rs` (populate the new `raw_value` field with the
+  already-parsed `Value` instead of discarding it — this is the Fix 1 change:
+  eliminates the second `serde_json::from_str` that would otherwise happen in
+  `flush_chunk`/backfill)
+- Modify: `src/scanner/codex.rs`, `src/scanner/gemini.rs` (populate `raw_value:
+  None` at their `ParsedTranscriptRecord { ... }` construction sites — Codex
+  doesn't need the raw value since `parsed.message` already IS the text the
+  `<skill><name>` regex scans; Gemini never produces skill events)
 - Test: `src/scanner/skill_events_tests.rs` (new sidecar file, hooked via
   `#[cfg(test)] #[path = "skill_events_tests.rs"] mod tests;` at the bottom of
   `src/scanner/skill_events.rs`, matching `src/scanner/claude.rs` /
   `src/scanner/codex.rs` convention)
+- Test: `src/scanner/claude_tests.rs` (assert `raw_value` is populated)
 
 **Interfaces:**
-- Consumes: nothing new (operates on `serde_json::Value` and `&str`, no other
-  Task-1+ types)
+- Consumes: nothing new for the extractor itself (operates on `serde_json::Value`
+  and `&str`, no other Task-1+ types); the `ParsedTranscriptRecord.raw_value`
+  field addition is consumed by Task 6
 - Produces: `ExtractedSkillEvent`, `SkillEventKind`, `SkillEvidenceKind` (all
-  locked above), `pub fn extract_claude_skill_events(value: &serde_json::Value)
-  -> Vec<ExtractedSkillEvent>`
+  locked above, Fix 2: no `skill_path`/`metadata_json`), `pub fn
+  extract_claude_skill_events(value: &serde_json::Value) ->
+  Vec<ExtractedSkillEvent>`, `ParsedTranscriptRecord.raw_value: Option<serde_json::Value>`
+
+**Eng review Fix 1 (`ParsedTranscriptRecord.raw_value`):** `claude::parse_line`
+already does `let value: Value = serde_json::from_str(line)?;` at the top of
+the function — it just never returned that value. The original plan had
+`flush_chunk` re-parse `line_text` a SECOND time to get a `serde_json::Value`
+for skill extraction, which doubles JSON-parse CPU on the hottest path in the
+system (every Claude transcript row, ingest-time). The fix is to carry the
+already-parsed `Value` through `ParsedTranscriptRecord` instead.
 
 - [ ] **Step 1: Write the failing test**
+
+  First, in `src/scanner.rs`, add the new field to `ParsedTranscriptRecord`
+  (around line 1424):
+  ```rust
+  pub(crate) struct ParsedTranscriptRecord {
+      pub record_key: String,
+      pub timestamp: Option<String>,
+      pub message: String,
+      pub session_id: Option<String>,
+      pub ai_project: Option<String>,
+      /// The already-parsed raw JSON value for Claude transcript lines (`None`
+      /// for Codex/Gemini, which don't need it — Codex's skill-tag scanner
+      /// reads `message` directly; Gemini never produces skill events). Lets
+      /// skill-event extraction (Task 6) reuse the JSON parse `parse_line`
+      /// already did internally, instead of re-parsing `line_text` a second
+      /// time (eng review Fix 1 — see Task 2).
+      pub raw_value: Option<serde_json::Value>,
+  }
+  ```
+
+  In `src/scanner/claude_tests.rs`, add (adjust the exact assertion style to
+  match whatever helper the neighboring tests in that file already use to
+  build a `ParsedTranscriptRecord` from a line):
+  ```rust
+  #[test]
+  fn parse_line_carries_the_raw_parsed_value() {
+      let line = r#"{"sessionId":"sess-1","content":"hi","attributionSkill":"cortex-troubleshoot"}"#;
+      let parsed = parse_line(line, Path::new("/tmp/x.jsonl"), 0)
+          .unwrap()
+          .unwrap();
+      let raw = parsed.raw_value.expect("claude parse_line must carry raw_value");
+      assert_eq!(raw.get("attributionSkill").and_then(|v| v.as_str()), Some("cortex-troubleshoot"));
+  }
+  ```
 
   Create `src/scanner/skill_events_tests.rs`:
   ```rust
@@ -469,20 +634,6 @@ impl CortexService {
   }
 
   #[test]
-  fn extracts_nested_payload_attribution_fields() {
-      let value = json!({
-          "payload": {
-              "attributionSkill": "code-review",
-              "attributionPlugin": null
-          }
-      });
-      let events = extract_claude_skill_events(&value);
-      assert_eq!(events.len(), 1);
-      assert_eq!(events[0].skill_name, "code-review");
-      assert_eq!(events[0].skill_plugin, None);
-  }
-
-  #[test]
   fn emits_nothing_when_attribution_fields_absent() {
       let value = json!({"sessionId": "sess-1", "content": "just chatting"});
       assert!(extract_claude_skill_events(&value).is_empty());
@@ -507,7 +658,31 @@ impl CortexService {
       assert_eq!(events[0].skill_name, "sonnar");
       assert_eq!(events[0].skill_plugin.as_deref(), Some("arrs"));
   }
+
+  #[test]
+  fn rejects_skill_name_containing_control_characters() {
+      // Eng review Fix 8: a crafted attributionSkill value embedding an ANSI
+      // escape sequence must be rejected, not silently stored — the CLI
+      // printer (Task 9) uses println! directly on skill_name, so control
+      // characters would let a malicious transcript spoof terminal output.
+      let value = json!({
+          "attributionSkill": "\u{1b}[2J\u{1b}[31mFAKE",
+      });
+      assert!(extract_claude_skill_events(&value).is_empty());
+  }
+
+  #[test]
+  fn rejects_skill_name_containing_embedded_newline() {
+      let value = json!({
+          "attributionSkill": "cortex-troubleshoot\nFAKE APPROVED LINE",
+      });
+      assert!(extract_claude_skill_events(&value).is_empty());
+  }
   ```
+
+  (Eng review Fix 3: the `extracts_nested_payload_attribution_fields` test
+  from the original plan is removed along with the `payload.*` candidate
+  branch it exercised — see Step 3 below.)
 
 - [ ] **Step 2: Run test to verify it fails**
   ```bash
@@ -524,12 +699,21 @@ impl CortexService {
   //!
   //! Two independent extractors feed the same [`ExtractedSkillEvent`] shape:
   //! - Claude: structured `attributionSkill` / `attributionPlugin` JSON fields
-  //!   (top-level, `message.*`, or `payload.*` nesting).
+  //!   (top-level or `message.*` nesting — see Task 2's eng-review note on why
+  //!   a third `payload.*` candidate was deliberately NOT added: no observed
+  //!   transcript sample confirms that shape, so it would be speculative).
   //! - Codex: `<skill><name>...</name></skill>` tags embedded in transcript
   //!   message text (see `codex_skill_regex` in this module).
   //!
+  //! Both extractors short-circuit on a cheap substring check before doing any
+  //! real parsing/regex work (eng review Fix 1), so the common no-skill-event
+  //! case costs a single `str::contains` call.
+  //!
   //! Callers normalize with [`ExtractedSkillEvent::normalized`] before
-  //! inserting, which trims/clamps/derives the `plugin:skill` combined form.
+  //! inserting, which trims/clamps/derives the `plugin:skill` combined form
+  //! and rejects control characters (eng review Fix 8 — an adversarial
+  //! transcript could otherwise embed ANSI escapes that the CLI printer
+  //! (Task 9) would echo verbatim via `println!`).
 
   const MAX_SKILL_FIELD_CHARS: usize = 256;
 
@@ -567,20 +751,30 @@ impl CortexService {
   pub struct ExtractedSkillEvent {
       pub skill_name: String,
       pub skill_plugin: Option<String>,
-      pub skill_path: Option<String>,
       pub event_kind: SkillEventKind,
       pub evidence_kind: SkillEvidenceKind,
-      pub metadata_json: Option<String>,
   }
 
   impl ExtractedSkillEvent {
-      /// Trim, reject-if-empty, and clamp `skill_name`/`skill_plugin` to
-      /// `MAX_SKILL_FIELD_CHARS`. Returns `None` when the resulting skill_name
-      /// would be empty (never panics or bubbles an error — callers skip the
-      /// event and keep parsing the rest of the transcript).
+      /// Trim, reject-if-empty, reject-if-contains-control-characters, and
+      /// clamp `skill_name`/`skill_plugin` to `MAX_SKILL_FIELD_CHARS`. Returns
+      /// `None` when the resulting skill_name would be empty OR contains any
+      /// `char::is_control()` character (eng review Fix 8 — closes a terminal
+      /// output spoofing vector: ANSI escapes or embedded newlines/CRs in a
+      /// skill name would otherwise be echoed verbatim by the CLI's
+      /// `println!`-based printer in Task 9). Never panics or bubbles an
+      /// error — callers skip the event and keep parsing the rest of the
+      /// transcript.
       fn normalized(mut self) -> Option<Self> {
           let trimmed_name = self.skill_name.trim();
-          if trimmed_name.is_empty() {
+          if trimmed_name.is_empty() || trimmed_name.chars().any(char::is_control) {
+              return None;
+          }
+          if self
+              .skill_plugin
+              .as_deref()
+              .is_some_and(|plugin| plugin.chars().any(char::is_control))
+          {
               return None;
           }
           self.skill_name = clamp_chars(trimmed_name, MAX_SKILL_FIELD_CHARS);
@@ -601,34 +795,20 @@ impl CortexService {
   }
 
   /// Extract Claude skill-attribution events from a raw transcript JSON value.
-  /// Checks top-level, `message.*`, and `payload.*` nesting for
-  /// `attributionSkill` / `attributionPlugin` string fields (Claude transcripts
-  /// use flat top-level fields on user-facing records and nested `message.*`
-  /// fields on some tool-result records; `payload.*` mirrors the Codex
-  /// event-envelope shape defensively in case a future transcript format nests
-  /// the same way). Returns one event per candidate location that has a
+  /// Checks top-level and `message.*` nesting for `attributionSkill` /
+  /// `attributionPlugin` string fields (Claude transcripts use flat top-level
+  /// fields on user-facing records and nested `message.*` fields on some
+  /// tool-result records). Returns one event per candidate location that has a
   /// non-empty `attributionSkill`; at most one event in practice since a single
-  /// transcript line only has one of the three shapes.
-  pub fn extract_claude_skill_events(value: &serde_json::Value) -> Vec<serde_json::Value>
-  {
-      unreachable!()
-  }
-
-  #[cfg(test)]
-  #[path = "skill_events_tests.rs"]
-  mod tests;
-  ```
-
-  That stub is wrong on purpose as a checkpoint — replace the final function
-  with the real implementation before running tests:
-
-  ```rust
+  /// transcript line only has one of the two shapes.
+  ///
+  /// Eng review Fix 1: callers (Task 6/7) should already have skipped calling
+  /// this function at all when the source text doesn't contain
+  /// `"attributionSkill"` as a substring — this function itself has nothing
+  /// further to short-circuit on since it operates on an already-parsed
+  /// `Value`, not raw text.
   pub fn extract_claude_skill_events(value: &serde_json::Value) -> Vec<ExtractedSkillEvent> {
-      let candidates = [
-          value,
-          value.get("message").unwrap_or(&serde_json::Value::Null),
-          value.get("payload").unwrap_or(&serde_json::Value::Null),
-      ];
+      let candidates = [value, value.get("message").unwrap_or(&serde_json::Value::Null)];
       for candidate in candidates {
           let Some(skill) = candidate.get("attributionSkill").and_then(serde_json::Value::as_str)
           else {
@@ -641,10 +821,8 @@ impl CortexService {
           let event = ExtractedSkillEvent {
               skill_name: skill.to_string(),
               skill_plugin: plugin,
-              skill_path: None,
               event_kind: SkillEventKind::ClaudeAttribution,
               evidence_kind: SkillEvidenceKind::StructuredJsonField,
-              metadata_json: None,
           };
           if let Some(normalized) = event.normalized() {
               return vec![normalized];
@@ -653,23 +831,77 @@ impl CortexService {
       }
       Vec::new()
   }
+
+  #[cfg(test)]
+  #[path = "skill_events_tests.rs"]
+  mod tests;
   ```
 
-  Remove the placeholder stub entirely — the file should contain exactly one
-  definition of `extract_claude_skill_events` (the real one above). Leave the
-  `#[cfg(test)] #[path = "skill_events_tests.rs"] mod tests;` at the bottom.
+  Now wire `ParsedTranscriptRecord.raw_value` into the three parser modules
+  that construct it. In `src/scanner/claude.rs`, `parse_line` already binds
+  `let value: Value = serde_json::from_str(line)?;` at the top — populate the
+  new field with a clone of that same already-parsed value instead of
+  discarding it:
+  ```rust
+  pub fn parse_line(
+      line: &str,
+      path: &Path,
+      line_no: usize,
+  ) -> Result<Option<ParsedTranscriptRecord>> {
+      let value: Value = serde_json::from_str(line)?;
+      let message = extract_message(&value);
+      if message.is_empty() {
+          return Ok(None);
+      }
+      let session_id = value
+          .get("sessionId")
+          .or_else(|| value.get("session_id"))
+          .or_else(|| value.pointer("/session/id"))
+          .and_then(Value::as_str)
+          .map(ToString::to_string)
+          .or_else(|| Some(path.to_string_lossy().to_string()));
+      Ok(Some(ParsedTranscriptRecord {
+          record_key: record_key_from_line(&value, line, line_no),
+          timestamp: value
+              .get("timestamp")
+              .and_then(Value::as_str)
+              .map(ToString::to_string),
+          message,
+          session_id,
+          ai_project: extract_project(&value),
+          raw_value: Some(value),
+      }))
+  }
+  ```
+  (`value` is moved into `raw_value` last since nothing after this point still
+  needs to borrow it — `extract_message`/`extract_project`/session lookups all
+  ran earlier against `&value`.)
+
+  In `src/scanner/codex.rs`, add `raw_value: None,` to the
+  `ParsedTranscriptRecord { ... }` literal in `parse_line` (Codex doesn't need
+  the raw value — `message` returned alongside it already IS the text the
+  `<skill><name>` regex scans in Task 3/6).
+
+  In `src/scanner/gemini.rs`, add `raw_value: None,` to its
+  `ParsedTranscriptRecord { ... }` literal (Gemini never produces skill events
+  — explicitly out of scope for this phase).
 
 - [ ] **Step 4: Run test to verify it passes**
   ```bash
   cargo test --lib scanner::skill_events
+  cargo test --lib scanner::claude::tests::parse_line_carries_the_raw_parsed_value
+  cargo build --lib
   ```
-  Expected: all 6 tests in `skill_events_tests.rs` pass —
-  `test scanner::skill_events::tests::... ok` x6.
+  Expected: all 7 tests in `skill_events_tests.rs` pass —
+  `test scanner::skill_events::tests::... ok` x7 — the new
+  `parse_line_carries_the_raw_parsed_value` test passes, and the workspace
+  still builds (confirms `codex.rs`/`gemini.rs` construction sites were
+  updated in lockstep with the new field).
 
 - [ ] **Step 5: Commit**
   ```bash
-  git add src/scanner/skill_events.rs
-  git commit -m "feat(scanner): add Claude attributionSkill/attributionPlugin extraction"
+  git add src/scanner/skill_events.rs src/scanner.rs src/scanner/claude.rs src/scanner/codex.rs src/scanner/gemini.rs src/scanner/claude_tests.rs
+  git commit -m "feat(scanner): add Claude attributionSkill/attributionPlugin extraction and thread raw_value through ParsedTranscriptRecord"
   ```
 
 ---
@@ -756,6 +988,31 @@ impl CortexService {
       assert_eq!(events.len(), 1);
       assert_eq!(events[0].skill_name.chars().count(), 256);
   }
+
+  #[test]
+  fn rejects_codex_skill_name_containing_ansi_escape() {
+      // Eng review Fix 8 — same adversarial-input rejection as Task 2's
+      // Claude test, but through the Codex tag-scanning path.
+      let text = "<skill><name>\u{1b}[2J\u{1b}[31mFAKE</name></skill>";
+      assert!(extract_codex_skill_events(text).is_empty());
+  }
+
+  #[test]
+  fn rejects_codex_skill_name_containing_embedded_newline() {
+      let text = "<skill><name>real-skill\nFAKE APPROVED LINE</name></skill>";
+      assert!(extract_codex_skill_events(text).is_empty());
+  }
+
+  #[test]
+  fn short_circuits_when_text_has_no_skill_tag_substring() {
+      // Eng review Fix 1 — cheap bound on the common (no-skill-event) case:
+      // text without a literal "<skill>" substring never reaches the regex
+      // engine. This is a behavioral assertion (empty result), not a proof of
+      // the short-circuit itself — see Task 6/7 for where the caller-side
+      // substring check actually lives.
+      let text = "just a normal transcript line with no tags at all";
+      assert!(extract_codex_skill_events(text).is_empty());
+  }
   ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -789,7 +1046,15 @@ impl CortexService {
   /// invoke multiple skills), de-duplicating identical skill names within the
   /// row. Deliberately narrow — matches only the literal tag pair, never prose
   /// like "use the rust skill".
+  ///
+  /// Eng review Fix 1: short-circuits on a cheap substring check before
+  /// touching the regex engine at all — the overwhelming majority of
+  /// transcript rows contain no skill tag, so this bounds the common case to
+  /// one `str::contains` call instead of a full regex scan.
   pub fn extract_codex_skill_events(text: &str) -> Vec<ExtractedSkillEvent> {
+      if !text.contains("<skill>") {
+          return Vec::new();
+      }
       let mut seen = std::collections::HashSet::new();
       let mut events = Vec::new();
       for capture in CODEX_SKILL_TAG.captures_iter(text) {
@@ -797,10 +1062,8 @@ impl CortexService {
           let event = ExtractedSkillEvent {
               skill_name: raw_name.to_string(),
               skill_plugin: None,
-              skill_path: None,
               event_kind: SkillEventKind::CodexSkillBlock,
               evidence_kind: SkillEvidenceKind::TranscriptContent,
-              metadata_json: None,
           };
           let Some(normalized) = event.normalized() else {
               continue;
@@ -814,11 +1077,19 @@ impl CortexService {
   ```
 
   Now update `ExtractedSkillEvent::normalized` (from Task 2) to derive the
-  `plugin:skill` split when the raw name already contains a single `:`:
+  `plugin:skill` split when the raw name already contains a single `:`, on top
+  of the control-character rejection Task 2 already added:
   ```rust
   fn normalized(mut self) -> Option<Self> {
       let trimmed_name = self.skill_name.trim();
-      if trimmed_name.is_empty() {
+      if trimmed_name.is_empty() || trimmed_name.chars().any(char::is_control) {
+          return None;
+      }
+      if self
+          .skill_plugin
+          .as_deref()
+          .is_some_and(|plugin| plugin.chars().any(char::is_control))
+      {
           return None;
       }
       // If the source already used "plugin:skill" combined form, split it out
@@ -848,12 +1119,13 @@ impl CortexService {
   ```bash
   cargo test --lib scanner::skill_events
   ```
-  Expected: all tests from Task 2 + Task 3 pass (14 total).
+  Expected: all tests from Task 2 + Task 3 pass (18 total: 7 Claude-side +
+  11 Codex-side).
 
 - [ ] **Step 5: Commit**
   ```bash
   git add src/scanner/skill_events.rs
-  git commit -m "feat(scanner): add Codex <skill><name> tag extraction with dedup and normalization"
+  git commit -m "feat(scanner): add Codex <skill><name> tag extraction with dedup, normalization, and short-circuit"
   ```
 
 ---
@@ -905,10 +1177,8 @@ impl CortexService {
       ExtractedSkillEvent {
           skill_name: skill_name.to_string(),
           skill_plugin: Some("cortex".to_string()),
-          skill_path: None,
           event_kind: SkillEventKind::ClaudeAttribution,
           evidence_kind: SkillEvidenceKind::StructuredJsonField,
-          metadata_json: None,
       }
   }
 
@@ -971,10 +1241,8 @@ impl CortexService {
           event: ExtractedSkillEvent {
               skill_name: "rustarr".to_string(),
               skill_plugin: None,
-              skill_path: None,
               event_kind: SkillEventKind::CodexSkillBlock,
               evidence_kind: SkillEvidenceKind::TranscriptContent,
-              metadata_json: None,
           },
       };
       assert_eq!(insert_skill_events(&pool, &[insert]).unwrap(), 1);
@@ -1085,8 +1353,8 @@ impl CortexService {
       let mut stmt = tx.prepare_cached(
           "INSERT OR IGNORE INTO ai_skill_events (
               log_id, ai_tool, ai_project, ai_session_id, hostname, timestamp,
-              skill_name, skill_plugin, skill_path, event_kind, evidence_kind, metadata_json
-          ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+              skill_name, skill_plugin, event_kind, evidence_kind
+          ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
       )?;
       let mut inserted = 0usize;
       for item in events {
@@ -1099,10 +1367,8 @@ impl CortexService {
               item.timestamp,
               item.event.skill_name,
               item.event.skill_plugin,
-              item.event.skill_path,
               item.event.event_kind.as_str(),
               item.event.evidence_kind.as_str(),
-              item.event.metadata_json,
           ])?;
           inserted += changed;
       }
@@ -1144,10 +1410,8 @@ impl CortexService {
       pub timestamp: String,
       pub skill_name: String,
       pub skill_plugin: Option<String>,
-      pub skill_path: Option<String>,
       pub event_kind: String,
       pub evidence_kind: String,
-      pub metadata_json: Option<String>,
   }
 
   #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1171,7 +1435,7 @@ impl CortexService {
 
       let mut sql = String::from(
           "SELECT id, log_id, ai_tool, ai_project, ai_session_id, hostname, timestamp,
-                  skill_name, skill_plugin, skill_path, event_kind, evidence_kind, metadata_json
+                  skill_name, skill_plugin, event_kind, evidence_kind
            FROM ai_skill_events WHERE 1 = 1",
       );
       let mut bindings: Vec<rusqlite::types::Value> = Vec::new();
@@ -1218,10 +1482,8 @@ impl CortexService {
                   timestamp: row.get(6)?,
                   skill_name: row.get(7)?,
                   skill_plugin: row.get(8)?,
-                  skill_path: row.get(9)?,
-                  event_kind: row.get(10)?,
-                  evidence_kind: row.get(11)?,
-                  metadata_json: row.get(12)?,
+                  event_kind: row.get(9)?,
+                  evidence_kind: row.get(10)?,
               })
           })?
           .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -1673,6 +1935,12 @@ impl CortexService {
   /// into a chunk's `batch` vector. Carried alongside `batch`/`imports` because
   /// skill extraction needs the PRE-SCRUB parsed value (Claude JSON) or raw
   /// extracted text (Codex), not the already-scrubbed `LogBatchEntry.message`.
+  ///
+  /// Eng review Fix 1: `Claude` wraps the `serde_json::Value` that
+  /// `ParsedTranscriptRecord.raw_value` already carries (Task 2) — NOT a
+  /// re-parse of `line_text`. `claude::parse_line` parses the line's JSON
+  /// exactly once; this side channel just moves that already-parsed value
+  /// forward instead of throwing it away and parsing again.
   #[derive(Debug, Clone)]
   enum ChunkSkillSource {
       Claude(serde_json::Value),
@@ -1682,29 +1950,32 @@ impl CortexService {
   ```
 
   In `index_file_with_options`, inside the per-line loop (around the existing
-  `Ok(Some(parsed)) => { ... }` arm at line 537), the parser currently only
-  returns `ParsedTranscriptRecord` (message already extracted, no access to the
-  raw `serde_json::Value`). Add a raw-value/text side channel:
-
-  First, change `parse_line_for_source` callers to also retain the raw
-  `serde_json::Value` for Claude/ExplicitFile rows. Simplest approach: after
-  `parse_line_for_source` succeeds, re-parse `line_text` as JSON once more for
-  the skill-extraction side channel (cheap — same JSON already parsed once
-  inside `claude::parse_line`/`codex::parse_line`; a second `serde_json::from_str`
-  here avoids threading a new return field through `ParsedTranscriptRecord`,
-  which is `pub(crate)` and read by both parser modules and would otherwise
-  require touching `codex.rs`/`claude.rs` return types — this local re-parse is
-  the minimal-diff choice):
+  `Ok(Some(parsed)) => { ... }` arm at line 537), build the skill-extraction
+  side channel FROM `parsed.raw_value` / `parsed.message` — no re-parse of
+  `line_text`. Also apply the Fix 1 short-circuit here: skip building a
+  `ChunkSkillSource::Claude`/`Codex` variant at all (store `None` instead) when
+  the cheap substring check already rules out a skill event, so the per-row
+  cost in the overwhelmingly common no-skill-event case is one `contains` call
+  plus a clone of a `Value` that's already sitting in memory (not a fresh
+  parse):
   ```rust
               Ok(Some(parsed)) => {
                   let record_key = parsed.record_key;
                   let message = scrub_ai_message(&parsed.message, None);
                   let skill_source = match source_kind {
-                      SourceKind::CodexSession => ChunkSkillSource::Codex(parsed.message.clone()),
+                      SourceKind::CodexSession => {
+                          if parsed.message.contains("<skill>") {
+                              ChunkSkillSource::Codex(parsed.message.clone())
+                          } else {
+                              ChunkSkillSource::None
+                          }
+                      }
                       SourceKind::ClaudeProject | SourceKind::ExplicitFile => {
-                          match serde_json::from_str::<serde_json::Value>(line_text) {
-                              Ok(value) => ChunkSkillSource::Claude(value),
-                              Err(_) => ChunkSkillSource::None,
+                          match &parsed.raw_value {
+                              Some(value) if line_text.contains("attributionSkill") => {
+                                  ChunkSkillSource::Claude(value.clone())
+                              }
+                              _ => ChunkSkillSource::None,
                           }
                       }
                       SourceKind::GeminiSession => ChunkSkillSource::None,
@@ -1712,6 +1983,13 @@ impl CortexService {
                   let project_candidate = parsed
   ```
   (the rest of that arm is unchanged up through `imports.push(record_key);`).
+  The `line_text.contains("attributionSkill")` check on the RAW text (not the
+  parsed value) is the actual short-circuit — it's cheaper than any JSON
+  traversal and catches the common case before `extract_claude_skill_events`
+  ever runs. `.clone()` on `parsed.raw_value` is unavoidable here (the `Value`
+  needs to outlive `parsed` into the side-channel vector), but that clone is
+  only paid when the substring check already indicates a real candidate row —
+  the no-skill-event common case never clones the Value at all.
 
   Add a new `skill_sources: Vec<ChunkSkillSource>` vector alongside `batch` and
   `imports` (declared near line 484, `let mut batch = Vec::new();`):
@@ -1854,6 +2132,17 @@ impl CortexService {
   phase), push `ChunkSkillSource::None` in lockstep with each
   `imports.push(record_key);` in that function, and pass `&mut skill_sources`
   to each of its three `flush_chunk(...)` calls.
+
+  **Eng review Fix 1 summary — no double parse anywhere on this path:** the
+  short-circuit now exists at TWO layers, both cheap: (1) the per-line loop in
+  `index_file_with_options` only clones `parsed.raw_value` into
+  `ChunkSkillSource::Claude` when `line_text.contains("attributionSkill")`, and
+  only builds `ChunkSkillSource::Codex` when `parsed.message.contains("<skill>")`
+  — the common no-skill-event row does neither; (2) `extract_codex_skill_events`
+  itself (Task 3) re-checks the same substring before touching the regex
+  engine, so even a caller that skips layer (1) is still bounded. At no point
+  does `flush_chunk` call `serde_json::from_str` on `line_text` — the only JSON
+  parse of a Claude transcript line happens once, inside `claude::parse_line`.
 
 - [ ] **Step 4: Run test to verify it passes**
   ```bash
@@ -1998,6 +2287,58 @@ impl CortexService {
       assert_eq!(second.inserted, 0);
       assert_eq!(second.skipped_duplicates, 1);
   }
+
+  #[tokio::test]
+  async fn limit_is_clamped_to_hard_upper_bound() {
+      // Eng review Fix 7 — an operator/caller passing an absurd limit doesn't
+      // drive an unbounded scan; it's silently clamped to the hard cap.
+      let (service, _dir) = test_service();
+      insert_claude_log_row(&service.pool_for_test(), r#"{"attributionSkill":"cortex"}"#);
+
+      // 10_000_000 exceeds the hard cap (1_000_000) — should not error, should
+      // just clamp. We can't easily observe the internal clamp directly
+      // without a huge fixture, so this asserts the call succeeds rather than
+      // erroring or hanging (a stronger unit test for the clamp arithmetic
+      // itself lives at the module level below, not through the service).
+      let result = service
+          .backfill_skill_events(SkillBackfillRequest {
+              since: None,
+              limit: Some(10_000_000),
+              dry_run: true,
+          })
+          .await
+          .unwrap();
+      assert_eq!(result.scanned, 1);
+  }
+
+  #[tokio::test]
+  async fn concurrent_backfill_calls_return_busy_instead_of_racing() {
+      // Eng review Fix 7 — single-flight guard. Two concurrent calls: one
+      // proceeds, the other observes the guard held and returns a clear
+      // "already running" error rather than both scanning the same corpus
+      // simultaneously. This test drives the guard directly (see Step 3's
+      // `BACKFILL_GUARD` for why a real two-task race is flaky to assert
+      // deterministically in a unit test) — it holds the guard manually to
+      // simulate an in-flight backfill, then asserts the service call observes
+      // it and fails fast.
+      let (service, _dir) = test_service();
+      insert_claude_log_row(&service.pool_for_test(), r#"{"attributionSkill":"cortex"}"#);
+
+      let _held = super::backfill_guard()
+          .clone()
+          .try_acquire_owned()
+          .expect("guard should be free at test start");
+
+      let result = service
+          .backfill_skill_events(SkillBackfillRequest {
+              since: None,
+              limit: Some(100),
+              dry_run: true,
+          })
+          .await;
+
+      assert!(result.is_err(), "second concurrent backfill call must be rejected");
+  }
   ```
 
   This test assumes a `pool_for_test()` accessor exists on `CortexService` for
@@ -2057,22 +2398,62 @@ impl CortexService {
   //! predate this phase's ingest-time wiring (`src/scanner.rs::flush_chunk`).
   //!
   //! Chunked scan-and-release: each chunk acquires a fresh pool connection,
-  //! processes up to `CHUNK_SIZE` rows in one transaction, commits, and drops
-  //! the connection before continuing — mirrors `purge_old_logs` in
-  //! `src/db/maintenance.rs` so a large historical backfill never starves the
-  //! ingest writer of a pool connection for more than one chunk's duration.
+  //! processes up to `CHUNK_SIZE` rows, and drops the connection before
+  //! continuing — mirrors `purge_old_logs` in `src/db/maintenance.rs` so a
+  //! large historical backfill never starves the ingest writer of a pool
+  //! connection for more than one chunk's duration.
+  //!
+  //! **Eng review Fix 6**: unlike `purge_old_logs` (which DELETEs and
+  //! correctly holds `write_lock()`), `fetch_candidate_chunk` here is a pure
+  //! `SELECT` — WAL mode already gives readers a consistent snapshot without
+  //! the write lock, so it is NOT held around the fetch. Only
+  //! `insert_skill_events` (a real write) acquires the lock, and it does so
+  //! internally (see Task 4).
+  //!
+  //! **Eng review Fix 7**: `limit` is hard-clamped to `[1, 1_000_000]` (an
+  //! operator/caller cannot drive an unbounded scan), and a process-wide
+  //! single-flight guard (`backfill_guard`) ensures only one backfill runs at
+  //! a time — a second concurrent call fails fast with `ServiceError::Busy`
+  //! instead of both holding a `run_db` semaphore permit for the whole
+  //! multi-chunk scan. The guard is service-scoped (not REST-scoped like
+  //! `api.rs`'s `SHARED_MAINTENANCE_PERMIT`) because this method is also
+  //! reachable from the CLI's local mode and MCP, neither of which goes
+  //! through `api.rs`.
+
+  use std::sync::{Arc, OnceLock};
 
   use anyhow::Result;
   use rusqlite::params;
+  use tokio::sync::Semaphore;
 
   use crate::db::{DbPool, SkillEventInsert, insert_skill_events};
   use crate::scanner::skill_events::{extract_claude_skill_events, extract_codex_skill_events};
 
   use super::super::models::{SkillBackfillRequest, SkillBackfillResult};
   use super::super::time::parse_optional_timestamp;
-  use super::{CortexService, ServiceResult};
+  use super::{CortexService, ServiceError, ServiceResult};
 
   const CHUNK_SIZE: i64 = 2_000;
+
+  /// Eng review Fix 7: hard upper bound on `SkillBackfillRequest.limit`. Chosen
+  /// generously above any realistic single-host `logs` table size (millions of
+  /// rows would already be well past `CORTEX_MAX_DB_SIZE_MB`'s default 1024 MB
+  /// guard in practice) while still being a real, enforced ceiling rather than
+  /// "whatever the caller asks for" — closes the unbounded-scan DoS surface
+  /// now that this is a `pub` service method reachable from CLI/MCP/REST.
+  const MAX_BACKFILL_LIMIT: u64 = 1_000_000;
+
+  /// Eng review Fix 7: process-wide single-flight gate for
+  /// `backfill_skill_events`, mirroring the `SHARED_MAINTENANCE_PERMIT`
+  /// pattern in `src/api.rs` (`OnceLock<Arc<Semaphore>>` + `try_acquire_owned`)
+  /// but scoped to the service layer so CLI-local and MCP callers are covered
+  /// too, not just REST. A held permit means a backfill is in flight; a second
+  /// concurrent call observes `NoPermits` and returns `ServiceError::Busy`
+  /// immediately rather than queuing behind the first scan.
+  fn backfill_guard() -> Arc<Semaphore> {
+      static GUARD: OnceLock<Arc<Semaphore>> = OnceLock::new();
+      Arc::clone(GUARD.get_or_init(|| Arc::new(Semaphore::new(1))))
+  }
 
   struct CandidateRow {
       id: i64,
@@ -2091,8 +2472,16 @@ impl CortexService {
       ) -> ServiceResult<SkillBackfillResult> {
           let since = parse_optional_timestamp(req.since.as_deref(), "since")?
               .map(|dt| dt.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string());
-          let limit = req.limit.unwrap_or(10_000).max(1);
+          // Eng review Fix 7: hard clamp, not just a floor.
+          let limit = req.limit.unwrap_or(10_000).clamp(1, MAX_BACKFILL_LIMIT);
           let dry_run = req.dry_run;
+
+          // Eng review Fix 7: single-flight guard acquired BEFORE the run_db
+          // call so a second concurrent caller never even queues for a DB
+          // permit — it fails fast here instead.
+          let _permit = backfill_guard()
+              .try_acquire_owned()
+              .map_err(|_| ServiceError::Busy("skill event backfill already running".into()))?;
 
           self.run_db("backfill_skill_events", move |pool| {
               run_backfill(pool, since.as_deref(), limit, dry_run)
@@ -2120,8 +2509,11 @@ impl CortexService {
               break;
           }
           let chunk_limit = CHUNK_SIZE.min(remaining as i64).max(1);
+          // Eng review Fix 6: no write_lock() here — this is a pure SELECT and
+          // WAL mode already gives it a consistent snapshot. Holding the write
+          // lock around a read needlessly serializes the backfill against the
+          // live syslog ingest writer for zero correctness benefit.
           let conn = pool.get()?;
-          let _write_guard = crate::db::write_lock();
           let rows = fetch_candidate_chunk(&conn, since, last_id, chunk_limit)?;
           drop(conn); // release back to pool before per-row parse work + next chunk
 
@@ -2134,14 +2526,25 @@ impl CortexService {
 
           let mut inserts = Vec::new();
           for row in &rows {
+              // Eng review Fix 1: the backfill reads `row.message` straight
+              // from the `logs` table (there is no pre-parsed Value to reuse
+              // here, unlike the ingest hot path in Task 6 — this is a
+              // one-time historical scan, not the per-request ingest loop),
+              // so a JSON parse is unavoidable for Claude rows that DO have a
+              // skill event. The substring short-circuit still applies: skip
+              // the parse entirely for the common case where the row has no
+              // attributionSkill field at all.
               let extracted = match row.ai_tool.as_str() {
-                  "claude" => match serde_json::from_str::<serde_json::Value>(&row.message) {
-                      Ok(value) => extract_claude_skill_events(&value),
-                      Err(_) => {
-                          result.parse_errors += 1;
-                          continue;
+                  "claude" if row.message.contains("attributionSkill") => {
+                      match serde_json::from_str::<serde_json::Value>(&row.message) {
+                          Ok(value) => extract_claude_skill_events(&value),
+                          Err(_) => {
+                              result.parse_errors += 1;
+                              continue;
+                          }
                       }
-                  },
+                  }
+                  "claude" => continue,
                   "codex" => extract_codex_skill_events(&row.message),
                   _ => continue,
               };
@@ -2252,18 +2655,25 @@ impl CortexService {
   Modify `src/app/services.rs`: add `mod skill_backfill;` next to
   `mod ai_indexing;` (around line 64).
 
+  Also, make `backfill_guard` reachable from the test module (the
+  `concurrent_backfill_calls_return_busy_instead_of_racing` test in Step 1
+  calls `super::backfill_guard()`), so keep its visibility at the module level
+  (private is fine — `#[path = "skill_backfill_tests.rs"] mod tests;` is a
+  child module and can see private items via `super::`).
+
 - [ ] **Step 4: Run test to verify it passes**
   ```bash
   cargo test --lib app::services::skill_backfill
   ```
-  Expected: both tests pass —
-  `dry_run_reports_counts_without_inserting` and
-  `real_run_inserts_events_and_is_idempotent`.
+  Expected: all four tests pass — `dry_run_reports_counts_without_inserting`,
+  `real_run_inserts_events_and_is_idempotent`,
+  `limit_is_clamped_to_hard_upper_bound` (Fix 7), and
+  `concurrent_backfill_calls_return_busy_instead_of_racing` (Fix 7).
 
 - [ ] **Step 5: Commit**
   ```bash
   git add src/app/services/skill_backfill.rs src/app/services/skill_backfill_tests.rs src/app/models/skill_backfill.rs src/app/models.rs src/app/services.rs
-  git commit -m "feat(app): add backfill_skill_events service method with dry-run and idempotent chunked scan"
+  git commit -m "feat(app): add backfill_skill_events service method with dry-run, idempotent chunked scan, single-flight guard, and hard limit clamp"
   ```
 
 ---
@@ -2720,10 +3130,8 @@ impl CortexService {
       pub timestamp: String,
       pub skill_name: String,
       pub skill_plugin: Option<String>,
-      pub skill_path: Option<String>,
       pub event_kind: String,
       pub evidence_kind: String,
-      pub metadata_json: Option<String>,
   }
 
   impl From<db::AiSkillEventEntry> for SkillEventEntry {
@@ -2738,10 +3146,8 @@ impl CortexService {
               timestamp: value.timestamp,
               skill_name: value.skill_name,
               skill_plugin: value.skill_plugin,
-              skill_path: value.skill_path,
               event_kind: value.event_kind,
               evidence_kind: value.evidence_kind,
-              metadata_json: value.metadata_json,
           }
       }
   }
@@ -2804,17 +3210,40 @@ impl CortexService {
   In `src/api.rs`:
   - Add route: `.route("/api/ai/skills", get(ai_skills))` (near the other
     `/api/sessions/*` routes for locality).
-  - Add handler:
+  - Add handler. **Eng review Fix 9**: `skill_events` stays `cortex:read`-scoped
+    per GH #94's explicit decision (not reconsidered here — do not add
+    `require_api_admin_token`), but as cheap defense-in-depth this handler logs
+    the caller IP and query filters at `tracing::info!` before serving the
+    response — matching the logging LEVEL convention of `Read`-scoped routes in
+    this file (the admin-scoped `ai_llm_invocations` uses `tracing::warn!`
+    because it exposes kill-switch/circuit-breaker operational state; a plain
+    `Read`-scoped AI-transcript route like this one uses `info!` instead, so
+    there's at least a trace record of who queried skill-usage history without
+    the noise level of a `warn!` on every normal read):
     ```rust
     async fn ai_skills(
         State(state): State<ApiState>,
+        ConnectInfo(peer): ConnectInfo<SocketAddr>,
         Query(req): Query<ListSkillEventsRequest>,
     ) -> impl IntoResponse {
+        tracing::info!(
+            caller_ip = %peer.ip(),
+            skill = ?req.skill,
+            plugin = ?req.plugin,
+            tool = ?req.tool,
+            project = ?req.project,
+            session_id = ?req.session_id,
+            hostname = ?req.hostname,
+            "read: skill_events queried"
+        );
         respond(state.service.list_skill_events(req).await)
     }
     ```
     Add `ListSkillEventsRequest` to the big `use super::models::{...}` import
-    block at the top of `src/api.rs`.
+    block at the top of `src/api.rs`. `ConnectInfo<SocketAddr>` and
+    `SocketAddr` are already imported/used by other handlers in this file
+    (e.g. `ai_llm_invocations`, `db_vacuum`) — reuse the same imports, do not
+    add duplicates.
 
   In `src/cli/dispatch_sessions.rs`, replace the Task-8 stub `run_ai_skills`
   with:
@@ -2849,7 +3278,14 @@ impl CortexService {
   pattern is mechanical and this repo's convention is full CLI/MCP/REST parity
   per `CLAUDE.md`.
 
-  In `src/cli/output/logs.rs`, add near `print_ai_tools_response`:
+  In `src/cli/output/logs.rs`, add near `print_ai_tools_response`. **Eng
+  review Fix 8 note**: this function uses `println!` directly on
+  `event.skill_name` / `event.skill_plugin` with no additional sanitization —
+  that's safe because Task 2/3's `ExtractedSkillEvent::normalized()` already
+  rejects any skill name/plugin containing a control character before it ever
+  reaches the database, so by the time a row gets here it cannot contain an
+  ANSI escape or embedded newline. Do not re-add sanitization here; the fix
+  belongs at the extraction boundary, not the printer.
   ```rust
   pub(crate) fn print_skill_events_response(
       response: &cortex::app::ListSkillEventsResponse,
@@ -3036,11 +3472,14 @@ impl CortexService {
 **Files:**
 - Modify: `CLAUDE.md` (repo-root, at
   `/home/jmagar/workspace/cortex/.claude/worktrees/happy-kepler-2d8fa5/CLAUDE.md`)
-  — MCP Tools section: `47 actions` -> `48 actions`, add `skill_events` row to
-  the action table (alphabetically/logically placed after `graph`, before the
-  admin actions section, matching `src/mcp/actions.rs` ordering)
-- Modify: `README.md` — search for any "47 action" or MCP action count/table
-  mentions (`grep -n "47 action\|action.*count" README.md`) and update
+  — MCP Tools section: `48 actions` -> `49 actions` (NOT "47 -> 48" — as of
+  this eng review pass, PR 1 "LLM Invocation Guard" has already merged and
+  added the `llm_invocations` action, so the live baseline is already 48; this
+  phase's `skill_events` is the 49th), add `skill_events` row to the action
+  table (alphabetically/logically placed after `graph`, before the admin
+  actions section, matching `src/mcp/actions.rs` ordering)
+- Modify: `README.md` — search for any action-count mentions
+  (`grep -n "action.*count\|[0-9][0-9] actions" README.md`) and update
   in lockstep
 - Modify: `docs/mcp/TOOLS.md` — add `skill_events` to the action reference
 - Modify: `docs/mcp/SCHEMA.md` — document the `ai_skill_events` table schema
@@ -3061,41 +3500,46 @@ impl CortexService {
 
 - [ ] **Step 1: Write the failing test**
 
-  Documentation changes are covered by this repo's existing doc-consistency
-  test if one exists — check first:
+  **Eng review Fix 11 (real defect — corrects a false claim in the original
+  plan)**: the original version of this task confidently asserted that
+  `src/docs_tests.rs` "should already be red after Task 9 added the
+  skill_events action (48 actions vs. a docs file still claiming 47)." This is
+  FALSE — verified directly by reading the file during this eng review pass.
+  `src/docs_tests.rs` contains exactly 4 tests
+  (`current_docker_ingest_docs_prefer_agent_path_over_socket_proxy`,
+  `coverage_docs_use_cortex_names_and_current_smoke_scope`,
+  `coverage_tooling_is_documented_and_scripted`,
+  `live_smoke_keeps_deterministic_admin_rest_coverage`), none of which assert
+  an action count or cross-check `ACTION_SPECS` against any doc file. Verify
+  this yourself before proceeding rather than trusting either this note or the
+  original plan's claim — repo state can drift:
   ```bash
-  grep -rn "47" src/docs_tests.rs 2>&1
-  cat src/docs_tests.rs | head -60
+  grep -n "action.*count\|ACTION_SPECS" src/docs_tests.rs 2>&1
+  cat src/docs_tests.rs
   ```
-  If `src/docs_tests.rs` asserts an action count or cross-checks
-  `ACTION_SPECS` against `CLAUDE.md`/`docs/contracts/mcp-actions-current.md`
-  programmatically, that test is the "failing test" for this task — it should
-  already be red after Task 9 added the `skill_events` action (48 actions vs.
-  a docs file still claiming 47). Confirm:
-  ```bash
-  cargo test --lib docs_tests
-  ```
-  Expected: if such a test exists, it now fails (action count mismatch,
-  missing doc row, etc.) — that failure IS this task's Step 1/Step 2. If no
-  such automated doc-consistency test exists in this repo, skip Steps 1-2 and
-  proceed directly to Step 3 (manual doc edits), since there is nothing to
-  automatically assert; note this explicitly in the commit message.
+  As of this review, that grep returns nothing and the file has no such
+  assertion. **Task 11's doc updates are therefore manual, not test-gated** —
+  skip Steps 1-2 entirely and go straight to Step 3 (manual doc edits). If a
+  future session finds `docs_tests.rs` HAS grown such an assertion by the time
+  this task is implemented, treat that as the actual failing test for Step
+  1/2 instead of this note.
 
 - [ ] **Step 2: Run test to verify it fails**
-  ```bash
-  cargo test --lib docs_tests
-  ```
-  Expected (if the test exists): failure citing action count 47 vs actual 48,
-  or a missing `skill_events` entry. If no such test exists, this step is N/A.
+
+  N/A per Step 1 — no such test exists as of this eng review pass. If one has
+  been added since, run it here and use its failure as this step's evidence.
 
 - [ ] **Step 3: Write minimal implementation**
 
   In `CLAUDE.md` (repo root), find:
   ```
-  One MCP tool: **`cortex`** — dispatches by `action` argument. 47 actions, generated from `ACTION_SPECS` in `src/mcp/actions.rs` (the single authoritative registry — regenerate this table from there).
+  One MCP tool: **`cortex`** — dispatches by `action` argument. 48 actions, generated from `ACTION_SPECS` in `src/mcp/actions.rs` (the single authoritative registry — regenerate this table from there).
   ```
-  Change `47 actions` to `48 actions`. In the action table, add a new row
-  after the `graph` row and before the `file_tails` (admin) row:
+  Change `48 actions` to `49 actions` (re-verify the live count with
+  `python3 -c "import re; print(len(re.findall(r'action_spec!\(\s*\"[a-z_]+\"', open('src/mcp/actions.rs').read())))"`
+  or equivalent before editing — do not trust a hardcoded number in case other
+  work has landed an action in the interim). In the action table, add a new
+  row after the `graph` row and before the `file_tails` (admin) row:
   ```
   | `skill_events` | List extracted AI skill-invocation events |
   ```
@@ -3108,7 +3552,13 @@ impl CortexService {
   exact per-action documentation block shape — likely name, description,
   scope, example args, example response).
 
-  In `docs/mcp/SCHEMA.md`, add a new section documenting `ai_skill_events`:
+  In `docs/mcp/SCHEMA.md`, add a new section documenting `ai_skill_events`.
+  **Eng review Fix 2**: no `skill_path`/`metadata_json` rows — those columns
+  do not exist in the shipped schema (neither extractor ever set them, so they
+  were removed rather than documented as "reserved for future use"). **Eng
+  review Fix 4/5**: index list matches the redesigned set, and
+  `idx_logs_ai_tool_id` is called out separately since it lives on the
+  existing `logs` table, not `ai_skill_events`:
   ```markdown
   ### `ai_skill_events`
 
@@ -3124,21 +3574,30 @@ impl CortexService {
   | `ai_session_id` | TEXT | nullable — copied from the source `logs` row |
   | `hostname` | TEXT NOT NULL | copied from the source `logs` row |
   | `timestamp` | TEXT NOT NULL | copied from the source `logs` row |
-  | `skill_name` | TEXT NOT NULL | trimmed, max 256 chars; `plugin:skill` combined form when the source used that shape |
-  | `skill_plugin` | TEXT | nullable, trimmed, max 256 chars |
-  | `skill_path` | TEXT | nullable; reserved, currently always NULL from both extractors |
+  | `skill_name` | TEXT NOT NULL | trimmed, max 256 chars, control characters rejected; `plugin:skill` combined form when the source used that shape |
+  | `skill_plugin` | TEXT | nullable, trimmed, max 256 chars, control characters rejected |
   | `event_kind` | TEXT NOT NULL | `claude_attribution` \| `codex_skill_block` |
   | `evidence_kind` | TEXT NOT NULL | `structured_json_field` \| `transcript_content` |
-  | `metadata_json` | TEXT | nullable; reserved for future evidence detail |
   | `created_at` | TEXT NOT NULL | insert time |
 
   `UNIQUE(log_id, skill_name, event_kind, evidence_kind)` makes ingest-time and
   backfill insertion idempotent via `INSERT OR IGNORE`.
 
-  Indexes: `idx_ai_skill_events_skill_time (skill_name, timestamp)`,
-  `idx_ai_skill_events_session_time (ai_tool, ai_project, ai_session_id,
-  timestamp)`, `idx_ai_skill_events_project_skill_time (ai_project, skill_name,
-  timestamp) WHERE ai_project IS NOT NULL`.
+  Indexes on `ai_skill_events` (chosen to match the shipped CLI filter surface
+  — `--skill`, `--plugin`, `--tool`, `--project`, `--session-id`, `--host`,
+  plus the unfiltered default sort):
+  - `idx_ai_skill_events_timestamp (timestamp)` — unfiltered/residual-filter default `ORDER BY timestamp DESC`
+  - `idx_ai_skill_events_skill_time (skill_name, timestamp)` — `--skill`
+  - `idx_ai_skill_events_plugin_time (skill_plugin, timestamp)` — `--plugin`
+  - `idx_ai_skill_events_hostname_time (hostname, timestamp)` — `--host`
+  - `idx_ai_skill_events_session_time (ai_tool, ai_project, ai_session_id, timestamp)` — `--tool` (leading column), and `--session-id` when paired with `--tool`
+  - `idx_ai_skill_events_project_skill_time (ai_project, skill_name, timestamp) WHERE ai_project IS NOT NULL` — `--project` (+ `--skill`)
+
+  Migration 38 also adds `idx_logs_ai_tool_id (ai_tool, id) WHERE ai_tool IN
+  ('claude', 'codex')` to the EXISTING `logs` table — this supports the
+  `sessions skills backfill` keyset-pagination scan (`id > ?` + `ORDER BY id
+  ASC`), which the pre-existing `idx_logs_ai_tool_cover (ai_tool,
+  ai_session_id, timestamp)` cannot serve since it doesn't include `id`.
   ```
 
   In `docs/contracts/mcp-actions-current.md`, check for a generation script
@@ -3170,8 +3629,11 @@ impl CortexService {
   cargo test --lib docs_tests
   cargo test --lib
   ```
-  Expected: doc-consistency test (if it exists) passes; full test suite still
-  green.
+  Expected: `docs_tests` passes trivially (as of this eng review pass it
+  contains no action-count/doc-cross-check assertion — see Fix 11 note above —
+  so this is a no-op regression guard, not a positive verification of the doc
+  edits); full test suite still green. The doc edits themselves are verified
+  by manual read-through, not by this test suite.
 
 - [ ] **Step 5: Commit**
   ```bash
@@ -3201,36 +3663,46 @@ feature branch, per repo convention, not per phase-task.
 
 ## Self-Review
 
+**Note (post-review):** this Self-Review section describes the plan as
+originally drafted. The "## Eng Review Fixes Applied" section near the top of
+this document records the 11 fixes applied on top of it after four
+independent review agents (architecture, simplicity, security, performance)
+checked the plan against the live repo; the coverage/consistency claims below
+have been updated in place to reflect the post-fix shapes, not re-derived
+from scratch.
+
 ### Spec coverage
 
 | Spec item | Covered by |
 |---|---|
-| Claude `attributionSkill`/`attributionPlugin` extraction (top-level, `message.*`, `payload.*` nesting) | Task 2 |
+| Claude `attributionSkill`/`attributionPlugin` extraction (top-level, `message.*` nesting — `payload.*` deliberately removed, see Fix 3) | Task 2 |
 | Codex `<skill><name>` extraction, multi-tag dedup, prose-not-matched | Task 3 |
-| Shared normalization (trim/clamp/`plugin:skill` split, never fabricated across separate Claude fields) | Task 2 (base), Task 3 (extends) |
-| Migration for `ai_skill_events` table + indexes + `KNOWN_SCHEMA_VERSION` bump | Task 1 |
+| Shared normalization (trim/clamp/`plugin:skill` split, control-character rejection per Fix 8, never fabricated across separate Claude fields) | Task 2 (base), Task 3 (extends) |
+| Migration for `ai_skill_events` table + redesigned indexes (Fix 4) + `idx_logs_ai_tool_id` on `logs` (Fix 5) + `KNOWN_SCHEMA_VERSION` bump | Task 1 |
 | DB insert/list query layer (`insert_skill_events[_in_tx]`, `list_skill_events`) | Task 4 |
 | `insert_logs_batch_in_tx` returns log ids (prerequisite plumbing for ingest-time insertion) | Task 5 |
-| Ingest-time insertion, same transaction as the `logs` row, no second full-table scan | Task 6 |
-| Backfill: bounded/chunked, lock released between chunks, idempotent, dry-run | Task 7 |
+| `ParsedTranscriptRecord.raw_value` threading (Fix 1) | Task 2 |
+| Ingest-time insertion, same transaction as the `logs` row, no second full-table scan, no double JSON-parse (Fix 1), short-circuit on no-skill-event rows | Task 6 |
+| Backfill: bounded/chunked, no write_lock around the SELECT (Fix 6), hard limit clamp + single-flight guard (Fix 7), idempotent, dry-run | Task 7 |
 | `cortex sessions skills backfill` CLI command | Task 8 |
-| `skill_events` read surface — MCP action, CLI list (`cortex sessions skills`), REST (`GET /api/ai/skills`) | Task 9 |
+| `skill_events` read surface — MCP action (still `cortex:read`), CLI list (`cortex sessions skills`), REST (`GET /api/ai/skills`, with Fix 9 audit logging) | Task 9 |
 | End-to-end ingest-then-backfill idempotency across both insertion paths | Task 10 |
-| Docs: action count/table, CLI reference, schema docs, contracts snapshot | Task 11 |
+| Docs: corrected action count (48 -> 49, not 47 -> 48), action table, CLI reference, schema docs (no `skill_path`/`metadata_json`), contracts snapshot, corrected `docs_tests.rs` claim (Fix 11) | Task 11 |
 
-No gaps were found requiring a new task — every locked interface declared at the top of this plan (`ExtractedSkillEvent`, `SkillEventKind`, `SkillEvidenceKind`, `SkillEventInsert`, `AiSkillEventParams`, `AiSkillEventEntry`, `ListSkillEventsResult`, `SkillBackfillRequest`, `SkillBackfillResult`) is produced by exactly one task and consumed by name in every later task that needs it.
+No gaps were found requiring a new task — every locked interface declared at the top of this plan (`ExtractedSkillEvent`, `SkillEventKind`, `SkillEvidenceKind`, `SkillEventInsert`, `AiSkillEventParams`, `AiSkillEventEntry`, `ListSkillEventsResult`, `SkillBackfillRequest`, `SkillBackfillResult`) is produced by exactly one task and consumed by name in every later task that needs it, now with `skill_path`/`metadata_json` removed consistently everywhere (Fix 2).
 
 ### Placeholder scan
 
-Task 2's Step 3 includes a deliberate `unreachable!()` stub shown as a "checkpoint" before the real implementation — this is intentional scaffolding called out explicitly in the plan text ("That stub is wrong on purpose as a checkpoint — replace the final function with the real implementation before running tests") and is immediately superseded by the real `extract_claude_skill_events` body in the same step. No other `unreachable!()`, `todo!()`, `unimplemented!()`, or silent no-op stub remains outside that single documented exception. Task 8 leaves `run_ai_skills` (the read/list dispatch arm) as an explicit `bail!("not yet implemented")` stub, but this is closed out within the same plan at Task 9 Step 3, not left dangling at the end of the phase.
+Task 2's original `unreachable!()` "checkpoint" stub was removed during this eng review pass along with the `payload.*` branch it exercised (Fix 3) — the task now writes the real `extract_claude_skill_events` implementation directly, no intermediate wrong-on-purpose stub. No `unreachable!()`, `todo!()`, `unimplemented!()`, or silent no-op stub remains anywhere in the plan. Task 8 still leaves `run_ai_skills` (the read/list dispatch arm) as an explicit `bail!("not yet implemented")` stub, but this is closed out within the same plan at Task 9 Step 3, not left dangling at the end of the phase.
 
 ### Type consistency
 
-Verified by direct text search across the whole document:
-- `ExtractedSkillEvent` — same five fields (`skill_name`, `skill_plugin`, `skill_path`, `event_kind`, `evidence_kind`, `metadata_json`) in the Locked Interfaces block, Task 2's struct definition, Task 3's usage, and every constructor call site in Tasks 4, 6, and 7.
-- `AiSkillEventParams` — identical nine-field shape (`skill`, `plugin`, `tool`, `project`, `session_id`, `hostname`, `from`, `to`, `limit`) in the Locked Interfaces block and Task 4's concrete implementation; Task 9's `ListSkillEventsRequest` (app-layer) maps 1:1 onto it field-for-field in `CortexService::list_skill_events`.
-- `AiSkillEventEntry` — identical thirteen-field shape in the Locked Interfaces block, Task 4's struct, and Task 9's `From<db::AiSkillEventEntry> for SkillEventEntry` conversion (every field is threaded through, none dropped or renamed).
-- `SkillEventInsert` — same six fields (`log_id`, `ai_tool`, `ai_project`, `ai_session_id`, `hostname`, `timestamp`, `event`) used consistently by Task 4's insert function, Task 6's ingest wiring, and Task 7's backfill service.
-- `SkillBackfillRequest`/`SkillBackfillResult` — same shapes in the Locked Interfaces block, Task 7's model definitions, and Task 8's CLI arg mapping into the request.
+Verified by direct text search across the whole document after applying the 11 fixes:
+- `ExtractedSkillEvent` — same FOUR fields (`skill_name`, `skill_plugin`, `event_kind`, `evidence_kind`) in the Locked Interfaces block, Task 2's struct definition, Task 3's usage, and every constructor call site in Tasks 4, 6, and 7 — `skill_path`/`metadata_json` removed everywhere per Fix 2.
+- `AiSkillEventParams` — identical nine-field shape (`skill`, `plugin`, `tool`, `project`, `session_id`, `hostname`, `from`, `to`, `limit`) in the Locked Interfaces block and Task 4's concrete implementation (unaffected by Fix 2 — this struct never had `skill_path`/`metadata_json`); Task 9's `ListSkillEventsRequest` (app-layer) maps 1:1 onto it field-for-field in `CortexService::list_skill_events`.
+- `AiSkillEventEntry` — identical ELEVEN-field shape (down from thirteen) in the Locked Interfaces block, Task 4's struct, and Task 9's `From<db::AiSkillEventEntry> for SkillEventEntry` conversion (every remaining field is threaded through, none dropped or renamed beyond the two Fix 2 removals).
+- `SkillEventInsert` — same six fields (`log_id`, `ai_tool`, `ai_project`, `ai_session_id`, `hostname`, `timestamp`, `event`) used consistently by Task 4's insert function, Task 6's ingest wiring, and Task 7's backfill service — unchanged by any fix (it wraps `ExtractedSkillEvent` rather than duplicating its fields).
+- `SkillBackfillRequest`/`SkillBackfillResult` — same shapes in the Locked Interfaces block, Task 7's model definitions, and Task 8's CLI arg mapping into the request; Task 7's `backfill_skill_events` body changed (hard clamp + single-flight guard, Fix 7) but the request/result struct SHAPES themselves are unchanged.
+- `ParsedTranscriptRecord` — new `raw_value: Option<serde_json::Value>` field (Fix 1), added consistently in Task 2's `src/scanner.rs` edit and populated/no-op'd consistently across `claude.rs` (populated), `codex.rs` (`None`), and `gemini.rs` (`None`).
 
 No divergent field names or types were found between the interface declarations and their downstream usages.

@@ -341,6 +341,42 @@ the recorded status, e.g. `running`, `success`, `error`, `dry_run`,
 an **admin-scoped** action — it requires `cortex:admin`, not just
 `cortex:read`.
 
+### `cortex sessions skills`
+
+List extracted AI skill-invocation events (Claude `attributionSkill`
+structured fields, Codex `<skill><name>` transcript tags).
+
+```bash
+cortex sessions skills --project cortex --limit 20
+cortex sessions skills --skill cortex-troubleshoot --since 1h --json
+```
+
+All flags are optional filters: `--skill`, `--plugin`, `--tool`,
+`--project`, `--session-id`, `--host`, `--since`, `--until` (normalized
+time expressions), and `--limit` (defaults to 50, clamped to `1..=500`).
+This is a `cortex:read`-scoped action.
+
+### `cortex sessions skills backfill`
+
+Chunked, bounded, dry-run-capable backfill of `ai_skill_events` from
+existing `logs` rows — catches up rows ingested before this phase shipped.
+
+```bash
+cortex sessions skills backfill --since 30d --limit 10000 --dry-run
+cortex sessions skills backfill --limit 50000
+```
+
+`--since` (optional, normalized time expression) restricts the scan to
+rows at or after that timestamp. `--limit` (optional, defaults to 10000,
+hard-capped at 1,000,000) bounds the number of `logs` rows scanned in one
+call. `--dry-run` reports `scanned`/`parse_errors` without inserting any
+rows. Insertion is idempotent (`INSERT OR IGNORE` on
+`UNIQUE(log_id, skill_name, event_kind, evidence_kind)`), so re-running
+backfill is always safe. Only one backfill can run at a time process-wide;
+a concurrent second call fails fast with a "already running" error. Local
+mode only — this is a DB-heavy batch job that runs against the local
+`CortexService`, not proxied over HTTP.
+
 ### `cortex sessions blocks`
 
 Bucket AI activity into 5-hour UTC windows.
@@ -1095,6 +1131,7 @@ models.
 | `cortex sessions similar` | `cortex` with `action="similar_incidents"` |
 | `cortex sessions ask-history` | `cortex` with `action="ask_history"` |
 | `cortex sessions incident-context` | `cortex` with `action="incident_context"` |
+| `cortex sessions skills` | `cortex` with `action="skill_events"` |
 | `cortex correlate events` | `cortex` with `action="correlate"` |
 | `cortex state host` | `cortex` with `action="host_state"` |
 | `cortex state fleet` | `cortex` with `action="fleet_state"` |

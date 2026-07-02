@@ -31,6 +31,7 @@ pub fn parse_line(
         message,
         session_id,
         ai_project: extract_project(&value),
+        raw_value: Some(value),
     }))
 }
 

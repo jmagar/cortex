@@ -322,3 +322,48 @@ fn parse_sessions_unknown_subcommand_suggests_close_match() {
 fn strings(values: &[&str]) -> Vec<String> {
     values.iter().map(|value| (*value).to_string()).collect()
 }
+
+#[test]
+fn parses_sessions_skills_backfill_with_flags() {
+    let command = parse_sessions_command(&strings(&[
+        "skills",
+        "backfill",
+        "--since",
+        "30d",
+        "--limit",
+        "10000",
+        "--dry-run",
+    ]))
+    .unwrap();
+
+    match command {
+        crate::cli::CliCommand::Sessions(crate::cli::SessionsCommand::SkillsBackfill(args)) => {
+            // --since is normalized to RFC3339 by norm_time, not stored raw.
+            let since = args.since.expect("since should be set");
+            assert!(since.ends_with("+00:00"), "--since not normalized: {since}");
+            assert_eq!(args.limit, Some(10000));
+            assert!(args.dry_run);
+        }
+        other => panic!("expected SessionsCommand::SkillsBackfill, got {other:?}"),
+    }
+}
+
+#[test]
+fn parses_sessions_skills_list_with_project_filter() {
+    let command = parse_sessions_command(&strings(&[
+        "skills",
+        "--project",
+        "cortex",
+        "--limit",
+        "20",
+    ]))
+    .unwrap();
+
+    match command {
+        crate::cli::CliCommand::Sessions(crate::cli::SessionsCommand::Skills(args)) => {
+            assert_eq!(args.project.as_deref(), Some("cortex"));
+            assert_eq!(args.limit, Some(20));
+        }
+        other => panic!("expected SessionsCommand::Skills, got {other:?}"),
+    }
+}
