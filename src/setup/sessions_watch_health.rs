@@ -1,8 +1,11 @@
 use std::io::{self, ErrorKind};
 use std::path::Path;
 
-use super::systemd::{systemctl_user_phase, systemctl_user_required_phase, systemctl_user_state};
-use super::{PhaseTimer, SetupPhase, SetupStatus};
+use super::systemd::{
+    systemctl_user_phase, systemctl_user_required_named_phase, systemctl_user_required_phase,
+    systemctl_user_state,
+};
+use super::{PhaseTimer, SetupPhase, SetupStatus, check_file_phase, setup_path_value};
 
 /// One named health condition checked by the periodic sessions-watch
 /// doctor alert. `unhealthy=true` means this condition should trigger a
@@ -31,8 +34,12 @@ pub(crate) fn sessions_watch_health_conditions() -> Vec<HealthCondition> {
 
 /// Check all sessions-watch health conditions; if any are unhealthy, send
 /// one Apprise notification summarizing them. Returns a SetupPhase so this
-/// composes with the rest of the setup-report machinery (and so `cortex
-/// setup doctor` can surface it alongside other checks).
+/// composes with the rest of the setup-report machinery.
+///
+/// When `apprise_urls` is empty (notifications disabled/unconfigured), this
+/// still returns `SetupStatus::Error` on unhealthy conditions so `--json`
+/// output and `cortex setup doctor` are never silent about it — only the
+/// push notification itself is skipped.
 pub(crate) async fn run_sessions_watch_health_check_and_notify(
     apprise_base_url: &str,
     apprise_urls: &[String],
@@ -54,7 +61,12 @@ pub(crate) async fn run_sessions_watch_health_check_and_notify(
         .collect::<Vec<_>>()
         .join("\n");
 
-    if !apprise_urls.is_empty() {
+    if apprise_urls.is_empty() {
+        tracing::warn!(
+            conditions = %body,
+            "sessions-watch health alert: notifications disabled/unconfigured, no Apprise notify sent"
+        );
+    } else {
         let client = crate::notifications::apprise::AppriseClient::new(apprise_base_url);
         if let Err(error) = client
             .notify(
@@ -75,9 +87,29 @@ pub(crate) async fn run_sessions_watch_health_check_and_notify(
     )
 }
 
-fn install_health_check_timer_files(systemd_dir: &Path) -> io::Result<SetupPhase> {
+/// Generate the `cortex-sessions-watch-doctor.service` unit content.
+///
+/// Templated the same way `ai_watch_service_unit` templates its sibling —
+/// `ExecStart` uses the resolved `cortex_bin` (not a hardcoded `%h/.local/bin`
+/// literal) so it works regardless of install layout, and the hardening
+/// directives match the watch service it doctors (`NoNewPrivileges`,
+/// `PrivateTmp`, `ProtectSystem=strict`, `ProtectHome=read-only`, `UMask`).
+/// No `BindPaths`/`ReadWritePaths` are needed — this unit only reads config
+/// and makes an outbound HTTP call, it never touches the DB or state dirs
+/// directly.
+fn doctor_service_unit(cortex_bin: &Path) -> io::Result<String> {
+    let cortex_bin = setup_path_value(cortex_bin)?;
+    Ok(format!(
+        "[Unit]\nDescription=cortex sessions-watch periodic health check\nDocumentation=https://github.com/jmagar/cortex\n\n[Service]\nType=oneshot\nExecStart={cortex_bin} setup sessions-watch-health-check --json\nUMask=0077\nNoNewPrivileges=true\nPrivateTmp=true\nProtectSystem=strict\nProtectHome=read-only\n\n[Install]\nWantedBy=default.target\n"
+    ))
+}
+
+fn install_health_check_timer_files(
+    systemd_dir: &Path,
+    cortex_bin: &Path,
+) -> io::Result<SetupPhase> {
     let timer = PhaseTimer::start("sessions-watch-doctor-timer-files");
-    let service_content = include_str!("../../config/systemd/cortex-sessions-watch-doctor.service");
+    let service_content = doctor_service_unit(cortex_bin)?;
     let timer_content = include_str!("../../config/systemd/cortex-sessions-watch-doctor.timer");
     std::fs::create_dir_all(systemd_dir)?;
     std::fs::write(
@@ -94,12 +126,89 @@ fn install_health_check_timer_files(systemd_dir: &Path) -> io::Result<SetupPhase
     ))
 }
 
+/// Verify the installed doctor timer/service files match the expected
+/// generated content. Mirrors `check_ai_watch_service_content_phase` for the
+/// sibling watch service — without this, `cortex setup sessions-watch-service
+/// check`/`cortex setup doctor` could report healthy while the alerting
+/// mechanism itself is silently missing or stale, reintroducing a milder
+/// version of the blind spot this feature exists to close.
+fn check_doctor_service_content_phase(systemd_dir: &Path, cortex_bin: &Path) -> SetupPhase {
+    let timer = PhaseTimer::start("sessions-watch-doctor-service-content");
+    let service_path = systemd_dir.join("cortex-sessions-watch-doctor.service");
+    let timer_path = systemd_dir.join("cortex-sessions-watch-doctor.timer");
+    let expected_service = match doctor_service_unit(cortex_bin) {
+        Ok(content) => content,
+        Err(error) => return timer.finish(SetupStatus::Error, error.to_string()),
+    };
+    let expected_timer = include_str!("../../config/systemd/cortex-sessions-watch-doctor.timer");
+    let current_service = match std::fs::read_to_string(&service_path) {
+        Ok(raw) => raw,
+        Err(error) => return timer.finish(SetupStatus::Error, error.to_string()),
+    };
+    let current_timer = match std::fs::read_to_string(&timer_path) {
+        Ok(raw) => raw,
+        Err(error) => return timer.finish(SetupStatus::Error, error.to_string()),
+    };
+    if current_service != expected_service {
+        return timer.finish(
+            SetupStatus::Error,
+            format!(
+                "{} does not match generated doctor service unit",
+                service_path.display()
+            ),
+        );
+    }
+    if current_timer != expected_timer {
+        return timer.finish(
+            SetupStatus::Error,
+            format!(
+                "{} does not match generated doctor timer unit",
+                timer_path.display()
+            ),
+        );
+    }
+    timer.finish(
+        SetupStatus::Ok,
+        "sessions-watch-doctor service+timer files match generated content",
+    )
+}
+
+/// All `SessionsWatchServiceAction::Check` phases for the doctor timer:
+/// file presence, generated-content match, and systemd enabled/active
+/// state. Mirrors the equivalent checks the watch service already has.
+pub(super) fn check_doctor_timer_phases(systemd_dir: &Path, cortex_bin: &Path) -> Vec<SetupPhase> {
+    vec![
+        check_file_phase(
+            "sessions-watch-doctor-service",
+            &systemd_dir.join("cortex-sessions-watch-doctor.service"),
+            "run cortex setup sessions-watch-service install",
+        ),
+        check_file_phase(
+            "sessions-watch-doctor-timer",
+            &systemd_dir.join("cortex-sessions-watch-doctor.timer"),
+            "run cortex setup sessions-watch-service install",
+        ),
+        check_doctor_service_content_phase(systemd_dir, cortex_bin),
+        systemctl_user_required_named_phase(
+            "sessions-watch-doctor-timer-enabled",
+            &["is-enabled", "cortex-sessions-watch-doctor.timer"],
+        ),
+        systemctl_user_required_named_phase(
+            "sessions-watch-doctor-timer-active",
+            &["is-active", "cortex-sessions-watch-doctor.timer"],
+        ),
+    ]
+}
+
 /// Write the doctor timer/service files and enable the timer. Called from
 /// `SessionsWatchServiceAction::Install` after the watch service itself is
 /// enabled+active.
-pub(super) fn install_and_enable_doctor_timer(systemd_dir: &Path) -> io::Result<Vec<SetupPhase>> {
+pub(super) fn install_and_enable_doctor_timer(
+    systemd_dir: &Path,
+    cortex_bin: &Path,
+) -> io::Result<Vec<SetupPhase>> {
     Ok(vec![
-        install_health_check_timer_files(systemd_dir)?,
+        install_health_check_timer_files(systemd_dir, cortex_bin)?,
         systemctl_user_phase(&["daemon-reload"]),
         systemctl_user_required_phase(&["enable", "--now", "cortex-sessions-watch-doctor.timer"]),
     ])

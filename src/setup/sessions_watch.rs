@@ -5,19 +5,19 @@ use std::time::Instant;
 
 use super::firstrun::{ensure_private_dir, parse_env};
 use super::sessions_watch_health::{
-    build_and_run_health_check, disable_and_remove_doctor_timer, install_and_enable_doctor_timer,
+    build_and_run_health_check, check_doctor_timer_phases, disable_and_remove_doctor_timer,
+    install_and_enable_doctor_timer,
 };
-use super::systemd::{
-    systemctl_user_phase, systemctl_user_required_named_phase, systemctl_user_state,
+pub(crate) use super::sessions_watch_legacy::{
+    ai_index_timer_disabled_phase, legacy_ai_systemd_units_absent_phase,
 };
+use super::systemd::{systemctl_user_phase, systemctl_user_required_named_phase};
 use super::{
     AI_WATCH_SERVICE_ACTIVE_PHASE, AI_WATCH_SERVICE_ENABLED_PHASE, PhaseTimer,
     SessionsWatchServiceAction, SetupIssueKind, SetupPhase, SetupReport, SetupStatus,
     check_file_phase, host_local_report_input, setup_path_value, setup_report,
     should_skip_ai_watch_systemd_enable, skipped_phase,
 };
-
-const LEGACY_AI_SYSTEMD_UNITS: &[&str] = &["cortex-ai-watch.service", "cortex-ai-index.timer"];
 
 pub async fn run_sessions_watch_service_setup(
     action: SessionsWatchServiceAction,
@@ -102,7 +102,7 @@ pub async fn run_sessions_watch_service_setup(
                 AI_WATCH_SERVICE_ACTIVE_PHASE,
                 &["is-active", "cortex-sessions-watch.service"],
             ));
-            phases.extend(install_and_enable_doctor_timer(&systemd_dir)?);
+            phases.extend(install_and_enable_doctor_timer(&systemd_dir, &cortex_bin)?);
         }
         SessionsWatchServiceAction::Remove => {
             phases.push(systemctl_user_phase(&[
@@ -155,6 +155,7 @@ pub async fn run_sessions_watch_service_setup(
                 AI_WATCH_SERVICE_ACTIVE_PHASE,
                 &["is-active", "cortex-sessions-watch.service"],
             ));
+            phases.extend(check_doctor_timer_phases(&systemd_dir, &cortex_bin));
         }
         SessionsWatchServiceAction::HealthCheck => phases.push(build_and_run_health_check().await),
     }
@@ -171,55 +172,6 @@ pub async fn run_sessions_watch_service_setup(
         ),
         phases,
     ))
-}
-
-pub(super) fn legacy_ai_systemd_units_absent_phase() -> SetupPhase {
-    let timer = PhaseTimer::start("legacy-ai-systemd-units-absent");
-    let stale = LEGACY_AI_SYSTEMD_UNITS
-        .iter()
-        .filter_map(|unit| {
-            let active = systemctl_user_state("is-active", unit);
-            let enabled = systemctl_user_state("is-enabled", unit);
-            let active_stale = active.as_deref() == Some("active");
-            let enabled_stale = enabled.as_deref() == Some("enabled");
-            (active_stale || enabled_stale)
-                .then(|| format!("{unit} active={active:?} enabled={enabled:?}"))
-        })
-        .collect::<Vec<_>>();
-    if stale.is_empty() {
-        return timer.finish(
-            SetupStatus::Ok,
-            "legacy cortex-ai systemd units inactive or absent",
-        );
-    }
-    timer.finish(
-        SetupStatus::Error,
-        format!(
-            "legacy cortex-ai systemd units still active/enabled: {}; run `systemctl --user disable --now {}`",
-            stale.join("; "),
-            LEGACY_AI_SYSTEMD_UNITS.join(" ")
-        ),
-    )
-}
-
-pub(super) fn ai_index_timer_disabled_phase() -> SetupPhase {
-    let timer = PhaseTimer::start("sessions-index-timer-disabled");
-    let active = systemctl_user_state("is-active", "cortex-sessions-index.timer");
-    let enabled = systemctl_user_state("is-enabled", "cortex-sessions-index.timer");
-    if active.as_deref() == Some("active") || enabled.as_deref() == Some("enabled") {
-        return timer.finish(
-            SetupStatus::Error,
-            format!(
-                "cortex-sessions-index.timer still active/enabled (active={active:?}, enabled={enabled:?})"
-            ),
-        );
-    }
-    timer.finish(
-        SetupStatus::Ok,
-        format!(
-            "cortex-sessions-index.timer inactive or absent (active={active:?}, enabled={enabled:?})"
-        ),
-    )
 }
 
 fn install_ai_watch_service_files(

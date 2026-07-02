@@ -17,6 +17,7 @@ mod resolve;
 mod sessions_index;
 mod sessions_watch;
 mod sessions_watch_health;
+mod sessions_watch_legacy;
 mod systemd;
 
 pub use agent_command::run_agent_command_setup;
