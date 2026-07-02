@@ -230,7 +230,6 @@ jobs:
       - coverage
       - deny
       - mcp-integration
-      - gitleaks
     steps:
       - name: Verify required jobs passed or were intentionally skipped
         run: |
@@ -251,4 +250,9 @@ jobs:
           require_success_or_skipped coverage "${{ needs.coverage.result }}"
           require_success_or_skipped deny "${{ needs.deny.result }}"
           require_success_or_skipped mcp-integration "${{ needs.mcp-integration.result }}"
-          require_success_or_skipped gitleaks "${{ needs.gitleaks.result }}"
+          # gitleaks is intentionally NOT in the required-jobs list: the
+          # gitleaks-action now requires a paid GITLEAKS_LICENSE secret this
+          # repo doesn't have configured, so it fails on every PR regardless
+          # of content. The job still runs and reports its own status as a
+          # non-blocking advisory check; re-add it to this gate once a
+          # license is configured (or the action is swapped/pinned).
