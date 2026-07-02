@@ -1113,6 +1113,18 @@ echo "Action: skill_events"
 SKILL_EVENTS=$(mcp_call skill_events "limit=5" 2>&1)
 assert_no_error "skill_events: no error" "$SKILL_EVENTS"
 
+# ── skill_incidents ──────────────────────────────────────────────────────────
+echo ""
+echo "Action: skill_incidents"
+SKILL_INCIDENTS=$(mcp_call skill_incidents "limit=5" 2>&1)
+assert_no_error "skill_incidents: no error" "$SKILL_INCIDENTS"
+
+# ── skill_investigate ────────────────────────────────────────────────────────
+echo ""
+echo "Action: skill_investigate"
+SKILL_INVESTIGATE=$(mcp_call skill_investigate "skill=smoke-test-skill" 2>&1)
+assert_no_error "skill_investigate: no error" "$SKILL_INVESTIGATE"
+
 # ── graph proof UX (optional: requires known seeded graph evidence id) ───────
 echo ""
 echo "Graph proof UX"
