@@ -71,6 +71,89 @@ async fn disabled_runner_denies_and_audits() {
 }
 
 #[tokio::test]
+async fn background_enrich_action_denied_when_background_enrichment_disabled() {
+    let (pool, _dir) = test_pool();
+    let cfg = LlmConfig {
+        background_enrichment_enabled: false,
+        ..LlmConfig::default()
+    };
+    let runner = LlmRunner::new(pool.clone(), cfg);
+
+    let result = runner
+        .run(base_spec("background_enrich"), |_prompt| async {
+            panic!("run_fn must not be called when background enrichment is disabled")
+        })
+        .await;
+
+    assert!(matches!(result, Err(LlmRunnerError::ActionDisabled(_))));
+}
+
+/// Regression test for the enforcement gap: the documented contract states
+/// `background_enrichment_enabled` is "checked whenever `caller_surface ==
+/// Background`" — not only when the action name happens to literally be
+/// `"background_enrich"`. Construct a spec with `caller_surface: Background`
+/// and a DIFFERENT action name, and confirm the call is denied even though
+/// no per-action config entry exists for it.
+#[tokio::test]
+async fn background_caller_surface_denied_regardless_of_action_name() {
+    let (pool, _dir) = test_pool();
+    let cfg = LlmConfig {
+        background_enrichment_enabled: false,
+        ..LlmConfig::default()
+    };
+    let runner = LlmRunner::new(pool.clone(), cfg);
+
+    let mut spec = base_spec("skill_assess");
+    spec.caller_surface = LlmCallerSurface::Background;
+
+    let result = runner
+        .run(spec, |_prompt| async {
+            panic!(
+                "run_fn must not be called: background_enrichment_enabled=false must gate \
+                 ANY action run with caller_surface=Background, not just \"background_enrich\""
+            )
+        })
+        .await;
+
+    assert!(
+        matches!(result, Err(LlmRunnerError::ActionDisabled(_))),
+        "expected ActionDisabled for a Background-surface call with enrichment disabled, got {result:?}"
+    );
+
+    let conn = pool.get().unwrap();
+    let status: String = conn
+        .query_row(
+            "SELECT status FROM llm_invocations WHERE action = 'skill_assess' ORDER BY started_at DESC LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(status, "disabled");
+}
+
+/// Sanity check on the flip side: once `background_enrichment_enabled` is
+/// true, a Background-surface call with a non-"background_enrich" action
+/// name is allowed through (assuming no other gate denies it).
+#[tokio::test]
+async fn background_caller_surface_allowed_when_enrichment_enabled() {
+    let (pool, _dir) = test_pool();
+    let cfg = LlmConfig {
+        background_enrichment_enabled: true,
+        ..LlmConfig::default()
+    };
+    let runner = LlmRunner::new(pool.clone(), cfg);
+
+    let mut spec = base_spec("skill_assess");
+    spec.caller_surface = LlmCallerSurface::Background;
+
+    let result = runner
+        .run(spec, |_prompt| async { Ok("ok".to_string()) })
+        .await;
+
+    assert!(result.is_ok(), "expected success, got {result:?}");
+}
+
+#[tokio::test]
 async fn prompt_over_limit_is_rejected_before_spawn() {
     let (pool, _dir) = test_pool();
     let cfg = LlmConfig {
@@ -185,7 +268,29 @@ async fn circuit_opens_after_failure_threshold_and_audits_denial() {
             panic!("run_fn must not be called while circuit is open")
         })
         .await;
-    assert!(matches!(third, Err(LlmRunnerError::CircuitOpen { .. })));
+    match third {
+        Err(LlmRunnerError::CircuitOpen { retry_after, .. }) => {
+            // `retry_after` must be an actionable value (seconds remaining
+            // until the circuit closes), not `Instant`'s opaque Debug
+            // output (e.g. `Instant { tv_sec: ..., tv_nsec: ... }`).
+            assert!(!retry_after.is_empty(), "retry_after must not be empty");
+            assert!(
+                !retry_after.contains("Instant"),
+                "retry_after must not leak Instant Debug output: {retry_after}"
+            );
+            let seconds_str = retry_after.strip_suffix('s').unwrap_or_else(|| {
+                panic!("retry_after must be formatted as '<n>s': {retry_after}")
+            });
+            let seconds: u64 = seconds_str
+                .parse()
+                .unwrap_or_else(|_| panic!("retry_after seconds must parse as u64: {retry_after}"));
+            assert!(
+                seconds > 0,
+                "retry_after must report a positive number of remaining seconds, got {seconds}"
+            );
+        }
+        other => panic!("expected CircuitOpen, got {other:?}"),
+    }
 
     let conn = pool.get().unwrap();
     let denied_count: i64 = conn
@@ -199,6 +304,51 @@ async fn circuit_opens_after_failure_threshold_and_audits_denial() {
         denied_count, 1,
         "circuit_open denial must itself be audited"
     );
+}
+
+/// `retry_after` must round UP a sub-second remainder, never truncate it to
+/// "0s" — a caller reading "0s" would reasonably assume the circuit is
+/// already closed and retry immediately, when it's actually still open.
+/// `circuit_opens_after_failure_threshold_and_audits_denial` only asserts
+/// `seconds > 0`, which happens to hold with the default 300s cooldown but
+/// does not exercise the truncation-vs-rounding boundary; this test uses a
+/// 1s cooldown so the remaining time is checked well under a second after
+/// the circuit opens, which `.as_secs()` (truncate) would misreport as
+/// `"0s"` but `.as_secs_f64().ceil()` (round up) correctly reports as `"1s"`.
+#[tokio::test]
+async fn circuit_open_retry_after_rounds_up_sub_second_remainder() {
+    let (pool, _dir) = test_pool();
+    let cfg = LlmConfig {
+        failure_threshold: 1,
+        cooldown_secs: 1,
+        max_invocations_per_minute: 100,
+        max_invocations_per_hour: 100,
+        ..LlmConfig::default()
+    };
+    let runner = LlmRunner::new(pool.clone(), cfg);
+
+    let first = runner
+        .run(base_spec("ai_assess"), |_prompt| async {
+            Err(anyhow::anyhow!("simulated LLM failure"))
+        })
+        .await;
+    assert!(first.is_err());
+
+    let second = runner
+        .run(base_spec("ai_assess"), |_prompt| async {
+            panic!("run_fn must not be called while circuit is open")
+        })
+        .await;
+    match second {
+        Err(LlmRunnerError::CircuitOpen { retry_after, .. }) => {
+            assert_ne!(
+                retry_after, "0s",
+                "retry_after must round up a sub-second remainder, not truncate to 0s \
+                 while the circuit is still open"
+            );
+        }
+        other => panic!("expected CircuitOpen, got {other:?}"),
+    }
 }
 
 #[tokio::test]

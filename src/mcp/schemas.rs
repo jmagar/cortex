@@ -223,7 +223,7 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                 },
                 "status": {
                     "type": "string",
-                    "description": "For action=llm_invocations: filter by invocation outcome status. One of: running, success, error, denied, rate_limited, circuit_open, disabled, dry_run, timeout."
+                    "description": "For action=llm_invocations: filter by invocation outcome status. One of: running, success, error, denied, rate_limited, circuit_open, disabled, dry_run, timeout, interrupted. 'interrupted' is a terminal status assigned by orphaned-row reconciliation at startup: init_pool rewrites any row still status='running' from a prior process into status='interrupted'."
                 },
                 "limit": {
                     "type": "integer",

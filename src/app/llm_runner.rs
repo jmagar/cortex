@@ -134,7 +134,7 @@ pub enum LlmRunnerError {
     ActionConcurrencyLimited { action: String, limit: usize },
     #[error("rate limit exceeded for action '{action}': {detail}")]
     RateLimited { action: String, detail: String },
-    #[error("circuit open for action '{action}' until {retry_after}")]
+    #[error("circuit open for action '{action}', retry after {retry_after}")]
     CircuitOpen { action: String, retry_after: String },
     #[error("LLM invocation '{0}' timed out after {1}s")]
     Timeout(String, u64),
@@ -182,8 +182,17 @@ impl LlmRunner {
         }
     }
 
-    fn action_enabled(&self, action: &str) -> bool {
-        if action == "background_enrich" && !self.config.background_enrichment_enabled {
+    /// `caller_surface` is required (not just `action`) because the
+    /// documented contract for `background_enrichment_enabled` is "checked
+    /// whenever `caller_surface == Background`" — the gate must trigger for
+    /// ANY action run with `LlmCallerSurface::Background`, not only the
+    /// literal action name `"background_enrich"`. The action-name check is
+    /// kept as defense in depth: it protects the well-known background
+    /// action even if a caller forgets to set `caller_surface` correctly.
+    fn action_enabled(&self, action: &str, caller_surface: LlmCallerSurface) -> bool {
+        if !self.config.background_enrichment_enabled
+            && (caller_surface == LlmCallerSurface::Background || action == "background_enrich")
+        {
             return false;
         }
         self.config
@@ -253,8 +262,10 @@ impl LlmRunner {
             return Err(LlmRunnerError::Disabled);
         }
 
-        // 2. Per-action enablement (covers background_enrichment_enabled too).
-        if !self.action_enabled(&action) {
+        // 2. Per-action enablement (covers background_enrichment_enabled too,
+        //    gated on caller_surface == Background per the documented
+        //    contract, not just the "background_enrich" action name).
+        if !self.action_enabled(&action, spec.caller_surface) {
             let id = new_invocation_id();
             self.write_start_row(&id, &spec, "disabled", prompt_bytes)
                 .await?;
@@ -287,9 +298,19 @@ impl LlmRunner {
                         .await?;
                     self.write_finish_row(&id, "circuit_open", Some("circuit_open"), 0)
                         .await?;
+                    // `Instant`'s Debug output is opaque/platform-dependent
+                    // (not a wall-clock time), so it's not actionable for a
+                    // caller trying to know how long to wait. Report the
+                    // remaining seconds until the circuit closes instead.
+                    // Round UP (not truncate) so a sub-second remainder
+                    // never reports "0s" while the circuit is still open.
+                    let retry_after_secs = open_until
+                        .saturating_duration_since(Instant::now())
+                        .as_secs_f64()
+                        .ceil() as u64;
                     return Err(LlmRunnerError::CircuitOpen {
                         action: action.clone(),
-                        retry_after: format!("{open_until:?}"),
+                        retry_after: format!("{retry_after_secs}s"),
                     });
                 }
                 entry.circuit_open_until = None;
