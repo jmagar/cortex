@@ -302,6 +302,37 @@ impl HttpClient {
         self.execute_once(send, path).await
     }
 
+    /// GET counterpart to `post_json_with_admin_no_retry`: sends the admin
+    /// token header for admin-gated GET reads (e.g. `llm_invocations`, which
+    /// exposes circuit-breaker/kill-switch operational state and is not
+    /// `cortex:read`-tier). No retry, matching the POST admin helper.
+    async fn get_json_with_admin<Req, Resp>(&self, path: &str, req: Option<&Req>) -> Result<Resp>
+    where
+        Req: Serialize + ?Sized,
+        Resp: DeserializeOwned,
+    {
+        let token = self
+            .api_admin_token
+            .as_deref()
+            .ok_or_else(|| anyhow!("CORTEX_API_ADMIN_TOKEN is required for this HTTP API read"))?;
+        let mut admin_value =
+            HeaderValue::from_str(token).context("failed to construct admin token header")?;
+        admin_value.set_sensitive(true);
+        let admin_header = HeaderName::from_static("x-cortex-admin-token");
+        let url = self.url(path)?;
+        let send = || async {
+            let mut builder = self
+                .inner
+                .request(Method::GET, url.clone())
+                .header(admin_header.clone(), admin_value.clone());
+            if let Some(r) = req {
+                builder = builder.query(r);
+            }
+            builder.send().await
+        };
+        self.execute_once(send, path).await
+    }
+
     async fn execute_once<F, Fut, Resp>(&self, send: F, path: &str) -> Result<Resp>
     where
         F: FnOnce() -> Fut,
@@ -559,6 +590,22 @@ impl HttpClient {
         let qs = serde_qs::to_string(req)
             .context("failed to serialize AiInvestigateRequest as query string")?;
         self.get_json_with_raw_query("/api/sessions/investigate", &qs)
+            .await
+    }
+
+    /// Admin-gated: requires `CORTEX_API_ADMIN_TOKEN` to be set client-side
+    /// (see `get_json_with_admin`) — `llm_invocations` exposes operational
+    /// kill-switch/circuit-breaker state, not just log content.
+    ///
+    /// The server returns `Vec<LlmInvocationRow>`, but `LlmInvocationRow`
+    /// lives in `pub(crate) mod db` (same cross-crate boundary as
+    /// `notifications_recent` above), so the CLI keeps the raw JSON value
+    /// for printing/JSON-passthrough.
+    pub async fn ai_llm_invocations(
+        &self,
+        req: &cortex::app::LlmInvocationsRequest,
+    ) -> Result<serde_json::Value> {
+        self.get_json_with_admin("/api/sessions/llm-invocations", Some(req))
             .await
     }
 

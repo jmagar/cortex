@@ -1838,3 +1838,145 @@ fn full_migration_chain_upgrades_populated_v0_2_6_database() {
         .unwrap();
     assert_eq!(count, 3);
 }
+
+#[test]
+fn migration_37_creates_llm_invocations_table() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("test.db");
+    let config = test_storage_config(db_path);
+    let pool = init_pool(&config).expect("init_pool should succeed");
+    let conn = pool.get().unwrap();
+
+    // Table exists with the exact locked column set.
+    let mut stmt = conn
+        .prepare(
+            "SELECT COUNT(*) FROM pragma_table_info('llm_invocations') WHERE name IN (
+                'id','started_at','finished_at','duration_ms','caller_surface','action',
+                'provider','model','program','incident_id','ai_tool','ai_project',
+                'ai_session_id','evidence_counts_json','prompt_bytes','output_bytes',
+                'status','error','metadata_json'
+            )",
+        )
+        .unwrap();
+    let count: i64 = stmt.query_row([], |row| row.get(0)).unwrap();
+    assert_eq!(count, 19, "llm_invocations must have all 19 locked columns");
+    drop(stmt);
+
+    // Migration is recorded and idempotent.
+    let version: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM schema_migrations WHERE version = 37",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(version, 1);
+
+    // Re-running init_pool (simulating a restart) must not error or duplicate the row.
+    drop(conn);
+    drop(pool);
+    let pool2 = init_pool(&config).expect("second init_pool should succeed");
+    let conn2 = pool2.get().unwrap();
+    let version2: i64 = conn2
+        .query_row(
+            "SELECT COUNT(*) FROM schema_migrations WHERE version = 37",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        version2, 1,
+        "migration 37 must be idempotent across restarts"
+    );
+}
+
+#[test]
+fn migration_37_indexes_exist() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("test.db");
+    let config = test_storage_config(db_path);
+    let pool = init_pool(&config).expect("init_pool should succeed");
+    let conn = pool.get().unwrap();
+    for idx in [
+        "idx_llm_invocations_started",
+        "idx_llm_invocations_action_started",
+        "idx_llm_invocations_status_started",
+    ] {
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name = ?1",
+                [idx],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1, "expected index {idx} to exist");
+    }
+}
+
+// PR #106 reconciliation fix (code-reviewer): if the process is killed
+// between `LlmRunner::write_start_row` (status='running') and the matching
+// finish-row write, the audit row is orphaned in 'running' forever — no
+// process is left to finish it. `init_pool` now reconciles orphaned
+// 'running' rows to 'interrupted' on every startup, mirroring the existing
+// `maintenance_jobs` orphan-reconciliation immediately above it in
+// `init_pool`. Simulate a crash (insert a 'running' row directly, bypassing
+// `LlmRunner`) then a restart (re-run `init_pool` against the same path).
+#[test]
+fn init_pool_reconciles_orphaned_running_llm_invocations_on_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("test.db");
+    let config = test_storage_config(db_path);
+    let pool = init_pool(&config).expect("init_pool should succeed");
+    let conn = pool.get().unwrap();
+
+    conn.execute(
+        "INSERT INTO llm_invocations
+            (id, started_at, caller_surface, action, provider, status)
+         VALUES ('llm-orphan', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), 'test', 'ai_assess', 'gemini-cli', 'running')",
+        [],
+    )
+    .expect("seed orphaned running row");
+
+    // A concurrently-'success' row (as if it finished cleanly before the
+    // crash) must be left untouched by the reconciliation.
+    conn.execute(
+        "INSERT INTO llm_invocations
+            (id, started_at, finished_at, caller_surface, action, provider, status)
+         VALUES ('llm-clean', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), 'test', 'ai_assess', 'gemini-cli', 'success')",
+        [],
+    )
+    .expect("seed clean success row");
+
+    drop(conn);
+    drop(pool);
+
+    // Re-run init_pool (simulating a restart) — must reconcile the orphan.
+    let pool2 = init_pool(&config).expect("second init_pool should succeed");
+    let conn2 = pool2.get().unwrap();
+
+    let (status, finished_at, error): (String, Option<String>, Option<String>) = conn2
+        .query_row(
+            "SELECT status, finished_at, error FROM llm_invocations WHERE id = 'llm-orphan'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(status, "interrupted");
+    assert!(
+        finished_at.is_some(),
+        "reconciled row must get a finished_at timestamp"
+    );
+    assert_eq!(error.as_deref(), Some("interrupted by server restart"));
+
+    let clean_status: String = conn2
+        .query_row(
+            "SELECT status FROM llm_invocations WHERE id = 'llm-clean'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        clean_status, "success",
+        "reconciliation must not touch rows that already reached a terminal status"
+    );
+}

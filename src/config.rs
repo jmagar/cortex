@@ -74,6 +74,7 @@ pub struct Config {
     pub enrichment: EnrichmentConfigToml,
     pub error_detection: ErrorDetectionConfig,
     pub notifications: NotificationsConfig,
+    pub llm: LlmConfig,
 }
 
 // ---------------------------------------------------------------------------
@@ -242,6 +243,93 @@ impl Default for EnrichmentConfigToml {
             scrub_prompts: true,
             fts_merge_pages: 0,
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// LLM invocation guard configuration
+//
+// Shared by every LLM-backed assessment feature (ai_assess today;
+// skill_assess / mcp_assess / hook_assess added by later phases). See
+// `src/app/llm_runner.rs` for the runtime enforcement of these limits.
+// Loaded from `[llm]` in `config.toml` or `CORTEX_LLM_*` env vars.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LlmConfig {
+    /// Global kill switch. When false, every `LlmRunner::run` call is
+    /// denied immediately (still audited with status "disabled").
+    /// Default: true. Env override: `CORTEX_LLM_ENABLED`.
+    pub enabled: bool,
+    /// Max invocations running concurrently across all actions.
+    /// Default: 1.
+    pub max_concurrent: usize,
+    /// Max invocations running concurrently for a single action.
+    /// Default: 1.
+    pub max_per_action_concurrent: usize,
+    /// Max invocations per action per rolling 60s window. Default: 3.
+    pub max_invocations_per_minute: u32,
+    /// Max invocations per action per rolling 3600s window. Default: 30.
+    pub max_invocations_per_hour: u32,
+    /// Consecutive failures/timeouts for an action before its circuit
+    /// opens. Default: 3.
+    pub failure_threshold: u32,
+    /// How long an open circuit stays open before allowing another
+    /// attempt (seconds). Default: 300.
+    pub cooldown_secs: u64,
+    /// Per-invocation timeout (seconds). Default: 120. Mirrors the
+    /// pre-existing `CORTEX_LLM_COMPLETION_TIMEOUT_SECS` env var read by
+    /// `GeminiAssessConfig::from_env` in `src/assessment.rs` — this is
+    /// threaded through instead of that struct re-reading the env var
+    /// independently (see the "timeout duplication" eng review fix).
+    pub timeout_secs: u64,
+    /// Max prompt+evidence size in bytes. Requests over this are rejected
+    /// before spawning any process. Default: 1_048_576 (1 MiB).
+    pub max_prompt_bytes: usize,
+    /// Max captured output size in bytes; output beyond this is
+    /// truncated. Default: 262_144 (256 KiB).
+    pub max_output_bytes: usize,
+    /// Whether ANY background (non-interactive, non-CLI/MCP/REST-request)
+    /// code path may invoke an LLM. Default: false. There must be no code
+    /// path that runs LLM calls in the background without this being
+    /// explicitly true — `LlmRunner::run` checks this whenever
+    /// `caller_surface == Background`.
+    pub background_enrichment_enabled: bool,
+    /// Per-action enablement, keyed by action name (e.g. "ai_assess").
+    /// An action with no entry here is treated as enabled=true UNLESS
+    /// its name is "background_enrich", which defaults to disabled via
+    /// `background_enrichment_enabled` regardless of this map.
+    pub actions: std::collections::HashMap<String, LlmActionConfig>,
+}
+
+impl Default for LlmConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            max_concurrent: 1,
+            max_per_action_concurrent: 1,
+            max_invocations_per_minute: 3,
+            max_invocations_per_hour: 30,
+            failure_threshold: 3,
+            cooldown_secs: 300,
+            timeout_secs: 120,
+            max_prompt_bytes: 1_048_576,
+            max_output_bytes: 262_144,
+            background_enrichment_enabled: false,
+            actions: std::collections::HashMap::new(),
+        }
+    }
+}
+
+/// Per-action `[llm.actions.<name>]` toggle.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LlmActionConfig {
+    pub enabled: bool,
+}
+
+impl Default for LlmActionConfig {
+    fn default() -> Self {
+        Self { enabled: true }
     }
 }
 
@@ -929,6 +1017,9 @@ impl Config {
             &mut config.storage.err_floor_per_source_cap,
         )?;
 
+        // [llm] env overrides.
+        env_override_bool("CORTEX_LLM_ENABLED", &mut config.llm.enabled)?;
+
         // [mcp.auth] env overrides.
         env_override_auth_mode("CORTEX_AUTH_MODE", &mut config.mcp.auth.mode)?;
         env_override_opt_str("CORTEX_PUBLIC_URL", &mut config.mcp.auth.public_url);
@@ -1077,6 +1168,7 @@ impl Config {
         validate_storage_config(&config.storage)?;
         validate_notifications_config(&config.notifications)?;
         validate_error_detection_config(&config.error_detection)?;
+        validate_llm_config(&config.llm)?;
         validate_host(&config.receiver.host)?;
         validate_host(&config.mcp.host)?;
         validate_auth_config(&config, check_bind)?;
@@ -1600,6 +1692,25 @@ fn validate_error_detection_config(cfg: &ErrorDetectionConfig) -> anyhow::Result
              (emerg/alert/crit/err/warning/notice/info/debug), got {:?}",
             cfg.notify_min_severity
         );
+    }
+    Ok(())
+}
+
+fn validate_llm_config(cfg: &LlmConfig) -> anyhow::Result<()> {
+    if cfg.max_concurrent == 0 {
+        anyhow::bail!("[llm] max_concurrent must be > 0");
+    }
+    if cfg.max_per_action_concurrent == 0 {
+        anyhow::bail!("[llm] max_per_action_concurrent must be > 0");
+    }
+    if cfg.timeout_secs == 0 {
+        anyhow::bail!("[llm] timeout_secs must be > 0");
+    }
+    if cfg.max_prompt_bytes == 0 {
+        anyhow::bail!("[llm] max_prompt_bytes must be > 0");
+    }
+    if cfg.max_output_bytes == 0 {
+        anyhow::bail!("[llm] max_output_bytes must be > 0");
     }
     Ok(())
 }

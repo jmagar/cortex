@@ -367,9 +367,9 @@ pub(crate) use super::dispatch_db::{
 pub(crate) use super::dispatch_sessions::{
     run_ai_abuse, run_ai_add, run_ai_ask_history, run_ai_assess, run_ai_blocks, run_ai_checkpoints,
     run_ai_context, run_ai_correlate, run_ai_doctor, run_ai_errors, run_ai_incident_context,
-    run_ai_incidents, run_ai_index, run_ai_investigate, run_ai_projects, run_ai_prune_checkpoints,
-    run_ai_search, run_ai_similar_incidents, run_ai_smoke_watch, run_ai_tools, run_sessions_watch,
-    run_sessions_watch_status,
+    run_ai_incidents, run_ai_index, run_ai_investigate, run_ai_llm_invocations, run_ai_projects,
+    run_ai_prune_checkpoints, run_ai_search, run_ai_similar_incidents, run_ai_smoke_watch,
+    run_ai_tools, run_sessions_watch, run_sessions_watch_status,
 };
 
 #[cfg(test)]

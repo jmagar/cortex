@@ -49,6 +49,7 @@ cortex exposes one MCP tool named `cortex`. The required
 | `file_tails` | Manage Cortex-owned file-tail ingest sources |
 | `notifications_recent` | List recent notification firings |
 | `notifications_test` | Send a test notification via Apprise |
+| `llm_invocations` | Recent LLM invocation audit records (concurrency/rate-limit/circuit-breaker denials included) |
 | `similar_incidents` | FTS5 cluster search — find historical incidents similar to a query |
 | `ask_history` | Search AI transcript history for past work related to a topic |
 | `incident_context` | Full context bundle for a known time window — logs + AI sessions |

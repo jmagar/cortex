@@ -1153,3 +1153,54 @@ fn self_trim_falls_through_to_heartbeats_when_logs_floor_protected() {
         "fallthrough must report the heartbeat rows it trimmed"
     );
 }
+
+fn insert_llm_invocation(pool: &DbPool, id: &str, started_at: &str) {
+    let conn = pool.get().unwrap();
+    conn.execute(
+        "INSERT INTO llm_invocations (id, started_at, caller_surface, action, provider, status)
+         VALUES (?1, ?2, 'cli', 'ai_assess', 'gemini-cli', 'completed')",
+        params![id, started_at],
+    )
+    .unwrap();
+}
+
+fn count_llm_invocations(pool: &DbPool) -> i64 {
+    let conn = pool.get().unwrap();
+    conn.query_row("SELECT COUNT(*) FROM llm_invocations", [], |row| row.get(0))
+        .unwrap()
+}
+
+#[test]
+fn test_purge_old_llm_invocations_removes_old() {
+    let (pool, _dir) = test_pool();
+    insert_llm_invocation(&pool, "old-1", "2020-01-01T00:00:00.000Z");
+    insert_llm_invocation(&pool, "new-1", "2099-01-01T00:00:00.000Z");
+
+    let deleted = purge_old_llm_invocations(&pool, 90, 1000).unwrap();
+    assert_eq!(deleted, 1, "should delete exactly the old row");
+    assert_eq!(count_llm_invocations(&pool), 1);
+}
+
+#[test]
+fn test_purge_old_llm_invocations_zero_retention_noop() {
+    let (pool, _dir) = test_pool();
+    insert_llm_invocation(&pool, "old-1", "2020-01-01T00:00:00.000Z");
+
+    let deleted = purge_old_llm_invocations(&pool, 0, 1000).unwrap();
+    assert_eq!(deleted, 0, "retention_days=0 should be a no-op");
+    assert_eq!(count_llm_invocations(&pool), 1);
+}
+
+#[test]
+fn test_purge_old_llm_invocations_chunked() {
+    let (pool, _dir) = test_pool();
+    for i in 0..5 {
+        insert_llm_invocation(&pool, &format!("old-{i}"), "2020-01-01T00:00:00.000Z");
+    }
+    insert_llm_invocation(&pool, "new-1", "2099-01-01T00:00:00.000Z");
+
+    // chunk_size smaller than the deletable set exercises the loop-until-empty path.
+    let deleted = purge_old_llm_invocations(&pool, 90, 2).unwrap();
+    assert_eq!(deleted, 5);
+    assert_eq!(count_llm_invocations(&pool), 1);
+}

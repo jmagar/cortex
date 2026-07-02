@@ -1,12 +1,12 @@
 use anyhow::{Result, anyhow, bail};
 
 use super::super::super::parse_common::{
-    FlagCursor, norm_time, parse_u32_flag, value_after_equals,
+    FlagCursor, norm_time, parse_i64_flag, parse_u32_flag, value_after_equals,
 };
 use super::super::super::{
     CliCommand, SessionsAskHistoryArgs, SessionsAssessArgs, SessionsCommand,
     SessionsIncidentContextArgs, SessionsIncidentsArgs, SessionsInvestigateArgs,
-    SessionsOutputDetail, SessionsSimilarArgs,
+    SessionsLlmInvocationsArgs, SessionsOutputDetail, SessionsSimilarArgs,
 };
 pub(crate) fn parse_sessions_similar(args: &[String]) -> Result<CliCommand> {
     let mut parsed = SessionsSimilarArgs::default();
@@ -320,10 +320,12 @@ pub(crate) fn parse_sessions_assess(args: &[String]) -> Result<CliCommand> {
     let mut window_minutes: Option<u32> = None;
     let mut correlation_window_minutes: Option<u32> = None;
     let mut terms: Vec<String> = Vec::new();
+    let mut dry_run = false;
     let mut flags = FlagCursor::new(args);
     while let Some(arg) = flags.next() {
         match arg.as_str() {
             "--json" => json = true,
+            "--dry-run" => dry_run = true,
             "--model" => model = Some(flags.value("--model")?),
             "--project" => project = Some(flags.value("--project")?),
             "--tool" => tool = Some(flags.value("--tool")?),
@@ -397,7 +399,41 @@ pub(crate) fn parse_sessions_assess(args: &[String]) -> Result<CliCommand> {
             correlation_window_minutes,
             terms,
             limit,
+            dry_run,
         },
+    )))
+}
+
+pub(crate) fn parse_sessions_llm_invocations(args: &[String]) -> Result<CliCommand> {
+    let mut parsed = SessionsLlmInvocationsArgs::default();
+    let mut flags = FlagCursor::new(args);
+    while let Some(arg) = flags.next() {
+        match arg.as_str() {
+            "--json" => parsed.json = true,
+            "--since" => parsed.since = Some(norm_time(flags.value("--since")?)?),
+            "--action" => parsed.action = Some(flags.value("--action")?),
+            "--status" => parsed.status = Some(flags.value("--status")?),
+            "--limit" => parsed.limit = Some(parse_i64_flag("--limit", flags.value("--limit")?)?),
+            _ if arg.starts_with("--since=") => {
+                parsed.since = Some(norm_time(value_after_equals(arg, "--since")?)?)
+            }
+            _ if arg.starts_with("--action=") => {
+                parsed.action = Some(value_after_equals(arg, "--action")?)
+            }
+            _ if arg.starts_with("--status=") => {
+                parsed.status = Some(value_after_equals(arg, "--status")?)
+            }
+            _ if arg.starts_with("--limit=") => {
+                parsed.limit = Some(parse_i64_flag(
+                    "--limit",
+                    value_after_equals(arg, "--limit")?,
+                )?)
+            }
+            _ => bail!("unknown flag for sessions llm-invocations: {arg}"),
+        }
+    }
+    Ok(CliCommand::Sessions(SessionsCommand::LlmInvocations(
+        parsed,
     )))
 }
 

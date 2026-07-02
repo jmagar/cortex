@@ -63,11 +63,15 @@ that registry by `src/mcp/schemas.rs::tool_definitions()`.
 | `unack_error` | Revoke an error acknowledgement | yes |
 | `file_tails` | Manage Cortex-owned file-tail ingest sources | yes |
 | `notifications_test` | Send a test Apprise notification | yes |
+| `llm_invocations` | Recent LLM invocation audit records (concurrency/rate-limit/circuit-breaker denials included) | no |
 | `help` | Returns markdown documentation for all actions | no |
 
-Most MCP actions are read-only. `ack_error`, `unack_error`, `file_tails`, and
-`notifications_test` require `cortex:admin`; they mutate acknowledgement/audit
-or notification state through service-owned actor and safety policy.
+Most MCP actions are read-only. `ack_error`, `unack_error`, `file_tails`,
+`notifications_test`, and `llm_invocations` require `cortex:admin`. The first
+four mutate acknowledgement/audit or notification state through service-owned
+actor and safety policy; `llm_invocations` is read-only but is admin-scoped
+because it exposes operational kill-switch/circuit-breaker state, not log
+content.
 
 ## Direct CLI commands
 

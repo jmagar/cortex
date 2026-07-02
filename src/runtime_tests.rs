@@ -31,6 +31,7 @@ fn test_config(tmp: &std::path::Path, mcp: McpConfig) -> Config {
         enrichment: Default::default(),
         error_detection: Default::default(),
         notifications: Default::default(),
+        llm: Default::default(),
     }
 }
 
