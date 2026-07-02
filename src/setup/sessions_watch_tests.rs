@@ -55,6 +55,30 @@ fn path_with_prepended(dir: &std::path::Path) -> std::ffi::OsString {
     std::env::join_paths(paths).unwrap()
 }
 
+#[test]
+fn ai_watch_service_unit_tolerates_contention_burst() {
+    let cortex_bin = std::path::Path::new("/home/user/.local/bin/cortex");
+    let env_path = std::path::Path::new("/home/user/.config/cortex/sessions-watch.env");
+    let db_path = std::path::Path::new("/home/user/.cortex/data/cortex.db");
+    let state_dir = std::path::Path::new("/home/user/.local/state/cortex");
+    let user_home = std::path::Path::new("/home/user");
+
+    let unit = ai_watch_service_unit(cortex_bin, env_path, db_path, state_dir, user_home);
+
+    // A short 5-crash budget over 300s is exactly what caused the 2026-06-29
+    // incident: a burst of transient lock-contention crashes exhausted the
+    // limit and the unit stayed `failed` for 3 days with no auto-restart.
+    // Widen the budget so a contention burst doesn't trip permanent failure.
+    assert!(
+        unit.contains("StartLimitBurst=20"),
+        "expected StartLimitBurst=20, got unit:\n{unit}"
+    );
+    assert!(
+        unit.contains("StartLimitIntervalSec=600"),
+        "expected StartLimitIntervalSec=600, got unit:\n{unit}"
+    );
+}
+
 #[cfg(unix)]
 #[test]
 #[serial]
