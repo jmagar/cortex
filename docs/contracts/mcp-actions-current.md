@@ -54,6 +54,7 @@ The live registry currently contains 48 actions (this snapshot may lag
 | `abuse_incidents` | `cortex:read` | moderate | Grouped abuse incident candidates |
 | `abuse_investigate` | `cortex:read` | expensive | Evidence bundles for abuse incidents |
 | `ai_correlate` | `cortex:read` | moderate | AI transcript anchors with nearby non-AI logs |
+| `topic_correlate` | `cortex:read` | moderate | Resolve a topic to graph entities and correlate all related logs into a unified timeline |
 | `usage_blocks` | `cortex:read` | cheap | AI activity in 5-hour UTC blocks |
 | `project_context` | `cortex:read` | moderate | AI project summary and recent entries |
 | `list_ai_tools` | `cortex:read` | cheap | AI tools observed in transcripts |

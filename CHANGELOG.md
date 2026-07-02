@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.2.1] - 2026-07-01
+
+### Fixed
+
+- Documented the `topic_correlate` MCP action, which was missing from the
+  action index in `docs/contracts/mcp-actions-current.md` and `README.md`.
+
 ## [3.2.0] - 2026-07-01
 
 ### Added
