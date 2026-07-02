@@ -21,8 +21,8 @@ use crate::app::{
     AiInvestigateRequest, AnomaliesRequest, ClockSkewRequest, CompareRequest, ContextRequest,
     CorrelateEventsRequest, CorrelateStateRequest, FilterLogsRequest, FleetStateRequest,
     GetErrorsRequest, GetLogRequest, HomelabMapRequest, HostStateRequest, IngestRateRequest,
-    ListAiProjectsRequest, ListAiToolsRequest, ListAppsRequest, ListSessionsRequest,
-    ListSkillEventsRequest, ListSourceIpsRequest, LlmInvocationsRequest,
+    ListAiProjectsRequest, ListAiToolsRequest, ListAppsRequest, ListHookEventsRequest,
+    ListSessionsRequest, ListSkillEventsRequest, ListSourceIpsRequest, LlmInvocationsRequest,
     NotificationsRecentRequest, PatternsRequest, ProjectContextRequest, RequestActor,
     SearchLogsRequest, SearchSessionsRequest, SilentHostsRequest, TailLogsRequest, TimelineRequest,
     TopicCorrelateRequest, UnackErrorRequest, UnaddressedErrorsRequest, UsageBlocksRequest,
@@ -35,6 +35,7 @@ use help::tool_cortex_help;
 
 mod context;
 mod help;
+mod hook_incidents;
 mod skill_incidents;
 
 /// Execute a tool by name
@@ -125,6 +126,9 @@ async fn dispatch_cortex_action(
         H::SkillEvents => tool_skill_events(state, args).await,
         H::SkillIncidents => skill_incidents::tool_skill_incidents(state, args).await,
         H::SkillInvestigate => skill_incidents::tool_skill_investigate(state, args).await,
+        H::HookEvents => tool_hook_events(state, args).await,
+        H::HookIncidents => hook_incidents::tool_hook_incidents(state, args).await,
+        H::HookInvestigate => hook_incidents::tool_hook_investigate(state, args).await,
         H::Help => help::tool_cortex_help().await,
     }
 }
@@ -272,6 +276,12 @@ async fn tool_list_ai_tools(state: &AppState, args: Value) -> anyhow::Result<Val
 async fn tool_skill_events(state: &AppState, args: Value) -> anyhow::Result<Value> {
     let req: ListSkillEventsRequest = action_payload(args, "skill_events")?;
     let response = state.service.list_skill_events(req).await?;
+    Ok(serde_json::to_value(response)?)
+}
+
+async fn tool_hook_events(state: &AppState, args: Value) -> anyhow::Result<Value> {
+    let req: ListHookEventsRequest = action_payload(args, "hook_events")?;
+    let response = state.service.list_hook_events(req).await?;
     Ok(serde_json::to_value(response)?)
 }
 

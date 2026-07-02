@@ -94,9 +94,11 @@ async fn real_run_inserts_events_and_is_idempotent() {
 #[tokio::test]
 #[serial(hook_backfill_guard)]
 async fn codex_rows_are_skipped_entirely() {
-    // GH #105: no Codex runtime-hook parser exists yet. A Codex log row must
-    // never be scanned for hook events even if it happens to contain the
-    // literal substring "hook_" somewhere in unrelated content.
+    // GH #105: no Codex runtime-hook parser exists yet. The backfill's
+    // candidate query filters to `ai_tool = 'claude'` only, so a Codex log
+    // row is never even fetched as a candidate (scanned stays 0) even if it
+    // happens to contain the literal substring "hook_" somewhere in
+    // unrelated content — stronger than a post-fetch skip.
     let (service, _dir) = test_service();
     let pool = service.pool_for_test();
     let conn = pool.get().unwrap();
@@ -116,7 +118,7 @@ async fn codex_rows_are_skipped_entirely() {
         })
         .await
         .unwrap();
-    assert_eq!(result.scanned, 1);
+    assert_eq!(result.scanned, 0);
     assert_eq!(result.inserted, 0);
 }
 

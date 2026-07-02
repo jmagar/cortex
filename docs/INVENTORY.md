@@ -62,6 +62,9 @@ that registry by `src/mcp/schemas.rs::tool_definitions()`.
 | `skill_events` | List extracted AI skill-invocation events | no |
 | `skill_incidents` | Groups negative-signal transcript hits following a skill invocation into scored incident candidates | no |
 | `skill_investigate` | Expands skill-usage incidents into deterministic evidence bundles, skill-first | no |
+| `hook_events` | List extracted/collected AI hook events (runtime execution and config inventory) | no |
+| `hook_incidents` | Groups hook failures/timeouts and other negative signals into scored incident candidates | no |
+| `hook_investigate` | Expands hook-usage incidents into deterministic evidence bundles, hook-first | no |
 | `ack_error` | Acknowledge an error signature | yes |
 | `unack_error` | Revoke an error acknowledgement | yes |
 | `file_tails` | Manage Cortex-owned file-tail ingest sources | yes |

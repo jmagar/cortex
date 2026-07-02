@@ -22,6 +22,7 @@ use skill_incidents::{parse_sessions_skill_incidents, parse_sessions_skill_inves
 mod more;
 mod ops;
 mod skill_incidents;
+mod hooks;
 mod skills;
 
 const SESSIONS_SUBCOMMANDS: &[&str] = &[
@@ -52,6 +53,8 @@ const SESSIONS_SUBCOMMANDS: &[&str] = &[
     "skill-incidents",
     "skill-investigate",
     "skill-assess",
+    "hook-events",
+    "hooks-backfill",
 ];
 
 pub(crate) fn parse_sessions_command(args: &[String]) -> Result<CliCommand> {
@@ -93,6 +96,8 @@ pub(crate) fn parse_sessions_command(args: &[String]) -> Result<CliCommand> {
         "skill-incidents" => parse_sessions_skill_incidents(rest),
         "skill-investigate" => parse_sessions_skill_investigate(rest),
         "skill-assess" => parse_sessions_skill_assess(rest),
+        "hook-events" => self::hooks::parse_sessions_hook_events(rest),
+        "hooks-backfill" => self::hooks::parse_sessions_hooks_backfill(rest),
         _ => bail!(
             "{}",
             super::suggest::unknown_command(

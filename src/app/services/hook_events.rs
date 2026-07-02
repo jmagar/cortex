@@ -40,4 +40,23 @@ impl CortexService {
             .await?;
         Ok(result.into())
     }
+
+    /// Collect a fresh point-in-time hook config/trust-state inventory from
+    /// local host files (`~/.claude/settings.json`, `~/.codex/hooks.json`,
+    /// `~/.codex/config.toml [hooks.state]`) and persist it via
+    /// `crate::hook_config::collect_and_store`. Returns the number of newly
+    /// inserted rows (repeated calls at the same `timestamp` are idempotent
+    /// on the `ai_hook_events` unique index). CLI-only in practice — see
+    /// `cortex assess hooks --collect-config`'s `CliMode::Http` guard;
+    /// nothing here itself refuses a non-local caller, callers are
+    /// responsible for that guard, mirroring the LLM-runner CLI-only
+    /// convention used elsewhere in this service.
+    pub async fn collect_hook_config_inventory(&self) -> ServiceResult<usize> {
+        let hostname = crate::scanner::local_hostname();
+        let timestamp = crate::app::time::rfc3339_z(chrono::Utc::now());
+        self.run_db("collect_hook_config_inventory", move |pool| {
+            crate::hook_config::collect_and_store(pool, &hostname, &timestamp)
+        })
+        .await
+    }
 }

@@ -2085,9 +2085,18 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
     // `'trusted_hash_state'`). `log_id` is nullable because config-inventory
     // rows are collected from local host config files, not a transcript log
     // row — see GH #105's "Hook assessment design" section.
-    // UNIQUE(ai_tool, ai_session_id, hook_event, hook_name, timestamp,
-    // evidence_kind) makes INSERT OR IGNORE idempotent across re-ingest,
-    // backfill re-runs, and repeated config collector scans.
+    //
+    // Uniqueness is enforced via a UNIQUE INDEX over
+    // COALESCE(ai_session_id, ''), COALESCE(hook_name, '') rather than a
+    // table-level UNIQUE(...) constraint: SQLite treats every NULL as
+    // distinct from every other NULL in a UNIQUE constraint, and
+    // config-inventory rows always have `ai_session_id = NULL` (they are
+    // host-global, not session-scoped) — a bare UNIQUE(ai_session_id, ...)
+    // would let `collect_and_store` insert an unbounded number of duplicate
+    // rows on every repeated collection instead of deduping via
+    // `INSERT OR IGNORE`. Wrapping the nullable columns in COALESCE collapses
+    // NULL to a consistent sentinel so repeated collections at the same
+    // hook_event/hook_name/timestamp/evidence_kind correctly dedupe.
     if !migration_applied(&conn, 39)? {
         conn.execute_batch(
             "BEGIN IMMEDIATE;
@@ -2113,9 +2122,18 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
                trusted_hash           TEXT,
                evidence_kind          TEXT NOT NULL,
                metadata_json          TEXT,
-               created_at             TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-               UNIQUE(ai_tool, ai_session_id, hook_event, hook_name, timestamp, evidence_kind)
+               created_at             TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
              );
+
+             CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_hook_events_unique
+                 ON ai_hook_events(
+                   ai_tool,
+                   COALESCE(ai_session_id, ''),
+                   hook_event,
+                   COALESCE(hook_name, ''),
+                   timestamp,
+                   evidence_kind
+                 );
 
              CREATE INDEX IF NOT EXISTS idx_ai_hook_events_hook_time
                  ON ai_hook_events(hook_event, hook_name, timestamp);

@@ -1419,7 +1419,7 @@ fn normalize_timestamp(timestamp: Option<&str>) -> Result<String> {
     }
 }
 
-fn local_hostname() -> String {
+pub(crate) fn local_hostname() -> String {
     #[cfg(unix)]
     {
         let mut buf = vec![0u8; 256];

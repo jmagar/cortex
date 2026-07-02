@@ -30,6 +30,7 @@
 #   cortex llm_invocations,
 #   cortex similar_incidents, cortex ask_history, cortex incident_context, cortex graph,
 #   cortex skill_events, cortex skill_incidents, cortex skill_investigate,
+#   cortex hook_events, cortex hook_incidents, cortex hook_investigate,
 #   cortex help
 #
 # Exit codes:

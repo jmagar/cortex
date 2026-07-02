@@ -4,9 +4,9 @@ use anyhow::{Result, bail};
 use cortex::app::{
     AbuseSearchRequest, AiAssessRequest, AiCheckpointsRequest, AiCorrelateRequest,
     AiIncidentRequest, AiInvestigateRequest, AiParseErrorsRequest, AiPruneCheckpointsRequest,
-    AskHistoryRequest, IncidentContextRequest, ListAiProjectsRequest, ListAiToolsRequest,
-    ProjectContextRequest, SearchSessionsRequest, SimilarIncidentsRequest, SkillAssessRequest,
-    UsageBlocksRequest,
+    AskHistoryRequest, HookAssessRequest, IncidentContextRequest, ListAiProjectsRequest,
+    ListAiToolsRequest, ListHookEventsRequest, ProjectContextRequest, SearchSessionsRequest,
+    SimilarIncidentsRequest, SkillAssessRequest, UsageBlocksRequest,
 };
 use std::io::Write;
 
@@ -14,7 +14,7 @@ use super::output::common::print_json;
 use super::output::logs::{
     UsageBlocksPrintOptions, print_abuse_search_response, print_ai_correlate_response,
     print_ai_projects_response, print_ai_tools_response, print_project_context_response,
-    print_search_sessions_response, print_skill_events_response,
+    print_hook_events_response, print_search_sessions_response, print_skill_events_response,
     print_usage_blocks_response_with_options,
 };
 use super::output::sessions::more::{
@@ -32,7 +32,8 @@ use super::output::sessions::{
 };
 use super::sessions_watch::ai_smoke_watch;
 use super::{
-    AssessAbuseArgs, AssessSkillArgs, CliMode, OutputArgs, SessionsAbuseArgs, SessionsAddArgs,
+    AssessAbuseArgs, AssessHooksArgs, AssessSkillArgs, CliMode, OutputArgs, SessionsAbuseArgs,
+    SessionsAddArgs,
     SessionsAskHistoryArgs, SessionsAssessArgs, SessionsBlocksArgs, SessionsCheckpointsArgs,
     SessionsContextArgs, SessionsCorrelateArgs, SessionsDoctorArgs, SessionsErrorsArgs,
     SessionsIncidentContextArgs, SessionsIncidentsArgs, SessionsIndexArgs, SessionsInvestigateArgs,
@@ -376,6 +377,63 @@ pub(crate) async fn run_ai_skills(mode: &CliMode, args: SessionsSkillsListArgs) 
         CliMode::Http(client) => http_or_cancel(client.ai_skills(&req)).await?,
     };
     print_skill_events_response(&response, json)
+}
+
+pub(crate) async fn run_ai_hook_events(
+    mode: &CliMode,
+    args: super::SessionsHookEventsListArgs,
+) -> Result<()> {
+    let json = args.json;
+    let req = ListHookEventsRequest {
+        hook_event: args.hook_event,
+        hook_name: args.hook_name,
+        hook_source: args.hook_source,
+        status: args.status,
+        evidence_kind: args.evidence_kind,
+        tool: args.tool,
+        project: args.project,
+        session_id: args.session_id,
+        hostname: args.host,
+        from: args.since,
+        to: args.until,
+        limit: args.limit,
+    };
+    let response = match mode {
+        CliMode::Local(service) => service.list_hook_events(req).await?,
+        CliMode::Http(client) => http_or_cancel(client.ai_hook_events(&req)).await?,
+    };
+    print_hook_events_response(&response, json)
+}
+
+pub(crate) async fn run_ai_hooks_backfill(
+    mode: &CliMode,
+    args: super::SessionsHooksBackfillArgs,
+) -> Result<()> {
+    let service = match mode {
+        CliMode::Http(_) => bail!("sessions hooks-backfill runs local DB scans; omit --http"),
+        CliMode::Local(service) => service,
+    };
+    let response = service
+        .backfill_hook_events(cortex::app::HookBackfillRequest {
+            since: args.since,
+            limit: args.limit,
+            dry_run: args.dry_run,
+        })
+        .await?;
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&response)?);
+    } else {
+        println!(
+            "scanned={} inserted={} skipped_duplicates={} parse_errors={} truncated={} dry_run={}",
+            response.scanned,
+            response.inserted,
+            response.skipped_duplicates,
+            response.parse_errors,
+            response.truncated,
+            response.dry_run
+        );
+    }
+    Ok(())
 }
 
 pub(crate) async fn run_ai_index(mode: &CliMode, args: SessionsIndexArgs) -> Result<()> {
@@ -876,6 +934,117 @@ pub(crate) async fn run_assess_skill(mode: &CliMode, args: AssessSkillArgs) -> R
     }
     for result in &response.results {
         println!("# incident {}", result.incident_id);
+        if let Some(assessment) = &result.assessment {
+            println!("{assessment}");
+        } else {
+            println!("{}", serde_json::to_string_pretty(&result.findings)?);
+        }
+        println!();
+    }
+    if !response.other_matching_incidents.is_empty() {
+        eprintln!(
+            "[{} other matching incident(s) not assessed; pass --all or --limit N: {}]",
+            response.other_matching_incidents.len(),
+            response
+                .other_matching_incidents
+                .iter()
+                .map(|s| s.incident_id.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
+    if response.no_incident_low_severity_summary {
+        eprintln!("[note: single low-signal incident — no negative signals detected]");
+    }
+    Ok(())
+}
+
+/// `cortex assess hooks` — resolve and assess the top hook incident (or all
+/// with `--all`/`--limit`). LLM assessment is local-only, mirroring
+/// `run_assess_skill`. When `--collect-config` is passed, a fresh point-in-time
+/// hook config inventory is collected from the local host FIRST (local mode
+/// only), so config/trust evidence is available alongside runtime evidence.
+pub(crate) async fn run_assess_hooks(mode: &CliMode, args: AssessHooksArgs) -> Result<()> {
+    let run_llm = !args.no_llm;
+    if run_llm {
+        if let CliMode::Http(_) = mode {
+            bail!(
+                "cortex assess hooks spawns Gemini CLI on the local host; omit --http or pass --no-llm"
+            );
+        }
+    }
+
+    // Optional live config-inventory collect-then-assess. Config inventory is a
+    // point-in-time host read (not backfilled from transcript history), so this
+    // is the intended way to make config/trust evidence available.
+    if args.collect_config {
+        match mode {
+            CliMode::Local(service) => {
+                let inserted = service.collect_hook_config_inventory().await?;
+                eprintln!("[collected {inserted} hook config-inventory row(s) from local host]");
+            }
+            CliMode::Http(_) => {
+                bail!(
+                    "cortex assess hooks --collect-config reads local host config files; omit --http"
+                )
+            }
+        }
+    }
+
+    let req = HookAssessRequest {
+        hook_event: args.hook_event.clone(),
+        hook_name: args.hook_name.clone(),
+        hook_source: args.hook_source.clone(),
+        model: args.model.clone(),
+        project: args.project.clone(),
+        tool: args.tool.clone(),
+        since: args.since.clone(),
+        until: args.until.clone(),
+        window_minutes: args.window_minutes,
+        correlation_window_minutes: args.correlation_window_minutes,
+        limit: args.limit,
+        all: args.all,
+    };
+    let response = match mode {
+        CliMode::Local(service) => {
+            if args.json {
+                service
+                    .run_hook_assessment_with_delta(req, run_llm, |_| Ok(()))
+                    .await?
+            } else {
+                let mut streamed = false;
+                let response = service
+                    .run_hook_assessment_with_delta(req, run_llm, |delta| {
+                        streamed = true;
+                        print!("{delta}");
+                        std::io::stdout().flush()?;
+                        Ok(())
+                    })
+                    .await?;
+                if streamed
+                    && !response
+                        .results
+                        .iter()
+                        .any(|r| r.assessment.as_deref().is_some_and(|a| a.ends_with('\n')))
+                {
+                    println!();
+                }
+                response
+            }
+        }
+        CliMode::Http(_) => {
+            bail!("cortex assess hooks --http is not yet implemented; run locally")
+        }
+    };
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&response)?);
+        return Ok(());
+    }
+    for result in &response.results {
+        println!("# incident {}", result.incident_id);
+        // Always surface the runtime-vs-config evidence basis (GH #105
+        // acceptance criterion) even in the human-readable path.
+        println!("evidence basis: {}", result.findings.evidence_basis);
         if let Some(assessment) = &result.assessment {
             println!("{assessment}");
         } else {

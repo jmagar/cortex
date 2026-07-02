@@ -69,6 +69,9 @@ selects one of these 48 actions:
 | `skill_events` | `cortex:read` | cheap | List extracted AI skill-invocation events |
 | `skill_incidents` | `cortex:read` | moderate | Grouped skill-usage incident candidates |
 | `skill_investigate` | `cortex:read` | expensive | Evidence bundles for skill-usage incidents, skill-first |
+| `hook_events` | `cortex:read` | cheap | List extracted/collected AI hook events (runtime + config inventory) |
+| `hook_incidents` | `cortex:read` | moderate | Grouped hook-usage incident candidates |
+| `hook_investigate` | `cortex:read` | expensive | Evidence bundles for hook-usage incidents, hook-first |
 | `ack_error` | `cortex:admin` | write | Acknowledge an error signature |
 | `unack_error` | `cortex:admin` | write | Revoke an error acknowledgement |
 | `file_tails` | `cortex:admin` | write | Manage Cortex-owned file-tail ingest sources |

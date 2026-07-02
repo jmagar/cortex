@@ -1,12 +1,12 @@
 use super::*;
 
-// PR 4 of GH #94: LLM skill/abuse assessment is CLI-only. See the doc
-// comment near `ACTION_SPECS` above for the full invariant. This guards
-// against a future PR accidentally adding an MCP action for it without
-// re-auditing the run_llm=false contract.
+// PR 4 of GH #94 / GH #105: LLM skill/abuse/hook assessment is CLI-only. See
+// the doc comment near `ACTION_SPECS` above for the full invariant. This
+// guards against a future PR accidentally adding an MCP action for it
+// without re-auditing the run_llm=false contract.
 #[test]
 fn no_mcp_action_spec_invokes_gemini_assessment() {
-    let forbidden = ["skill_assess", "abuse_assess"];
+    let forbidden = ["skill_assess", "abuse_assess", "hook_assess"];
     for name in forbidden {
         assert!(
             !ACTION_SPECS.iter().any(|spec| spec.name == name),

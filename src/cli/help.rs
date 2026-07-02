@@ -173,15 +173,18 @@ const CATALOG: &[CommandDoc] = &[
             "cortex sessions doctor [--strict-permissions] [--json]",
             "cortex sessions watch-status [--json]",
             "cortex sessions smoke-watch [--json]",
+            "cortex sessions hook-events [--hook NAME] [--hook-event EVENT] [--hook-source SOURCE] [--status STATUS] [--evidence-kind KIND] [--tool TOOL] [--project PATH] [--session-id ID] [--host HOST] [--since TIME] [--until TIME] [--limit N] [--json]",
+            "cortex sessions hooks-backfill [--since TIME] [--limit N] [--dry-run] [--json]",
         ],
     },
     CommandDoc {
         name: "assess",
-        summary: "LLM-guarded skill and abuse-incident assessment (LlmRunner, local-only)",
+        summary: "LLM-guarded skill, abuse-incident, and hook assessment (LlmRunner, local-only)",
         usage: &[
             "cortex assess skill SKILL [--plugin NAME] [--model MODEL] [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--all] [--window-minutes N] [--correlation-window-minutes N] [--no-llm] [--json]",
             "cortex assess skill --plugin NAME [--model MODEL] [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--all] [--window-minutes N] [--correlation-window-minutes N] [--no-llm] [--json]",
             "cortex assess abuse [--incident-id ID] [--model MODEL] [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--window-minutes N] [--correlation-window-minutes N] [--no-llm] [--json]",
+            "cortex assess hooks [--hook NAME] [--hook-event EVENT] [--hook-source SOURCE] [--model MODEL] [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--all] [--window-minutes N] [--correlation-window-minutes N] [--no-llm] [--collect-config] [--json]",
         ],
     },
     CommandDoc {

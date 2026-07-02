@@ -28,6 +28,8 @@ pub(crate) enum SessionsCommand {
     SkillsBackfill(SessionsSkillsBackfillArgs),
     SkillIncidents(SessionsSkillIncidentsArgs),
     SkillInvestigate(SessionsSkillInvestigateArgs),
+    HookEvents(SessionsHookEventsListArgs),
+    HooksBackfill(SessionsHooksBackfillArgs),
     /// Low-level alias for `cortex assess skill` — forwards to the exact
     /// same dispatch function (`dispatch::run_assess_skill`) so the two
     /// entry points never drift on behavior, only on discoverability.
@@ -90,6 +92,31 @@ pub(crate) struct SessionsSkillsListArgs {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct SessionsSkillsBackfillArgs {
+    pub json: bool,
+    pub since: Option<String>,
+    pub limit: Option<u64>,
+    pub dry_run: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct SessionsHookEventsListArgs {
+    pub json: bool,
+    pub hook_event: Option<String>,
+    pub hook_name: Option<String>,
+    pub hook_source: Option<String>,
+    pub status: Option<String>,
+    pub evidence_kind: Option<String>,
+    pub tool: Option<String>,
+    pub project: Option<String>,
+    pub session_id: Option<String>,
+    pub host: Option<String>,
+    pub since: Option<String>,
+    pub until: Option<String>,
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct SessionsHooksBackfillArgs {
     pub json: bool,
     pub since: Option<String>,
     pub limit: Option<u64>,

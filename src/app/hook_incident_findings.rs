@@ -227,6 +227,98 @@ pub fn derive_hook_incident_findings(
         });
     }
 
+    // ── Additional phrase-scanned failure modes ─────────────────────────────
+    let scope_hit_ids: Vec<i64> = scannable(
+        signal_anchors,
+        transcript_before,
+        transcript_after,
+        nearby_logs,
+        nearby_errors,
+    )
+    .filter(|entry| {
+        let lower = entry.message.to_ascii_lowercase();
+        [
+            "hook fired on the wrong",
+            "wrong tool for this hook",
+            "hook matched too broadly",
+            "hook should not have run",
+        ]
+        .iter()
+        .any(|kw| lower.contains(kw))
+    })
+    .map(|e| e.id)
+    .collect();
+    if !scope_hit_ids.is_empty() {
+        findings.likely_failure_modes.push(HookFailureMode {
+            category: HOOK_WRONG_SCOPE.to_owned(),
+            confidence: confidence_for(scope_hit_ids.len()).to_owned(),
+            evidence_ids: scope_hit_ids,
+        });
+        findings.prevention_hints.push(HookPreventionHint {
+            category: HOOK_WRONG_SCOPE.to_owned(),
+            hint: "Tighten the hook's matcher so it fires only for the intended tool/event scope."
+                .to_owned(),
+        });
+    }
+
+    let drift_hit_ids: Vec<i64> = scannable(
+        signal_anchors,
+        transcript_before,
+        transcript_after,
+        nearby_logs,
+        nearby_errors,
+    )
+    .filter(|entry| {
+        let lower = entry.message.to_ascii_lowercase();
+        [
+            "hook config drifted",
+            "hook policy changed",
+            "unexpected hook configuration",
+            "hook trust changed",
+        ]
+        .iter()
+        .any(|kw| lower.contains(kw))
+    })
+    .map(|e| e.id)
+    .collect();
+    if !drift_hit_ids.is_empty() {
+        findings.likely_failure_modes.push(HookFailureMode {
+            category: HOOK_POLICY_DRIFT.to_owned(),
+            confidence: confidence_for(drift_hit_ids.len()).to_owned(),
+            evidence_ids: drift_hit_ids,
+        });
+        findings.prevention_hints.push(HookPreventionHint {
+            category: HOOK_POLICY_DRIFT.to_owned(),
+            hint: "Pin the hook's config/trust state and review changes to the hook source before \
+                   re-trusting it."
+                .to_owned(),
+        });
+    }
+
+    // ── hook_not_invoked: a config/trust-only incident (a hook is configured
+    // and/or trusted but no runtime execution evidence exists in this
+    // incident) is the ONLY safe basis for a not-invoked signal, and ONLY as a
+    // low-confidence hypothesis — per GH #105, config presence is never proof
+    // of non-execution across sessions, so this stays scoped to the incident's
+    // own evidence and is explicitly low confidence.
+    let has_config_evidence = hook_events
+        .iter()
+        .any(|e| e.evidence_kind == "config_inventory" || e.evidence_kind == "trusted_hash_state");
+    if has_config_evidence && !incident.has_runtime_evidence {
+        findings.likely_failure_modes.push(HookFailureMode {
+            category: HOOK_NOT_INVOKED.to_owned(),
+            confidence: "low".to_owned(),
+            evidence_ids: hook_event_ids.clone(),
+        });
+        findings.prevention_hints.push(HookPreventionHint {
+            category: HOOK_NOT_INVOKED.to_owned(),
+            hint: "This hook is configured/trusted but shows no runtime execution evidence in this \
+                   window. Confirm it is wired to fire for the expected event, and compare against \
+                   runtime evidence for the same session before concluding it never ran."
+                .to_owned(),
+        });
+    }
+
     if !nearby_tool_calls.is_empty() {
         findings.contributing_factors.push(HookContributingFactor {
             factor: format!(

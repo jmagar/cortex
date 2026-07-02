@@ -22,7 +22,8 @@
 #   mcp_call notifications_recent, mcp_call file_tails, mcp_call notifications_test,
 #   mcp_call llm_invocations,
 #   mcp_call similar_incidents, mcp_call ask_history, mcp_call incident_context, mcp_call graph,
-#   mcp_call skill_events,
+#   mcp_call skill_events, mcp_call skill_incidents, mcp_call skill_investigate,
+#   mcp_call hook_events, mcp_call hook_incidents, mcp_call hook_investigate,
 #   mcp_call help
 
 set -euo pipefail
@@ -1124,6 +1125,24 @@ echo ""
 echo "Action: skill_investigate"
 SKILL_INVESTIGATE=$(mcp_call skill_investigate "skill=smoke-test-skill" 2>&1)
 assert_no_error "skill_investigate: no error" "$SKILL_INVESTIGATE"
+
+# ── hook_events ──────────────────────────────────────────────────────────────
+echo ""
+echo "Action: hook_events"
+HOOK_EVENTS=$(mcp_call hook_events "limit=5" 2>&1)
+assert_no_error "hook_events: no error" "$HOOK_EVENTS"
+
+# ── hook_incidents ───────────────────────────────────────────────────────────
+echo ""
+echo "Action: hook_incidents"
+HOOK_INCIDENTS=$(mcp_call hook_incidents "limit=5" 2>&1)
+assert_no_error "hook_incidents: no error" "$HOOK_INCIDENTS"
+
+# ── hook_investigate ─────────────────────────────────────────────────────────
+echo ""
+echo "Action: hook_investigate"
+HOOK_INVESTIGATE=$(mcp_call hook_investigate "hook=smoke-test-hook" 2>&1)
+assert_no_error "hook_investigate: no error" "$HOOK_INVESTIGATE"
 
 # ── graph proof UX (optional: requires known seeded graph evidence id) ───────
 echo ""

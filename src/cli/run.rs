@@ -143,6 +143,12 @@ pub(crate) async fn run(mode: CliMode, command: CliCommand) -> Result<()> {
                 dispatch::run_ai_llm_invocations(&mode, args).await
             }
             super::SessionsCommand::Skills(args) => dispatch::run_ai_skills(&mode, args).await,
+            super::SessionsCommand::HookEvents(args) => {
+                dispatch::run_ai_hook_events(&mode, args).await
+            }
+            super::SessionsCommand::HooksBackfill(args) => {
+                dispatch::run_ai_hooks_backfill(&mode, args).await
+            }
             super::SessionsCommand::SkillsBackfill(args) => {
                 dispatch::run_ai_skills_backfill(&mode, args).await
             }
@@ -162,9 +168,7 @@ pub(crate) async fn run(mode: CliMode, command: CliCommand) -> Result<()> {
             super::AssessCommand::Mcp(_) => {
                 Err(anyhow!("cortex assess mcp is not yet implemented"))
             }
-            super::AssessCommand::Hooks(_) => {
-                Err(anyhow!("cortex assess hooks is not yet implemented"))
-            }
+            super::AssessCommand::Hooks(args) => dispatch::run_assess_hooks(&mode, args).await,
         },
         CliCommand::Heartbeat(command) => {
             super::heartbeat_agent::run_heartbeat_no_db(command).await

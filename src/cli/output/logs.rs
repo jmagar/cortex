@@ -1,8 +1,9 @@
 use anyhow::Result;
 use cortex::app::{
     AbuseSearchResponse, AiCorrelateResponse, CorrelateEventsResponse, DbStats, GetErrorsResponse,
-    ListAiProjectsResponse, ListAiToolsResponse, ListHostsResponse, ListSkillEventsResponse,
-    ProjectContextResponse, SearchLogsResponse, SearchSessionsResponse, UsageBlocksResponse,
+    ListAiProjectsResponse, ListAiToolsResponse, ListHookEventsResponse, ListHostsResponse,
+    ListSkillEventsResponse, ProjectContextResponse, SearchLogsResponse, SearchSessionsResponse,
+    UsageBlocksResponse,
 };
 
 use super::super::SessionsOutputDetail;
@@ -358,6 +359,49 @@ pub(crate) fn print_skill_events_response(
             violet(&event.skill_name),
             plugin,
             primary(&event.event_kind),
+            cyan(&event.ai_tool),
+            event.ai_project.as_deref().unwrap_or("-")
+        );
+    }
+    if response.truncated {
+        println!("{}", muted("(truncated — refine filters or raise --limit)"));
+    }
+    Ok(())
+}
+
+pub(crate) fn print_hook_events_response(
+    response: &ListHookEventsResponse,
+    json: bool,
+) -> Result<()> {
+    if json {
+        return print_json(response);
+    }
+    if response.events.is_empty() {
+        println!("No hook events found.");
+        return Ok(());
+    }
+    println!(
+        "{} event(s) shown{}",
+        cyan(&response.events.len().to_string()),
+        if response.truncated {
+            " (truncated)"
+        } else {
+            ""
+        }
+    );
+    for event in &response.events {
+        let name = event
+            .hook_name
+            .as_deref()
+            .map(|n| format!(" name={n}"))
+            .unwrap_or_default();
+        println!(
+            "{}  {}{}  status={}  evidence={}  tool={} project={}",
+            muted(&local_ts(&event.timestamp)),
+            violet(&event.hook_event),
+            name,
+            primary(&event.status),
+            cyan(&event.evidence_kind),
             cyan(&event.ai_tool),
             event.ai_project.as_deref().unwrap_or("-")
         );
