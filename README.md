@@ -35,7 +35,7 @@ MCP is an exposure surface, not the owner of log-intelligence business policy. S
 
 ## Tools
 
-One MCP tool, `cortex`, is exposed. Use the required `action` argument to run `search`, `filter`, `tail`, `errors`, `hosts`, `map`, `sessions`, `search_sessions`, `abuse`, `abuse_incidents`, `abuse_investigate`, `ai_correlate`, `usage_blocks`, `project_context`, `list_ai_tools`, `list_ai_projects`, `correlate`, `stats`, `status`, `apps`, `source_ips`, `timeline`, `patterns`, `context`, `get`, `ingest_rate`, `silent_hosts`, `clock_skew`, `anomalies`, `compare`, `compose_status`, `compose_doctor`, `unaddressed_errors`, `ack_error`, `unack_error`, `notifications_recent`, `notifications_test`, `llm_invocations`, `similar_incidents`, `ask_history`, `incident_context`, `graph`, or `help`.
+One MCP tool, `cortex`, is exposed. Use the required `action` argument to run `search`, `filter`, `tail`, `errors`, `hosts`, `map`, `sessions`, `search_sessions`, `abuse`, `abuse_incidents`, `abuse_investigate`, `ai_correlate`, `topic_correlate`, `usage_blocks`, `project_context`, `list_ai_tools`, `list_ai_projects`, `correlate`, `stats`, `status`, `apps`, `source_ips`, `timeline`, `patterns`, `context`, `get`, `ingest_rate`, `silent_hosts`, `clock_skew`, `anomalies`, `compare`, `compose_status`, `compose_doctor`, `unaddressed_errors`, `ack_error`, `unack_error`, `notifications_recent`, `notifications_test`, `llm_invocations`, `similar_incidents`, `ask_history`, `incident_context`, `graph`, or `help`.
 
 For the complete action-specific parameter reference, see [`docs/mcp/SCHEMA.md`](docs/mcp/SCHEMA.md). For correlation behavior and AI/non-AI inclusion rules, see [`docs/mcp/CORRELATION.md`](docs/mcp/CORRELATION.md).
 
@@ -53,6 +53,7 @@ For the complete action-specific parameter reference, see [`docs/mcp/SCHEMA.md`]
 | `abuse_incidents` | Groups abuse hits into scored incident candidates |
 | `abuse_investigate` | Expands incidents into deterministic evidence bundles |
 | `ai_correlate` | AI transcript anchors cross-referenced against non-AI logs |
+| `topic_correlate` | Resolve a topic to graph entities and correlate all related logs into a unified timeline |
 | `usage_blocks` | AI activity in 5-hour UTC windows |
 | `project_context` | Summary for one AI project path |
 | `list_ai_tools` | Distinct AI tools with counts |
