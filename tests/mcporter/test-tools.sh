@@ -14,7 +14,7 @@
 #   cortex unack_error, cortex notifications_recent, cortex file_tails, cortex notifications_test,
 #   cortex llm_invocations,
 #   cortex similar_incidents, cortex ask_history, cortex incident_context, cortex graph,
-#   cortex skill_events,
+#   cortex skill_events, cortex skill_incidents, cortex skill_investigate,
 #   cortex help
 #
 # The server runs as a Docker container over HTTP. No stdio launch needed.

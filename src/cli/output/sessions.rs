@@ -487,6 +487,7 @@ pub(crate) fn ensure_ai_doctor_success(
 }
 
 pub(crate) mod more;
+pub(crate) mod skill_incidents;
 
 #[cfg(test)]
 #[path = "sessions_tests.rs"]

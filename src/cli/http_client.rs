@@ -64,19 +64,20 @@ use cortex::app::{
     AbuseSearchRequest, AbuseSearchResponse, AckErrorRequest, AckErrorResponse,
     AiCheckpointsRequest, AiCorrelateRequest, AiCorrelateResponse, AiIncidentRequest,
     AiIncidentResponse, AiInvestigateRequest, AiInvestigateResponse, AiParseErrorsRequest,
-    AiPruneCheckpointsRequest, AnomaliesRequest, AnomaliesResponse, AskHistoryRequest,
-    AskHistoryResponse, ClockSkewRequest, ClockSkewResponse, CompareRequest, CompareResponse,
-    CorrelateEventsRequest, CorrelateEventsResponse, CorrelateStateRequest, CorrelateStateResponse,
-    DbBackupRequest, DbBackupResult, DbCheckpointRequest, DbCheckpointResult,
-    DbIntegrityJobStarted, DbIntegrityRequest, DbIntegrityResult, DbMaintenanceStatus, DbStats,
-    DbVacuumRequest, DbVacuumResult, FileTailRequest, FileTailResponse, FilterLogsRequest,
-    FleetStateRequest, FleetStateResponse, GetErrorsRequest, GetErrorsResponse, GetLogRequest,
-    GetLogResponse, GraphAroundRequest, GraphAroundResponse, GraphEntityLookupRequest,
-    GraphEntityLookupResponse, GraphEvidenceLookupRequest, GraphEvidenceLookupResponse,
-    GraphExplainRequest, GraphExplainResponse, HostStateRequest, HostStateResponse,
-    IncidentContextRequest, IncidentContextResponse, IngestRateRequest, IngestRateResponse,
-    ListAiProjectsRequest, ListAiProjectsResponse, ListAiToolsRequest, ListAiToolsResponse,
-    ListAppsRequest, ListAppsResponse, ListHostsResponse, ListSessionsRequest,
+    AiPruneCheckpointsRequest, AiSkillIncidentRequest, AiSkillIncidentResponse,
+    AiSkillInvestigateRequest, AiSkillInvestigateResponse, AnomaliesRequest, AnomaliesResponse,
+    AskHistoryRequest, AskHistoryResponse, ClockSkewRequest, ClockSkewResponse, CompareRequest,
+    CompareResponse, CorrelateEventsRequest, CorrelateEventsResponse, CorrelateStateRequest,
+    CorrelateStateResponse, DbBackupRequest, DbBackupResult, DbCheckpointRequest,
+    DbCheckpointResult, DbIntegrityJobStarted, DbIntegrityRequest, DbIntegrityResult,
+    DbMaintenanceStatus, DbStats, DbVacuumRequest, DbVacuumResult, FileTailRequest,
+    FileTailResponse, FilterLogsRequest, FleetStateRequest, FleetStateResponse, GetErrorsRequest,
+    GetErrorsResponse, GetLogRequest, GetLogResponse, GraphAroundRequest, GraphAroundResponse,
+    GraphEntityLookupRequest, GraphEntityLookupResponse, GraphEvidenceLookupRequest,
+    GraphEvidenceLookupResponse, GraphExplainRequest, GraphExplainResponse, HostStateRequest,
+    HostStateResponse, IncidentContextRequest, IncidentContextResponse, IngestRateRequest,
+    IngestRateResponse, ListAiProjectsRequest, ListAiProjectsResponse, ListAiToolsRequest,
+    ListAiToolsResponse, ListAppsRequest, ListAppsResponse, ListHostsResponse, ListSessionsRequest,
     ListSessionsResponse, ListSkillEventsRequest, ListSkillEventsResponse, ListSourceIpsRequest,
     ListSourceIpsResponse, MaintenanceJobStatus, PatternsRequest, PatternsResponse,
     ProjectContextRequest, ProjectContextResponse, SearchLogsRequest, SearchLogsResponse,
@@ -595,6 +596,26 @@ impl HttpClient {
         let qs = serde_qs::to_string(req)
             .context("failed to serialize AiInvestigateRequest as query string")?;
         self.get_json_with_raw_query("/api/sessions/investigate", &qs)
+            .await
+    }
+
+    pub async fn ai_skill_incidents(
+        &self,
+        req: &AiSkillIncidentRequest,
+    ) -> Result<AiSkillIncidentResponse> {
+        let qs = serde_qs::to_string(req)
+            .context("failed to serialize AiSkillIncidentRequest as query string")?;
+        self.get_json_with_raw_query("/api/sessions/skill-incidents", &qs)
+            .await
+    }
+
+    pub async fn ai_skill_investigate(
+        &self,
+        req: &AiSkillInvestigateRequest,
+    ) -> Result<AiSkillInvestigateResponse> {
+        let qs = serde_qs::to_string(req)
+            .context("failed to serialize AiSkillInvestigateRequest as query string")?;
+        self.get_json_with_raw_query("/api/sessions/skill-investigate", &qs)
             .await
     }
 

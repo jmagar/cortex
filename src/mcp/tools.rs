@@ -35,6 +35,7 @@ use help::tool_cortex_help;
 
 mod context;
 mod help;
+mod skill_incidents;
 
 /// Execute a tool by name
 pub(super) async fn execute_tool(
@@ -122,6 +123,8 @@ async fn dispatch_cortex_action(
         H::IncidentContext => context::tool_incident_context(state, args).await,
         H::Graph => context::tool_graph(state, args).await,
         H::SkillEvents => tool_skill_events(state, args).await,
+        H::SkillIncidents => skill_incidents::tool_skill_incidents(state, args).await,
+        H::SkillInvestigate => skill_incidents::tool_skill_investigate(state, args).await,
         H::Help => help::tool_cortex_help().await,
     }
 }

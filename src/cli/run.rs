@@ -146,6 +146,12 @@ pub(crate) async fn run(mode: CliMode, command: CliCommand) -> Result<()> {
             super::SessionsCommand::SkillsBackfill(args) => {
                 dispatch::run_ai_skills_backfill(&mode, args).await
             }
+            super::SessionsCommand::SkillIncidents(args) => {
+                dispatch::run_ai_skill_incidents(&mode, args).await
+            }
+            super::SessionsCommand::SkillInvestigate(args) => {
+                dispatch::run_ai_skill_investigate(&mode, args).await
+            }
         },
         CliCommand::Heartbeat(command) => {
             super::heartbeat_agent::run_heartbeat_no_db(command).await

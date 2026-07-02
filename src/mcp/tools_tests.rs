@@ -1197,7 +1197,9 @@ fn sample_args_for_action(action: &str) -> Option<serde_json::Value> {
         | "notifications_test"
         | "llm_invocations"
         | "skill_events"
+        | "skill_incidents"
         | "help" => json!({"action": action}),
+        "skill_investigate" => json!({"action": action, "skill": "schema-test-skill"}),
         _ => return None,
     })
 }

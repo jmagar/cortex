@@ -100,6 +100,8 @@ pub(super) enum ActionHandler {
     IncidentContext,
     Graph,
     SkillEvents,
+    SkillIncidents,
+    SkillInvestigate,
     Help,
 }
 
@@ -518,6 +520,34 @@ pub(super) const ACTION_SPECS: &[ActionSpec] = &[
             "cortex sessions skills --project cortex --limit 20",
             "cortex sessions skills --skill cortex-troubleshoot --since 1h",
         ]
+    ),
+    action_spec!(
+        "skill_incidents",
+        Read,
+        "List detected skill-usage incidents (negative signals after a skill loaded)",
+        Moderate,
+        SkillIncidents,
+        flags: &[],
+        examples: &[
+            "cortex sessions skill-incidents --skill lavra:lavra-plan --since 7d",
+            "cortex sessions skill-incidents --plugin lavra --min-score 35",
+        ]
+    ),
+    action_spec!(
+        "skill_investigate",
+        Read,
+        "Deep-dive investigation of a skill-usage incident, skill-first",
+        Expensive,
+        SkillInvestigate,
+        flags: &[],
+        examples: &[
+            "cortex sessions skill-investigate lavra:lavra-plan",
+            "cortex sessions skill-investigate lavra:lavra-plan --since 7d",
+            "cortex sessions skill-investigate lavra:lavra-plan --tool codex --project /home/jmagar/workspace/cortex",
+            "cortex sessions skill-investigate --plugin lavra --all --limit 5",
+        ],
+        positional: Some("--skill"),
+        defaults: Defaults::new()
     ),
     // ── Admin / write actions ──────────────────────────────────────────────
     action_spec!(

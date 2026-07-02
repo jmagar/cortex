@@ -61,6 +61,8 @@ A single MCP tool, `mcp__cortex__cortex`, dispatches on a required `action` argu
 | `incident_context` | Full log context bundle for a known time window |
 | `graph` | Resolve graph entities and return bounded one-hop neighborhoods with evidence |
 | `skill_events` | List extracted AI skill-invocation events |
+| `skill_incidents` | Groups negative-signal transcript hits following a skill invocation into scored incident candidates |
+| `skill_investigate` | Expands skill-usage incidents into deterministic evidence bundles, skill-first |
 | `help` | Canonical in-tree action reference (use as ground truth if this doc drifts) |
 
 **Always prefer the MCP tool**. Fall back to HTTP only when MCP is unavailable.
