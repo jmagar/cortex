@@ -152,6 +152,9 @@ pub(crate) async fn run(mode: CliMode, command: CliCommand) -> Result<()> {
             super::SessionsCommand::SkillInvestigate(args) => {
                 dispatch::run_ai_skill_investigate(&mode, args).await
             }
+            super::SessionsCommand::SkillAssess(args) => {
+                dispatch::run_assess_skill(&mode, args).await
+            }
         },
         CliCommand::Assess(command) => match command {
             super::AssessCommand::Skill(args) => dispatch::run_assess_skill(&mode, args).await,

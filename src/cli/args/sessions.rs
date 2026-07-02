@@ -28,6 +28,10 @@ pub(crate) enum SessionsCommand {
     SkillsBackfill(SessionsSkillsBackfillArgs),
     SkillIncidents(SessionsSkillIncidentsArgs),
     SkillInvestigate(SessionsSkillInvestigateArgs),
+    /// Low-level alias for `cortex assess skill` — forwards to the exact
+    /// same dispatch function (`dispatch::run_assess_skill`) so the two
+    /// entry points never drift on behavior, only on discoverability.
+    SkillAssess(super::assess::AssessSkillArgs),
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
