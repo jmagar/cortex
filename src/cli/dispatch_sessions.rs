@@ -345,11 +345,12 @@ pub(crate) async fn run_ai_skills_backfill(
         println!("{}", serde_json::to_string_pretty(&response)?);
     } else {
         println!(
-            "scanned={} inserted={} skipped_duplicates={} parse_errors={} truncated={} dry_run={}",
+            "scanned={} inserted={} skipped_duplicates={} parse_errors={} source_unavailable={} truncated={} dry_run={}",
             response.scanned,
             response.inserted,
             response.skipped_duplicates,
             response.parse_errors,
+            response.source_unavailable,
             response.truncated,
             response.dry_run
         );

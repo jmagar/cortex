@@ -534,7 +534,7 @@ pub fn index_file_with_options(
     };
 
     loop {
-        let Some(read_line) = read_bounded_line(&mut reader, &mut hasher)? else {
+        let Some(read_line) = read_bounded_line(&mut reader, Some(&mut hasher))? else {
             break;
         };
         if read_line.oversized {
@@ -964,10 +964,10 @@ fn detect_explicit_file_source_kind(path: &Path) -> Result<SourceKind> {
     }
     let file = fs::File::open(path)?;
     let mut reader = BufReader::new(file);
-    let mut hasher = Sha256::new();
     let mut line_no = 0usize;
     while line_no < 50 {
-        let Some(read_line) = read_bounded_line(&mut reader, &mut hasher)? else {
+        // Sniffing source kind only needs the text, not the checkpoint digest.
+        let Some(read_line) = read_bounded_line(&mut reader, None)? else {
             return Ok(SourceKind::ExplicitFile);
         };
         if read_line.oversized {
@@ -1445,7 +1445,16 @@ struct ReadLine {
     oversized: bool,
 }
 
-fn read_bounded_line<R: BufRead>(reader: &mut R, hasher: &mut Sha256) -> Result<Option<ReadLine>> {
+/// Read one newline-delimited record, capping it at `MAX_RECORD_SIZE_BYTES`.
+///
+/// `hasher` is optional: the ingest/checkpoint path passes `Some(..)` to fold
+/// each byte into the source-file digest, while callers that only need the
+/// text (e.g. `read_transcript_lines`, the skill-event backfill's historical
+/// recovery) pass `None` to skip the SHA-256 work entirely.
+fn read_bounded_line<R: BufRead>(
+    reader: &mut R,
+    mut hasher: Option<&mut Sha256>,
+) -> Result<Option<ReadLine>> {
     let mut line = Vec::new();
     let mut oversized = false;
     loop {
@@ -1458,7 +1467,9 @@ fn read_bounded_line<R: BufRead>(reader: &mut R, hasher: &mut Sha256) -> Result<
         }
         let newline_pos = available.iter().position(|byte| *byte == b'\n');
         let take_len = newline_pos.map_or(available.len(), |pos| pos + 1);
-        hasher.update(&available[..take_len]);
+        if let Some(hasher) = hasher.as_deref_mut() {
+            hasher.update(&available[..take_len]);
+        }
         if !oversized {
             // Copy one sentinel byte past the inclusive record limit so we can
             // detect oversized records while still accepting exactly-limit rows.
@@ -1488,6 +1499,42 @@ fn read_bounded_line<R: BufRead>(reader: &mut R, hasher: &mut Sha256) -> Result<
         text,
         oversized: false,
     }))
+}
+
+/// Recover specific 0-based lines from a transcript file, using the same
+/// bounded, newline-delimited record semantics as the ingest path
+/// (`read_bounded_line` / `MAX_RECORD_SIZE_BYTES`) so `line_no` values recorded
+/// at ingest time resolve to the same physical lines here. Opens and scans the
+/// file once, stopping as soon as every requested line has been found.
+///
+/// Returns only the requested lines that were located and are within the
+/// record-size bound. A line beyond EOF (file truncated/rotated since ingest)
+/// or one that now exceeds `MAX_RECORD_SIZE_BYTES` (file corrupted/rewritten)
+/// is simply absent from the returned map — callers treat that as
+/// "source unavailable" rather than an error, since this is best-effort
+/// historical recovery, not the live ingest path. Trailing `\r`/`\n` is
+/// trimmed to match how the ingest path normalizes each record before parsing.
+pub(crate) fn read_transcript_lines(
+    path: &Path,
+    wanted: &HashSet<usize>,
+) -> Result<HashMap<usize, String>> {
+    let file = fs::File::open(path)?;
+    let mut reader = BufReader::new(file);
+    let mut out = HashMap::new();
+    let mut line_no = 0usize;
+    let mut remaining = wanted.len();
+    while remaining > 0 {
+        let Some(read_line) = read_bounded_line(&mut reader, None)? else {
+            break; // EOF before every requested line was found
+        };
+        if !read_line.oversized && wanted.contains(&line_no) {
+            let text = read_line.text.trim_end_matches(['\r', '\n']).to_string();
+            out.insert(line_no, text);
+            remaining -= 1;
+        }
+        line_no += 1;
+    }
+    Ok(out)
 }
 
 fn default_roots() -> Vec<PathBuf> {

@@ -369,13 +369,41 @@ cortex sessions skills backfill --limit 50000
 `--since` (optional, normalized time expression) restricts the scan to
 rows at or after that timestamp. `--limit` (optional, defaults to 10000,
 hard-capped at 1,000,000) bounds the number of `logs` rows scanned in one
-call. `--dry-run` reports `scanned`/`parse_errors` without inserting any
-rows. Insertion is idempotent (`INSERT OR IGNORE` on
-`UNIQUE(log_id, skill_name, event_kind, evidence_kind)`), so re-running
-backfill is always safe. Only one backfill can run at a time process-wide;
-a concurrent second call fails fast with a "already running" error. Local
-mode only — this is a DB-heavy batch job that runs against the local
-`CortexService`, not proxied over HTTP.
+call. `--dry-run` reports `scanned`/`parse_errors`/`source_unavailable`
+without inserting any rows — note it still reads the source transcript files
+from disk to compute those counts, so it is not a zero-I/O preview; only the
+DB write is skipped. Insertion is idempotent (`INSERT OR IGNORE` on
+`UNIQUE(log_id, skill_name, event_kind, evidence_kind)`): re-running the
+backfill is a no-op **as long as the source transcript files are unchanged**.
+Because a Claude row's `skill_name` is re-derived from the file on each run
+and is part of that uniqueness key, editing a transcript line in place between
+runs can insert a second, differently-named event for the same `log_id`
+(the `INSERT OR IGNORE` sees a new key, not a conflict). Transcript files are
+append-only in practice, so this is an edge case, not a routine hazard. Only
+one backfill can run at a time process-wide; a concurrent second call fails
+fast with a "already running" error. Local mode only — this is a DB-heavy
+batch job that runs against the local `CortexService`, not proxied over HTTP.
+
+Codex rows are recovered directly from `logs.message` (the transcript text,
+including `<skill><name>` tags, survives ingest-time scrubbing intact).
+Claude rows are recovered by re-reading the specific line of the original
+transcript file (via the shared `scanner::read_transcript_lines` helper, which
+applies the same bounded, newline-delimited record semantics as the ingest
+path), located via the persisted `ai_transcript_path` column and the `line_no`
+recorded in `metadata_json` at ingest time — `logs.message` for a Claude row
+is already-extracted plain text and never contains the raw
+`attributionSkill`/`attributionPlugin` JSON. `source_unavailable` counts
+Claude rows where that recovery wasn't possible: no `ai_transcript_path`/
+`line_no` on the row (legacy rows ingested before that metadata existed),
+the source file no longer exists, or the recorded line is out of range or
+exceeds the record-size bound (file rotated/truncated/rewritten since
+ingest). Those rows are skipped, not treated as an error; run with
+`RUST_LOG=debug` to see the per-row reason (`log_id`, path, line number).
+A non-zero `source_unavailable` after a real pass is expected for
+pre-metadata legacy rows and for transcripts since deleted or rotated — those
+are permanently unrecoverable via this command and need no action. An
+unexpectedly high count on recently-ingested rows suggests the transcript
+source directory moved; verify `ai_transcript_path` still resolves.
 
 ### `cortex sessions blocks`
 
