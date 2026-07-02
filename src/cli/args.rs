@@ -15,7 +15,8 @@ pub(crate) use sessions::{
     SessionsCorrelateArgs, SessionsDoctorArgs, SessionsErrorsArgs, SessionsIncidentContextArgs,
     SessionsIncidentsArgs, SessionsIndexArgs, SessionsInvestigateArgs, SessionsListArgs,
     SessionsLlmInvocationsArgs, SessionsOutputDetail, SessionsPruneCheckpointsArgs,
-    SessionsSearchArgs, SessionsSimilarArgs, SessionsSkillsBackfillArgs, SessionsSkillsListArgs,
+    SessionsSearchArgs, SessionsSimilarArgs, SessionsSkillIncidentsArgs,
+    SessionsSkillInvestigateArgs, SessionsSkillsBackfillArgs, SessionsSkillsListArgs,
     SessionsWatchArgs,
 };
 pub(crate) use surface::{

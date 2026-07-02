@@ -26,6 +26,48 @@ pub(crate) enum SessionsCommand {
     LlmInvocations(SessionsLlmInvocationsArgs),
     Skills(SessionsSkillsListArgs),
     SkillsBackfill(SessionsSkillsBackfillArgs),
+    SkillIncidents(SessionsSkillIncidentsArgs),
+    SkillInvestigate(SessionsSkillInvestigateArgs),
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct SessionsSkillIncidentsArgs {
+    pub json: bool,
+    pub skill: Option<String>,
+    pub plugin: Option<String>,
+    pub tool: Option<String>,
+    pub project: Option<String>,
+    pub session_id: Option<String>,
+    pub hostname: Option<String>,
+    pub since: Option<String>,
+    pub until: Option<String>,
+    pub limit: Option<u32>,
+    pub window_minutes: Option<u32>,
+    pub signals: Vec<String>,
+    /// Kept as `String` and parsed to `f64` at `into_request()` time,
+    /// matching this repo's pattern of parsing typed values at the
+    /// request-conversion boundary rather than during flag scanning (no
+    /// shared f64 parser helper exists in `FlagCursor`/`parse_common.rs`).
+    pub min_score: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct SessionsSkillInvestigateArgs {
+    /// Bare positional argument — the skill name, e.g. `lavra:lavra-plan`.
+    /// `None` when the caller used `--incident-id` or `--plugin` instead.
+    pub skill: Option<String>,
+    pub plugin: Option<String>,
+    pub incident_id: Option<String>,
+    pub tool: Option<String>,
+    pub project: Option<String>,
+    pub since: Option<String>,
+    pub until: Option<String>,
+    pub limit: Option<u32>,
+    pub window_minutes: Option<u32>,
+    pub correlation_window_minutes: Option<u32>,
+    /// Investigate multiple matching incidents instead of just the top one.
+    pub all: bool,
+    pub json: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

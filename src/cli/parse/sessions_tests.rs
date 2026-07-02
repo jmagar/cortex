@@ -367,3 +367,128 @@ fn parses_sessions_skills_list_with_project_filter() {
         other => panic!("expected SessionsCommand::Skills, got {other:?}"),
     }
 }
+
+#[test]
+fn skill_investigate_binds_bare_positional_to_skill() {
+    let cmd = parse_sessions_command(&strings(&["skill-investigate", "lavra:lavra-plan"])).unwrap();
+    match cmd {
+        crate::cli::CliCommand::Sessions(crate::cli::SessionsCommand::SkillInvestigate(args)) => {
+            assert_eq!(args.skill.as_deref(), Some("lavra:lavra-plan"));
+            assert!(args.incident_id.is_none());
+        }
+        other => panic!("expected SkillInvestigate, got {other:?}"),
+    }
+}
+
+#[test]
+fn skill_investigate_accepts_since_and_tool_flags_with_positional() {
+    let cmd = parse_sessions_command(&strings(&[
+        "skill-investigate",
+        "lavra:lavra-plan",
+        "--since",
+        "7d",
+        "--tool",
+        "codex",
+    ]))
+    .unwrap();
+    match cmd {
+        crate::cli::CliCommand::Sessions(crate::cli::SessionsCommand::SkillInvestigate(args)) => {
+            assert_eq!(args.skill.as_deref(), Some("lavra:lavra-plan"));
+            assert_eq!(args.tool.as_deref(), Some("codex"));
+            assert!(args.since.is_some());
+        }
+        other => panic!("expected SkillInvestigate, got {other:?}"),
+    }
+}
+
+#[test]
+fn skill_investigate_incident_id_flag_overrides_but_does_not_require_positional() {
+    let cmd = parse_sessions_command(&strings(&[
+        "skill-investigate",
+        "--incident-id",
+        "skill-inc-deadbeef",
+    ]))
+    .unwrap();
+    match cmd {
+        crate::cli::CliCommand::Sessions(crate::cli::SessionsCommand::SkillInvestigate(args)) => {
+            assert_eq!(args.incident_id.as_deref(), Some("skill-inc-deadbeef"));
+            assert!(args.skill.is_none());
+        }
+        other => panic!("expected SkillInvestigate, got {other:?}"),
+    }
+}
+
+#[test]
+fn skill_investigate_plugin_flag_for_plugin_level_investigation() {
+    let cmd =
+        parse_sessions_command(&strings(&["skill-investigate", "--plugin", "lavra"])).unwrap();
+    match cmd {
+        crate::cli::CliCommand::Sessions(crate::cli::SessionsCommand::SkillInvestigate(args)) => {
+            assert_eq!(args.plugin.as_deref(), Some("lavra"));
+            assert!(args.skill.is_none());
+        }
+        other => panic!("expected SkillInvestigate, got {other:?}"),
+    }
+}
+
+#[test]
+fn skill_investigate_all_and_limit_flags() {
+    let cmd = parse_sessions_command(&strings(&[
+        "skill-investigate",
+        "lavra:lavra-plan",
+        "--all",
+        "--limit",
+        "5",
+    ]))
+    .unwrap();
+    match cmd {
+        crate::cli::CliCommand::Sessions(crate::cli::SessionsCommand::SkillInvestigate(args)) => {
+            assert!(args.all);
+            assert_eq!(args.limit, Some(5));
+        }
+        other => panic!("expected SkillInvestigate, got {other:?}"),
+    }
+}
+
+#[test]
+fn skill_incidents_accepts_skill_and_min_score_flags() {
+    let cmd = parse_sessions_command(&strings(&[
+        "skill-incidents",
+        "--skill",
+        "lavra:lavra-plan",
+        "--min-score",
+        "35",
+    ]))
+    .unwrap();
+    match cmd {
+        crate::cli::CliCommand::Sessions(crate::cli::SessionsCommand::SkillIncidents(args)) => {
+            assert_eq!(args.skill.as_deref(), Some("lavra:lavra-plan"));
+            assert_eq!(args.min_score.as_deref(), Some("35"));
+        }
+        other => panic!("expected SkillIncidents, got {other:?}"),
+    }
+}
+
+#[test]
+fn skill_incidents_accepts_repeated_signal_flags() {
+    let cmd = parse_sessions_command(&strings(&[
+        "skill-incidents",
+        "--signal",
+        "tool_failure_after_skill",
+        "--signal",
+        "user_correction_after_skill",
+    ]))
+    .unwrap();
+    match cmd {
+        crate::cli::CliCommand::Sessions(crate::cli::SessionsCommand::SkillIncidents(args)) => {
+            assert_eq!(
+                args.signals,
+                vec![
+                    "tool_failure_after_skill".to_string(),
+                    "user_correction_after_skill".to_string()
+                ]
+            );
+        }
+        other => panic!("expected SkillIncidents, got {other:?}"),
+    }
+}
