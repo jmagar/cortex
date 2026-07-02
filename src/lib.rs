@@ -15,6 +15,7 @@ pub mod deploy;
 pub mod doctor;
 pub mod enrich;
 pub mod filetail;
+pub(crate) mod skill_assessment;
 pub(crate) use filetail as file_tail;
 pub mod heartbeat;
 pub mod heartbeat_agent;

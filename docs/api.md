@@ -101,6 +101,12 @@ to them by default.
 **Total: 58 routes** (current `src/api.rs` router surface, including syslog,
 surface-parity, AI, graph, compose, notification, error-ack, and DB routes).
 
+`cortex assess skill` / `cortex assess abuse` are CLI-only in this phase
+(no REST route) — see README "Skill and abuse assessment". LLM assessment
+spawns Gemini on the local host via `LlmRunner` and is never exposed over
+MCP or REST; this mirrors the existing `cortex sessions assess` (no
+`/api/sessions/assess` route either).
+
 ---
 
 ## Versioning policy

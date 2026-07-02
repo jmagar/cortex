@@ -8,8 +8,10 @@ use super::parse_logs::{
 };
 use super::{CliCommand, commands, parse_config, suggest};
 
+mod assess;
 mod sessions;
 
+use self::assess::parse_assess;
 use self::sessions::parse_sessions_command;
 
 pub(crate) const TOP_LEVEL_COMMANDS: &[&str] = &[
@@ -18,6 +20,7 @@ pub(crate) const TOP_LEVEL_COMMANDS: &[&str] = &[
     "tail",
     "hosts",
     "sessions",
+    "assess",
     "analysis",
     "state",
     "ingest",
@@ -46,6 +49,7 @@ pub(crate) fn parse_command(args: Vec<String>) -> Result<CliCommand> {
         "tail" => parse_tail(rest),
         "hosts" => parse_hosts(rest),
         "sessions" => parse_sessions_command(rest),
+        "assess" => parse_assess(rest),
         "analysis" => parse_analysis(rest),
         "state" => commands::state::parse_state(rest),
         "ingest" => parse_ingest(rest),

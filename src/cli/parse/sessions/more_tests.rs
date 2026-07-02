@@ -311,6 +311,23 @@ fn parse_sessions_llm_invocations_rejects_unknown_flag() {
     assert!(err.contains("unknown flag for sessions llm-invocations"));
 }
 
+#[test]
+fn parse_sessions_skill_assess_forwards_positional_skill() {
+    let cmd = crate::cli::CliCommand::parse(vec![
+        "sessions".to_string(),
+        "skill-assess".to_string(),
+        "cortex-frustration-assessment".to_string(),
+    ])
+    .unwrap();
+    match cmd {
+        crate::cli::CliCommand::Sessions(crate::cli::SessionsCommand::SkillAssess(args)) => {
+            assert_eq!(args.skill.as_deref(), Some("cortex-frustration-assessment"));
+            assert!(!args.no_llm);
+        }
+        other => panic!("expected SessionsCommand::SkillAssess, got {other:?}"),
+    }
+}
+
 fn strings(values: &[&str]) -> Vec<String> {
     values.iter().map(|value| (*value).to_string()).collect()
 }

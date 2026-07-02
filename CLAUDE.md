@@ -24,6 +24,8 @@ cortex compose logs --tail 20    # bounded compose logs
 cortex db status                 # inspect SQLite maintenance state
 cortex db integrity              # run SQLite integrity_check
 cortex db backup                 # create WAL-safe SQLite backup
+cortex assess skill <skill> [--since 7d] [--tool codex] [--all|--limit N] [--no-llm]
+cortex assess abuse [--incident-id ID] [--no-llm]  # unified assess namespace; see README "Skill and abuse assessment"
 ```
 
 ```bash

@@ -437,6 +437,22 @@ pub(crate) fn parse_sessions_llm_invocations(args: &[String]) -> Result<CliComma
     )))
 }
 
+/// `cortex sessions skill-assess <skill>` — low-level alias for `cortex
+/// assess skill`. Delegates flag parsing to the canonical `assess skill`
+/// parser (`parse_assess_skill_from`) so the two entry points never drift,
+/// then rewraps the result as `SessionsCommand::SkillAssess` instead of
+/// `AssessCommand::Skill`.
+pub(crate) fn parse_sessions_skill_assess(args: &[String]) -> Result<CliCommand> {
+    let assess_cmd = super::super::assess::parse_assess_skill_from(args)?;
+    let CliCommand::Assess(super::super::super::AssessCommand::Skill(skill_args)) = assess_cmd
+    else {
+        unreachable!("parse_assess_skill_from always returns AssessCommand::Skill");
+    };
+    Ok(CliCommand::Sessions(SessionsCommand::SkillAssess(
+        skill_args,
+    )))
+}
+
 #[cfg(test)]
 #[path = "more_tests.rs"]
 mod tests;

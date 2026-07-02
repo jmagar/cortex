@@ -16,6 +16,7 @@ mod investigation;
 mod log_query;
 mod ops;
 mod rag;
+mod skill_assess;
 mod skill_events;
 mod stats;
 
@@ -30,6 +31,7 @@ pub use investigation::*;
 pub use log_query::*;
 pub use ops::*;
 pub use rag::*;
+pub use skill_assess::*;
 pub use skill_events::*;
 pub use stats::*;
 

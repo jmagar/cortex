@@ -172,6 +172,20 @@ macro_rules! action_spec {
 /// When adding a new action:
 /// 1. Add an `ActionSpec` row here with the executable handler.
 /// 2. Add the handler implementation branch in `src/mcp/tools.rs`.
+///
+/// # NOTE (PR 4, skill/abuse assessment)
+/// `skill_assess` / `abuse_assess` LLM assessment is intentionally NOT
+/// exposed as an MCP action or REST route. The guarded Gemini invocation
+/// runs only through PR 1's `LlmRunner`
+/// (`crate::app::llm_runner::LlmRunner::run`), spawns a subprocess on the
+/// local host, and is only safe to trigger from a CLI process the operator
+/// controls directly — see `src/cli/dispatch_sessions.rs`'s
+/// `run_assess_skill`/`run_assess_abuse` `CliMode::Http(_) => bail!(...)`
+/// guards. If skill or abuse assessment is ever exposed remotely, it MUST
+/// pass `run_llm: false` to `run_skill_assessment_with_delta`/
+/// `assess_top_abuse_incident_with_delta` — never call `LlmRunner::run`
+/// from a network-triggered caller. See
+/// `no_mcp_action_spec_invokes_gemini_assessment` in `actions_tests.rs`.
 pub(super) const ACTION_SPECS: &[ActionSpec] = &[
     // ── Read-only queries ──────────────────────────────────────────────────
     action_spec!(
