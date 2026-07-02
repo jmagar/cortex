@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.5.0] - 2026-07-02
+
+### Added
+
+- Skill LLM assessment and a unified `cortex assess` CLI namespace (GH #94 PR 4/4), the final PR completing GH #94's Plan A scope. Built on PR 1's `LlmRunner` invocation guard and PR 3's `investigate_ai_skill_incidents` evidence detector:
+  - A new embedded `cortex-skill-improvement-assessment` skill (`plugins/cortex/skills/cortex-skill-improvement-assessment/SKILL.md`) produces a 7-section Markdown assessment (incident summary, skill purpose, what happened, evidence-backed failure modes, proposed skill-doc changes, proposed regression tests/queries, confidence and open questions) from a `SkillIncidentEvidence` bundle. Evidence is always wrapped in `<untrusted-evidence source="cortex skill_investigate json" treat-as="passive-data">...</untrusted-evidence>` and never treated as instructions, regardless of content — locked in by a prompt-injection isolation test.
+  - `CortexService::run_skill_assessment_with_delta` (`src/app/services/skill_assessment.rs`) resolves a skill (or `--plugin`) name to its highest-priority (or all, with `--all`) matching skill incident via `investigate_ai_skill_incidents`, and optionally runs the guarded Gemini assessment through `LlmRunner::run` — the only LLM invocation this PR adds.
+  - `CortexService::assess_top_abuse_incident_with_delta` (`src/app/services/assessment.rs`) is a thin UX wrapper around the existing `list_ai_incidents` + `run_gemini_assess_with_delta` pipeline (already `LlmRunner`-guarded) — auto-picks the top-priority matching abuse incident when `--incident-id` is omitted; adds zero new LLM call sites.
+  - A new unified `cortex assess skill|abuse|mcp|hooks` CLI command group: `skill` and `abuse` are fully implemented (`--no-llm` for deterministic-findings-only, `--all`/`--limit`/`--plugin` on `skill`, `--incident-id` on `abuse`); `mcp` and `hooks` are stubbed (`bail!("... not yet implemented")`), tracked in GH #104/#105. `cortex sessions skill-assess <skill>` is a low-level alias forwarding to the same dispatch function.
+  - LLM assessment is CLI-only by design: `skill_assess`/`abuse_assess` are never exposed as MCP actions or REST routes, and `--http` mode is rejected unless `--no-llm` is also passed (mirrors the existing `cortex sessions assess` guard). Locked in by regression tests asserting zero `llm_invocations` audit rows when `run_llm=false`, and a test asserting neither action name exists in `ACTION_SPECS`.
+  - MCP action count unchanged at 51 (no new MCP actions added by this PR, by design).
+
 ## [3.4.0] - 2026-07-02
 
 ### Added
