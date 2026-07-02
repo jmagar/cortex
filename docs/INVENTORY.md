@@ -60,6 +60,8 @@ that registry by `src/mcp/schemas.rs::tool_definitions()`.
 | `incident_context` | Window bundle of non-AI log aggregates/errors and active AI sessions | no |
 | `graph` | Resolve graph entities, neighborhoods, and evidence-backed explanations | no |
 | `skill_events` | List extracted AI skill-invocation events | no |
+| `skill_incidents` | Groups negative-signal transcript hits following a skill invocation into scored incident candidates | no |
+| `skill_investigate` | Expands skill-usage incidents into deterministic evidence bundles, skill-first | no |
 | `ack_error` | Acknowledge an error signature | yes |
 | `unack_error` | Revoke an error acknowledgement | yes |
 | `file_tails` | Manage Cortex-owned file-tail ingest sources | yes |

@@ -146,6 +146,8 @@ pub(super) const API_SURFACE_SPECS: &[SurfaceSpec] = &[
     api!("/api/sessions/investigate", Sessions, Canonical, Read),
     api!("/api/sessions/llm-invocations", Sessions, Canonical, Admin),
     api!("/api/sessions/skills", Sessions, Canonical, Read),
+    api!("/api/sessions/skill-incidents", Sessions, Canonical, Read),
+    api!("/api/sessions/skill-investigate", Sessions, Canonical, Read),
     api!(
         "/api/compose/status",
         Compose,

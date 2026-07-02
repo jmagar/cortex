@@ -35,7 +35,7 @@ MCP is an exposure surface, not the owner of log-intelligence business policy. S
 
 ## Tools
 
-One MCP tool, `cortex`, is exposed. Use the required `action` argument to run `search`, `filter`, `tail`, `errors`, `hosts`, `map`, `sessions`, `search_sessions`, `abuse`, `abuse_incidents`, `abuse_investigate`, `ai_correlate`, `topic_correlate`, `usage_blocks`, `project_context`, `list_ai_tools`, `list_ai_projects`, `correlate`, `stats`, `status`, `apps`, `source_ips`, `timeline`, `patterns`, `context`, `get`, `ingest_rate`, `silent_hosts`, `clock_skew`, `anomalies`, `compare`, `compose_status`, `compose_doctor`, `unaddressed_errors`, `ack_error`, `unack_error`, `notifications_recent`, `notifications_test`, `llm_invocations`, `similar_incidents`, `ask_history`, `incident_context`, `graph`, or `help`.
+One MCP tool, `cortex`, is exposed. Use the required `action` argument to run `search`, `filter`, `tail`, `errors`, `hosts`, `map`, `sessions`, `search_sessions`, `abuse`, `abuse_incidents`, `abuse_investigate`, `ai_correlate`, `topic_correlate`, `usage_blocks`, `project_context`, `list_ai_tools`, `list_ai_projects`, `correlate`, `stats`, `status`, `apps`, `source_ips`, `timeline`, `patterns`, `context`, `get`, `ingest_rate`, `silent_hosts`, `clock_skew`, `anomalies`, `compare`, `compose_status`, `compose_doctor`, `unaddressed_errors`, `ack_error`, `unack_error`, `notifications_recent`, `notifications_test`, `llm_invocations`, `similar_incidents`, `ask_history`, `incident_context`, `graph`, `skill_events`, `skill_incidents`, `skill_investigate`, or `help`.
 
 For the complete action-specific parameter reference, see [`docs/mcp/SCHEMA.md`](docs/mcp/SCHEMA.md). For correlation behavior and AI/non-AI inclusion rules, see [`docs/mcp/CORRELATION.md`](docs/mcp/CORRELATION.md).
 
@@ -84,6 +84,9 @@ For the complete action-specific parameter reference, see [`docs/mcp/SCHEMA.md`]
 | `ask_history` | Search AI transcript history with nearby log context |
 | `incident_context` | Full context bundle for a known time window |
 | `graph` | Resolve graph entities, neighborhoods, and evidence-backed explanations |
+| `skill_events` | List extracted AI skill-invocation events |
+| `skill_incidents` | Groups negative-signal transcript hits following a skill invocation into scored incident candidates |
+| `skill_investigate` | Expands skill-usage incidents into deterministic evidence bundles, skill-first |
 | `help` | Markdown reference for all actions |
 
 ## Homelab Inventory

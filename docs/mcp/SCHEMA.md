@@ -67,6 +67,8 @@ selects one of these 48 actions:
 | `incident_context` | `cortex:read` | moderate | Window bundle: log aggregates, errors, AI sessions |
 | `graph` | `cortex:read` | moderate | Entity lookup and one-hop graph neighborhoods |
 | `skill_events` | `cortex:read` | cheap | List extracted AI skill-invocation events |
+| `skill_incidents` | `cortex:read` | moderate | Grouped skill-usage incident candidates |
+| `skill_investigate` | `cortex:read` | expensive | Evidence bundles for skill-usage incidents, skill-first |
 | `ack_error` | `cortex:admin` | write | Acknowledge an error signature |
 | `unack_error` | `cortex:admin` | write | Revoke an error acknowledgement |
 | `file_tails` | `cortex:admin` | write | Manage Cortex-owned file-tail ingest sources |

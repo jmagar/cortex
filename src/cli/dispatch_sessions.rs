@@ -21,6 +21,9 @@ use super::output::sessions::more::{
     print_ai_investigate_response_with_options, print_ask_history_response,
     print_incident_context_response, print_similar_incidents_response,
 };
+use super::output::sessions::skill_incidents::{
+    print_ai_skill_incidents_response, print_ai_skill_investigate_response,
+};
 use super::output::sessions::{
     ensure_ai_doctor_success, ensure_index_success, print_ai_doctor_response,
     print_ai_parse_errors_response, print_ai_smoke_watch_response, print_checkpoints_response,
@@ -33,7 +36,8 @@ use super::{
     SessionsCorrelateArgs, SessionsDoctorArgs, SessionsErrorsArgs, SessionsIncidentContextArgs,
     SessionsIncidentsArgs, SessionsIndexArgs, SessionsInvestigateArgs, SessionsListArgs,
     SessionsLlmInvocationsArgs, SessionsPruneCheckpointsArgs, SessionsSearchArgs,
-    SessionsSimilarArgs, SessionsSkillsBackfillArgs, SessionsSkillsListArgs, SessionsWatchArgs,
+    SessionsSimilarArgs, SessionsSkillIncidentsArgs, SessionsSkillInvestigateArgs,
+    SessionsSkillsBackfillArgs, SessionsSkillsListArgs, SessionsWatchArgs,
 };
 
 // ─── AI Arg → Request conversions (bead 0p8r.8) ─────────────────────────────
@@ -542,6 +546,83 @@ pub(crate) async fn run_ai_investigate(
         CliMode::Http(client) => http_or_cancel(client.ai_investigate(&req)).await?,
     };
     print_ai_investigate_response_with_options(&response, json, print_options)
+}
+
+impl SessionsSkillIncidentsArgs {
+    pub(crate) fn into_request(self) -> cortex::app::AiSkillIncidentRequest {
+        cortex::app::AiSkillIncidentRequest {
+            skill: self.skill,
+            plugin: self.plugin,
+            tool: self.tool,
+            project: self.project,
+            session_id: self.session_id,
+            hostname: self.hostname,
+            since: self.since,
+            until: self.until,
+            limit: self.limit,
+            window_minutes: self.window_minutes,
+            signals: self.signals,
+            min_score: self
+                .min_score
+                .map(|s| s.parse::<f64>())
+                .transpose()
+                .ok()
+                .flatten(),
+        }
+    }
+}
+
+impl SessionsSkillInvestigateArgs {
+    pub(crate) fn into_request(self) -> cortex::app::AiSkillInvestigateRequest {
+        cortex::app::AiSkillInvestigateRequest {
+            incident_id: self.incident_id,
+            skill: self.skill,
+            plugin: self.plugin,
+            tool: self.tool,
+            project: self.project,
+            since: self.since,
+            until: self.until,
+            limit: if self.all {
+                self.limit.or(Some(3))
+            } else {
+                self.limit.or(Some(1))
+            },
+            window_minutes: self.window_minutes,
+            correlation_window_minutes: self.correlation_window_minutes,
+        }
+    }
+}
+
+pub(crate) async fn run_ai_skill_incidents(
+    mode: &CliMode,
+    args: SessionsSkillIncidentsArgs,
+) -> Result<()> {
+    let json = args.json;
+    let req = args.into_request();
+    let response = match mode {
+        CliMode::Local(service) => service.list_ai_skill_incidents(req).await?,
+        CliMode::Http(client) => http_or_cancel(client.ai_skill_incidents(&req)).await?,
+    };
+    print_ai_skill_incidents_response(&response, json)
+}
+
+pub(crate) async fn run_ai_skill_investigate(
+    mode: &CliMode,
+    args: SessionsSkillInvestigateArgs,
+) -> Result<()> {
+    let json = args.json;
+    if args.skill.is_none() && args.plugin.is_none() && args.incident_id.is_none() {
+        bail!(
+            "sessions skill-investigate requires a skill name (positional), --plugin, or \
+             --incident-id, e.g. `cortex sessions skill-investigate lavra:lavra-plan`"
+        );
+    }
+    let req = args.into_request();
+    let response = match mode {
+        CliMode::Local(service) => service.investigate_ai_skill_incidents(req).await?,
+        CliMode::Http(client) => http_or_cancel(client.ai_skill_investigate(&req)).await?,
+    };
+    print_ai_skill_investigate_response(&response, json)
 }
 
 pub(crate) async fn run_ai_assess(mode: &CliMode, args: SessionsAssessArgs) -> Result<()> {

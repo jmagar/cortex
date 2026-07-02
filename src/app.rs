@@ -7,6 +7,8 @@ pub mod llm_runner;
 mod models;
 mod os_adapter;
 mod services;
+pub(crate) mod skill_incident_findings;
+pub mod skill_signal_detectors;
 pub(crate) mod time;
 mod watch_status;
 
@@ -38,6 +40,10 @@ pub use models::{
     AiProjectEntry,
     AiPruneCheckpointsRequest,
     AiSessionEntry,
+    AiSkillIncidentRequest,
+    AiSkillIncidentResponse,
+    AiSkillInvestigateRequest,
+    AiSkillInvestigateResponse,
     AiToolEntry,
     AiWatchStatusReport,
     AnomaliesRequest,

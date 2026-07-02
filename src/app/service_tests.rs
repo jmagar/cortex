@@ -2467,3 +2467,210 @@ async fn service_exposes_llm_runner_with_configured_defaults() {
         .unwrap();
     assert_eq!(outcome.output, "pong");
 }
+
+#[tokio::test]
+async fn list_ai_skill_incidents_empty_db_returns_no_data() {
+    let (service, _pool, _dir) = test_service();
+    let response = service
+        .list_ai_skill_incidents(AiSkillIncidentRequest::default())
+        .await
+        .unwrap();
+    assert_eq!(response.incidents.len(), 0);
+    assert_eq!(response.total_incidents, 0);
+}
+
+#[tokio::test]
+async fn investigate_ai_skill_incidents_empty_db_returns_no_data_flag() {
+    let (service, _pool, _dir) = test_service();
+    let response = service
+        .investigate_ai_skill_incidents(AiSkillInvestigateRequest::default())
+        .await
+        .unwrap();
+    assert_eq!(response.evidence.len(), 0);
+    assert!(response.no_data);
+    assert!(!response.suggested_filters.is_empty());
+}
+
+#[allow(clippy::too_many_arguments)]
+fn insert_skill_event_for_service_test(
+    pool: &DbPool,
+    log_id: i64,
+    ai_tool: &str,
+    ai_project: &str,
+    ai_session_id: &str,
+    hostname: &str,
+    timestamp: &str,
+    skill_name: &str,
+    skill_plugin: Option<&str>,
+) {
+    let conn = pool.get().unwrap();
+    conn.execute(
+        "INSERT INTO ai_skill_events
+            (log_id, ai_tool, ai_project, ai_session_id, hostname, timestamp,
+             skill_name, skill_plugin, event_kind, evidence_kind, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'skill_invoked', 'transcript', ?6)",
+        rusqlite::params![
+            log_id,
+            ai_tool,
+            ai_project,
+            ai_session_id,
+            hostname,
+            timestamp,
+            skill_name,
+            skill_plugin,
+        ],
+    )
+    .unwrap();
+}
+
+fn skill_ai_entry(ts: &str, session_id: &str, msg: &str) -> LogBatchEntry {
+    LogBatchEntry {
+        timestamp: ts.to_string(),
+        hostname: "dookie".into(),
+        facility: Some("local0".into()),
+        severity: "info".into(),
+        app_name: Some("ai-transcript".into()),
+        process_id: None,
+        message: msg.to_string(),
+        raw: msg.to_string(),
+        source_ip: "127.0.0.1:514".into(),
+        docker_checkpoint: None,
+        ai_tool: Some("codex".into()),
+        ai_project: Some("/tmp/skill-svc-test".into()),
+        ai_session_id: Some(session_id.to_string()),
+        ai_transcript_path: Some(format!("/tmp/skill-svc-test/{session_id}.jsonl")),
+        metadata_json: None,
+        http_status: None,
+        auth_outcome: None,
+        dns_blocked: None,
+        event_action: None,
+        parse_error: None,
+    }
+}
+
+#[tokio::test]
+async fn investigate_ai_skill_incidents_by_skill_picks_top_priority_and_lists_others() {
+    let (service, pool, _dir) = test_service();
+
+    // Session "sess-low": skill event only, no negative signal.
+    let low_skill = skill_ai_entry(
+        "2026-01-01T00:00:00Z",
+        "sess-low",
+        "loaded skill lavra:lavra-plan",
+    );
+    // Session "sess-high": skill event + correction + tool failure.
+    let high_skill = skill_ai_entry(
+        "2026-01-01T00:00:00Z",
+        "sess-high",
+        "loaded skill lavra:lavra-plan",
+    );
+    let high_correction = skill_ai_entry(
+        "2026-01-01T00:01:00Z",
+        "sess-high",
+        "you said you would run the tests but you didn't",
+    );
+    let high_failure = skill_ai_entry(
+        "2026-01-01T00:02:00Z",
+        "sess-high",
+        "command exited with exit code 1",
+    );
+    insert_logs_batch(
+        &pool,
+        &[low_skill, high_skill, high_correction, high_failure],
+    )
+    .unwrap();
+
+    let log_ids: Vec<i64> = {
+        let conn = pool.get().unwrap();
+        let mut stmt = conn.prepare("SELECT id FROM logs ORDER BY id ASC").unwrap();
+        stmt.query_map([], |row| row.get::<_, i64>(0))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap()
+    };
+    insert_skill_event_for_service_test(
+        &pool,
+        log_ids[0],
+        "codex",
+        "/tmp/skill-svc-test",
+        "sess-low",
+        "dookie",
+        "2026-01-01T00:00:00Z",
+        "lavra:lavra-plan",
+        Some("lavra"),
+    );
+    insert_skill_event_for_service_test(
+        &pool,
+        log_ids[1],
+        "codex",
+        "/tmp/skill-svc-test",
+        "sess-high",
+        "dookie",
+        "2026-01-01T00:00:00Z",
+        "lavra:lavra-plan",
+        Some("lavra"),
+    );
+
+    let response = service
+        .investigate_ai_skill_incidents(AiSkillInvestigateRequest {
+            skill: Some("lavra:lavra-plan".to_string()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(
+        response.evidence.len(),
+        1,
+        "skill-first default returns the single top incident"
+    );
+    assert_eq!(
+        response.evidence[0].incident.session_id, "sess-high",
+        "top-priority incident must be the higher-signal session"
+    );
+    assert_eq!(
+        response.other_matching_incidents.len(),
+        1,
+        "the lower-priority incident must be summarized in other_matching_incidents"
+    );
+    assert_eq!(response.other_matching_incidents[0].priority_label, "low");
+}
+
+#[tokio::test]
+async fn investigate_ai_skill_incidents_low_signal_returns_summary_not_error() {
+    let (service, pool, _dir) = test_service();
+    let skill_log = skill_ai_entry(
+        "2026-01-01T00:00:00Z",
+        "sess-only",
+        "loaded skill lavra:lavra-plan",
+    );
+    insert_logs_batch(&pool, &[skill_log]).unwrap();
+    let log_id: i64 = {
+        let conn = pool.get().unwrap();
+        conn.query_row("SELECT id FROM logs LIMIT 1", [], |row| row.get(0))
+            .unwrap()
+    };
+    insert_skill_event_for_service_test(
+        &pool,
+        log_id,
+        "codex",
+        "/tmp/skill-svc-test",
+        "sess-only",
+        "dookie",
+        "2026-01-01T00:00:00Z",
+        "lavra:lavra-plan",
+        Some("lavra"),
+    );
+
+    let response = service
+        .investigate_ai_skill_incidents(AiSkillInvestigateRequest {
+            skill: Some("lavra:lavra-plan".to_string()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    assert!(!response.no_data);
+    assert_eq!(response.evidence.len(), 1);
+    assert!(response.no_incident_low_severity_summary);
+}

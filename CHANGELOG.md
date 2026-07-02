@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.4.0] - 2026-07-02
+
+### Added
+
+- Skill incident detection, investigation, and deterministic findings (GH #94 PR 3/4), built on PR 2's `ai_skill_events` table:
+  - Five deterministic, phrase-boundary signal-anchor detectors (`src/app/skill_signal_detectors.rs`) classify transcript log messages as anchors for `user_correction_after_skill`, `tool_failure_after_skill`, `scope_or_source_confusion`, `ignored_skill_or_policy_instruction`, and `overlong_loop_after_skill` (the last one requires both a high tool-call volume AND a co-occurring negative signal — long-but-successful work never triggers it alone).
+  - A new `skill_incidents` MCP action, `GET /api/sessions/skill-incidents` REST route, and `cortex sessions skill-incidents` CLI command group `ai_skill_events` rows by `(skill_name, skill_plugin, tool, project, session_id, hostname, window_bucket)`, score them via a locked formula, and assign each a stable synthetic `incident_id` (`skill-inc-{hash}`) and `priority_label` (low/medium/high/critical). Sorting uses `f64::total_cmp` to guarantee a total order even if a NaN score ever appears.
+  - A new `skill_investigate` MCP action, `GET /api/sessions/skill-investigate` REST route, and skill-first `cortex sessions skill-investigate <skill>` CLI command (bare positional binds to `--skill`) expand a `SkillIncident` into a bounded, truncation-flagged `SkillIncidentEvidence` bundle — skill events, signal anchors, transcript before/after, and nearby tool failures/corrections/logs/errors, each collection capped and truncation-flagged. Filtering by `--skill`/`--plugin` resolves to the single top-priority incident by default, with the rest summarized into `other_matching_incidents`; a zero-signal match is still returned (never an error) but flagged via `no_incident_low_severity_summary`; no matching data returns `no_data` plus `suggested_filters` instead of an empty result.
+  - A new deterministic findings module (`src/app/skill_incident_findings.rs`) — pure rule evaluation over an evidence bundle, no DB or LLM calls — derives `likely_failure_modes` (9 named categories: `skill_scope_mismatch`, `missing_prerequisite_check`, `wrong_source_of_truth`, `overly_broad_research_loop`, `tool_policy_mismatch`, `missing_verification_step`, `ambiguous_skill_trigger`, `stale_or_conflicting_skill_instruction`, `assistant_overexplained_simple_answer`, plus `unknown`), `contributing_factors`, skill-doc-actionable `prevention_hints`, and `open_questions`. Every non-`unknown` finding cites the log row ids that support it; weak evidence yields `unknown` + `open_questions` rather than an unsupported claim.
+  - MCP action count: 49 → 51.
+
 ## [3.3.0] - 2026-07-02
 
 ### Added

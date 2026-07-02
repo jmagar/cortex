@@ -17,9 +17,11 @@ use super::super::{
     CliCommand, SessionsAbuseArgs, SessionsBlocksArgs, SessionsCommand, SessionsContextArgs,
     SessionsCorrelateArgs, SessionsListArgs, SessionsOutputDetail, SessionsSearchArgs,
 };
+use skill_incidents::{parse_sessions_skill_incidents, parse_sessions_skill_investigate};
 
 mod more;
 mod ops;
+mod skill_incidents;
 mod skills;
 
 const SESSIONS_SUBCOMMANDS: &[&str] = &[
@@ -47,6 +49,8 @@ const SESSIONS_SUBCOMMANDS: &[&str] = &[
     "assess",
     "llm-invocations",
     "skills",
+    "skill-incidents",
+    "skill-investigate",
 ];
 
 pub(crate) fn parse_sessions_command(args: &[String]) -> Result<CliCommand> {
@@ -85,6 +89,8 @@ pub(crate) fn parse_sessions_command(args: &[String]) -> Result<CliCommand> {
         "assess" => parse_sessions_assess(rest),
         "llm-invocations" => parse_sessions_llm_invocations(rest),
         "skills" => self::skills::parse_sessions_skills(rest),
+        "skill-incidents" => parse_sessions_skill_incidents(rest),
+        "skill-investigate" => parse_sessions_skill_investigate(rest),
         _ => bail!(
             "{}",
             super::suggest::unknown_command(

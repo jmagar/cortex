@@ -30,7 +30,7 @@ protected endpoint still requires transport auth when configured.
 
 ## Current Action Index
 
-The live registry currently contains 49 actions (this snapshot may lag
+The live registry currently contains 51 actions (this snapshot may lag
 `src/mcp/actions.rs::ACTION_SPECS`, the authoritative source):
 
 | Action | Scope | Cost | Purpose |
@@ -78,6 +78,8 @@ The live registry currently contains 49 actions (this snapshot may lag
 | `incident_context` | `cortex:read` | moderate | Window bundle: log aggregates, errors, AI sessions |
 | `graph` | `cortex:read` | moderate | Entity lookup and one-hop graph neighborhoods |
 | `skill_events` | `cortex:read` | cheap | List extracted AI skill-invocation events |
+| `skill_incidents` | `cortex:read` | moderate | Grouped skill-usage incident candidates |
+| `skill_investigate` | `cortex:read` | expensive | Evidence bundles for skill-usage incidents, skill-first |
 | `ack_error` | `cortex:admin` | write | Acknowledge an error signature |
 | `unack_error` | `cortex:admin` | write | Revoke an error acknowledgement |
 | `file_tails` | `cortex:admin` | write | Manage local file-tail ingest sources |
@@ -112,6 +114,7 @@ AI-aware correlation path. Use:
 
 - `ai_correlate` for AI transcript anchors plus nearby non-AI logs.
 - `abuse_investigate` for deterministic abuse evidence bundles.
+- `skill_investigate` for deterministic skill-usage-incident evidence bundles, skill-first.
 - `similar_incidents` for FTS5 historical incident clusters.
 - `ask_history` for AI transcript history with nearby log context.
 - `incident_context` for a caller-provided time-window bundle.
