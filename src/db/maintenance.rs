@@ -774,13 +774,23 @@ pub fn purge_old_llm_invocations(
         return Ok(0);
     }
 
+    // `llm_invocations.started_at` is written by SQLite as
+    // `strftime('%Y-%m-%dT%H:%M:%fZ','now')`, which includes millisecond
+    // fractional seconds (e.g. `2026-07-01T20:09:50.850Z`). The cutoff must
+    // carry the same precision: since the comparison is a lexicographic
+    // string compare (`started_at < cutoff`), a cutoff formatted without
+    // fractional seconds (e.g. `...:50Z`) does NOT sort the same as it would
+    // as a real timestamp comparison — `"...:50Z"` can compare greater OR
+    // less than `"...:50.850Z"` depending on the next byte (`Z` (0x5A) vs
+    // `.` (0x2E)), misordering rows within the same second. Use
+    // `SecondsFormat::Millis` (matches `%f`'s 3-digit precision) so the
+    // comparison is safe.
     let cutoff = Utc::now()
         .checked_sub_signed(chrono::TimeDelta::days(retention_days as i64))
         .ok_or_else(|| {
             anyhow::anyhow!("date arithmetic overflow for retention_days={retention_days}")
         })?
-        .format("%Y-%m-%dT%H:%M:%SZ")
-        .to_string();
+        .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
 
     let mut total_deleted: usize = 0;
     loop {

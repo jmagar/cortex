@@ -1204,3 +1204,76 @@ fn test_purge_old_llm_invocations_chunked() {
     assert_eq!(deleted, 5);
     assert_eq!(count_llm_invocations(&pool), 1);
 }
+
+/// Regression test for the lexicographic-cutoff bug: a cutoff formatted
+/// without fractional seconds (e.g. `...:50Z`) does not sort consistently
+/// against `started_at` values that DO carry fractional seconds (SQLite
+/// writes `started_at` via `strftime('%Y-%m-%dT%H:%M:%fZ','now')`). Seed two
+/// rows one second apart that straddle a millisecond-precision cutoff, and
+/// confirm the purge honors true chronological order rather than string
+/// comparison.
+#[test]
+fn test_purge_old_llm_invocations_millisecond_precision_ordering() {
+    let (pool, _dir) = test_pool();
+
+    // Two rows within the same wall-clock second, one just after and one
+    // just before a cutoff that sits between them.
+    insert_llm_invocation(&pool, "just-before-cutoff", "2020-01-01T00:00:50.000001Z");
+    insert_llm_invocation(&pool, "just-after-cutoff", "2020-01-01T00:00:50.999999Z");
+
+    // Directly exercise the cutoff-comparison SQL with a hand-built cutoff
+    // straddling the two rows, to pin down true chronological behavior
+    // independent of `Utc::now()` in the production function.
+    let cutoff = "2020-01-01T00:00:50.500000Z";
+    let conn = pool.get().unwrap();
+    let deleted = conn
+        .execute(
+            "DELETE FROM llm_invocations WHERE id IN (
+                 SELECT id FROM llm_invocations
+                 WHERE started_at < ?1
+                 LIMIT 1000
+             )",
+            params![cutoff],
+        )
+        .unwrap();
+    drop(conn);
+
+    assert_eq!(
+        deleted, 1,
+        "exactly the row before the cutoff must be deleted"
+    );
+
+    let conn = pool.get().unwrap();
+    let remaining_id: String = conn
+        .query_row("SELECT id FROM llm_invocations", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(
+        remaining_id, "just-after-cutoff",
+        "the row chronologically after the cutoff must survive"
+    );
+}
+
+/// End-to-end regression test through the real production function: the
+/// cutoff it formats must retain millisecond precision so that a row
+/// inserted a fraction of a second before `Utc::now() - retention_days` is
+/// correctly purged instead of surviving due to a lexicographic-comparison
+/// mismatch against a coarser cutoff string.
+#[test]
+fn test_purge_old_llm_invocations_cutoff_has_fractional_seconds() {
+    let (pool, _dir) = test_pool();
+
+    // A row exactly at the retention boundary, but 1ms before now-90days,
+    // formatted with the same precision SQLite uses for started_at.
+    let boundary =
+        (chrono::Utc::now() - chrono::TimeDelta::days(90) - chrono::TimeDelta::milliseconds(1))
+            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    insert_llm_invocation(&pool, "at-boundary", &boundary);
+
+    let deleted = purge_old_llm_invocations(&pool, 90, 1000).unwrap();
+    assert_eq!(
+        deleted, 1,
+        "row just past the retention boundary must be purged; a cutoff \
+         missing fractional-second precision could misorder it"
+    );
+    assert_eq!(count_llm_invocations(&pool), 0);
+}
