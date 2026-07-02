@@ -24,7 +24,7 @@
 
 This phase assumes the prior "skill events" phase has landed:
 
-- Table `ai_skill_events` with columns `id, log_id, ai_tool, ai_project, ai_session_id, hostname, timestamp, skill_name, skill_plugin, skill_path, event_kind, evidence_kind, metadata_json, created_at`, created inline in `src/db/pool.rs` (this repo's migrations are `CREATE TABLE IF NOT EXISTS` blocks in `init_pool`/`run_migrations`, NOT a separate migrations directory — confirm by grepping `CREATE TABLE IF NOT EXISTS` in `src/db/pool.rs`).
+- Table `ai_skill_events` with columns `id, log_id, ai_tool, ai_project, ai_session_id, hostname, timestamp, skill_name, skill_plugin, event_kind, evidence_kind, created_at` (per PR 2's eng review pass, `skill_path` and `metadata_json` were dropped before implementation — neither extractor ever set them — so the shipped table does NOT have them; re-verify with the grep below since this note may itself be stale by the time PR 3 is implemented), created inline in `src/db/pool.rs` (this repo's migrations are `CREATE TABLE IF NOT EXISTS` blocks in `init_pool`/`run_migrations`, NOT a separate migrations directory — confirm by grepping `CREATE TABLE IF NOT EXISTS` in `src/db/pool.rs`).
 - DB-layer params/entry types, assumed named `AiSkillEventParams` and `AiSkillEventEntry` in `src/db/models.rs`, with a query function (assumed `search_ai_skill_events` or similar) in `src/db/queries.rs`.
 - App-layer mirrors in `src/app/models/` (likely `src/app/models/ai_skill_events.rs` or folded into an existing `ai_*` model file) and a service method on `src/app/services/ai.rs`.
 
@@ -34,7 +34,7 @@ This phase assumes the prior "skill events" phase has landed:
 grep -rn "ai_skill_events\|AiSkillEvent" src/db/models.rs src/db/queries.rs src/app/models/ src/app/services/ src/mcp/actions.rs src/mcp/tools.rs
 ```
 
-If the real struct/field/function names differ from the assumptions above (e.g. `SkillEventParams` instead of `AiSkillEventParams`, or the table lives under a different column set), **update every reference in this phase's tasks to match the real names before implementing** — do not silently proceed with mismatched names. The column set assumed above (`id, log_id, ai_tool, ai_project, ai_session_id, hostname, timestamp, skill_name, skill_plugin, skill_path, event_kind, evidence_kind, metadata_json, created_at`) is treated as ground truth for all SQL in this plan; adjust column names in every `SELECT`/`INSERT`/index statement below if the actual schema differs.
+If the real struct/field/function names differ from the assumptions above (e.g. `SkillEventParams` instead of `AiSkillEventParams`, or the table lives under a different column set), **update every reference in this phase's tasks to match the real names before implementing** — do not silently proceed with mismatched names. The column set assumed above (`id, log_id, ai_tool, ai_project, ai_session_id, hostname, timestamp, skill_name, skill_plugin, event_kind, evidence_kind, created_at` — NOT `skill_path`/`metadata_json`, dropped by PR 2's eng review pass; see the callout above) is treated as ground truth for all SQL in this plan; adjust column names in every `SELECT`/`INSERT`/index statement below if the actual schema differs.
 
 This plan also assumes indexes named (or equivalent to):
 - `idx_ai_skill_events_skill_time` on `(skill_name, timestamp)`
@@ -633,13 +633,16 @@ fn insert_skill_event(
     skill_name: &str,
     skill_plugin: Option<&str>,
 ) {
+    // Note (PR 2 eng review sync): `skill_path`/`metadata_json` were dropped
+    // from `ai_skill_events` before PR 2 shipped — neither extractor ever set
+    // them. This INSERT reflects the shipped column set; re-verify against
+    // the real schema before implementing if this note has gone stale.
     let conn = pool.get().unwrap();
     conn.execute(
         "INSERT INTO ai_skill_events
             (log_id, ai_tool, ai_project, ai_session_id, hostname, timestamp,
-             skill_name, skill_plugin, skill_path, event_kind, evidence_kind,
-             metadata_json, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL, 'skill_invoked', 'transcript', NULL, ?6)",
+             skill_name, skill_plugin, event_kind, evidence_kind, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'skill_invoked', 'transcript', ?6)",
         rusqlite::params![
             log_id,
             ai_tool,
@@ -1622,10 +1625,12 @@ pub fn investigate_ai_skill_incidents(
             let placeholders: Vec<String> = (1..=incident.skill_event_ids.len())
                 .map(|i| format!("?{i}"))
                 .collect();
+            // Note (PR 2 eng review sync): no skill_path/metadata_json columns
+            // — dropped from ai_skill_events before PR 2 shipped. Re-verify
+            // against the real schema before implementing if stale.
             let sql = format!(
                 "SELECT id, log_id, ai_tool, ai_project, ai_session_id, hostname, timestamp,
-                        skill_name, skill_plugin, skill_path, event_kind, evidence_kind,
-                        metadata_json
+                        skill_name, skill_plugin, event_kind, evidence_kind
                  FROM ai_skill_events WHERE id IN ({}) ORDER BY timestamp ASC",
                 placeholders.join(",")
             );
