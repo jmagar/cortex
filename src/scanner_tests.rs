@@ -1598,3 +1598,96 @@ fn transcript_row_with_no_skill_reference_creates_no_skill_event() {
         .unwrap();
     assert_eq!(count, 0);
 }
+
+#[tokio::test]
+async fn end_to_end_ingest_then_backfill_is_idempotent_across_both_paths() {
+    // Row 1 uses Codex, not Claude: `logs.message` for a Codex row IS the
+    // scannable transcript text (the `<skill><name>` regex reads it
+    // directly), so it stays intact through `scrub_ai_message` and remains
+    // recoverable by the backfill's `row.message` re-scan. A Claude row's
+    // `logs.message` is `extract_message`'s plain-text `content` extraction
+    // (e.g. "hi"), which NEVER contains the raw `attributionSkill` JSON
+    // field — that data exists only in the source JSONL file, never
+    // persisted to the DB. This is a real, confirmed constraint of the
+    // shipped backfill design (it re-scans `logs.message`/`logs.raw`, and
+    // neither ever holds raw JSON for Claude rows), not a limitation of this
+    // test. See PR2 handoff notes for the follow-up bead tracking this gap.
+    let (pool, dir) = test_pool();
+
+    // Row 1: indexed normally (picks up the skill event via flush_chunk).
+    let codex_file = dir.path().join("codex.jsonl");
+    std::fs::write(
+        &codex_file,
+        concat!(
+            r#"{"type":"response_item","payload":{"type":"message","content":"<skill><name>rustarr</name></skill> deploying"},"timestamp":"2026-06-01T00:00:00Z"}"#,
+            "\n"
+        ),
+    )
+    .unwrap();
+    index_file(&pool, &codex_file, "codex_session").unwrap();
+
+    // Row 2: inserted directly into `logs` bypassing the scanner entirely,
+    // simulating a Codex transcript row ingested BEFORE this phase shipped
+    // — this is exactly what `sessions skills backfill` exists to catch up.
+    // Codex's `message` column already holds the raw transcript text (never
+    // JSON-extracted away), so a pre-existing Codex row's skill tag is
+    // genuinely recoverable via backfill, unlike Claude's.
+    {
+        let conn = pool.get().unwrap();
+        conn.execute(
+            "INSERT INTO logs (timestamp, hostname, severity, message, raw, source_ip, ai_tool, ai_project, ai_session_id)
+             VALUES ('2026-06-01T00:00:00.000Z', 'dookie', 'info', ?1, ?1, 'transcript://codex_session', 'codex', 'cortex', 'sess-2')",
+            rusqlite::params!["<skill><name>web-app-testing</name></skill> testing now"],
+        )
+        .unwrap();
+    }
+
+    let conn = pool.get().unwrap();
+    let pre_backfill_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM ai_skill_events", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(
+        pre_backfill_count, 1,
+        "only the scanner-ingested row should have a skill event pre-backfill"
+    );
+    drop(conn);
+
+    // Backfill catches the pre-existing row 2 without duplicating row 1's event.
+    let service = crate::app::CortexService::new(
+        std::sync::Arc::new(pool.clone()),
+        StorageConfig::for_test(dir.path().join("unused.db")),
+    );
+    let result = service
+        .backfill_skill_events(crate::app::SkillBackfillRequest {
+            since: None,
+            limit: Some(100),
+            dry_run: false,
+        })
+        .await
+        .unwrap();
+    assert_eq!(result.scanned, 2, "both codex rows should be scanned");
+    assert_eq!(result.inserted, 1, "only row 2's event is new");
+    assert_eq!(
+        result.skipped_duplicates, 1,
+        "row 1's event was already present from ingest-time extraction"
+    );
+
+    let conn = pool.get().unwrap();
+    let total: i64 = conn
+        .query_row("SELECT COUNT(*) FROM ai_skill_events", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(total, 2);
+    drop(conn);
+
+    // Running backfill again is fully idempotent.
+    let second = service
+        .backfill_skill_events(crate::app::SkillBackfillRequest {
+            since: None,
+            limit: Some(100),
+            dry_run: false,
+        })
+        .await
+        .unwrap();
+    assert_eq!(second.inserted, 0);
+    assert_eq!(second.skipped_duplicates, 2);
+}

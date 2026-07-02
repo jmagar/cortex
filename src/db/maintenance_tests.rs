@@ -364,7 +364,16 @@ fn test_enforce_storage_budget_reconciles_hosts_after_deletes() {
     let (pool, dir) = test_pool();
     let large_oldest = "delete-me-1-".repeat(150_000);
     let large_older = "delete-me-2-".repeat(150_000);
-    let large_keep = "keep-me-".repeat(30_000);
+    // Deliberately small relative to `recovery_db_size_mb` below: after both
+    // `deleted-host` rows are trimmed, this row alone (plus fixed schema/
+    // index overhead, which grows slowly as the schema gains tables/indexes
+    // over time) must land comfortably under the 2MB recovery target with
+    // real headroom — not within a single SQLite page (4096 bytes) of it.
+    // A prior version of this fixture sized `large_keep` right at that
+    // boundary, so an unrelated schema change (e.g. a new index) could tip
+    // post-delete size a few KB over the target and cause the loop to trim
+    // one extra (wrongly "surviving") row. See PR2 (GH #94) investigation.
+    let large_keep = "keep-me-".repeat(5_000);
     let entries = vec![
         make_entry(
             "2026-01-01T00:00:01Z",
