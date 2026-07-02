@@ -14,6 +14,7 @@ mod models;
 pub(crate) mod notifications;
 mod pool;
 mod queries;
+mod skill_events;
 
 pub(crate) use analytics::PATTERN_SCAN_LIMIT_MAX;
 pub use analytics::{
@@ -80,4 +81,9 @@ pub use queries::{
     search_ai_related_logs, search_ai_sessions, search_logs,
     search_logs_from_graph_related_entities, severity_to_num, similar_incidents_clusters,
     tail_logs, timeline_rollup_status, topic_correlate_inputs, validate_fts_query,
+};
+pub(crate) use skill_events::insert_skill_events_in_tx;
+pub use skill_events::{
+    AiSkillEventEntry, AiSkillEventParams, ListSkillEventsResult, SkillEventInsert,
+    insert_skill_events, list_skill_events,
 };
