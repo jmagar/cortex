@@ -5,7 +5,8 @@ use cortex::app::{
     AbuseSearchRequest, AiAssessRequest, AiCheckpointsRequest, AiCorrelateRequest,
     AiIncidentRequest, AiInvestigateRequest, AiParseErrorsRequest, AiPruneCheckpointsRequest,
     AskHistoryRequest, IncidentContextRequest, ListAiProjectsRequest, ListAiToolsRequest,
-    ProjectContextRequest, SearchSessionsRequest, SimilarIncidentsRequest, UsageBlocksRequest,
+    ProjectContextRequest, SearchSessionsRequest, SimilarIncidentsRequest, SkillAssessRequest,
+    UsageBlocksRequest,
 };
 use std::io::Write;
 
@@ -31,11 +32,11 @@ use super::output::sessions::{
 };
 use super::sessions_watch::ai_smoke_watch;
 use super::{
-    CliMode, OutputArgs, SessionsAbuseArgs, SessionsAddArgs, SessionsAskHistoryArgs,
-    SessionsAssessArgs, SessionsBlocksArgs, SessionsCheckpointsArgs, SessionsContextArgs,
-    SessionsCorrelateArgs, SessionsDoctorArgs, SessionsErrorsArgs, SessionsIncidentContextArgs,
-    SessionsIncidentsArgs, SessionsIndexArgs, SessionsInvestigateArgs, SessionsListArgs,
-    SessionsLlmInvocationsArgs, SessionsPruneCheckpointsArgs, SessionsSearchArgs,
+    AssessAbuseArgs, AssessSkillArgs, CliMode, OutputArgs, SessionsAbuseArgs, SessionsAddArgs,
+    SessionsAskHistoryArgs, SessionsAssessArgs, SessionsBlocksArgs, SessionsCheckpointsArgs,
+    SessionsContextArgs, SessionsCorrelateArgs, SessionsDoctorArgs, SessionsErrorsArgs,
+    SessionsIncidentContextArgs, SessionsIncidentsArgs, SessionsIndexArgs, SessionsInvestigateArgs,
+    SessionsListArgs, SessionsLlmInvocationsArgs, SessionsPruneCheckpointsArgs, SessionsSearchArgs,
     SessionsSimilarArgs, SessionsSkillIncidentsArgs, SessionsSkillInvestigateArgs,
     SessionsSkillsBackfillArgs, SessionsSkillsListArgs, SessionsWatchArgs,
 };
@@ -800,6 +801,173 @@ pub(crate) async fn run_ai_llm_invocations(
                 );
             }
         }
+    }
+    Ok(())
+}
+
+/// `cortex assess skill <skill>` — LLM-guarded skill-incident assessment.
+/// Resolves the highest-priority (or all, with `--all`) matching skill
+/// incident via `CortexService::run_skill_assessment_with_delta`, which
+/// itself sources evidence from `investigate_ai_skill_incidents` (PR 3) and
+/// runs the guarded Gemini assessment through `LlmRunner` (PR 1). LLM
+/// assessment is local-only — `--http` is rejected unless `--no-llm` is
+/// also passed (mirrors `run_ai_assess`'s guard exactly).
+pub(crate) async fn run_assess_skill(mode: &CliMode, args: AssessSkillArgs) -> Result<()> {
+    let run_llm = !args.no_llm;
+    if run_llm {
+        if let CliMode::Http(_) = mode {
+            bail!(
+                "cortex assess skill spawns Gemini CLI on the local host; omit --http or pass --no-llm"
+            );
+        }
+    }
+    let req = SkillAssessRequest {
+        skill: args.skill.clone(),
+        plugin: args.plugin.clone(),
+        model: args.model.clone(),
+        project: args.project.clone(),
+        tool: args.tool.clone(),
+        since: args.since.clone(),
+        until: args.until.clone(),
+        window_minutes: args.window_minutes,
+        correlation_window_minutes: args.correlation_window_minutes,
+        limit: args.limit,
+        all: args.all,
+    };
+    let response = match mode {
+        CliMode::Local(service) => {
+            if args.json {
+                service
+                    .run_skill_assessment_with_delta(req, run_llm, |_| Ok(()))
+                    .await?
+            } else {
+                let mut streamed = false;
+                let response = service
+                    .run_skill_assessment_with_delta(req, run_llm, |delta| {
+                        streamed = true;
+                        print!("{delta}");
+                        std::io::stdout().flush()?;
+                        Ok(())
+                    })
+                    .await?;
+                if streamed
+                    && !response
+                        .results
+                        .iter()
+                        .any(|r| r.assessment.as_deref().is_some_and(|a| a.ends_with('\n')))
+                {
+                    println!();
+                }
+                response
+            }
+        }
+        // No REST/HTTP route exists for `assess skill` in this phase. If it
+        // is ever exposed over HTTP it must call the deterministic-
+        // findings-only path server-side (LLM assessment stays CLI-only) —
+        // the HTTP client wiring itself is future work.
+        CliMode::Http(_) => {
+            bail!("cortex assess skill --http is not yet implemented; run locally")
+        }
+    };
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&response)?);
+        return Ok(());
+    }
+    for result in &response.results {
+        println!("# incident {}", result.incident_id);
+        if let Some(assessment) = &result.assessment {
+            println!("{assessment}");
+        } else {
+            println!("{}", serde_json::to_string_pretty(&result.findings)?);
+        }
+        println!();
+    }
+    if !response.other_matching_incidents.is_empty() {
+        eprintln!(
+            "[{} other matching incident(s) not assessed; pass --all or --limit N: {}]",
+            response.other_matching_incidents.len(),
+            response
+                .other_matching_incidents
+                .iter()
+                .map(|s| s.incident_id.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
+    if response.no_incident_low_severity_summary {
+        eprintln!("[note: single low-signal incident — no negative signals detected]");
+    }
+    Ok(())
+}
+
+/// `cortex assess abuse` — thin UX wrapper around the existing
+/// abuse-incident assessment pipeline (`list_ai_incidents` +
+/// `run_gemini_assess_with_delta`, itself already `LlmRunner`-guarded).
+/// Auto-picks the top-priority matching incident when `--incident-id` is
+/// omitted. LLM assessment is local-only, mirroring `run_assess_skill`'s
+/// and `run_ai_assess`'s guard exactly.
+pub(crate) async fn run_assess_abuse(mode: &CliMode, args: AssessAbuseArgs) -> Result<()> {
+    let run_llm = !args.no_llm;
+    let service = match mode {
+        CliMode::Http(_) if run_llm => {
+            bail!(
+                "cortex assess abuse spawns Gemini CLI on the local host; omit --http or pass --no-llm"
+            )
+        }
+        CliMode::Http(_) => {
+            bail!("cortex assess abuse --http is not yet implemented for --no-llm; run locally")
+        }
+        CliMode::Local(service) => service,
+    };
+    let req = cortex::app::AbuseAssessRequest {
+        incident_id: args.incident_id.clone(),
+        model: args.model.clone(),
+        project: args.project.clone(),
+        tool: args.tool.clone(),
+        since: args.since.clone(),
+        until: args.until.clone(),
+        window_minutes: args.window_minutes,
+        correlation_window_minutes: args.correlation_window_minutes,
+        terms: vec![],
+        limit: args.limit,
+    };
+    let mut streamed = false;
+    let response = service
+        .assess_top_abuse_incident_with_delta(req, run_llm, |delta| {
+            streamed = true;
+            print!("{delta}");
+            std::io::stdout().flush()?;
+            Ok(())
+        })
+        .await?;
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&response)?);
+        return Ok(());
+    }
+    if !streamed {
+        if response.assessed.assessment.is_empty() {
+            println!(
+                "[deterministic-only: incident {} — pass without --no-llm for a full assessment]",
+                response.assessed.incident_id
+            );
+        } else {
+            println!("{}", response.assessed.assessment);
+        }
+    } else if !response.assessed.assessment.ends_with('\n') {
+        println!();
+    }
+    eprintln!(
+        "\n[assessed incident={} anchors={} bundles={}]",
+        response.assessed.incident_id,
+        response.assessed.evidence_summary.total_anchors,
+        response.assessed.evidence_summary.evidence_bundle_count,
+    );
+    if !response.other_matching_incidents.is_empty() {
+        eprintln!(
+            "[{} other matching incident(s): {}]",
+            response.other_matching_incidents.len(),
+            response.other_matching_incidents.join(", ")
+        );
     }
     Ok(())
 }

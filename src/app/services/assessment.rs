@@ -159,4 +159,117 @@ impl CortexService {
             evidence_summary,
         })
     }
+
+    /// UX wrapper for `cortex assess abuse`: auto-picks the top-priority
+    /// matching abuse incident when `req.incident_id` is `None`, otherwise
+    /// assesses the explicitly supplied incident id. Delegates the LLM
+    /// path entirely to `run_gemini_assess_with_delta` (already
+    /// `LlmRunner`-guarded) — this function adds no new LLM call site.
+    pub async fn assess_top_abuse_incident_with_delta<F>(
+        &self,
+        req: AbuseAssessRequest,
+        run_llm: bool,
+        mut on_delta: F,
+    ) -> ServiceResult<AbuseAssessResponse>
+    where
+        F: FnMut(&str) -> anyhow::Result<()> + Send,
+    {
+        let (incident_id, other_matching_incidents) = match req.incident_id.clone() {
+            Some(id) => (id, Vec::new()),
+            None => {
+                let list_req = AiIncidentRequest {
+                    project: req.project.clone(),
+                    tool: req.tool.clone(),
+                    since: req.since.clone(),
+                    until: req.until.clone(),
+                    limit: req.limit,
+                    window_minutes: req.window_minutes,
+                    terms: req.terms.clone(),
+                };
+                let list_resp = self.list_ai_incidents(list_req).await?;
+                if list_resp.incidents.is_empty() {
+                    return Err(ServiceError::InvalidInput(
+                        "no abuse incident found matching the given filters".to_string(),
+                    ));
+                }
+                let mut sorted = list_resp.incidents.clone();
+                sorted.sort_by(|a, b| {
+                    b.priority_score
+                        .partial_cmp(&a.priority_score)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
+                let top = sorted[0].incident_id.clone();
+                let others = sorted[1..].iter().map(|i| i.incident_id.clone()).collect();
+                (top, others)
+            }
+        };
+
+        let assess_req = AiAssessRequest {
+            incident_id,
+            model: req.model,
+            project: req.project,
+            tool: req.tool,
+            since: req.since,
+            until: req.until,
+            window_minutes: req.window_minutes,
+            correlation_window_minutes: req.correlation_window_minutes,
+            terms: req.terms,
+            limit: req.limit,
+        };
+
+        let assessed = if run_llm {
+            // Already LlmRunner-guarded end to end (PR 1 Task 6) — no
+            // additional spec/audit wiring needed here.
+            self.run_gemini_assess_with_delta(assess_req, &mut on_delta)
+                .await?
+        } else {
+            // Deterministic-only: reuse investigate_ai_incidents directly
+            // rather than touching run_gemini_assess_with_delta at all, so
+            // LlmRunner::run is never called. Build a minimal
+            // AiAssessResponse shape with an empty assessment string so
+            // callers (MCP/REST, --no-llm) get a consistent response type.
+            let invest_req = AiInvestigateRequest {
+                incident_id: Some(assess_req.incident_id.clone()),
+                project: assess_req.project.clone(),
+                tool: assess_req.tool.clone(),
+                since: assess_req.since.clone(),
+                until: assess_req.until.clone(),
+                limit: Some(assess_req.limit.unwrap_or(200).max(200)),
+                window_minutes: assess_req.window_minutes,
+                correlation_window_minutes: assess_req.correlation_window_minutes,
+                terms: assess_req.terms.clone(),
+            };
+            let invest_resp = self.investigate_ai_incidents(invest_req).await?;
+            let matching: Vec<_> = invest_resp
+                .evidence
+                .iter()
+                .filter(|e| e.incident.incident_id == assess_req.incident_id)
+                .collect();
+            if matching.is_empty() {
+                return Err(ServiceError::InvalidInput(format!(
+                    "no incident found with id '{}'; run `cortex sessions incidents` to list available ids",
+                    assess_req.incident_id
+                )));
+            }
+            AiAssessResponse {
+                incident_id: assess_req.incident_id,
+                assessment: String::new(),
+                prompt_preview: String::new(),
+                evidence_summary: AiAssessEvidenceSummary {
+                    total_incidents: invest_resp.total_incidents,
+                    evidence_bundle_count: matching.len(),
+                    total_anchors: matching.iter().map(|e| e.anchors.len()).sum(),
+                },
+            }
+        };
+
+        Ok(AbuseAssessResponse {
+            assessed,
+            other_matching_incidents,
+        })
+    }
 }
+
+#[cfg(test)]
+#[path = "assessment_tests.rs"]
+mod tests;

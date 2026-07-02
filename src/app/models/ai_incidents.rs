@@ -173,6 +173,38 @@ pub struct AiAssessResponse {
     pub evidence_summary: AiAssessEvidenceSummary,
 }
 
+/// Request for `cortex assess abuse` — a UX wrapper around the existing
+/// `list_ai_incidents` + `run_gemini_assess_with_delta` pipeline (the
+/// latter already routes through PR 1's `LlmRunner` internally — this
+/// wrapper adds zero new LLM call sites). When `incident_id` is `None`,
+/// the top-priority matching incident (by `AbuseIncident::priority_score`)
+/// is auto-selected.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AbuseAssessRequest {
+    pub incident_id: Option<String>,
+    pub model: Option<String>,
+    pub project: Option<String>,
+    pub tool: Option<String>,
+    pub since: Option<String>,
+    pub until: Option<String>,
+    pub window_minutes: Option<u32>,
+    pub correlation_window_minutes: Option<u32>,
+    #[serde(default)]
+    pub terms: Vec<String>,
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AbuseAssessResponse {
+    pub assessed: AiAssessResponse,
+    /// Other candidate incident ids that matched the same filters but were
+    /// not auto-selected (populated only on the auto-pick path, i.e. when
+    /// `incident_id` was `None` in the request and more than one incident
+    /// matched).
+    pub other_matching_incidents: Vec<String>,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AiCorrelateRequest {

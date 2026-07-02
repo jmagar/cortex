@@ -48,7 +48,7 @@ const SECTIONS: &[(&str, &[&str])] = &[
         "Analytics & Correlation",
         &["analysis", "correlate", "state", "stats", "timeline"],
     ),
-    ("AI Transcripts", &["sessions"]),
+    ("AI Transcripts", &["sessions", "assess"]),
     ("Signals & Alerts", &["alerts"]),
     ("Ingestion", &["ingest", "heartbeat"]),
     (
@@ -173,6 +173,15 @@ const CATALOG: &[CommandDoc] = &[
             "cortex sessions doctor [--strict-permissions] [--json]",
             "cortex sessions watch-status [--json]",
             "cortex sessions smoke-watch [--json]",
+        ],
+    },
+    CommandDoc {
+        name: "assess",
+        summary: "LLM-guarded skill and abuse-incident assessment (LlmRunner, local-only)",
+        usage: &[
+            "cortex assess skill SKILL [--plugin NAME] [--model MODEL] [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--all] [--window-minutes N] [--correlation-window-minutes N] [--no-llm] [--json]",
+            "cortex assess skill --plugin NAME [--model MODEL] [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--all] [--window-minutes N] [--correlation-window-minutes N] [--no-llm] [--json]",
+            "cortex assess abuse [--incident-id ID] [--model MODEL] [--project PATH] [--tool TOOL] [--since TIME] [--until TIME] [--limit N] [--window-minutes N] [--correlation-window-minutes N] [--no-llm] [--json]",
         ],
     },
     CommandDoc {
