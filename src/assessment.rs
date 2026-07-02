@@ -8,7 +8,6 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
 
 const DEFAULT_GEMINI_MODEL: &str = "gemini-3.1-flash-lite-preview";
-const DEFAULT_COMPLETION_TIMEOUT_SECS: u64 = 120;
 const STDERR_TAIL_LIMIT: usize = 4096;
 const GEMINI_STDIN_PROMPT_STUB: &str = "Read the assessment instructions and evidence from stdin.";
 const GEMINI_AUTH_FILES: &[&str] = &[
@@ -48,17 +47,30 @@ pub(crate) struct GeminiAssessConfig {
 }
 
 impl GeminiAssessConfig {
-    pub(crate) fn from_env(model_override: Option<String>) -> Self {
+    /// `timeout_secs` MUST be the same resolved value `LlmRunner` uses as
+    /// its own outer timeout (`LlmRunner::timeout_secs()`, i.e.
+    /// `[llm].timeout_secs` / `CORTEX_LLM_ENABLED`-adjacent config) — this
+    /// eliminates a double-timeout-source bug where
+    /// `CORTEX_LLM_COMPLETION_TIMEOUT_SECS` (this struct's old independent
+    /// env read) and `[llm].timeout_secs` (LlmRunner's) could silently
+    /// disagree, silently producing an effective timeout of
+    /// `min(both)`. Setting the legacy env var now only logs a deprecation
+    /// warning; it no longer takes effect on this path.
+    pub(crate) fn from_env(model_override: Option<String>, timeout_secs: u64) -> Self {
+        if non_empty_env("CORTEX_LLM_COMPLETION_TIMEOUT_SECS").is_some() {
+            tracing::warn!(
+                "CORTEX_LLM_COMPLETION_TIMEOUT_SECS is set but is now superseded by \
+                 [llm].timeout_secs for the `cortex sessions assess` path; the old env \
+                 var is ignored here. Set [llm].timeout_secs instead."
+            );
+        }
         Self {
             program: env_or_default("CORTEX_HEADLESS_GEMINI_CMD", "gemini"),
             model: model_override
                 .or_else(|| non_empty_env("CORTEX_HEADLESS_GEMINI_MODEL"))
                 .unwrap_or_else(|| DEFAULT_GEMINI_MODEL.to_string()),
             source_home: non_empty_env("CORTEX_HEADLESS_GEMINI_HOME").map(PathBuf::from),
-            timeout_secs: non_empty_env("CORTEX_LLM_COMPLETION_TIMEOUT_SECS")
-                .and_then(|value| value.parse::<u64>().ok())
-                .unwrap_or(DEFAULT_COMPLETION_TIMEOUT_SECS)
-                .max(1),
+            timeout_secs: timeout_secs.max(1),
         }
     }
 
@@ -403,7 +415,7 @@ fn append_bounded_tail(buffer: &mut Vec<u8>, chunk: &[u8]) {
     }
 }
 
-fn redact_secrets(text: &str) -> String {
+pub(crate) fn redact_secrets(text: &str) -> String {
     text.split_whitespace()
         .map(|token| {
             if looks_secretish(token) {
@@ -416,7 +428,7 @@ fn redact_secrets(text: &str) -> String {
         .join(" ")
 }
 
-fn looks_secretish(token: &str) -> bool {
+pub(crate) fn looks_secretish(token: &str) -> bool {
     let upper = token.to_ascii_uppercase();
     upper.contains("API_KEY=")
         || upper.contains("TOKEN=")

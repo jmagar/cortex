@@ -3,6 +3,7 @@ mod error;
 pub(crate) mod error_detection;
 pub(crate) mod heartbeat_flags;
 pub(crate) mod incident_findings;
+pub mod llm_runner;
 mod models;
 mod os_adapter;
 mod services;
@@ -145,6 +146,7 @@ pub use models::{
     ListSessionsResponse,
     ListSourceIpsRequest,
     ListSourceIpsResponse,
+    LlmInvocationsRequest,
     LogEntry,
     MaintenanceJobStatus,
     NotificationsRecentRequest,

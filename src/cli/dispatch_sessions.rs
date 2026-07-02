@@ -9,6 +9,7 @@ use cortex::app::{
 };
 use std::io::Write;
 
+use super::output::common::print_json;
 use super::output::logs::{
     UsageBlocksPrintOptions, print_abuse_search_response, print_ai_correlate_response,
     print_ai_projects_response, print_ai_tools_response, print_project_context_response,
@@ -30,7 +31,8 @@ use super::{
     SessionsAssessArgs, SessionsBlocksArgs, SessionsCheckpointsArgs, SessionsContextArgs,
     SessionsCorrelateArgs, SessionsDoctorArgs, SessionsErrorsArgs, SessionsIncidentContextArgs,
     SessionsIncidentsArgs, SessionsIndexArgs, SessionsInvestigateArgs, SessionsListArgs,
-    SessionsPruneCheckpointsArgs, SessionsSearchArgs, SessionsSimilarArgs, SessionsWatchArgs,
+    SessionsLlmInvocationsArgs, SessionsPruneCheckpointsArgs, SessionsSearchArgs,
+    SessionsSimilarArgs, SessionsWatchArgs,
 };
 
 // ─── AI Arg → Request conversions (bead 0p8r.8) ─────────────────────────────
@@ -497,6 +499,8 @@ pub(crate) async fn run_ai_assess(mode: &CliMode, args: SessionsAssessArgs) -> R
         }
         CliMode::Local(service) => service,
     };
+    let dry_run = args.dry_run;
+    let json = args.json;
     let req = AiAssessRequest {
         incident_id: args.incident_id,
         model: args.model,
@@ -509,7 +513,31 @@ pub(crate) async fn run_ai_assess(mode: &CliMode, args: SessionsAssessArgs) -> R
         terms: args.terms,
         limit: args.limit,
     };
-    if args.json {
+    if dry_run {
+        // GH issue #94: preview the prompt/evidence bundle via
+        // `LlmRunner::dry_run` without invoking Gemini. Writes a
+        // "dry_run"-status audit row but spawns no subprocess.
+        let outcome = service.dry_run_gemini_assess(req).await?;
+        if json {
+            println!("{}", serde_json::to_string_pretty(&outcome)?);
+        } else {
+            println!("[dry-run] invocation_id={}", outcome.invocation_id);
+            println!("[dry-run] prompt_bytes={}", outcome.prompt_bytes);
+            println!(
+                "[dry-run] evidence: total_incidents={} evidence_bundle_count={} total_anchors={} truncated={}",
+                outcome.evidence_counts.total_incidents,
+                outcome.evidence_counts.evidence_bundle_count,
+                outcome.evidence_counts.total_anchors,
+                outcome.evidence_counts.truncated,
+            );
+            println!(
+                "[dry-run] would_exceed_prompt_limit={}",
+                outcome.would_exceed_prompt_limit
+            );
+        }
+        return Ok(());
+    }
+    if json {
         let response = service.run_gemini_assess(req).await?;
         println!("{}", serde_json::to_string_pretty(&response)?);
     } else {
@@ -533,6 +561,112 @@ pub(crate) async fn run_ai_assess(mode: &CliMode, args: SessionsAssessArgs) -> R
             response.evidence_summary.total_anchors,
             response.evidence_summary.evidence_bundle_count,
         );
+    }
+    Ok(())
+}
+
+/// One printable line for a `llm_invocations` row, shared by both
+/// `CliMode` branches below (`LlmInvocationRow`'s typed fields on the Local
+/// branch, raw `serde_json::Value` fields on the Http branch — see the
+/// cross-crate visibility note on `run_ai_llm_invocations`).
+fn format_llm_invocation_line(
+    started_at: &str,
+    id: &str,
+    action: &str,
+    status: &str,
+    duration_ms: Option<i64>,
+) -> String {
+    format!(
+        "[{started_at}] {id} action={action} status={status} duration_ms={}",
+        duration_ms
+            .map(|d| d.to_string())
+            .unwrap_or_else(|| "-".to_string()),
+    )
+}
+
+// Eng review fix (pattern-recognition-specialist): `into_request` for CLI
+// args belongs in `dispatch_sessions.rs`, not `args/sessions.rs` — every
+// other sibling `Sessions*Args::into_request()` (11 of them, e.g.
+// `SessionsIncidentsArgs`/`SessionsInvestigateArgs` immediately above)
+// lives here, placed right before the `run_ai_*` function that consumes
+// it. `args/sessions.rs` is otherwise pure struct/enum definitions with
+// no business logic.
+impl SessionsLlmInvocationsArgs {
+    pub(crate) fn into_request(self) -> cortex::app::LlmInvocationsRequest {
+        cortex::app::LlmInvocationsRequest {
+            limit: self.limit,
+            since: self.since,
+            action: self.action,
+            status: self.status,
+        }
+    }
+}
+
+/// `cortex sessions llm-invocations` — list recent LLM invocation audit
+/// records (concurrency/rate-limit/circuit-breaker denials included).
+///
+/// Admin-scoped: exposes operational kill-switch/circuit-breaker state, not
+/// just log content. In `CliMode::Http`, requires `CORTEX_API_ADMIN_TOKEN`
+/// to be set — the request fails with a clear error otherwise.
+///
+/// `LlmInvocationRow` lives in `pub(crate) mod db` in the `cortex` lib
+/// crate, so it isn't nameable from this bin crate — but field access still
+/// works via type inference on the Local branch, same as
+/// `run_notify_recent`'s `FiringRow` handling above; the Http branch keeps
+/// the raw JSON value for the same reason.
+pub(crate) async fn run_ai_llm_invocations(
+    mode: &CliMode,
+    args: SessionsLlmInvocationsArgs,
+) -> Result<()> {
+    let json = args.json;
+    let req = args.into_request();
+    match mode {
+        CliMode::Local(service) => {
+            let rows = service.llm_invocations_checked(req).await?;
+            if json {
+                return print_json(&rows);
+            }
+            if rows.is_empty() {
+                println!("No LLM invocations recorded.");
+                return Ok(());
+            }
+            for row in &rows {
+                println!(
+                    "{}",
+                    format_llm_invocation_line(
+                        &row.started_at,
+                        &row.id,
+                        &row.action,
+                        &row.status,
+                        row.duration_ms,
+                    )
+                );
+            }
+        }
+        CliMode::Http(client) => {
+            let rows = http_or_cancel(client.ai_llm_invocations(&req)).await?;
+            if json {
+                return print_json(&rows);
+            }
+            let rows = rows.as_array().cloned().unwrap_or_default();
+            if rows.is_empty() {
+                println!("No LLM invocations recorded.");
+                return Ok(());
+            }
+            for row in &rows {
+                let get_str = |key: &str| row.get(key).and_then(|v| v.as_str()).unwrap_or("-");
+                println!(
+                    "{}",
+                    format_llm_invocation_line(
+                        get_str("started_at"),
+                        get_str("id"),
+                        get_str("action"),
+                        get_str("status"),
+                        row.get("duration_ms").and_then(|v| v.as_i64()),
+                    )
+                );
+            }
+        }
     }
     Ok(())
 }

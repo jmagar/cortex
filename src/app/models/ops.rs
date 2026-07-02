@@ -93,6 +93,21 @@ impl NotificationsRecentRequest {
     }
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LlmInvocationsRequest {
+    pub limit: Option<i64>,
+    pub since: Option<String>,
+    pub action: Option<String>,
+    pub status: Option<String>,
+}
+
+impl LlmInvocationsRequest {
+    pub fn effective_limit(&self) -> i64 {
+        self.limit.unwrap_or(50).clamp(1, 500)
+    }
+}
+
 // ── AI checkpoint inventory + prune request structs (bead 0p8r.3) ────────────
 //
 // These are typed request shapes shared between the REST handlers in

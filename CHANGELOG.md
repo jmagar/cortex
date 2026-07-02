@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.2.0] - 2026-07-01
+
+### Added
+
+- Shared `LlmRunner` invocation guard for all LLM-backed assessment features: global/per-action concurrency limits, per-action rate limiting, cooldown circuit breaker, per-invocation timeout, prompt/output byte caps, dry-run preview mode, and a global + per-action kill switch (`[llm]` config section, `CORTEX_LLM_ENABLED` env override).
+- `llm_invocations` audit table (migration 37) recording every LLM invocation attempt, including denials (rate-limited, circuit-open, disabled, concurrency-limited).
+- New read surfaces for the audit trail: CLI `cortex sessions llm-invocations`, MCP action `llm_invocations` (requires `cortex:admin` scope), REST `GET /api/sessions/llm-invocations` (requires the admin API token).
+- `cortex sessions assess` (the Gemini CLI subprocess assessment path) now routes through `LlmRunner` instead of invoking the Gemini subprocess directly.
+- `cortex sessions assess --dry-run` previews the prompt/evidence bundle via `LlmRunner::dry_run` without invoking Gemini (GH issue #94 acceptance criterion).
+
+### Changed
+
+- **Behavior change:** `cortex sessions assess` now enforces `[llm].max_concurrent=1` / `[llm].max_per_action_concurrent=1` by default. Two overlapping interactive `assess` invocations will now hard-fail the second with a concurrency-limited error, where previously they ran concurrently with no guard. Raise `[llm].max_concurrent` / `[llm].max_per_action_concurrent` if your workflow depends on concurrent assessments.
+- `GeminiAssessConfig::from_env` no longer reads `CORTEX_LLM_COMPLETION_TIMEOUT_SECS` for the `cortex sessions assess` path; the Gemini subprocess timeout is now driven solely by `[llm].timeout_secs`, eliminating a silent dual-timeout-source bug. Setting `CORTEX_LLM_COMPLETION_TIMEOUT_SECS` now logs a deprecation warning and has no effect on this path.
+
+### Fixed
+
+- Post-review fixes to the `LlmRunner`/`llm_invocations` feature above, applied before merge:
+  - The error returned to CLI/MCP/REST callers on a failed LLM invocation is now redacted with the same `sanitize_error` pass used for the persisted audit row — previously only the DB copy was sanitized, so a secret-shaped string in run_fn's error (e.g. leaked auth token in Gemini subprocess stderr) could still reach the caller directly.
+  - `extra_metadata` redaction now walks the `serde_json::Value` tree and redacts each string leaf individually before serializing, instead of redacting the whole serialized JSON blob. A secret supplied as a bare-prefix JSON value (e.g. `{"key":"sk-..."}` with no `TOKEN=`/`API_KEY=` wrapper) previously escaped redaction because the whole-blob approach tokenized on whitespace and the leaf value's `sk-`/`ghp_`/`atk_` prefix was hidden behind the surrounding braces.
+  - `list_llm_invocations` now builds its `WHERE` clause dynamically, appending only the filters that are actually set, so filtered queries use the `idx_llm_invocations_action_started` / `idx_llm_invocations_status_started` composite indexes instead of always falling back to a full scan (the previous `(?N IS NULL OR col = ?N)` idiom was not sargable).
+  - `LlmRunner::run`'s output truncation now respects `max_output_bytes` as an actual byte limit (UTF-8-safe boundary truncation) instead of a character-count limit, which previously let multi-byte UTF-8 output exceed the configured cap by up to ~4x.
+  - MCP tool schema: `since`/`limit` field descriptions now enumerate `llm_invocations`, and a `status` schema property documents its valid filter values, for MCP client introspection.
+  - Fixed a stale "46 actions" count in `docs/mcp/SCHEMA.md` (now 48, matching `ACTION_SPECS`).
+
+### Security
+
+- The `llm_invocations` audit read surface (CLI/MCP/REST) is scoped `cortex:admin`, not `cortex:read` — its `status`/`error`/`metadata_json` fields expose circuit-breaker and kill-switch operational state that is not appropriate for the broad `cortex:read` trust tier.
+
 ## [3.1.3] - 2026-06-30
 
 ### Fixed

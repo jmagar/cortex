@@ -22,10 +22,10 @@ use crate::app::{
     CorrelateEventsRequest, CorrelateStateRequest, FilterLogsRequest, FleetStateRequest,
     GetErrorsRequest, GetLogRequest, HomelabMapRequest, HostStateRequest, IngestRateRequest,
     ListAiProjectsRequest, ListAiToolsRequest, ListAppsRequest, ListSessionsRequest,
-    ListSourceIpsRequest, NotificationsRecentRequest, PatternsRequest, ProjectContextRequest,
-    RequestActor, SearchLogsRequest, SearchSessionsRequest, SilentHostsRequest, TailLogsRequest,
-    TimelineRequest, TopicCorrelateRequest, UnackErrorRequest, UnaddressedErrorsRequest,
-    UsageBlocksRequest,
+    ListSourceIpsRequest, LlmInvocationsRequest, NotificationsRecentRequest, PatternsRequest,
+    ProjectContextRequest, RequestActor, SearchLogsRequest, SearchSessionsRequest,
+    SilentHostsRequest, TailLogsRequest, TimelineRequest, TopicCorrelateRequest, UnackErrorRequest,
+    UnaddressedErrorsRequest, UsageBlocksRequest,
 };
 
 use super::AppState;
@@ -116,6 +116,7 @@ async fn dispatch_cortex_action(
         H::NotificationsRecent => tool_notifications_recent(state, args).await,
         H::FileTails => tool_file_tails(state, args).await,
         H::NotificationsTest => tool_notifications_test(state, args, auth).await,
+        H::LlmInvocations => tool_llm_invocations(state, args).await,
         H::SimilarIncidents => context::tool_similar_incidents(state, args).await,
         H::AskHistory => context::tool_ask_history(state, args).await,
         H::IncidentContext => context::tool_incident_context(state, args).await,
@@ -537,6 +538,12 @@ async fn tool_notifications_recent(state: &AppState, args: Value) -> anyhow::Res
     let req: NotificationsRecentRequest = action_payload(args, "notifications_recent")?;
     let firings = state.service.alerts().notifications(req).await?;
     Ok(serde_json::to_value(firings)?)
+}
+
+async fn tool_llm_invocations(state: &AppState, args: Value) -> anyhow::Result<Value> {
+    let req: LlmInvocationsRequest = action_payload(args, "llm_invocations")?;
+    let rows = state.service.llm_invocations_checked(req).await?;
+    Ok(serde_json::to_value(rows)?)
 }
 
 async fn tool_file_tails(state: &AppState, args: Value) -> anyhow::Result<Value> {

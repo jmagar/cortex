@@ -20,7 +20,7 @@ wins.
 ## Current Actions
 
 cortex exposes one MCP tool named `cortex`. The required `action` argument
-selects one of these 46 actions:
+selects one of these 48 actions:
 
 | Action | Scope | Cost | Purpose |
 | --- | --- | --- | --- |
@@ -70,6 +70,7 @@ selects one of these 46 actions:
 | `unack_error` | `cortex:admin` | write | Revoke an error acknowledgement |
 | `file_tails` | `cortex:admin` | write | Manage Cortex-owned file-tail ingest sources |
 | `notifications_test` | `cortex:admin` | write | Send a test Apprise notification |
+| `llm_invocations` | `cortex:admin` | cheap | Recent LLM invocation audit records (concurrency/rate-limit/circuit-breaker denials included) |
 | `help` | none | cheap | Markdown action reference |
 
 ## Schema Pattern

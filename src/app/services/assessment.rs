@@ -1,30 +1,47 @@
 use super::*;
+use crate::app::llm_runner::{
+    LlmCallerSurface, LlmDryRunOutcome, LlmEvidenceCounts, LlmInvocationSpec,
+};
 
 impl CortexService {
     pub async fn run_gemini_assess(&self, req: AiAssessRequest) -> ServiceResult<AiAssessResponse> {
         self.run_gemini_assess_with_delta(req, |_| Ok(())).await
     }
 
-    pub async fn run_gemini_assess_with_delta<F>(
+    /// Build the assessment prompt, evidence bundle, and `LlmInvocationSpec`
+    /// that both `run_gemini_assess_with_delta` and `dry_run_gemini_assess`
+    /// feed into `LlmRunner` — the only difference between the run and
+    /// dry-run paths is `LlmRunner::run` vs `LlmRunner::dry_run`, so
+    /// everything up to that point lives here to keep the two callers in
+    /// lockstep. Returns the spec plus the summary the run path echoes back
+    /// in `AiAssessResponse` (`spec.evidence_counts.truncated` carries the
+    /// truncation flag the summary omits), and the resolved
+    /// `GeminiAssessConfig` the run path needs to drive the subprocess.
+    ///
+    /// Eng review fix (Fix 1): `GeminiAssessConfig::from_env` is passed
+    /// `LlmRunner`'s own resolved timeout instead of independently
+    /// re-reading `CORTEX_LLM_COMPLETION_TIMEOUT_SECS`.
+    async fn build_assess_spec(
         &self,
-        req: AiAssessRequest,
-        on_delta: F,
-    ) -> ServiceResult<AiAssessResponse>
-    where
-        F: FnMut(&str) -> anyhow::Result<()> + Send,
-    {
+        req: &AiAssessRequest,
+    ) -> ServiceResult<(
+        LlmInvocationSpec,
+        AiAssessEvidenceSummary,
+        GeminiAssessConfig,
+    )> {
         let incident_id = req.incident_id.clone();
-        let gemini_config = GeminiAssessConfig::from_env(req.model);
+        let gemini_config =
+            GeminiAssessConfig::from_env(req.model.clone(), self.llm().timeout_secs());
         let invest_req = AiInvestigateRequest {
             incident_id: Some(incident_id.clone()),
-            project: req.project,
-            tool: req.tool,
-            since: req.since,
-            until: req.until,
+            project: req.project.clone(),
+            tool: req.tool.clone(),
+            since: req.since.clone(),
+            until: req.until.clone(),
             limit: Some(req.limit.unwrap_or(200).max(200)),
             window_minutes: req.window_minutes,
             correlation_window_minutes: req.correlation_window_minutes,
-            terms: req.terms,
+            terms: req.terms.clone(),
         };
         let invest_resp = self.investigate_ai_incidents(invest_req).await?;
 
@@ -44,16 +61,96 @@ impl CortexService {
         let evidence_json = serde_json::to_string_pretty(&matching)
             .map_err(|e| ServiceError::Internal(anyhow::anyhow!("json serialize failed: {e}")))?;
         let prompt = build_assessment_prompt(&evidence_json);
-        let prompt_preview = prompt.chars().take(500).collect::<String>();
         let evidence_summary = AiAssessEvidenceSummary {
             total_incidents: invest_resp.total_incidents,
             evidence_bundle_count: matching.len(),
             total_anchors: matching.iter().map(|e| e.anchors.len()).sum(),
         };
 
-        let assessment = run_gemini_assessment(&prompt, &gemini_config, on_delta)
+        let spec = LlmInvocationSpec {
+            caller_surface: LlmCallerSurface::Cli,
+            action: "ai_assess".to_string(),
+            incident_id: Some(incident_id),
+            ai_tool: req.tool.clone(),
+            ai_project: req.project.clone(),
+            ai_session_id: None,
+            evidence_counts: LlmEvidenceCounts {
+                total_incidents: evidence_summary.total_incidents,
+                evidence_bundle_count: evidence_summary.evidence_bundle_count,
+                total_anchors: evidence_summary.total_anchors,
+                truncated: invest_resp.truncated,
+            },
+            prompt,
+            provider: "gemini-cli".to_string(),
+            model: gemini_config.model.clone(),
+            program: gemini_config.program.clone(),
+            extra_metadata: serde_json::json!({}),
+        };
+
+        Ok((spec, evidence_summary, gemini_config))
+    }
+
+    /// Preview the prompt/evidence bundle that `run_gemini_assess` would
+    /// send to Gemini, WITHOUT invoking the LLM — routes through
+    /// `LlmRunner::dry_run` (GH issue #94's acceptance criterion for a
+    /// dry-run/preview mode). Still writes an audit row (status
+    /// "dry_run"), same as `LlmRunner::dry_run` does for every other
+    /// caller, but never spawns the Gemini subprocess.
+    pub async fn dry_run_gemini_assess(
+        &self,
+        req: AiAssessRequest,
+    ) -> ServiceResult<LlmDryRunOutcome> {
+        let (spec, _summary, _gemini_config) = self.build_assess_spec(&req).await?;
+        self.llm()
+            .dry_run(&spec)
             .await
-            .map_err(ServiceError::Internal)?;
+            .map_err(|err| ServiceError::Internal(anyhow::anyhow!(err)))
+    }
+
+    pub async fn run_gemini_assess_with_delta<F>(
+        &self,
+        req: AiAssessRequest,
+        mut on_delta: F,
+    ) -> ServiceResult<AiAssessResponse>
+    where
+        F: FnMut(&str) -> anyhow::Result<()> + Send,
+    {
+        let (spec, evidence_summary, gemini_config) = self.build_assess_spec(&req).await?;
+        let incident_id = spec.incident_id.clone().unwrap_or_default();
+        let prompt_preview = spec.prompt.chars().take(500).collect::<String>();
+
+        // `on_delta` is `FnMut` and borrows the caller's stack, so it cannot
+        // cross into the `'static` `run_fn` closure `LlmRunner::run`
+        // requires. Stream deltas through a channel instead: the run_fn
+        // task forwards each parsed delta line, and this function drains
+        // the channel concurrently with awaiting the run.
+        let (delta_tx, mut delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        let run_fut = self.llm().run(spec, move |prompt| async move {
+            run_gemini_assessment(&prompt, &gemini_config, move |delta: &str| {
+                let _ = delta_tx.send(delta.to_string());
+                Ok(())
+            })
+            .await
+        });
+        tokio::pin!(run_fut);
+
+        let assessment = loop {
+            tokio::select! {
+                biased;
+                Some(delta) = delta_rx.recv() => {
+                    on_delta(&delta).map_err(ServiceError::Internal)?;
+                }
+                result = &mut run_fut => {
+                    // Drain any remaining buffered deltas before returning.
+                    while let Ok(delta) = delta_rx.try_recv() {
+                        on_delta(&delta).map_err(ServiceError::Internal)?;
+                    }
+                    break result;
+                }
+            }
+        }
+        .map_err(|err| ServiceError::Internal(anyhow::anyhow!(err)))?
+        .output;
 
         Ok(AiAssessResponse {
             incident_id,

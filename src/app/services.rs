@@ -38,16 +38,16 @@ use super::models::{
     InvestigationClaimType, InvestigationEnvelope, InvestigationMetadata, ListAiProjectsRequest,
     ListAiProjectsResponse, ListAiToolsRequest, ListAiToolsResponse, ListAppsRequest,
     ListAppsResponse, ListHostsResponse, ListSessionsRequest, ListSessionsResponse,
-    ListSourceIpsRequest, ListSourceIpsResponse, LogEntry, MaintenanceJobStatus,
-    NotificationsRecentRequest, PatternsRequest, PatternsResponse, ProjectContextRequest,
-    ProjectContextResponse, RequestActor, ResolvedTopicEntity, SearchLogsRequest,
-    SearchLogsResponse, SearchSessionsRequest, SearchSessionsResponse, ServiceJournalEntry,
-    ServiceLogsRequest, ServiceLogsResponse, SilentHostsRequest, SilentHostsResponse,
-    SimilarIncidentsRequest, SimilarIncidentsResponse, TailLogsRequest, TimelineRequest,
-    TimelineResponse, TopicCorrelateRequest, TopicCorrelateResponse, TopicExpansionEntity,
-    TopicTimelineEntry, TopologyFinding, TopologyFindingEntity, TopologyFindingEvidence,
-    UsageBlocksRequest, UsageBlocksResponse, app_entity_summary, app_graph_from_explain_response,
-    app_log_summary, safe_passive_text,
+    ListSourceIpsRequest, ListSourceIpsResponse, LlmInvocationsRequest, LogEntry,
+    MaintenanceJobStatus, NotificationsRecentRequest, PatternsRequest, PatternsResponse,
+    ProjectContextRequest, ProjectContextResponse, RequestActor, ResolvedTopicEntity,
+    SearchLogsRequest, SearchLogsResponse, SearchSessionsRequest, SearchSessionsResponse,
+    ServiceJournalEntry, ServiceLogsRequest, ServiceLogsResponse, SilentHostsRequest,
+    SilentHostsResponse, SimilarIncidentsRequest, SimilarIncidentsResponse, TailLogsRequest,
+    TimelineRequest, TimelineResponse, TopicCorrelateRequest, TopicCorrelateResponse,
+    TopicExpansionEntity, TopicTimelineEntry, TopologyFinding, TopologyFindingEntity,
+    TopologyFindingEvidence, UsageBlocksRequest, UsageBlocksResponse, app_entity_summary,
+    app_graph_from_explain_response, app_log_summary, safe_passive_text,
 };
 use super::os_adapter::{OsAdapter, SystemOsAdapter};
 use super::time::{parse_optional_timestamp, parse_required_timestamp, rfc3339_z};
@@ -122,6 +122,7 @@ pub struct CortexService {
     file_tail_registry: Option<Arc<FileTailRegistry>>,
     file_tail_reconcile: Option<Arc<dyn Fn() -> anyhow::Result<()> + Send + Sync>>,
     file_tail_statuses: Option<Arc<dyn Fn() -> Vec<FileTailStatus> + Send + Sync>>,
+    llm_runner: Arc<crate::app::llm_runner::LlmRunner>,
 }
 
 /// Number of read permits issued for a given r2d2 pool size.
@@ -141,6 +142,10 @@ impl CortexService {
     pub(crate) fn new(pool: Arc<DbPool>, storage: StorageConfig) -> Self {
         let permits = read_permits_for_pool(storage.pool_size);
         let heavy_read_concurrency = storage.heavy_read_concurrency;
+        let llm_runner = Arc::new(crate::app::llm_runner::LlmRunner::new(
+            pool.clone(),
+            crate::config::LlmConfig::default(),
+        ));
         Self {
             pool,
             storage,
@@ -151,6 +156,7 @@ impl CortexService {
             file_tail_registry: None,
             file_tail_reconcile: None,
             file_tail_statuses: None,
+            llm_runner,
         }
     }
 
@@ -164,6 +170,10 @@ impl CortexService {
     ) -> Self {
         let permits = read_permits_for_pool(storage.pool_size);
         let heavy_read_concurrency = storage.heavy_read_concurrency;
+        let llm_runner = Arc::new(crate::app::llm_runner::LlmRunner::new(
+            pool.clone(),
+            crate::config::LlmConfig::default(),
+        ));
         Self {
             pool,
             storage,
@@ -174,12 +184,25 @@ impl CortexService {
             file_tail_registry: None,
             file_tail_reconcile: None,
             file_tail_statuses: None,
+            llm_runner,
         }
     }
 
     pub(crate) fn with_file_tail_registry(mut self, registry: Arc<FileTailRegistry>) -> Self {
         self.file_tail_registry = Some(registry);
         self
+    }
+
+    pub(crate) fn with_llm_config(mut self, config: crate::config::LlmConfig) -> Self {
+        self.llm_runner = Arc::new(crate::app::llm_runner::LlmRunner::new(
+            self.pool.clone(),
+            config,
+        ));
+        self
+    }
+
+    pub fn llm(&self) -> &crate::app::llm_runner::LlmRunner {
+        &self.llm_runner
     }
 
     pub(crate) fn with_file_tail_control(

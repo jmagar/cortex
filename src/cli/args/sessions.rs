@@ -23,6 +23,7 @@ pub(crate) enum SessionsCommand {
     Incidents(SessionsIncidentsArgs),
     Investigate(SessionsInvestigateArgs),
     Assess(SessionsAssessArgs),
+    LlmInvocations(SessionsLlmInvocationsArgs),
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -260,4 +261,20 @@ pub(crate) struct SessionsAssessArgs {
     pub correlation_window_minutes: Option<u32>,
     pub terms: Vec<String>,
     pub limit: Option<u32>,
+    /// When true, preview the prompt/evidence bundle via
+    /// `LlmRunner::dry_run` instead of invoking Gemini — see GH issue #94.
+    pub dry_run: bool,
+}
+
+/// `cortex sessions llm-invocations` — list recent LLM invocation audit
+/// records (concurrency/rate-limit/circuit-breaker denials included).
+/// Admin-scoped: in `CliMode::Http`, requires `CORTEX_API_ADMIN_TOKEN` to be
+/// set client-side (see `get_json_with_admin` in `http_client.rs`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct SessionsLlmInvocationsArgs {
+    pub since: Option<String>,
+    pub action: Option<String>,
+    pub status: Option<String>,
+    pub limit: Option<i64>,
+    pub json: bool,
 }

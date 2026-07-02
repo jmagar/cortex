@@ -261,7 +261,8 @@ impl RuntimeCore {
             CancellationToken::new(),
             config.receiver.max_message_size,
         );
-        let mut service = CortexService::new(Arc::clone(&pool), config.storage.clone());
+        let mut service = CortexService::new(Arc::clone(&pool), config.storage.clone())
+            .with_llm_config(config.llm.clone());
         if is_stdio {
             service = service.with_file_tail_registry(file_tail_registry);
         } else {
@@ -888,6 +889,24 @@ impl RuntimeCore {
                     };
                     let global_deleted =
                         db::purge_old_logs(&pool, retention_days, fts_merge_pages)?;
+                    // llm_invocations (migration 37) has no severity concept and no
+                    // volume-driven need for its own hardcoded cap (unlike AdGuard
+                    // tags/heartbeats above), so it rides the same global
+                    // retention_days knob as logs.
+                    let llm_invocations_deleted = match db::purge_old_llm_invocations(
+                        &pool,
+                        retention_days,
+                        cleanup_chunk_size,
+                    ) {
+                        Ok(n) => n,
+                        Err(e) => {
+                            tracing::error!(
+                                error = %e,
+                                "llm_invocations retention purge failed; continuing"
+                            );
+                            0
+                        }
+                    };
                     // Retention deletes OLDEST logs; the timeline_hourly rollup's
                     // ingest watermark only advances on inserts, so it would
                     // never notice these deletes and old buckets would ghost
@@ -897,22 +916,32 @@ impl RuntimeCore {
                     if let Err(e) = db::prune_timeline_rollup(&pool) {
                         tracing::error!(error = %e, "timeline rollup prune failed; continuing");
                     }
-                    Ok::<(usize, usize, usize), anyhow::Error>((
+                    Ok::<(usize, usize, usize, usize), anyhow::Error>((
                         tag_deleted,
                         heartbeat_deleted,
                         global_deleted,
+                        llm_invocations_deleted,
                     ))
                 })
                 .await
                 .map_err(|e| anyhow::anyhow!("spawn_blocking error: {e}"))
                 .and_then(|r| r)
                 {
-                    Ok((tag_deleted, heartbeat_deleted, global_deleted)) => tracing::info!(
+                    Ok((
+                        tag_deleted,
+                        heartbeat_deleted,
+                        global_deleted,
+                        llm_invocations_deleted,
+                    )) => tracing::info!(
                         retention_days,
                         tag_deleted,
                         heartbeat_deleted,
                         global_deleted,
-                        total_deleted = tag_deleted + heartbeat_deleted + global_deleted,
+                        llm_invocations_deleted,
+                        total_deleted = tag_deleted
+                            + heartbeat_deleted
+                            + global_deleted
+                            + llm_invocations_deleted,
                         elapsed_ms = started.elapsed().as_millis(),
                         "Retention purge tick completed"
                     ),

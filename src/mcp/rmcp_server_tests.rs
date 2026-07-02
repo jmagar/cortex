@@ -1494,3 +1494,48 @@ async fn unknown_action_is_denied_by_sentinel_scope() {
         "denial message should reference scope requirement; got: {msg}"
     );
 }
+
+// llm_invocations exposes circuit-breaker/kill-switch operational state
+// (status/error/metadata_json) — it must be admin-scoped, not cortex:read.
+// See eng review Fix 4 (security reviewer, MP2) in the LLM invocation
+// guard plan. This is additive alongside the generic admin-denial loop in
+// mounted_policy_with_read_scope_permits_read_actions, mirroring how this
+// repo already has an explicit sessions_action_requires_read_scope test
+// alongside its own generic loop.
+#[test]
+fn llm_invocations_action_requires_admin_scope() {
+    assert_eq!(
+        required_scope_for("llm_invocations"),
+        Some("cortex:admin"),
+        "llm_invocations exposes circuit-breaker/kill-switch operational \
+         state and must be admin-scoped, not cortex:read (eng review Fix 4)"
+    );
+}
+
+#[tokio::test]
+async fn llm_invocations_action_is_denied_for_read_only_scope() {
+    let (state, pool, _dir) = mounted_state();
+    seed_auth_action_log(&pool);
+    let auth = auth_ctx_with_scopes(vec!["cortex:read"]);
+    let router = rmcp_router_with_auth(state, auth);
+
+    let (status, response) = post_rmcp(
+        router,
+        jsonrpc_request(
+            30,
+            "tools/call",
+            Some(json!({"name": "cortex", "arguments": {"action": "llm_invocations"}})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        response["error"]["code"], -32600,
+        "llm_invocations must be denied for a cortex:read-only caller; response: {response}"
+    );
+    let msg = response["error"]["message"].as_str().unwrap_or("");
+    assert!(
+        msg.contains("requires scope: cortex:admin"),
+        "denial message should reference admin scope; got: {msg}"
+    );
+}

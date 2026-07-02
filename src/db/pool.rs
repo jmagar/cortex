@@ -2,7 +2,7 @@
 //! core.
 //!
 //! Owns the full schema: the `logs` table + FTS5 index, AI/graph/heartbeat
-//! projections, and the **31 sequential migrations** tracked by
+//! projections, and the **37 sequential migrations** tracked by
 //! `KNOWN_SCHEMA_VERSION`. Migrations run at startup; heavy ones log
 //! `Migration N: starting ...` lines, and the one-time
 //! `auto_vacuum=INCREMENTAL` conversion VACUUM is logged loudly (it can take
@@ -39,7 +39,7 @@ pub fn write_lock() -> parking_lot::ReentrantMutexGuard<'static, ()> {
     WRITE_LOCK.lock()
 }
 
-pub const KNOWN_SCHEMA_VERSION: i64 = 36;
+pub const KNOWN_SCHEMA_VERSION: i64 = 37;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SchemaVersionInfo {
@@ -1974,6 +1974,52 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
         tracing::info!("Migration 36: added user/device entities and identity relationships");
     }
 
+    // Migration 37: create llm_invocations, the shared audit table for every
+    // LLM-backed assessment call (ai_assess today; skill_assess/mcp_assess/
+    // hook_assess in later phases). A start row is written before the
+    // process/API call begins (status='running') and updated on completion.
+    // Concurrency/rate-limit/circuit-open/disabled denials also write a row
+    // (status set to the denial reason) so the audit trail covers every call
+    // attempt, not just ones that reached the LLM.
+    if !migration_applied(&conn, 37)? {
+        conn.execute_batch(
+            "BEGIN IMMEDIATE;
+
+             CREATE TABLE IF NOT EXISTS llm_invocations (
+               id                 TEXT PRIMARY KEY,
+               started_at         TEXT NOT NULL,
+               finished_at        TEXT,
+               duration_ms        INTEGER,
+               caller_surface     TEXT NOT NULL,
+               action             TEXT NOT NULL,
+               provider           TEXT NOT NULL,
+               model              TEXT,
+               program            TEXT,
+               incident_id        TEXT,
+               ai_tool            TEXT,
+               ai_project         TEXT,
+               ai_session_id      TEXT,
+               evidence_counts_json TEXT,
+               prompt_bytes       INTEGER,
+               output_bytes       INTEGER,
+               status             TEXT NOT NULL,
+               error              TEXT,
+               metadata_json      TEXT
+             );
+
+             CREATE INDEX IF NOT EXISTS idx_llm_invocations_started
+                 ON llm_invocations(started_at);
+             CREATE INDEX IF NOT EXISTS idx_llm_invocations_action_started
+                 ON llm_invocations(action, started_at);
+             CREATE INDEX IF NOT EXISTS idx_llm_invocations_status_started
+                 ON llm_invocations(status, started_at);
+
+             INSERT OR IGNORE INTO schema_migrations (version) VALUES (37);
+             COMMIT;",
+        )?;
+        tracing::info!("Migration 37: created llm_invocations audit table");
+    }
+
     // A server crash/restart mid-check leaves an orphaned 'running' maintenance
     // job that would never resolve. Mark any such rows 'failed' on every startup
     // so polls get a terminal answer instead of hanging forever. Idempotent and
@@ -1983,6 +2029,23 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
             SET status = 'failed',
                 finished_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
                 result_json = json_object('error', 'interrupted by server restart')
+          WHERE status = 'running';",
+    )?;
+
+    // Same reconciliation, same rationale, for `llm_invocations`: if the
+    // process is killed between `write_start_row` (status='running') and
+    // the matching `write_finish_row*` call — e.g. the `run_fn` future is
+    // dropped/cancelled by a server crash or forced shutdown — the audit
+    // row is stuck 'running' forever with no process left to finish it. A
+    // fresh process start means nothing from a prior process can still
+    // legitimately be running, so reconcile unconditionally on every
+    // startup. Idempotent and a no-op in the common case (clean restart,
+    // no in-flight invocations).
+    conn.execute_batch(
+        "UPDATE llm_invocations
+            SET status = 'interrupted',
+                finished_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+                error = 'interrupted by server restart'
           WHERE status = 'running';",
     )?;
 

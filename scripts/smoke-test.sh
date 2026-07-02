@@ -20,6 +20,7 @@
 #   mcp_call compose_status, mcp_call compose_doctor,
 #   mcp_call unaddressed_errors, mcp_call ack_error, mcp_call unack_error,
 #   mcp_call notifications_recent, mcp_call file_tails, mcp_call notifications_test,
+#   mcp_call llm_invocations,
 #   mcp_call similar_incidents, mcp_call ask_history, mcp_call incident_context, mcp_call graph,
 #   mcp_call help
 
@@ -511,6 +512,16 @@ if mcp_admin_scope_available; then
     fi
 else
     skip "file_tails: status requires cortex:admin (set CORTEX_STATIC_TOKEN_ADMIN=true or CORTEX_SMOKE_ADMIN=true)"
+fi
+
+# ── llm_invocations ──────────────────────────────────────────────────────────
+echo ""
+echo "Action: llm_invocations"
+if mcp_admin_scope_available; then
+    LLM_INVOCATIONS=$(mcp_call llm_invocations "limit=5" 2>&1)
+    assert_no_error "llm_invocations: no error" "$LLM_INVOCATIONS"
+else
+    skip "llm_invocations: requires cortex:admin (set CORTEX_STATIC_TOKEN_ADMIN=true or CORTEX_SMOKE_ADMIN=true)"
 fi
 
 # ── stats ─────────────────────────────────────────────────────────────────────

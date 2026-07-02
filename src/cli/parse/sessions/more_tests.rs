@@ -207,6 +207,23 @@ fn parse_sessions_assess_accepts_incident_and_investigation_filters() {
             assert_eq!(args.correlation_window_minutes, Some(9));
             assert_eq!(args.terms, vec!["auth"]);
             assert!(args.json);
+            assert!(!args.dry_run);
+        }
+        other => panic!("unexpected command: {other:?}"),
+    }
+}
+
+// Eng review fix (code-simplicity-reviewer, GH issue #94): `LlmRunner::dry_run`
+// had zero CLI/MCP/REST callers despite being fully implemented and
+// unit-tested. `cortex sessions assess --dry-run` is the wired-up caller.
+#[test]
+fn parse_sessions_assess_accepts_dry_run_flag() {
+    let command = parse_sessions_assess(&strings(&["incident-1", "--dry-run"])).unwrap();
+
+    match command {
+        crate::cli::CliCommand::Sessions(crate::cli::SessionsCommand::Assess(args)) => {
+            assert_eq!(args.incident_id, "incident-1");
+            assert!(args.dry_run);
         }
         other => panic!("unexpected command: {other:?}"),
     }
@@ -256,6 +273,42 @@ fn parse_sessions_more_reports_required_query_and_unexpected_argument_errors() {
 
     let err = parse_sessions_assess(&[]).unwrap_err().to_string();
     assert!(err.contains("requires an <incident_id>"));
+}
+
+#[test]
+fn parse_sessions_llm_invocations_collects_flags() {
+    let args = strings(&[
+        "--since",
+        "24h",
+        "--action",
+        "ai_assess",
+        "--status",
+        "success",
+        "--limit",
+        "50",
+        "--json",
+    ]);
+
+    let command = parse_sessions_llm_invocations(&args).unwrap();
+
+    match command {
+        crate::cli::CliCommand::Sessions(crate::cli::SessionsCommand::LlmInvocations(args)) => {
+            assert_eq!(args.action.as_deref(), Some("ai_assess"));
+            assert_eq!(args.status.as_deref(), Some("success"));
+            assert_eq!(args.limit, Some(50));
+            assert!(args.json);
+            assert!(args.since.is_some());
+        }
+        other => panic!("expected SessionsCommand::LlmInvocations, got {other:?}"),
+    }
+}
+
+#[test]
+fn parse_sessions_llm_invocations_rejects_unknown_flag() {
+    let err = parse_sessions_llm_invocations(&strings(&["--bogus"]))
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("unknown flag for sessions llm-invocations"));
 }
 
 fn strings(values: &[&str]) -> Vec<String> {
