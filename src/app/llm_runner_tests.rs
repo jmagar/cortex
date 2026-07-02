@@ -306,6 +306,51 @@ async fn circuit_opens_after_failure_threshold_and_audits_denial() {
     );
 }
 
+/// `retry_after` must round UP a sub-second remainder, never truncate it to
+/// "0s" — a caller reading "0s" would reasonably assume the circuit is
+/// already closed and retry immediately, when it's actually still open.
+/// `circuit_opens_after_failure_threshold_and_audits_denial` only asserts
+/// `seconds > 0`, which happens to hold with the default 300s cooldown but
+/// does not exercise the truncation-vs-rounding boundary; this test uses a
+/// 1s cooldown so the remaining time is checked well under a second after
+/// the circuit opens, which `.as_secs()` (truncate) would misreport as
+/// `"0s"` but `.as_secs_f64().ceil()` (round up) correctly reports as `"1s"`.
+#[tokio::test]
+async fn circuit_open_retry_after_rounds_up_sub_second_remainder() {
+    let (pool, _dir) = test_pool();
+    let cfg = LlmConfig {
+        failure_threshold: 1,
+        cooldown_secs: 1,
+        max_invocations_per_minute: 100,
+        max_invocations_per_hour: 100,
+        ..LlmConfig::default()
+    };
+    let runner = LlmRunner::new(pool.clone(), cfg);
+
+    let first = runner
+        .run(base_spec("ai_assess"), |_prompt| async {
+            Err(anyhow::anyhow!("simulated LLM failure"))
+        })
+        .await;
+    assert!(first.is_err());
+
+    let second = runner
+        .run(base_spec("ai_assess"), |_prompt| async {
+            panic!("run_fn must not be called while circuit is open")
+        })
+        .await;
+    match second {
+        Err(LlmRunnerError::CircuitOpen { retry_after, .. }) => {
+            assert_ne!(
+                retry_after, "0s",
+                "retry_after must round up a sub-second remainder, not truncate to 0s \
+                 while the circuit is still open"
+            );
+        }
+        other => panic!("expected CircuitOpen, got {other:?}"),
+    }
+}
+
 #[tokio::test]
 async fn dry_run_never_invokes_llm_and_reports_sizes() {
     let (pool, _dir) = test_pool();

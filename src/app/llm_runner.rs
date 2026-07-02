@@ -302,9 +302,12 @@ impl LlmRunner {
                     // (not a wall-clock time), so it's not actionable for a
                     // caller trying to know how long to wait. Report the
                     // remaining seconds until the circuit closes instead.
+                    // Round UP (not truncate) so a sub-second remainder
+                    // never reports "0s" while the circuit is still open.
                     let retry_after_secs = open_until
                         .saturating_duration_since(Instant::now())
-                        .as_secs();
+                        .as_secs_f64()
+                        .ceil() as u64;
                     return Err(LlmRunnerError::CircuitOpen {
                         action: action.clone(),
                         retry_after: format!("{retry_after_secs}s"),
