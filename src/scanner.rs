@@ -8,9 +8,13 @@ use sha2::{Digest, Sha256};
 
 use crate::ai_project::normalize_local_ai_project_path;
 use crate::config::StorageConfig;
-use crate::db::{DbPool, LogBatchEntry, enforce_storage_budget, insert_logs_batch_in_tx};
+use crate::db::{
+    DbPool, LogBatchEntry, SkillEventInsert, enforce_storage_budget, insert_logs_batch_in_tx,
+    insert_skill_events_in_tx,
+};
 use crate::ingest_metadata::bounded_metadata_json;
 use crate::receiver::enrichment::{project_from_transcript_path, scrub_ai_message};
+use crate::scanner::skill_events::{extract_claude_skill_events, extract_codex_skill_events};
 
 mod checkpoint;
 mod claude;
@@ -59,6 +63,23 @@ pub struct IndexOptions {
 #[derive(Debug, Clone, Default)]
 pub struct IndexFileOptions {
     pub force: bool,
+}
+
+/// Raw skill-extraction source paired 1:1 with each `LogBatchEntry` pushed
+/// into a chunk's `batch` vector. Carried alongside `batch`/`imports` because
+/// skill extraction needs the PRE-SCRUB parsed value (Claude JSON) or raw
+/// extracted text (Codex), not the already-scrubbed `LogBatchEntry.message`.
+///
+/// Eng review Fix 1: `Claude` wraps the `serde_json::Value` that
+/// `ParsedTranscriptRecord.raw_value` already carries (Task 2) — NOT a
+/// re-parse of `line_text`. `claude::parse_line` parses the line's JSON
+/// exactly once; this side channel just moves that already-parsed value
+/// forward instead of throwing it away and parsing again.
+#[derive(Debug, Clone)]
+enum ChunkSkillSource {
+    Claude(serde_json::Value),
+    Codex(String),
+    None,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -483,6 +504,7 @@ pub fn index_file_with_options(
     };
     let mut imports = Vec::new();
     let mut batch = Vec::new();
+    let mut skill_sources = Vec::new();
     let mut chunk_bytes = 0usize;
     let mut project_normalizer = ProjectNormalizer::default();
     let file = fs::File::open(&canonical_path)?;
@@ -537,6 +559,24 @@ pub fn index_file_with_options(
         match parse_line_for_source(source_kind, line_text, &canonical_path, line_no) {
             Ok(Some(parsed)) => {
                 let record_key = parsed.record_key;
+                let skill_source = match source_kind {
+                    SourceKind::CodexSession => {
+                        if parsed.message.contains("<skill>") {
+                            ChunkSkillSource::Codex(parsed.message.clone())
+                        } else {
+                            ChunkSkillSource::None
+                        }
+                    }
+                    SourceKind::ClaudeProject | SourceKind::ExplicitFile => {
+                        match &parsed.raw_value {
+                            Some(value) if line_text.contains("attributionSkill") => {
+                                ChunkSkillSource::Claude(value.clone())
+                            }
+                            _ => ChunkSkillSource::None,
+                        }
+                    }
+                    SourceKind::GeminiSession => ChunkSkillSource::None,
+                };
                 let message = scrub_ai_message(&parsed.message, None);
                 let project_candidate = parsed
                     .ai_project
@@ -601,6 +641,7 @@ pub fn index_file_with_options(
                 chunk_bytes = chunk_bytes.saturating_add(log_entry_string_bytes(&entry));
                 batch.push(entry);
                 imports.push(record_key);
+                skill_sources.push(skill_source);
                 if batch.len() >= MAX_INDEX_CHUNK_RECORDS || chunk_bytes >= MAX_INDEX_CHUNK_BYTES {
                     if !flush_chunk(
                         pool,
@@ -608,6 +649,7 @@ pub fn index_file_with_options(
                         source_id,
                         &mut batch,
                         &mut imports,
+                        &mut skill_sources,
                         None,
                         &mut result,
                     )? {
@@ -644,6 +686,7 @@ pub fn index_file_with_options(
             source_id,
             &mut batch,
             &mut imports,
+            &mut skill_sources,
             None,
             &mut result,
         )?;
@@ -662,6 +705,7 @@ pub fn index_file_with_options(
         source_id,
         &mut batch,
         &mut imports,
+        &mut skill_sources,
         completion_metadata.as_ref(),
         &mut result,
     )?;
@@ -772,16 +816,19 @@ pub fn ai_indexing_health(
     checkpoint::CheckpointStore::new(pool).indexing_health(process_start_time)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn flush_chunk(
     pool: &DbPool,
     storage: Option<&StorageConfig>,
     source_id: i64,
     batch: &mut Vec<LogBatchEntry>,
     imports: &mut Vec<String>,
+    skill_sources: &mut Vec<ChunkSkillSource>,
     completion_metadata: Option<&FileMetadata>,
     result: &mut IndexResult,
 ) -> Result<bool> {
     if batch.is_empty() {
+        skill_sources.clear();
         if let Some(file_metadata) = completion_metadata {
             let mut conn = pool.get()?;
             let _write_guard = crate::db::write_lock();
@@ -799,6 +846,7 @@ fn flush_chunk(
             result.storage_blocked_chunks += 1;
             batch.clear();
             imports.clear();
+            skill_sources.clear();
             return Ok(false);
         }
     }
@@ -808,16 +856,46 @@ fn flush_chunk(
     let tx = conn.transaction()?;
     let claimed = checkpoint::claim_imports_in_tx(&tx, source_id, imports)?;
     let mut claimed_batch = Vec::with_capacity(batch.len());
+    let mut claimed_skill_sources = Vec::with_capacity(skill_sources.len());
     let mut skipped_dupes = 0usize;
-    for (entry, claimed) in batch.drain(..).zip(claimed) {
+    for ((entry, claimed), skill_source) in
+        batch.drain(..).zip(claimed).zip(skill_sources.drain(..))
+    {
         if claimed {
             claimed_batch.push(entry);
+            claimed_skill_sources.push(skill_source);
         } else {
             skipped_dupes += 1;
         }
     }
     if !claimed_batch.is_empty() {
-        insert_logs_batch_in_tx(&tx, &claimed_batch)?;
+        let log_ids = insert_logs_batch_in_tx(&tx, &claimed_batch)?;
+        let mut skill_inserts = Vec::new();
+        for ((entry, log_id), skill_source) in claimed_batch
+            .iter()
+            .zip(log_ids.iter().copied())
+            .zip(claimed_skill_sources.iter())
+        {
+            let extracted = match skill_source {
+                ChunkSkillSource::Claude(value) => extract_claude_skill_events(value),
+                ChunkSkillSource::Codex(text) => extract_codex_skill_events(text),
+                ChunkSkillSource::None => Vec::new(),
+            };
+            for event in extracted {
+                skill_inserts.push(SkillEventInsert {
+                    log_id,
+                    ai_tool: entry.ai_tool.clone().unwrap_or_default(),
+                    ai_project: entry.ai_project.clone(),
+                    ai_session_id: entry.ai_session_id.clone(),
+                    hostname: entry.hostname.clone(),
+                    timestamp: entry.timestamp.clone(),
+                    event,
+                });
+            }
+        }
+        if !skill_inserts.is_empty() {
+            insert_skill_events_in_tx(&tx, &skill_inserts)?;
+        }
     }
     if let Some(file_metadata) = completion_metadata {
         checkpoint::update_source_metadata_in_tx(&tx, source_id, file_metadata)?;
@@ -1063,6 +1141,11 @@ fn index_gemini_file(
 
     let mut batch = Vec::new();
     let mut imports = Vec::new();
+    // Gemini rows never produce skill events — Gemini extraction is
+    // explicitly out of scope for this phase. This vector stays empty
+    // (one ChunkSkillSource::None pushed per record) purely so flush_chunk's
+    // shared signature is satisfied uniformly across all source kinds.
+    let mut skill_sources: Vec<ChunkSkillSource> = Vec::new();
     let mut chunk_bytes = 0usize;
     let host = local_hostname();
     let tool = SourceKind::GeminiSession.tool_name();
@@ -1146,6 +1229,7 @@ fn index_gemini_file(
         chunk_bytes = chunk_bytes.saturating_add(log_entry_string_bytes(&entry));
         batch.push(entry);
         imports.push(record_key);
+        skill_sources.push(ChunkSkillSource::None);
         if batch.len() >= MAX_INDEX_CHUNK_RECORDS || chunk_bytes >= MAX_INDEX_CHUNK_BYTES {
             if !flush_chunk(
                 pool,
@@ -1153,6 +1237,7 @@ fn index_gemini_file(
                 source_id,
                 &mut batch,
                 &mut imports,
+                &mut skill_sources,
                 None,
                 &mut result,
             )? {
@@ -1173,6 +1258,7 @@ fn index_gemini_file(
             source_id,
             &mut batch,
             &mut imports,
+            &mut skill_sources,
             None,
             &mut result,
         )?;
@@ -1191,6 +1277,7 @@ fn index_gemini_file(
         source_id,
         &mut batch,
         &mut imports,
+        &mut skill_sources,
         completion_metadata.as_ref(),
         &mut result,
     )?;
