@@ -41,6 +41,7 @@ const CURRENT_API_ROUTES: &[&str] = &[
     "/api/sessions/incidents",
     "/api/sessions/investigate",
     "/api/sessions/llm-invocations",
+    "/api/sessions/skills",
     "/api/compose/status",
     "/api/compose/doctor",
     "/api/sessions",

@@ -574,7 +574,7 @@ impl HttpClient {
     }
 
     pub async fn ai_skills(&self, req: &ListSkillEventsRequest) -> Result<ListSkillEventsResponse> {
-        self.get_json("/api/ai/skills", Some(req)).await
+        self.get_json("/api/sessions/skills", Some(req)).await
     }
 
     pub async fn ai_projects(&self, req: &ListAiProjectsRequest) -> Result<ListAiProjectsResponse> {

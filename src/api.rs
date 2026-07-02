@@ -266,7 +266,7 @@ pub fn router(state: ApiState) -> anyhow::Result<Router> {
         .route("/api/sessions/incidents", get(ai_incidents))
         .route("/api/sessions/investigate", get(ai_investigate))
         .route("/api/sessions/llm-invocations", get(ai_llm_invocations))
-        .route("/api/ai/skills", get(ai_skills))
+        .route("/api/sessions/skills", get(ai_skills))
         .route("/api/compose/status", get(compose_status))
         .route("/api/compose/doctor", get(compose_doctor))
         // --- ai session queries ---
@@ -817,16 +817,23 @@ async fn ai_llm_invocations(
     respond(state.service.llm_invocations_checked(req).await)
 }
 
-/// `GET /api/ai/skills` — `cortex:read`-scoped per GH #94's explicit
-/// decision (not admin, unlike `ai_llm_invocations` above). As cheap
-/// defense-in-depth this handler logs the caller IP and query filters at
-/// `tracing::info!` before serving the response — matching the logging
-/// LEVEL convention of `Read`-scoped AI-transcript routes in this file (the
-/// admin-scoped `ai_llm_invocations` uses `tracing::warn!` because it
-/// exposes kill-switch/circuit-breaker operational state; a plain
-/// `Read`-scoped route like this one uses `info!` instead, so there's at
-/// least a trace record of who queried skill-usage history without the
-/// noise level of a `warn!` on every normal read).
+/// `GET /api/sessions/skills` — `cortex:read`-scoped per GH #94's explicit
+/// decision (not admin, unlike `ai_llm_invocations` above). Note: the
+/// original plan drafted this as `GET /api/ai/skills`, but the live repo
+/// permanently removed the `/api/ai/*` prefix as a "clean break" migration
+/// to `/api/sessions/*` (see `src/surfaces/api.rs`'s `RemovedCleanBreak`
+/// entries + `surfaces_tests::api_ai_routes_are_intentional_clean_breaks`,
+/// which asserts `/api/ai/*` stays gone with no compatibility shim) — so
+/// this route lives under `/api/sessions/` alongside its siblings
+/// (`/api/sessions/tools`, `/api/sessions/llm-invocations`, etc.) instead.
+/// As cheap defense-in-depth this handler logs the caller IP and query
+/// filters at `tracing::info!` before serving the response — matching the
+/// logging LEVEL convention of `Read`-scoped AI-transcript routes in this
+/// file (the admin-scoped `ai_llm_invocations` uses `tracing::warn!`
+/// because it exposes kill-switch/circuit-breaker operational state; a
+/// plain `Read`-scoped route like this one uses `info!` instead, so
+/// there's at least a trace record of who queried skill-usage history
+/// without the noise level of a `warn!` on every normal read).
 async fn ai_skills(
     State(state): State<ApiState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,

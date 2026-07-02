@@ -311,6 +311,7 @@ pub const SURFACE_SPECS: &[SurfaceSpec] = &[
         Read
     ),
     mcp!("graph", Graph, Canonical, Read),
+    mcp!("skill_events", Sessions, Canonical, Read),
     mcp!("help", Protocol, Canonical, Info),
 ];
 
