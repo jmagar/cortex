@@ -1,0 +1,17 @@
+# cortex-sessions-watch-doctor.service — periodic health check + Apprise
+# alert for cortex-sessions-watch.service.
+#
+# Installed automatically by `cortex setup sessions-watch-service install`
+# alongside cortex-sessions-watch.service itself. Prevents a repeat of the
+# 2026-06-29 incident, where the watch service crashed into `failed` state
+# and sat there for 3 days with zero alerting.
+
+[Unit]
+Description=cortex sessions-watch periodic health check
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/cortex setup sessions-watch-health-check --json
+
+[Install]
+WantedBy=default.target

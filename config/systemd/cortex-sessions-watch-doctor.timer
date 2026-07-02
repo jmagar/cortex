@@ -1,0 +1,12 @@
+# cortex-sessions-watch-doctor.timer — runs the sessions-watch health
+# check every 15 minutes.
+
+[Unit]
+Description=Periodic cortex-sessions-watch.service health check
+
+[Timer]
+OnCalendar=*:0/15
+Persistent=true
+
+[Install]
+WantedBy=timers.target

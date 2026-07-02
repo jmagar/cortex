@@ -4,6 +4,9 @@ use std::process::Command;
 use std::time::Instant;
 
 use super::firstrun::{ensure_private_dir, parse_env};
+use super::sessions_watch_health::{
+    build_and_run_health_check, disable_and_remove_doctor_timer, install_and_enable_doctor_timer,
+};
 use super::systemd::{
     systemctl_user_phase, systemctl_user_required_named_phase, systemctl_user_state,
 };
@@ -99,6 +102,7 @@ pub async fn run_sessions_watch_service_setup(
                 AI_WATCH_SERVICE_ACTIVE_PHASE,
                 &["is-active", "cortex-sessions-watch.service"],
             ));
+            phases.extend(install_and_enable_doctor_timer(&systemd_dir)?);
         }
         SessionsWatchServiceAction::Remove => {
             phases.push(systemctl_user_phase(&[
@@ -116,6 +120,7 @@ pub async fn run_sessions_watch_service_setup(
                 &watch_env_path,
                 &service_path,
             )?);
+            phases.extend(disable_and_remove_doctor_timer(&systemd_dir)?);
             phases.push(systemctl_user_phase(&["daemon-reload"]));
         }
         SessionsWatchServiceAction::Check => {
@@ -151,6 +156,7 @@ pub async fn run_sessions_watch_service_setup(
                 &["is-active", "cortex-sessions-watch.service"],
             ));
         }
+        SessionsWatchServiceAction::HealthCheck => phases.push(build_and_run_health_check().await),
     }
 
     let elapsed_ms = started.elapsed().as_millis();

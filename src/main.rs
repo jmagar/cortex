@@ -731,6 +731,19 @@ fn parse_setup_command(args: &[String]) -> Result<SetupCommand> {
     }
     if matches!(
         iter.clone().next().map(String::as_str),
+        Some("sessions-watch-health-check")
+    ) {
+        let _ = iter.next();
+        let (_action, json) = parse_setup_subcommand_args("sessions-watch-health-check", iter)?;
+        return Ok(SetupCommand {
+            kind: SetupCommandKind::SessionsWatchService(
+                cortex::setup::SessionsWatchServiceAction::HealthCheck,
+            ),
+            json,
+        });
+    }
+    if matches!(
+        iter.clone().next().map(String::as_str),
         Some("agent-command")
     ) {
         let _ = iter.next();

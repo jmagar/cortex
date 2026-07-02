@@ -80,6 +80,29 @@ fn ai_watch_service_unit_tolerates_contention_burst() {
 }
 
 #[cfg(unix)]
+#[tokio::test]
+#[serial]
+async fn health_check_action_returns_ok_report_when_service_active() {
+    let dir = tempfile::tempdir().unwrap();
+    let bin_dir = dir.path().join("bin");
+    std::fs::create_dir_all(&bin_dir).unwrap();
+    write_executable(
+        &bin_dir.join("systemctl"),
+        "#!/bin/sh\ncase \"$*\" in\n  *is-active*cortex-sessions-watch.service*) printf 'active\\n' ;;\n  *) printf 'inactive\\n' ;;\nesac\nexit 0\n",
+    );
+    let _path = EnvGuard::set("PATH", path_with_prepended(&bin_dir));
+    // No CORTEX_NOTIFICATIONS_APPRISE_URL(S) set — health check must not
+    // require notifications config to run, only to fire an alert.
+    let _enabled = EnvGuard::remove("CORTEX_NOTIFICATIONS_ENABLED");
+
+    let report = run_sessions_watch_service_setup(SessionsWatchServiceAction::HealthCheck)
+        .await
+        .unwrap();
+
+    assert!(!report.has_errors, "expected no errors, got: {report:?}");
+}
+
+#[cfg(unix)]
 #[test]
 #[serial]
 fn legacy_ai_systemd_units_absent_phase_reports_stale_units() {
