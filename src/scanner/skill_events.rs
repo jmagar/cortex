@@ -18,6 +18,10 @@
 //! transcript could otherwise embed ANSI escapes that the CLI printer
 //! would echo verbatim via `println!`).
 
+use std::sync::LazyLock;
+
+use regex::Regex;
+
 const MAX_SKILL_FIELD_CHARS: usize = 256;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -79,6 +83,18 @@ impl ExtractedSkillEvent {
         {
             return None;
         }
+        // If the source already used "plugin:skill" combined form, split it
+        // out for skill_plugin while keeping skill_name as the full combined
+        // string (locked behavior — do not fabricate this split when
+        // plugin/skill came from separate source fields, e.g. Claude's
+        // attributionSkill/attributionPlugin).
+        if self.skill_plugin.is_none() {
+            if let Some((plugin, _rest)) = trimmed_name.split_once(':') {
+                if !plugin.is_empty() {
+                    self.skill_plugin = Some(plugin.to_string());
+                }
+            }
+        }
         self.skill_name = clamp_chars(trimmed_name, MAX_SKILL_FIELD_CHARS);
         self.skill_plugin = self.skill_plugin.and_then(|plugin| {
             let trimmed = plugin.trim();
@@ -137,6 +153,48 @@ pub fn extract_claude_skill_events(value: &serde_json::Value) -> Vec<ExtractedSk
         return Vec::new();
     }
     Vec::new()
+}
+
+/// Matches `<skill> <name> ... </name> </skill>` with optional whitespace
+/// around every tag boundary. `(?s)` lets `.` cross newlines (skill names are
+/// short but transcripts can wrap). Non-greedy `.*?` keeps each match scoped
+/// to one tag pair even when multiple `<skill>` blocks appear in one message.
+static CODEX_SKILL_TAG: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?s)<skill>\s*<name>\s*(.*?)\s*</name>\s*</skill>").expect("static regex")
+});
+
+/// Extract Codex skill-invocation events from transcript message text. Scans
+/// for ALL `<skill><name>...</name></skill>` occurrences (a single row can
+/// invoke multiple skills), de-duplicating identical skill names within the
+/// row. Deliberately narrow — matches only the literal tag pair, never prose
+/// like "use the rust skill".
+///
+/// Eng review Fix 1: short-circuits on a cheap substring check before
+/// touching the regex engine at all — the overwhelming majority of
+/// transcript rows contain no skill tag, so this bounds the common case to
+/// one `str::contains` call instead of a full regex scan.
+pub fn extract_codex_skill_events(text: &str) -> Vec<ExtractedSkillEvent> {
+    if !text.contains("<skill>") {
+        return Vec::new();
+    }
+    let mut seen = std::collections::HashSet::new();
+    let mut events = Vec::new();
+    for capture in CODEX_SKILL_TAG.captures_iter(text) {
+        let raw_name = capture.get(1).map_or("", |m| m.as_str());
+        let event = ExtractedSkillEvent {
+            skill_name: raw_name.to_string(),
+            skill_plugin: None,
+            event_kind: SkillEventKind::CodexSkillBlock,
+            evidence_kind: SkillEvidenceKind::TranscriptContent,
+        };
+        let Some(normalized) = event.normalized() else {
+            continue;
+        };
+        if seen.insert(normalized.skill_name.clone()) {
+            events.push(normalized);
+        }
+    }
+    events
 }
 
 #[cfg(test)]
