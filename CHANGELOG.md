@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.2.4] - 2026-07-02
+
+### Fixed
+
+- `circuit_open_retry_after_rounds_up_sub_second_remainder` (introduced in PR #106) was flaky under a fully-loaded parallel `cargo test --lib` run: it opened a circuit-breaker with a 1s cooldown and immediately asserted `retry_after != "0s"` on the next call, but under heavy CPU contention the gap between the two calls could occasionally exceed the full cooldown window, making `retry_after` legitimately compute to `"0s"`. Bumped the test's `cooldown_secs` to 300s so the sub-second-remainder assertion has a wide safety margin against scheduler jitter, while still exercising the same `ceil()`-based rounding behavior.
+
 ## [3.2.3] - 2026-07-02
 
 ### Fixed
