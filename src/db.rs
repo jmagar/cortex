@@ -7,6 +7,9 @@ pub(crate) mod graph_confidence;
 pub mod graph_findings;
 pub mod graph_inventory;
 mod heartbeat;
+mod hook_events;
+mod hook_incident_evidence;
+mod hook_incidents;
 mod ingest;
 pub(crate) mod llm_invocations;
 mod maintenance;
@@ -83,6 +86,19 @@ pub use queries::{
     search_ai_related_logs, search_ai_sessions, search_logs,
     search_logs_from_graph_related_entities, severity_to_num, similar_incidents_clusters,
     tail_logs, timeline_rollup_status, topic_correlate_inputs, validate_fts_query,
+};
+pub(crate) use hook_events::insert_hook_events_in_tx;
+pub use hook_events::{
+    AiHookEventEntry, AiHookEventParams, HookEventInsert, ListHookEventsResult,
+    insert_hook_events, list_hook_events,
+};
+pub use hook_incident_evidence::{
+    AiHookInvestigateParams, AiHookInvestigateResult, HookIncidentEvidence,
+    investigate_ai_hook_incidents,
+};
+pub use hook_incidents::{
+    AiHookIncidentParams, AiHookIncidentResult, HookIncident, HookSignalCounts,
+    search_ai_hook_incidents,
 };
 pub(crate) use skill_events::insert_skill_events_in_tx;
 pub use skill_events::{

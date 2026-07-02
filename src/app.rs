@@ -2,6 +2,8 @@ mod correlate;
 mod error;
 pub(crate) mod error_detection;
 pub(crate) mod heartbeat_flags;
+pub(crate) mod hook_incident_findings;
+pub mod hook_signal_detectors;
 pub(crate) mod incident_findings;
 pub mod llm_runner;
 mod models;

@@ -1,10 +1,12 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+use crate::app::hook_incident_findings;
 use crate::app::incident_findings;
 use crate::app::skill_incident_findings;
 use crate::db;
 
+mod ai_hook_incidents;
 mod ai_incidents;
 mod ai_inventory;
 mod ai_sessions;
@@ -12,6 +14,8 @@ mod ai_skill_incidents;
 mod context;
 mod core;
 mod graph;
+mod hook_assess;
+mod hook_events;
 mod investigation;
 mod log_query;
 mod ops;
@@ -20,6 +24,7 @@ mod skill_assess;
 mod skill_events;
 mod stats;
 
+pub use ai_hook_incidents::*;
 pub use ai_incidents::*;
 pub use ai_inventory::*;
 pub use ai_sessions::*;
@@ -27,6 +32,8 @@ pub use ai_skill_incidents::*;
 pub use context::*;
 pub use core::*;
 pub use graph::*;
+pub use hook_assess::*;
+pub use hook_events::*;
 pub use investigation::*;
 pub use log_query::*;
 pub use ops::*;
