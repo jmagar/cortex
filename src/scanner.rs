@@ -16,6 +16,7 @@ mod checkpoint;
 mod claude;
 mod codex;
 mod gemini;
+pub(crate) mod skill_events;
 
 pub use checkpoint::CheckpointStore;
 
@@ -1427,6 +1428,13 @@ pub(crate) struct ParsedTranscriptRecord {
     pub message: String,
     pub session_id: Option<String>,
     pub ai_project: Option<String>,
+    /// The already-parsed raw JSON value for Claude transcript lines (`None`
+    /// for Codex/Gemini, which don't need it — Codex's skill-tag scanner
+    /// reads `message` directly; Gemini never produces skill events). Lets
+    /// skill-event extraction (Task 6) reuse the JSON parse `parse_line`
+    /// already did internally, instead of re-parsing `line_text` a second
+    /// time (eng review Fix 1 — see Task 2).
+    pub raw_value: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone)]
