@@ -262,6 +262,32 @@ fn claude_secrets_shaped_as_json_values_are_redacted() {
 }
 
 #[test]
+fn claude_bare_json_string_secret_in_arguments_is_redacted() {
+    // Eng review fix (adversarial re-verify): a scalar `input` value that
+    // is itself a bare JSON string (not wrapped in an object/array) parses
+    // successfully but isn't Object/Array, so it previously fell through
+    // to redact_secrets on the STILL-QUOTED text — the leading `"` broke
+    // every looks_secretish prefix check, letting the secret through.
+    let value = json!({
+        "message": {
+            "content": [
+                {
+                    "type": "tool_use",
+                    "id": "toolu_secret",
+                    "name": "mcp__gh__auth",
+                    "input": "sk-FAKE_TEST_TOKEN_DO_NOT_USE_00000000000"
+                }
+            ]
+        }
+    });
+    let events = extract_claude_mcp_events(&value);
+    assert_eq!(events.len(), 1);
+    let args = events[0].arguments_json.as_deref().unwrap();
+    assert!(!args.contains("sk-FAKE_TEST_TOKEN_DO_NOT_USE_00000000000"));
+    assert!(args.contains("[REDACTED]"));
+}
+
+#[test]
 fn claude_tool_result_secrets_shaped_as_json_are_redacted() {
     // Output/error text is just as likely to carry a JSON-shaped secret
     // as call arguments (e.g. a tool echoing back an API response).

@@ -144,6 +144,14 @@ fn bounded_preview(value: &str) -> String {
             redact_json_value_strings(&mut parsed);
             parsed.to_string()
         }
+        // A bare JSON string (e.g. `value` is `"sk-realsecret"`, quotes
+        // included) parses successfully but isn't an Object/Array, so it
+        // fell through to `redact_secrets(value)` below on the STILL-
+        // QUOTED text — the leading `"` breaks every `looks_secretish`
+        // prefix check (`"sk-...` doesn't start with `sk-`), silently
+        // letting the secret through. Redact the unquoted inner string
+        // directly instead.
+        Ok(Value::String(s)) => redact_secrets(&s),
         _ => redact_secrets(value),
     };
     clamp_chars(&redacted, MAX_PREVIEW_CHARS)
