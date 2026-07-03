@@ -55,6 +55,53 @@ fn path_with_prepended(dir: &std::path::Path) -> std::ffi::OsString {
     std::env::join_paths(paths).unwrap()
 }
 
+#[test]
+fn ai_watch_service_unit_tolerates_contention_burst() {
+    let cortex_bin = std::path::Path::new("/home/user/.local/bin/cortex");
+    let env_path = std::path::Path::new("/home/user/.config/cortex/sessions-watch.env");
+    let db_path = std::path::Path::new("/home/user/.cortex/data/cortex.db");
+    let state_dir = std::path::Path::new("/home/user/.local/state/cortex");
+    let user_home = std::path::Path::new("/home/user");
+
+    let unit = ai_watch_service_unit(cortex_bin, env_path, db_path, state_dir, user_home);
+
+    // A short 5-crash budget over 300s is exactly what caused the 2026-06-29
+    // incident: a burst of transient lock-contention crashes exhausted the
+    // limit and the unit stayed `failed` for 3 days with no auto-restart.
+    // Widen the budget so a contention burst doesn't trip permanent failure.
+    assert!(
+        unit.contains("StartLimitBurst=20"),
+        "expected StartLimitBurst=20, got unit:\n{unit}"
+    );
+    assert!(
+        unit.contains("StartLimitIntervalSec=600"),
+        "expected StartLimitIntervalSec=600, got unit:\n{unit}"
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+#[serial]
+async fn health_check_action_returns_ok_report_when_service_active() {
+    let dir = tempfile::tempdir().unwrap();
+    let bin_dir = dir.path().join("bin");
+    std::fs::create_dir_all(&bin_dir).unwrap();
+    write_executable(
+        &bin_dir.join("systemctl"),
+        "#!/bin/sh\ncase \"$*\" in\n  *is-active*cortex-sessions-watch.service*) printf 'active\\n' ;;\n  *) printf 'inactive\\n' ;;\nesac\nexit 0\n",
+    );
+    let _path = EnvGuard::set("PATH", path_with_prepended(&bin_dir));
+    // No CORTEX_NOTIFICATIONS_APPRISE_URL(S) set — health check must not
+    // require notifications config to run, only to fire an alert.
+    let _enabled = EnvGuard::remove("CORTEX_NOTIFICATIONS_ENABLED");
+
+    let report = run_sessions_watch_service_setup(SessionsWatchServiceAction::HealthCheck)
+        .await
+        .unwrap();
+
+    assert!(!report.has_errors, "expected no errors, got: {report:?}");
+}
+
 #[cfg(unix)]
 #[test]
 #[serial]

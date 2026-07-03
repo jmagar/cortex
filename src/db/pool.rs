@@ -48,9 +48,21 @@ pub struct SchemaVersionInfo {
     pub known_version: i64,
 }
 
+/// Process-wide r2d2 background thread pool, shared across every `DbPool`
+/// this process creates.
+///
+/// In production a process holds exactly one `DbPool`, so a single thread
+/// would suffice. But `cargo test` runs in one process and each test that
+/// calls `init_pool()` creates its own independent `DbPool` sharing this same
+/// static pool — under full test-suite parallelism, dozens of pools' worth
+/// of background connection work queues behind a single thread, exceeding
+/// the 6s `connection_timeout` and surfacing as spurious "timed out waiting
+/// for connection" failures unrelated to any actual bug under test. Sized
+/// with headroom for concurrent test execution, not just single-process
+/// production use.
 fn shared_scheduled_thread_pool() -> Arc<ScheduledThreadPool> {
     static POOL: OnceLock<Arc<ScheduledThreadPool>> = OnceLock::new();
-    Arc::clone(POOL.get_or_init(|| Arc::new(ScheduledThreadPool::new(1))))
+    Arc::clone(POOL.get_or_init(|| Arc::new(ScheduledThreadPool::new(8))))
 }
 
 pub fn read_schema_version_info(pool: &DbPool) -> Result<SchemaVersionInfo> {

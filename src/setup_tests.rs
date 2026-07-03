@@ -518,7 +518,7 @@ fn ai_watch_service_unit_is_hardened_and_uses_absolute_exec() {
         )
     );
     assert!(unit.contains("Restart=on-failure"));
-    assert!(unit.contains("StartLimitBurst=5"));
+    assert!(unit.contains("StartLimitBurst=20"));
     assert!(unit.contains("UMask=0077"));
     assert!(unit.contains("NoNewPrivileges=true"));
     assert!(unit.contains("PrivateTmp=true"));
