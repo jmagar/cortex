@@ -57,6 +57,11 @@ pub(crate) struct SessionsMcpIncidentsArgs {
     pub limit: Option<u32>,
     pub window_minutes: Option<u32>,
     pub signals: Vec<String>,
+    /// Validated (not just stored) at flag-scan time via `parse_f64_flag`
+    /// — an invalid `--min-score` value is a hard CLI error rather than a
+    /// silently-dropped filter, unlike the pre-existing
+    /// `SessionsSkillIncidentsArgs.min_score`. Kept as `String` (not
+    /// `f64`) purely so this struct can keep deriving `Eq`.
     pub min_score: Option<String>,
 }
 

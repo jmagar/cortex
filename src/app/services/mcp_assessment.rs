@@ -17,14 +17,6 @@ use crate::assessment::{GeminiAssessConfig, run_gemini_assessment};
 use crate::mcp_assessment::build_mcp_assessment_prompt;
 
 impl CortexService {
-    pub async fn run_mcp_assessment(
-        &self,
-        req: McpAssessRequest,
-    ) -> ServiceResult<McpAssessResponse> {
-        self.run_mcp_assessment_with_delta(req, true, |_| Ok(()))
-            .await
-    }
-
     /// `run_llm = false` skips the `LlmRunner::run` call entirely and
     /// returns only deterministic findings — this is the path MCP/REST
     /// callers MUST use (mirrors the skill-assessment MCP-safety

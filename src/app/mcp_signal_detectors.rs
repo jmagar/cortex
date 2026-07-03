@@ -74,9 +74,8 @@ const USER_CORRECTION_PHRASES: &[&str] = &[
     "you used the wrong",
     "that's the wrong",
     "that is the wrong",
-    "is wrong",
-    "no, that's",
-    "no, that is",
+    "no, that's wrong",
+    "no, that is wrong",
 ];
 
 fn contains_any_phrase(haystack_lower: &str, phrases: &[&str]) -> bool {

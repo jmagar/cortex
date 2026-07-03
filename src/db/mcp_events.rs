@@ -58,14 +58,23 @@ fn resolve_result_tool_name_in_tx(
     ai_session_id: Option<&str>,
     call_id: &str,
 ) -> Result<Option<ResolvedCallIdentity>> {
+    // Filters on COALESCE(ai_session_id, '') rather than `ai_session_id IS
+    // ?2` so this lookup can use idx_ai_mcp_events_dedupe (built on the
+    // same COALESCE expression) instead of falling back to the wider
+    // idx_ai_mcp_events_session_time index. prepare_cached avoids
+    // re-parsing this statement on every result-row insert (roughly half
+    // of all ai_mcp_events rows, since calls and results are paired 1:1).
     let row: Option<ResolvedCallIdentity> = tx
-        .query_row(
+        .prepare_cached(
             "SELECT tool_name, mcp_server, mcp_tool FROM ai_mcp_events
-             WHERE ai_tool = ?1 AND ai_session_id IS ?2 AND call_id = ?3 AND event_kind = 'call'
+             WHERE ai_tool = ?1
+               AND COALESCE(ai_session_id, '') = COALESCE(?2, '')
+               AND call_id = ?3 AND event_kind = 'call'
              LIMIT 1",
-            params![ai_tool, ai_session_id, call_id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-        )
+        )?
+        .query_row(params![ai_tool, ai_session_id, call_id], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        })
         .optional()?;
     Ok(row)
 }

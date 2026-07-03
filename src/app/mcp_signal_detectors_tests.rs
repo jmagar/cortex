@@ -52,6 +52,25 @@ fn detects_user_correction_after_tool_call() {
 }
 
 #[test]
+fn user_correction_ignores_generic_wrong_and_bare_no_that_phrases() {
+    // Eng review fix: the phrase list previously included bare "is wrong"
+    // and "no, that's"/"no, that is" prefixes, which false-positive on
+    // ordinary debugging dialogue unrelated to a tool-call correction.
+    assert!(!detect_user_correction_after_tool_call(
+        "my assumption is wrong here"
+    ));
+    assert!(!detect_user_correction_after_tool_call(
+        "no, that's actually fine"
+    ));
+    assert!(!detect_user_correction_after_tool_call(
+        "no, that is expected behavior"
+    ));
+    assert!(detect_user_correction_after_tool_call(
+        "no, that's wrong, try again"
+    ));
+}
+
+#[test]
 fn repeated_call_failure_requires_threshold() {
     assert!(!detect_repeated_call_failure(0));
     assert!(!detect_repeated_call_failure(1));

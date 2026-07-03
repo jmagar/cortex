@@ -87,13 +87,12 @@ enum ChunkSkillSource {
 /// Raw MCP-extraction source paired 1:1 with each `LogBatchEntry` pushed
 /// into a chunk's `batch` vector, mirroring `ChunkSkillSource` above. Both
 /// Claude and Codex carry `raw_value` on every record now (see
-/// `codex::parse_line`'s doc comment), so this is populated whenever a
-/// parsed record's raw JSON is available — extraction itself
-/// short-circuits internally on shape (no `tool_use`/`function_call`
-/// content) rather than filtering here, so unlike `ChunkSkillSource` there
-/// is no cheap substring pre-check to gate on: `tool_use`/`function_call`
-/// don't have one distinguishing literal substring the way `<skill>` or
-/// `attributionSkill` do.
+/// `codex::parse_line`'s doc comment); the clone is gated behind a cheap
+/// substring pre-check on `line_text` (`tool_use`/`tool_result` for Claude,
+/// `function_call` for Codex — the exact literals
+/// `extract_claude_mcp_events`/`extract_codex_mcp_events` themselves match
+/// on), so a transcript line that can never produce an MCP event never
+/// pays the clone cost.
 #[derive(Debug, Clone)]
 enum ChunkMcpSource {
     Claude(serde_json::Value),
@@ -597,19 +596,32 @@ pub fn index_file_with_options(
                     }
                     SourceKind::GeminiSession => ChunkSkillSource::None,
                 };
-                // Unlike skill extraction, MCP extraction has no cheap
-                // substring pre-check to gate on (see `ChunkMcpSource`'s
-                // doc comment), so this simply forwards `raw_value`
-                // whenever the parser populated it.
+                // Perf fix: gate the clone behind a cheap substring
+                // pre-check, mirroring the skill-source gate above.
+                // `extract_claude_mcp_events`/`extract_codex_mcp_events`
+                // only ever match item/payload `type` fields containing
+                // "tool_use"/"tool_result" (Claude) or "function_call"
+                // (Codex, which also covers "function_call_output" as a
+                // substring) — any line lacking these literals can never
+                // produce an MCP event, so skipping the clone for them is
+                // safe and avoids doubling per-record memory retention for
+                // the (common) case of a tool-call-heavy transcript.
                 let mcp_source = match source_kind {
                     SourceKind::CodexSession => match &parsed.raw_value {
-                        Some(value) => ChunkMcpSource::Codex(value.clone()),
-                        None => ChunkMcpSource::None,
+                        Some(value) if line_text.contains("function_call") => {
+                            ChunkMcpSource::Codex(value.clone())
+                        }
+                        _ => ChunkMcpSource::None,
                     },
                     SourceKind::ClaudeProject | SourceKind::ExplicitFile => match &parsed.raw_value
                     {
-                        Some(value) => ChunkMcpSource::Claude(value.clone()),
-                        None => ChunkMcpSource::None,
+                        Some(value)
+                            if line_text.contains("tool_use")
+                                || line_text.contains("tool_result") =>
+                        {
+                            ChunkMcpSource::Claude(value.clone())
+                        }
+                        _ => ChunkMcpSource::None,
                     },
                     SourceKind::GeminiSession => ChunkMcpSource::None,
                 };

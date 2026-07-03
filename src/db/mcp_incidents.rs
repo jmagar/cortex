@@ -253,7 +253,7 @@ pub fn search_ai_mcp_incidents(
             })
             .unwrap_or_else(|_| last_seen.clone());
 
-        let mut anchor_stmt = conn.prepare(
+        let mut anchor_stmt = conn.prepare_cached(
             "SELECT id, message FROM logs
              WHERE ai_session_id = ?1 AND ai_project = ?2 AND ai_tool = ?3
                AND timestamp >= ?4 AND timestamp <= ?5

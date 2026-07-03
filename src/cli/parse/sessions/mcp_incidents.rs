@@ -1,6 +1,6 @@
 use anyhow::{Result, bail};
 
-use super::super::super::parse_common::{FlagCursor, norm_time, parse_u32_flag};
+use super::super::super::parse_common::{FlagCursor, norm_time, parse_f64_flag, parse_u32_flag};
 use super::super::super::{
     CliCommand, SessionsCommand, SessionsMcpIncidentsArgs, SessionsMcpInvestigateArgs,
 };
@@ -28,7 +28,14 @@ pub(crate) fn parse_sessions_mcp_incidents(args: &[String]) -> Result<CliCommand
                 )?)
             }
             "--signal" => parsed.signals.push(flags.value("--signal")?),
-            "--min-score" => parsed.min_score = Some(flags.value("--min-score")?),
+            "--min-score" => {
+                let raw = flags.value("--min-score")?;
+                // Validate eagerly so an invalid value is a hard CLI
+                // error, not a silently-dropped filter (into_request()
+                // trusts this and parses infallibly).
+                parse_f64_flag("--min-score", raw.clone())?;
+                parsed.min_score = Some(raw);
+            }
             _ if arg.starts_with('-') => bail!("unknown sessions mcp-incidents option: {arg}"),
             _ if parsed.mcp_server.is_none() => parsed.mcp_server = Some(arg),
             _ => bail!("unexpected sessions mcp-incidents argument: {arg}"),

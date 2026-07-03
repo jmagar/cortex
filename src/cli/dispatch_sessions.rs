@@ -701,12 +701,14 @@ impl SessionsMcpIncidentsArgs {
             limit: self.limit,
             window_minutes: self.window_minutes,
             signals: self.signals,
-            min_score: self
-                .min_score
-                .map(|s| s.parse::<f64>())
-                .transpose()
-                .ok()
-                .flatten(),
+            // Already validated as a well-formed f64 by
+            // parse_sessions_mcp_incidents (parse_f64_flag) — this can
+            // only fail if that invariant is broken, which is a bug worth
+            // panicking on rather than silently dropping the filter.
+            min_score: self.min_score.map(|s| {
+                s.parse::<f64>()
+                    .expect("min_score validated at CLI-parse time")
+            }),
         }
     }
 }

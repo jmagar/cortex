@@ -29,7 +29,7 @@
 
 use serde_json::Value;
 
-use crate::assessment::redact_secrets;
+use crate::assessment::{redact_json_value_strings, redact_secrets};
 
 /// Bound on stored preview/argument fields — mirrors
 /// `ingest_metadata::MAX_METADATA_STRING_CHARS` so a single oversized tool
@@ -67,6 +67,41 @@ pub struct ExtractedMcpEvent {
     pub error_text: Option<String>,
 }
 
+impl ExtractedMcpEvent {
+    /// Reject the event if `tool_name`, `mcp_server`, or `mcp_tool` contain
+    /// any `char::is_control()` character. Mirrors
+    /// `ExtractedSkillEvent::normalized()` (eng review Fix 8 there): these
+    /// fields are printed verbatim by the CLI's `println!`-based printer
+    /// (`src/cli/output/logs/events.rs`), so an ANSI escape or embedded
+    /// newline/CR here would otherwise be a terminal output spoofing
+    /// vector. `tool_name` comes straight from the transcript's `name`
+    /// field (an adversarial/malformed MCP server or transcript could set
+    /// it to anything); `mcp_server`/`mcp_tool` are substrings of
+    /// `tool_name` via `classify_tool_name`, so they inherit the same
+    /// risk. Never panics — callers skip the event and keep parsing the
+    /// rest of the transcript.
+    fn normalized(self) -> Option<Self> {
+        if self.tool_name.chars().any(char::is_control) {
+            return None;
+        }
+        if self
+            .mcp_server
+            .as_deref()
+            .is_some_and(|s| s.chars().any(char::is_control))
+        {
+            return None;
+        }
+        if self
+            .mcp_tool
+            .as_deref()
+            .is_some_and(|s| s.chars().any(char::is_control))
+        {
+            return None;
+        }
+        Some(self)
+    }
+}
+
 fn clamp_chars(value: &str, max_chars: usize) -> String {
     if value.chars().count() <= max_chars {
         value.to_string()
@@ -94,8 +129,24 @@ fn classify_tool_name(name: &str) -> (Option<String>, Option<String>) {
     }
 }
 
+/// Redact and length-clamp a preview string. `redact_secrets` tokenizes on
+/// whitespace, so a secret carried as a JSON value (e.g.
+/// `{"api_key":"sk-..."}`) serializes to a single whitespace-free token
+/// that doesn't start with a known prefix and is never caught. When
+/// `value` parses as a JSON object or array — the common shape for tool
+/// arguments/output — redact each string leaf individually before
+/// re-serializing instead, so secret boundaries are visible to
+/// `looks_secretish`. Scalar JSON values (bare strings/numbers) and
+/// non-JSON text fall back to whole-string redaction unchanged.
 fn bounded_preview(value: &str) -> String {
-    clamp_chars(&redact_secrets(value), MAX_PREVIEW_CHARS)
+    let redacted = match serde_json::from_str::<Value>(value) {
+        Ok(mut parsed @ (Value::Object(_) | Value::Array(_))) => {
+            redact_json_value_strings(&mut parsed);
+            parsed.to_string()
+        }
+        _ => redact_secrets(value),
+    };
+    clamp_chars(&redacted, MAX_PREVIEW_CHARS)
 }
 
 /// Extract Claude `tool_use`/`tool_result` events from one transcript line's
@@ -124,7 +175,7 @@ pub fn extract_claude_mcp_events(value: &Value) -> Vec<ExtractedMcpEvent> {
                     let encoded = input.to_string();
                     bounded_preview(&encoded)
                 });
-                events.push(ExtractedMcpEvent {
+                if let Some(event) = (ExtractedMcpEvent {
                     call_id: clamp_chars(call_id, MAX_NAME_CHARS),
                     tool_name: clamp_chars(name, MAX_NAME_CHARS),
                     mcp_server,
@@ -136,7 +187,11 @@ pub fn extract_claude_mcp_events(value: &Value) -> Vec<ExtractedMcpEvent> {
                     arguments_json,
                     output_preview: None,
                     error_text: None,
-                });
+                })
+                .normalized()
+                {
+                    events.push(event);
+                }
             }
             "tool_result" => {
                 let Some(call_id) = item.get("tool_use_id").and_then(Value::as_str) else {
@@ -162,7 +217,7 @@ pub fn extract_claude_mcp_events(value: &Value) -> Vec<ExtractedMcpEvent> {
                     (_, Some(text)) => (Some(bounded_preview(text)), None),
                     _ => (None, None),
                 };
-                events.push(ExtractedMcpEvent {
+                if let Some(event) = (ExtractedMcpEvent {
                     call_id: clamp_chars(call_id, MAX_NAME_CHARS),
                     // Result rows don't carry the tool name in Claude's
                     // shape; the DB layer resolves it from the paired call
@@ -185,7 +240,11 @@ pub fn extract_claude_mcp_events(value: &Value) -> Vec<ExtractedMcpEvent> {
                     arguments_json: None,
                     output_preview,
                     error_text,
-                });
+                })
+                .normalized()
+                {
+                    events.push(event);
+                }
             }
             _ => {}
         }
@@ -222,7 +281,7 @@ pub fn extract_codex_mcp_events(value: &Value) -> Vec<ExtractedMcpEvent> {
                 .get("arguments")
                 .and_then(Value::as_str)
                 .map(bounded_preview);
-            vec![ExtractedMcpEvent {
+            (ExtractedMcpEvent {
                 call_id: clamp_chars(call_id, MAX_NAME_CHARS),
                 tool_name: clamp_chars(name, MAX_NAME_CHARS),
                 mcp_server,
@@ -234,7 +293,10 @@ pub fn extract_codex_mcp_events(value: &Value) -> Vec<ExtractedMcpEvent> {
                 arguments_json,
                 output_preview: None,
                 error_text: None,
-            }]
+            })
+            .normalized()
+            .into_iter()
+            .collect()
         }
         Some("function_call_output") => {
             let Some(call_id) = payload.get("call_id").and_then(Value::as_str) else {
@@ -267,7 +329,7 @@ pub fn extract_codex_mcp_events(value: &Value) -> Vec<ExtractedMcpEvent> {
                 (_, Some(text)) => (Some(bounded_preview(text)), None),
                 _ => (None, None),
             };
-            vec![ExtractedMcpEvent {
+            (ExtractedMcpEvent {
                 call_id: clamp_chars(call_id, MAX_NAME_CHARS),
                 tool_name: String::new(),
                 mcp_server: None,
@@ -279,7 +341,10 @@ pub fn extract_codex_mcp_events(value: &Value) -> Vec<ExtractedMcpEvent> {
                 arguments_json: None,
                 output_preview,
                 error_text,
-            }]
+            })
+            .normalized()
+            .into_iter()
+            .collect()
         }
         _ => Vec::new(),
     }

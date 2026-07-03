@@ -2145,6 +2145,8 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
 
              CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_mcp_events_dedupe
                  ON ai_mcp_events(ai_tool, COALESCE(ai_session_id, ''), call_id, event_kind);
+             CREATE INDEX IF NOT EXISTS idx_ai_mcp_events_hostname_time
+                 ON ai_mcp_events(hostname, timestamp);
              CREATE INDEX IF NOT EXISTS idx_ai_mcp_events_tool_time
                  ON ai_mcp_events(tool_name, timestamp);
              CREATE INDEX IF NOT EXISTS idx_ai_mcp_events_server_time

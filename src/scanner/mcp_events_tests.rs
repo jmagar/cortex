@@ -2,6 +2,77 @@ use super::*;
 use serde_json::json;
 
 #[test]
+fn rejects_tool_name_containing_control_characters() {
+    // Mirrors ExtractedSkillEvent's control-character guard (eng review
+    // Fix 8 there): tool_name/mcp_server/mcp_tool are printed verbatim by
+    // the CLI's println!-based printer, so a crafted transcript embedding
+    // an ANSI escape sequence in the tool name must be rejected, not
+    // silently stored.
+    let value = json!({
+        "message": {
+            "content": [
+                {
+                    "type": "tool_use",
+                    "id": "toolu_1",
+                    "name": "\u{1b}[2J\u{1b}[31mFAKE",
+                    "input": {}
+                }
+            ]
+        }
+    });
+    assert!(extract_claude_mcp_events(&value).is_empty());
+}
+
+#[test]
+fn rejects_tool_name_containing_embedded_newline() {
+    let value = json!({
+        "message": {
+            "content": [
+                {
+                    "type": "tool_use",
+                    "id": "toolu_1",
+                    "name": "Bash\nFAKE APPROVED LINE",
+                    "input": {}
+                }
+            ]
+        }
+    });
+    assert!(extract_claude_mcp_events(&value).is_empty());
+}
+
+#[test]
+fn rejects_mcp_style_name_containing_control_characters() {
+    let value = json!({
+        "message": {
+            "content": [
+                {
+                    "type": "tool_use",
+                    "id": "toolu_1",
+                    "name": "mcp__lumen__\u{1b}[31msearch",
+                    "input": {}
+                }
+            ]
+        }
+    });
+    assert!(extract_claude_mcp_events(&value).is_empty());
+}
+
+#[test]
+fn codex_rejects_tool_name_containing_control_characters() {
+    let value = json!({
+        "timestamp": "2025-11-15T03:32:12.634Z",
+        "type": "response_item",
+        "payload": {
+            "type": "function_call",
+            "name": "\u{1b}[2J\u{1b}[31mFAKE",
+            "arguments": "{}",
+            "call_id": "call_1"
+        }
+    });
+    assert!(extract_codex_mcp_events(&value).is_empty());
+}
+
+#[test]
 fn claude_tool_use_builtin_extracts_call_with_no_mcp_classification() {
     let value = json!({
         "message": {
@@ -161,6 +232,56 @@ fn claude_secrets_in_arguments_are_redacted() {
     let args = events[0].arguments_json.as_deref().unwrap();
     assert!(!args.contains("ghp_FAKE_TEST_TOKEN_DO_NOT_USE_00000000"));
     assert!(args.contains("[REDACTED]"));
+}
+
+#[test]
+fn claude_secrets_shaped_as_json_values_are_redacted() {
+    // Eng review fix (security-sentinel): a secret carried as a JSON
+    // *value* (e.g. {"api_key":"sk-..."}) serializes to a single
+    // whitespace-free token that doesn't start with a known prefix, so
+    // whole-string redact_secrets misses it entirely. bounded_preview
+    // must tree-walk JSON object/array inputs and redact each string
+    // leaf individually.
+    let value = json!({
+        "message": {
+            "content": [
+                {
+                    "type": "tool_use",
+                    "id": "toolu_secret",
+                    "name": "mcp__gh__auth",
+                    "input": {"api_key": "sk-FAKE_TEST_TOKEN_DO_NOT_USE_00000000000"}
+                }
+            ]
+        }
+    });
+    let events = extract_claude_mcp_events(&value);
+    assert_eq!(events.len(), 1);
+    let args = events[0].arguments_json.as_deref().unwrap();
+    assert!(!args.contains("sk-FAKE_TEST_TOKEN_DO_NOT_USE_00000000000"));
+    assert!(args.contains("[REDACTED]"));
+}
+
+#[test]
+fn claude_tool_result_secrets_shaped_as_json_are_redacted() {
+    // Output/error text is just as likely to carry a JSON-shaped secret
+    // as call arguments (e.g. a tool echoing back an API response).
+    let value = json!({
+        "message": {
+            "content": [
+                {
+                    "tool_use_id": "toolu_secret",
+                    "type": "tool_result",
+                    "content": "{\"GITHUB_TOKEN\":\"ghp_FAKE_TEST_TOKEN_DO_NOT_USE_0000000000\"}",
+                    "is_error": false
+                }
+            ]
+        }
+    });
+    let events = extract_claude_mcp_events(&value);
+    assert_eq!(events.len(), 1);
+    let preview = events[0].output_preview.as_deref().unwrap();
+    assert!(!preview.contains("ghp_FAKE_TEST_TOKEN_DO_NOT_USE_0000000000"));
+    assert!(preview.contains("[REDACTED]"));
 }
 
 #[test]
