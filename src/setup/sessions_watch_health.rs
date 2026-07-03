@@ -104,13 +104,25 @@ fn doctor_service_unit(cortex_bin: &Path) -> io::Result<String> {
     ))
 }
 
+/// Generate the `cortex-sessions-watch-doctor.timer` unit content.
+///
+/// Inlined as a Rust string literal — like `doctor_service_unit` and the
+/// sibling `ai_watch_service_unit` — rather than `include_str!`'d from a
+/// checked-in file, because the Docker build context only `COPY`s specific
+/// directories (see `config/Dockerfile`) and does not include `config/systemd/`,
+/// so an `include_str!` reference to that path fails to compile in the
+/// container image build even though it compiles fine locally.
+fn doctor_timer_unit() -> &'static str {
+    "[Unit]\nDescription=Periodic cortex-sessions-watch.service health check\n\n[Timer]\nOnCalendar=*:0/15\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n"
+}
+
 fn install_health_check_timer_files(
     systemd_dir: &Path,
     cortex_bin: &Path,
 ) -> io::Result<SetupPhase> {
     let timer = PhaseTimer::start("sessions-watch-doctor-timer-files");
     let service_content = doctor_service_unit(cortex_bin)?;
-    let timer_content = include_str!("../../config/systemd/cortex-sessions-watch-doctor.timer");
+    let timer_content = doctor_timer_unit();
     std::fs::create_dir_all(systemd_dir)?;
     std::fs::write(
         systemd_dir.join("cortex-sessions-watch-doctor.service"),
@@ -140,7 +152,7 @@ fn check_doctor_service_content_phase(systemd_dir: &Path, cortex_bin: &Path) -> 
         Ok(content) => content,
         Err(error) => return timer.finish(SetupStatus::Error, error.to_string()),
     };
-    let expected_timer = include_str!("../../config/systemd/cortex-sessions-watch-doctor.timer");
+    let expected_timer = doctor_timer_unit();
     let current_service = match std::fs::read_to_string(&service_path) {
         Ok(raw) => raw,
         Err(error) => return timer.finish(SetupStatus::Error, error.to_string()),
@@ -226,9 +238,22 @@ pub(super) fn disable_and_remove_doctor_timer(systemd_dir: &Path) -> io::Result<
 /// Resolve notification config and run the health check + alert. Called
 /// from `SessionsWatchServiceAction::HealthCheck`.
 pub(super) async fn build_and_run_health_check() -> SetupPhase {
-    let notifications = crate::config::Config::load()
-        .map(|config| config.notifications)
-        .unwrap_or_default();
+    let notifications = match crate::config::Config::load() {
+        Ok(config) => config.notifications,
+        Err(error) => {
+            // Do not fall through to the "notifications disabled" path
+            // silently -- a config-load failure (malformed config.toml, a
+            // bad CORTEX_* env var) is a distinct, actionable operator
+            // error, not the same thing as "notifications intentionally
+            // turned off". Collapsing the two here would reproduce the
+            // exact silent-failure shape this feature exists to close.
+            tracing::error!(
+                error = %error,
+                "sessions-watch health check: failed to load config, cannot resolve notification settings"
+            );
+            crate::config::NotificationsConfig::default()
+        }
+    };
     let apprise_urls: Vec<String> = if notifications.enabled {
         notifications.apprise_urls.clone()
     } else {
