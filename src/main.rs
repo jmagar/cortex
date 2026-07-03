@@ -731,6 +731,35 @@ fn parse_setup_command(args: &[String]) -> Result<SetupCommand> {
     }
     if matches!(
         iter.clone().next().map(String::as_str),
+        Some("sessions-watch-health-check")
+    ) {
+        let _ = iter.next();
+        // No action verb to parse (this subcommand has exactly one fixed
+        // action) -- reusing parse_setup_subcommand_args here would silently
+        // accept nonsense like `sessions-watch-health-check install` since
+        // that parser treats "install"/"remove"/"check" as valid tokens
+        // regardless of subcommand. Parse --json/--help directly instead,
+        // matching the `doctor` subcommand's own no-action-verb parsing.
+        let mut json = false;
+        for arg in iter {
+            match arg.as_str() {
+                "--json" => json = true,
+                "--help" | "-h" => {
+                    print_usage();
+                    std::process::exit(0);
+                }
+                other => anyhow::bail!("unknown sessions-watch-health-check argument: {other}"),
+            }
+        }
+        return Ok(SetupCommand {
+            kind: SetupCommandKind::SessionsWatchService(
+                cortex::setup::SessionsWatchServiceAction::HealthCheck,
+            ),
+            json,
+        });
+    }
+    if matches!(
+        iter.clone().next().map(String::as_str),
         Some("agent-command")
     ) {
         let _ = iter.next();
