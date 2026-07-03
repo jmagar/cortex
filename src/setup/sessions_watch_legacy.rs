@@ -51,3 +51,7 @@ pub(crate) fn ai_index_timer_disabled_phase() -> SetupPhase {
         ),
     )
 }
+
+#[cfg(test)]
+#[path = "sessions_watch_legacy_tests.rs"]
+mod tests;

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.6.1] - 2026-07-03
+
+### Fixed
+
+- `cortex --help`/`cortex setup --help` was missing a usage line for the `sessions-watch-health-check` subcommand added in 3.6.0, even though every sibling `setup` subcommand documents its own line.
+
+### Changed
+
+- Split `src/setup/resolve.rs` and `src/setup/sessions_watch_legacy.rs` off their tests into dedicated `resolve_tests.rs`/`sessions_watch_legacy_tests.rs` sidecars, matching the sidecar-test convention the rest of the module family (and `CLAUDE.md`) already follows. Pure test relocation; no logic changes.
+
 ## [3.6.0] - 2026-07-02
 
 ### Fixed

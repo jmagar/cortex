@@ -279,3 +279,7 @@ pub(crate) fn write_private_file(path: &Path, body: &str) -> io::Result<()> {
     std::fs::write(path, body)?;
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "resolve_tests.rs"]
+mod tests;

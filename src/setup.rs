@@ -43,11 +43,6 @@ pub(crate) use firstrun::{
     health_phase, parse_env, run_compose_phase, write_compose_assets, write_env,
 };
 #[cfg(test)]
-pub(crate) use resolve::{
-    cortex_home_dir_from_exe_path, db_path_from_setup_env, validate_db_path,
-    validate_executable_path,
-};
-#[cfg(test)]
 pub(crate) use sessions_index::{ai_index_script, ai_index_service_unit, ai_index_timer_unit};
 #[cfg(test)]
 pub(crate) use sessions_watch::{

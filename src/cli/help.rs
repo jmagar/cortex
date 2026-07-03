@@ -282,6 +282,7 @@ const CATALOG: &[CommandDoc] = &[
             "cortex setup check|repair [--json]",
             "cortex setup sessions-index-timer install|remove|check [--json]",
             "cortex setup sessions-watch-service install|remove|check [--json]",
+            "cortex setup sessions-watch-health-check [--json]",
             "cortex setup agent-command install|remove|check [--json]",
             "cortex setup heartbeat-agent install|remove|check [--json]",
             "cortex setup debug-wrapper install|remove|check [--json]",
