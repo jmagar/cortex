@@ -1,13 +1,15 @@
 use anyhow::Result;
 use cortex::app::{
     AbuseSearchResponse, AiCorrelateResponse, CorrelateEventsResponse, DbStats, GetErrorsResponse,
-    ListAiProjectsResponse, ListAiToolsResponse, ListHostsResponse, ListSkillEventsResponse,
-    ProjectContextResponse, SearchLogsResponse, SearchSessionsResponse, UsageBlocksResponse,
+    ListAiProjectsResponse, ListAiToolsResponse, ListHostsResponse, ProjectContextResponse,
+    SearchLogsResponse, SearchSessionsResponse, UsageBlocksResponse,
 };
 
 use super::super::SessionsOutputDetail;
 use super::super::color::{cyan, muted, primary, severity, violet};
 use super::common::{local_ts, print_json, print_log, truncate};
+
+pub(crate) mod events;
 
 pub(crate) fn print_search_response(response: &SearchLogsResponse, json: bool) -> Result<()> {
     if json {
@@ -315,55 +317,6 @@ pub(crate) fn print_project_context_response(
     );
     for entry in &response.recent_entries {
         print_log(entry);
-    }
-    Ok(())
-}
-
-/// Eng review Fix 8 note: this function prints `event.skill_name` /
-/// `event.skill_plugin` directly with no additional sanitization — that's
-/// safe because `ExtractedSkillEvent::normalized()` already rejects any
-/// skill name/plugin containing a control character before it ever reaches
-/// the database, so by the time a row gets here it cannot contain an ANSI
-/// escape or embedded newline. Do not re-add sanitization here; the fix
-/// belongs at the extraction boundary, not the printer.
-pub(crate) fn print_skill_events_response(
-    response: &ListSkillEventsResponse,
-    json: bool,
-) -> Result<()> {
-    if json {
-        return print_json(response);
-    }
-    if response.events.is_empty() {
-        println!("No skill events found.");
-        return Ok(());
-    }
-    println!(
-        "{} event(s) shown{}",
-        cyan(&response.events.len().to_string()),
-        if response.truncated {
-            " (truncated)"
-        } else {
-            ""
-        }
-    );
-    for event in &response.events {
-        let plugin = event
-            .skill_plugin
-            .as_deref()
-            .map(|p| format!(" plugin={p}"))
-            .unwrap_or_default();
-        println!(
-            "{}  {}{}  {}  tool={} project={}",
-            muted(&local_ts(&event.timestamp)),
-            violet(&event.skill_name),
-            plugin,
-            primary(&event.event_kind),
-            cyan(&event.ai_tool),
-            event.ai_project.as_deref().unwrap_or("-")
-        );
-    }
-    if response.truncated {
-        println!("{}", muted("(truncated — refine filters or raise --limit)"));
     }
     Ok(())
 }

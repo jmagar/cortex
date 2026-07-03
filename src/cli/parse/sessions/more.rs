@@ -453,6 +453,14 @@ pub(crate) fn parse_sessions_skill_assess(args: &[String]) -> Result<CliCommand>
     )))
 }
 
+pub(crate) fn parse_sessions_mcp_assess(args: &[String]) -> Result<CliCommand> {
+    let assess_cmd = super::super::assess::parse_assess_mcp_from(args)?;
+    let CliCommand::Assess(super::super::super::AssessCommand::Mcp(mcp_args)) = assess_cmd else {
+        unreachable!("parse_assess_mcp_from always returns AssessCommand::Mcp");
+    };
+    Ok(CliCommand::Sessions(SessionsCommand::McpAssess(mcp_args)))
+}
+
 #[cfg(test)]
 #[path = "more_tests.rs"]
 mod tests;

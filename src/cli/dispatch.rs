@@ -370,7 +370,8 @@ pub(crate) use super::dispatch_sessions::{
     run_ai_incidents, run_ai_index, run_ai_investigate, run_ai_llm_invocations, run_ai_projects,
     run_ai_prune_checkpoints, run_ai_search, run_ai_similar_incidents, run_ai_skill_incidents,
     run_ai_skill_investigate, run_ai_skills, run_ai_skills_backfill, run_ai_smoke_watch,
-    run_ai_tools, run_assess_abuse, run_assess_skill, run_sessions_watch,
+    run_ai_tools, run_assess_abuse, run_assess_mcp, run_assess_skill, run_mcp_events,
+    run_mcp_events_backfill, run_mcp_incidents, run_mcp_investigate, run_sessions_watch,
     run_sessions_watch_status,
 };
 

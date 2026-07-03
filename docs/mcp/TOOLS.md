@@ -57,6 +57,9 @@ cortex exposes one MCP tool named `cortex`. The required
 | `skill_events` | List extracted AI skill-invocation events |
 | `skill_incidents` | Groups negative-signal transcript hits following a skill invocation into scored incident candidates |
 | `skill_investigate` | Expands skill-usage incidents into deterministic evidence bundles, skill-first |
+| `mcp_events` | List extracted AI MCP tool-call events |
+| `mcp_incidents` | Groups negative-signal transcript hits following an MCP tool call into scored incident candidates |
+| `mcp_investigate` | Expands MCP-usage incidents into deterministic evidence bundles, server/tool-first |
 | `help` | Markdown reference for all actions |
 
 ## cortex search
@@ -333,6 +336,67 @@ Response includes `evidence`, `total_incidents`, `truncated`,
 Optional arguments: `incident_id`, `skill`, `plugin`, `tool`, `project`,
 `since`, `until`, `limit`, `window_minutes` (default 10, max 120),
 `correlation_window_minutes` (default 5, max 120).
+
+## cortex mcp_events
+
+List extracted AI MCP tool-call events (`ai_mcp_events` rows) — the raw,
+unaggregated tool-call/tool-result stream classified via the
+`mcp__<server>__<tool>` naming convention (general tool calls have
+`mcp_server = null`).
+
+Response includes `total`, `truncated`, `events`.
+
+Optional arguments: `tool_name`, `mcp_server`, `mcp_tool`, `tool`, `project`,
+`session_id`, `hostname`, `is_error`, `since`, `until`, `limit`.
+
+## cortex mcp_incidents
+
+Groups `ai_mcp_events` rows into incident candidates by `(mcp_server,
+mcp_tool, tool, project, session_id, hostname, window_bucket)`, scanning the
+surrounding transcript for six deterministic negative-signal anchors:
+`repeated_call_failure`, `timeout_or_rate_limit`,
+`auth_or_permission_failure`, `schema_or_validation_error`,
+`unknown_tool_or_server`, and `user_correction_after_tool_call`. Each
+incident carries a stable `incident_id` (`mcp-inc-{hash}`), a
+`priority_score`/`priority_label`, and `signal_counts`/`signals_present`.
+
+Response includes `incidents`, `total_incidents`, `candidate_event_rows`,
+`candidate_cap`, `candidate_window_truncated`, `truncated`.
+
+Optional arguments: `mcp_server`, `mcp_tool`, `tool_name`, `tool`, `project`,
+`session_id`, `hostname`, `since`, `until`, `limit` (default 20, max 100),
+`window_minutes` (default 10, max 120), `signals` (filter to these anchor
+categories only), `min_score`.
+
+## cortex mcp_investigate
+
+Deep-dive investigation of MCP-usage incidents. When filtered by
+`mcp_server`, `mcp_tool`, or `tool_name` (without an exact `incident_id`),
+resolves **server/tool-first**: looks up all matching incidents, returns the
+top-priority one(s) in `evidence` (count controlled by `limit`, default 1),
+and summarizes the rest into `other_matching_incidents`. A single
+zero-signal match is still returned (never an error) but flagged via
+`no_incident_low_severity_summary`. Each evidence bundle includes the
+underlying MCP events, the transcript rows that triggered anchor signals,
+transcript context before/after, and nearby non-AI logs split into
+tool-failure/user-correction/error subsets — every collection carries an
+explicit truncation flag.
+
+Each bundle also carries a `findings` object — **deterministic, rule-based**
+failure hypotheses derived locally from the evidence (never an external LLM
+analysis), following the same pattern as `skill_investigate`'s `findings`.
+Categories include `wrong_mcp_tool_selected`, `mcp_server_unavailable`,
+`mcp_auth_or_permission_failure`, `mcp_schema_mismatch`,
+`mcp_timeout_or_rate_limit`, `mcp_result_misinterpreted`,
+`missing_mcp_discovery_step`, `tool_surface_confusion`, and `unknown`.
+
+Response includes `evidence`, `total_incidents`, `truncated`,
+`other_matching_incidents`, `no_incident_low_severity_summary`, `no_data`,
+`suggested_filters` (populated only when `no_data` is true).
+
+Optional arguments: `incident_id`, `mcp_server`, `mcp_tool`, `tool_name`,
+`tool`, `project`, `since`, `until`, `limit`, `window_minutes` (default 10,
+max 120), `correlation_window_minutes` (default 5, max 120).
 
 ## cortex help
 

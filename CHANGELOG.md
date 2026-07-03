@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.6.2] - 2026-07-03
+
+### Added
+
+- MCP event tracking (GH #104), mirroring GH #94's skill-event-tracking shape for MCP/tool-call events end to end:
+  - A new `ai_mcp_events` table (migration 39) normalizes MCP/tool-call events, indexed against the planned query filter surface (`mcp_server`/`mcp_tool` grouping, `tool_name` lookup, session tuple, error filter).
+  - `src/scanner/mcp_events.rs` parses Claude `tool_use`/`tool_result` and Codex `function_call`/`function_call_output` payloads into a normalized `ExtractedMcpEvent` shape; `mcp__<server>__<tool>` naming is the only authoritative MCP classification signal, with everything else recorded as a general tool-call row (`mcp_server = NULL`). Fixed a real extraction gap during TDD: Claude `tool_use` content items and Codex `function_call`/`function_call_output` payloads carry no free-text field, so `extract_message()` previously returned empty and `parse_line` silently dropped these rows before MCP extraction ever saw them — both parsers now emit a short synthetic summary so the row is ingested, with the full structured payload available via `raw_value`.
+  - `src/db/mcp_events.rs`/`src/db/mcp_incidents.rs`/`src/db/mcp_incident_evidence.rs` provide insert/list, incident grouping (`(mcp_server, mcp_tool, ai_tool, ai_project, ai_session_id, hostname, window_bucket)`, scored/sorted via `f64::total_cmp`), and bounded evidence bundles. Fixed a real idempotency bug during TDD: SQLite never treats two `NULL`s as equal in a `UNIQUE` constraint, so a plain `UNIQUE(...)` table constraint over the dedupe key (which includes a nullable `ai_session_id`) silently let duplicate sessionless rows back in — replaced with a `UNIQUE` index over `COALESCE(ai_session_id, '')`.
+  - Six deterministic MCP incident anchor signals (`src/app/mcp_signal_detectors.rs`): `repeated_call_failure`, `timeout_or_rate_limit`, `auth_or_permission_failure`, `schema_or_validation_error`, `unknown_tool_or_server`, `user_correction_after_tool_call`.
+  - Deterministic, rule-based MCP incident findings (`src/app/mcp_incident_findings.rs`, no DB/LLM calls): `wrong_mcp_tool_selected`, `mcp_server_unavailable`, `mcp_auth_or_permission_failure`, `mcp_schema_mismatch`, `mcp_timeout_or_rate_limit`, `mcp_result_misinterpreted`, `missing_mcp_discovery_step`, `tool_surface_confusion`, plus `unknown`.
+  - New MCP actions `mcp_events`, `mcp_incidents`, `mcp_investigate` (all `cortex:read`), plus `cortex sessions mcp-events[ backfill]|mcp-incidents|mcp-investigate` CLI commands. `mcp_investigate` resolves server/tool-first, mirroring `skill_investigate`'s skill-first resolution rule.
+  - `src/scanner.rs` threads a parallel `ChunkMcpSource` side channel through `flush_chunk` (mirroring `ChunkSkillSource`), extracting and inserting `ai_mcp_events` in the same transaction as the log batch insert.
+  - Bounded, idempotent, single-flight backfill (`src/app/services/mcp_backfill.rs`) scans the `raw` column (the original transcript JSON, not the scrubbed `message` summary) to catch up rows ingested before this phase shipped.
+  - `cortex assess mcp` — CLI-only, LLM-guarded MCP-incident assessment mirroring `cortex assess skill`: resolves the highest-priority (or all, with `--all`) matching MCP incident and runs the guarded Gemini assessment through `LlmRunner`. A new embedded `cortex-mcp-friction-assessment` skill produces the assessment write-up. LLM assessment is CLI-only by design — `mcp_assess` is never exposed as an MCP action or REST route, and `--http` is rejected unless `--no-llm` is also passed. `cortex sessions mcp-assess <server-or-tool>` is a low-level alias forwarding to the same dispatch function.
+
 ## [3.6.1] - 2026-07-03
 
 ### Fixed

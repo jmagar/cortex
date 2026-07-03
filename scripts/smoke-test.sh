@@ -22,7 +22,8 @@
 #   mcp_call notifications_recent, mcp_call file_tails, mcp_call notifications_test,
 #   mcp_call llm_invocations,
 #   mcp_call similar_incidents, mcp_call ask_history, mcp_call incident_context, mcp_call graph,
-#   mcp_call skill_events,
+#   mcp_call skill_events, mcp_call skill_incidents, mcp_call skill_investigate,
+#   mcp_call mcp_events, mcp_call mcp_incidents, mcp_call mcp_investigate,
 #   mcp_call help
 
 set -euo pipefail
@@ -1124,6 +1125,24 @@ echo ""
 echo "Action: skill_investigate"
 SKILL_INVESTIGATE=$(mcp_call skill_investigate "skill=smoke-test-skill" 2>&1)
 assert_no_error "skill_investigate: no error" "$SKILL_INVESTIGATE"
+
+# ── mcp_events ───────────────────────────────────────────────────────────────
+echo ""
+echo "Action: mcp_events"
+MCP_EVENTS=$(mcp_call mcp_events "limit=5" 2>&1)
+assert_no_error "mcp_events: no error" "$MCP_EVENTS"
+
+# ── mcp_incidents ────────────────────────────────────────────────────────────
+echo ""
+echo "Action: mcp_incidents"
+MCP_INCIDENTS=$(mcp_call mcp_incidents "limit=5" 2>&1)
+assert_no_error "mcp_incidents: no error" "$MCP_INCIDENTS"
+
+# ── mcp_investigate ──────────────────────────────────────────────────────────
+echo ""
+echo "Action: mcp_investigate"
+MCP_INVESTIGATE=$(mcp_call mcp_investigate "mcp_server=smoke-test-server" 2>&1)
+assert_no_error "mcp_investigate: no error" "$MCP_INVESTIGATE"
 
 # ── graph proof UX (optional: requires known seeded graph evidence id) ───────
 echo ""

@@ -155,13 +155,22 @@ pub(crate) async fn run(mode: CliMode, command: CliCommand) -> Result<()> {
             super::SessionsCommand::SkillAssess(args) => {
                 dispatch::run_assess_skill(&mode, args).await
             }
+            super::SessionsCommand::McpEvents(args) => dispatch::run_mcp_events(&mode, args).await,
+            super::SessionsCommand::McpEventsBackfill(args) => {
+                dispatch::run_mcp_events_backfill(&mode, args).await
+            }
+            super::SessionsCommand::McpIncidents(args) => {
+                dispatch::run_mcp_incidents(&mode, args).await
+            }
+            super::SessionsCommand::McpInvestigate(args) => {
+                dispatch::run_mcp_investigate(&mode, args).await
+            }
+            super::SessionsCommand::McpAssess(args) => dispatch::run_assess_mcp(&mode, args).await,
         },
         CliCommand::Assess(command) => match command {
             super::AssessCommand::Skill(args) => dispatch::run_assess_skill(&mode, args).await,
             super::AssessCommand::Abuse(args) => dispatch::run_assess_abuse(&mode, args).await,
-            super::AssessCommand::Mcp(_) => {
-                Err(anyhow!("cortex assess mcp is not yet implemented"))
-            }
+            super::AssessCommand::Mcp(args) => dispatch::run_assess_mcp(&mode, args).await,
             super::AssessCommand::Hooks(_) => {
                 Err(anyhow!("cortex assess hooks is not yet implemented"))
             }

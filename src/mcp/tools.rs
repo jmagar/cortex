@@ -14,18 +14,18 @@
 
 use lab_auth::AuthContext;
 use serde::de::DeserializeOwned;
-use serde_json::{Value, json};
+use serde_json::Value;
 
 use crate::app::{
-    AbuseSearchRequest, AckErrorRequest, AiCorrelateRequest, AiIncidentRequest,
-    AiInvestigateRequest, AnomaliesRequest, ClockSkewRequest, CompareRequest, ContextRequest,
-    CorrelateEventsRequest, CorrelateStateRequest, FilterLogsRequest, FleetStateRequest,
-    GetErrorsRequest, GetLogRequest, HomelabMapRequest, HostStateRequest, IngestRateRequest,
-    ListAiProjectsRequest, ListAiToolsRequest, ListAppsRequest, ListSessionsRequest,
+    AbuseSearchRequest, AiCorrelateRequest, AiIncidentRequest, AiInvestigateRequest,
+    AnomaliesRequest, ClockSkewRequest, CompareRequest, ContextRequest, CorrelateEventsRequest,
+    CorrelateStateRequest, FilterLogsRequest, FleetStateRequest, GetErrorsRequest, GetLogRequest,
+    HomelabMapRequest, HostStateRequest, IngestRateRequest, ListAiProjectsRequest,
+    ListAiToolsRequest, ListAppsRequest, ListMcpEventsRequest, ListSessionsRequest,
     ListSkillEventsRequest, ListSourceIpsRequest, LlmInvocationsRequest,
-    NotificationsRecentRequest, PatternsRequest, ProjectContextRequest, RequestActor,
-    SearchLogsRequest, SearchSessionsRequest, SilentHostsRequest, TailLogsRequest, TimelineRequest,
-    TopicCorrelateRequest, UnackErrorRequest, UnaddressedErrorsRequest, UsageBlocksRequest,
+    NotificationsRecentRequest, PatternsRequest, ProjectContextRequest, SearchLogsRequest,
+    SearchSessionsRequest, SilentHostsRequest, TailLogsRequest, TimelineRequest,
+    TopicCorrelateRequest, UnaddressedErrorsRequest, UsageBlocksRequest,
 };
 
 use super::AppState;
@@ -33,9 +33,12 @@ use super::actions;
 #[cfg(test)]
 use help::tool_cortex_help;
 
+mod admin;
 mod context;
 mod help;
+mod mcp_incidents;
 mod skill_incidents;
+mod status;
 
 /// Execute a tool by name
 pub(super) async fn execute_tool(
@@ -85,8 +88,8 @@ async fn dispatch_cortex_action(
         H::FleetState => tool_fleet_state(state, args).await,
         H::CorrelateEvents => tool_correlate_events(state, args).await,
         H::CorrelateState => tool_correlate_state(state, args).await,
-        H::GetStats => tool_get_stats(state, args).await,
-        H::GetStatus => tool_get_status(state, args).await,
+        H::GetStats => status::tool_get_stats(state, args).await,
+        H::GetStatus => status::tool_get_status(state, args).await,
         H::ListApps => tool_list_apps(state, args).await,
         H::ListSessions => tool_list_sessions(state, args).await,
         H::SearchSessions => tool_search_sessions(state, args).await,
@@ -112,11 +115,11 @@ async fn dispatch_cortex_action(
         H::ComposeStatus => tool_compose_status(args).await,
         H::ComposeDoctor => tool_compose_doctor(args).await,
         H::UnaddressedErrors => tool_unaddressed_errors(state, args).await,
-        H::AckError => tool_ack_error(state, args, auth).await,
-        H::UnackError => tool_unack_error(state, args, auth).await,
+        H::AckError => admin::tool_ack_error(state, args, auth).await,
+        H::UnackError => admin::tool_unack_error(state, args, auth).await,
         H::NotificationsRecent => tool_notifications_recent(state, args).await,
         H::FileTails => tool_file_tails(state, args).await,
-        H::NotificationsTest => tool_notifications_test(state, args, auth).await,
+        H::NotificationsTest => admin::tool_notifications_test(state, args, auth).await,
         H::LlmInvocations => tool_llm_invocations(state, args).await,
         H::SimilarIncidents => context::tool_similar_incidents(state, args).await,
         H::AskHistory => context::tool_ask_history(state, args).await,
@@ -125,6 +128,9 @@ async fn dispatch_cortex_action(
         H::SkillEvents => tool_skill_events(state, args).await,
         H::SkillIncidents => skill_incidents::tool_skill_incidents(state, args).await,
         H::SkillInvestigate => skill_incidents::tool_skill_investigate(state, args).await,
+        H::McpEvents => tool_mcp_events(state, args).await,
+        H::McpIncidents => mcp_incidents::tool_mcp_incidents(state, args).await,
+        H::McpInvestigate => mcp_incidents::tool_mcp_investigate(state, args).await,
         H::Help => help::tool_cortex_help().await,
     }
 }
@@ -275,6 +281,12 @@ async fn tool_skill_events(state: &AppState, args: Value) -> anyhow::Result<Valu
     Ok(serde_json::to_value(response)?)
 }
 
+async fn tool_mcp_events(state: &AppState, args: Value) -> anyhow::Result<Value> {
+    let req: ListMcpEventsRequest = action_payload(args, "mcp_events")?;
+    let response = state.service.list_mcp_events(req).await?;
+    Ok(serde_json::to_value(response)?)
+}
+
 async fn tool_list_ai_projects(state: &AppState, args: Value) -> anyhow::Result<Value> {
     let req: ListAiProjectsRequest = action_payload(args, "list_ai_projects")?;
     let response = state.service.list_ai_projects(req).await?;
@@ -408,91 +420,8 @@ async fn tool_correlate_events(state: &AppState, args: Value) -> anyhow::Result<
     Ok(serde_json::to_value(response)?)
 }
 
-pub(super) async fn tool_get_stats(state: &AppState, _args: Value) -> anyhow::Result<Value> {
-    let stats = state.service.stats().summary().await?;
-    let mut value = serde_json::to_value(&stats)?;
-    if let Some(object) = value.as_object_mut() {
-        object.insert(
-            "runtime_observability".into(),
-            serde_json::to_value(state.observability.snapshot())?,
-        );
-        object.insert(
-            "otlp".into(),
-            json!({
-                "logs_received": state.otlp_counters.logs_received.load(std::sync::atomic::Ordering::Relaxed),
-                "decode_errors": state.otlp_counters.decode_errors.load(std::sync::atomic::Ordering::Relaxed),
-            }),
-        );
-    }
-    tracing::debug!(
-        total_logs = stats.total_logs,
-        total_hosts = stats.total_hosts,
-        logical_db_size_mb = %stats.logical_db_size_mb,
-        physical_db_size_mb = %stats.physical_db_size_mb,
-        write_blocked = stats.write_blocked,
-        phantom_fts_rows = stats.phantom_fts_rows,
-        "get_stats completed"
-    );
-    Ok(value)
-}
-
-pub(super) async fn tool_get_status(state: &AppState, _args: Value) -> anyhow::Result<Value> {
-    let db_ok = state.service.health_check().await.is_ok();
-    let db_maintenance = state.service.db_status().await.ok();
-    let file_tail_statuses = state.service.file_tail_statuses_snapshot();
-    let file_tail_blocked_count = file_tail_statuses
-        .iter()
-        .filter(|status| status.blocked_on_writer_since.is_some())
-        .count();
-    let degraded = db_ok && file_tail_blocked_count > 0;
-    Ok(json!({
-        "status": if db_ok {
-            if degraded { "degraded" } else { "ok" }
-        } else {
-            "error"
-        },
-        "db_ok": db_ok,
-        "db_maintenance": db_maintenance,
-        "file_tails": {
-            "blocked_count": file_tail_blocked_count,
-            "statuses": file_tail_statuses,
-        },
-        "runtime_observability": state.observability.snapshot(),
-        "otlp": {
-            "logs_received": state.otlp_counters.logs_received.load(std::sync::atomic::Ordering::Relaxed),
-            "decode_errors": state.otlp_counters.decode_errors.load(std::sync::atomic::Ordering::Relaxed),
-        }
-    }))
-}
-
 pub(super) fn string_arg(args: &Value, name: &str) -> Option<String> {
     args.get(name).and_then(|v| v.as_str()).map(String::from)
-}
-
-/// Return a stable actor identifier for mutating/admin actions.
-///
-/// Mounted MCP requests carry caller identity in `AuthContext`. Prefer the
-/// verified email when available, then the subject. Loopback mode has no
-/// per-request credential, so it falls back to the local trust-boundary actor.
-fn extract_actor(state: &AppState, auth: Option<&AuthContext>) -> RequestActor {
-    if let Some(auth) = auth {
-        return RequestActor::mcp_identity(
-            (!auth.sub.is_empty()).then(|| auth.sub.clone()),
-            auth.email
-                .as_deref()
-                .filter(|email| !email.is_empty())
-                .map(str::to_string),
-        );
-    }
-
-    match &state.auth_policy {
-        super::AuthPolicy::LoopbackDev => RequestActor::mcp_loopback(),
-        super::AuthPolicy::TrustedGatewayUnscoped => "mcp:trusted-gateway".to_string().into(),
-        super::AuthPolicy::Mounted {
-            auth_state: Some(_),
-        } => RequestActor::mcp_oauth(),
-        super::AuthPolicy::Mounted { auth_state: None } => RequestActor::mcp_bearer(),
-    }
 }
 
 /// Build a caller-input error that the MCP error classifier maps to
@@ -522,28 +451,6 @@ async fn tool_unaddressed_errors(state: &AppState, args: Value) -> anyhow::Resul
     Ok(serde_json::to_value(resp)?)
 }
 
-async fn tool_ack_error(
-    state: &AppState,
-    args: Value,
-    auth: Option<&AuthContext>,
-) -> anyhow::Result<Value> {
-    let req: AckErrorRequest = action_payload(args, "ack_error")?;
-    let actor = extract_actor(state, auth);
-    let resp = state.service.alerts().ack_signature(req, actor).await?;
-    Ok(serde_json::to_value(resp)?)
-}
-
-async fn tool_unack_error(
-    state: &AppState,
-    args: Value,
-    auth: Option<&AuthContext>,
-) -> anyhow::Result<Value> {
-    let req: UnackErrorRequest = action_payload(args, "unack_error")?;
-    let actor = extract_actor(state, auth);
-    let resp = state.service.alerts().unack_signature(req, actor).await?;
-    Ok(serde_json::to_value(resp)?)
-}
-
 async fn tool_notifications_recent(state: &AppState, args: Value) -> anyhow::Result<Value> {
     let req: NotificationsRecentRequest = action_payload(args, "notifications_recent")?;
     let firings = state.service.alerts().notifications(req).await?;
@@ -560,23 +467,6 @@ async fn tool_file_tails(state: &AppState, args: Value) -> anyhow::Result<Value>
     let req: crate::app::FileTailRequest = action_payload(args, "file_tails")?;
     let resp = state.service.ingest().file_tails(req).await?;
     Ok(serde_json::to_value(resp)?)
-}
-
-async fn tool_notifications_test(
-    state: &AppState,
-    args: Value,
-    auth: Option<&AuthContext>,
-) -> anyhow::Result<Value> {
-    let body =
-        string_arg(&args, "body").unwrap_or_else(|| "Test notification from cortex".to_string());
-    // Actor is derived from request auth context, not caller-supplied args.
-    let actor = extract_actor(state, auth);
-    let result = state
-        .service
-        .alerts()
-        .test_notification(body, actor, &state.notifications_config)
-        .await?;
-    Ok(serde_json::json!({ "result": result }))
 }
 
 /// Parse an optional RFC3339 timestamp string and normalize it to UTC.
