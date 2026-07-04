@@ -109,13 +109,16 @@ pub fn investigate_ai_mcp_incidents(
     const NEARBY_SUBSET_CAP: usize = 25;
 
     let limit = params.limit.unwrap_or(3).clamp(1, 10) as usize;
-    let incident_lookup_limit = if params.incident_id.is_some() {
-        100
-    } else {
-        limit as u32
-    };
     let corr_mins = i64::from(params.correlation_window_minutes.unwrap_or(5).clamp(1, 120));
 
+    // `incident_id` is passed straight through to `AiMcpIncidentParams`,
+    // which filters the full computed incident set (bounded only by
+    // `MCP_INCIDENT_CANDIDATE_CAP` events, not an incident-count cap) before
+    // its own priority-ranked truncation. This guarantees an exact
+    // incident_id lookup finds its target regardless of priority rank —
+    // routing it through a fixed-size top-N candidate window (as a prior
+    // version of this code did) could silently miss incidents ranked below
+    // that window.
     let incident_result = search_ai_mcp_incidents(
         pool,
         &AiMcpIncidentParams {
@@ -128,7 +131,8 @@ pub fn investigate_ai_mcp_incidents(
             hostname: None,
             since: params.since.clone(),
             until: params.until.clone(),
-            limit: Some(incident_lookup_limit),
+            incident_id: params.incident_id.clone(),
+            limit: Some(limit as u32),
             window_minutes: params.window_minutes,
             signals: Vec::new(),
             min_score: None,
@@ -136,15 +140,7 @@ pub fn investigate_ai_mcp_incidents(
     )?;
     let total_incidents = incident_result.total_incidents;
     let truncated = incident_result.truncated;
-    let mut incidents = if let Some(incident_id) = &params.incident_id {
-        incident_result
-            .incidents
-            .into_iter()
-            .filter(|inc| inc.incident_id == *incident_id)
-            .collect::<Vec<_>>()
-    } else {
-        incident_result.incidents
-    };
+    let mut incidents = incident_result.incidents;
     incidents.truncate(limit);
 
     let conn = pool.get()?;
@@ -292,12 +288,15 @@ pub fn investigate_ai_mcp_incidents(
                         process_id, message, received_at, source_ip,
                         ai_tool, ai_project, ai_session_id, ai_transcript_path, metadata_json
                  FROM logs
-                 WHERE timestamp >= ?1 AND timestamp <= ?2
+                 WHERE timestamp >= ?1 AND timestamp <= ?2 AND hostname = ?3
                  ORDER BY timestamp ASC
                  LIMIT 51",
             )?;
             let rows = stmt
-                .query_map(rusqlite::params![win_from, win_to], map_row)?
+                .query_map(
+                    rusqlite::params![win_from, win_to, &incident.hostname],
+                    map_row,
+                )?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             let truncated = rows.len() > NEARBY_CAP;
             let mut out = rows;

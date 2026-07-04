@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.6.5] - 2026-07-04
+
+### Fixed
+
+- `skill_incident_evidence.rs`/`mcp_incident_evidence.rs`/`hook_incident_evidence.rs` all routed exact `incident_id` investigation lookups through their `search_ai_*_incidents` function with `limit: Some(100)`, then filtered the returned top-100-by-priority candidates client-side for the matching id — an incident ranked below the top 100 silently returned empty evidence even though it existed. Added an `incident_id` field to `Ai*IncidentParams` so the full computed incident set (bounded only by the event-candidate cap, not an incident-count cap) is filtered before priority-ranked truncation.
+- The same three modules' "nearby non-AI logs in the correlation window" query filtered only by `timestamp`, with no `hostname` scope, so an incident on one host could pull in unrelated log rows from a different host active in the same time window. Added `hostname = ?` to the query, bound to the incident's own host.
+- `HookIncidentEvidence` (app model) passed `hook_events` straight through as the db-layer `AiHookEventEntry` type instead of translating to the app-level `HookEventEntry`, unlike every other evidence vector on the same struct. `derive_hook_incident_findings` now takes `&[HookEventEntry]` to match.
+
 ## [3.6.4] - 2026-07-03
 
 ### Fixed (CodeRabbit review round)

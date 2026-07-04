@@ -124,7 +124,7 @@ pub struct AiHookInvestigateRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HookIncidentEvidence {
     pub incident: HookIncident,
-    pub hook_events: Vec<db::AiHookEventEntry>,
+    pub hook_events: Vec<HookEventEntry>,
     pub hook_events_truncated: bool,
     pub signal_anchors: Vec<LogEntry>,
     pub signal_anchors_truncated: bool,
@@ -155,10 +155,11 @@ impl From<db::HookIncidentEvidence> for HookIncidentEvidence {
             v.nearby_tool_calls.into_iter().map(Into::into).collect();
         let nearby_logs: Vec<LogEntry> = v.nearby_logs.into_iter().map(Into::into).collect();
         let nearby_errors: Vec<LogEntry> = v.nearby_errors.into_iter().map(Into::into).collect();
+        let hook_events: Vec<HookEventEntry> = v.hook_events.into_iter().map(Into::into).collect();
 
         let findings = hook_incident_findings::derive_hook_incident_findings(
             &incident,
-            &v.hook_events,
+            &hook_events,
             &signal_anchors,
             &transcript_before,
             &transcript_after,
@@ -169,7 +170,7 @@ impl From<db::HookIncidentEvidence> for HookIncidentEvidence {
 
         Self {
             incident,
-            hook_events: v.hook_events,
+            hook_events,
             hook_events_truncated: v.hook_events_truncated,
             signal_anchors,
             signal_anchors_truncated: v.signal_anchors_truncated,
