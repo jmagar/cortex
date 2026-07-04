@@ -1,6 +1,5 @@
 use super::*;
-use crate::app::models::{HookIncident, HookSignalCounts, LogEntry};
-use crate::db::AiHookEventEntry;
+use crate::app::models::{HookEventEntry, HookIncident, HookSignalCounts, LogEntry};
 
 fn log(id: i64, message: &str) -> LogEntry {
     LogEntry {
@@ -22,8 +21,8 @@ fn log(id: i64, message: &str) -> LogEntry {
     }
 }
 
-fn hook_event_entry(id: i64) -> AiHookEventEntry {
-    AiHookEventEntry {
+fn hook_event_entry(id: i64) -> HookEventEntry {
+    HookEventEntry {
         id,
         log_id: Some(id),
         ai_tool: "claude".to_string(),

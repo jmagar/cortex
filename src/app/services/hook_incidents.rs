@@ -25,6 +25,7 @@ impl CortexService {
                         evidence_kind: req.evidence_kind,
                         since: from,
                         until: to,
+                        incident_id: None,
                         limit: req.limit,
                         window_minutes: req.window_minutes,
                         signals: req.signals,

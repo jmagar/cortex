@@ -12,7 +12,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::models::{HookIncident, LogEntry};
+use super::models::{HookEventEntry, HookIncident, LogEntry};
 
 // ── Stable failure-mode categories (GH #105) ────────────────────────────────
 pub const HOOK_FAILED: &str = "hook_failed";
@@ -108,7 +108,7 @@ fn scannable<'a>(
 #[allow(clippy::too_many_arguments)]
 pub fn derive_hook_incident_findings(
     incident: &HookIncident,
-    hook_events: &[crate::db::AiHookEventEntry],
+    hook_events: &[HookEventEntry],
     signal_anchors: &[LogEntry],
     transcript_before: &[LogEntry],
     transcript_after: &[LogEntry],
