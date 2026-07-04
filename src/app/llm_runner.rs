@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 
 use tokio::sync::{Mutex, Semaphore};
 
-use crate::assessment::redact_secrets;
+use crate::assessment::{redact_json_value_strings, redact_secrets};
 use crate::config::LlmConfig;
 use crate::db::DbPool;
 
@@ -662,30 +662,6 @@ fn build_metadata_json(extra: &serde_json::Value) -> String {
         "pid": pid,
     })
     .to_string()
-}
-
-/// Recursively redact every string leaf in a `serde_json::Value` tree
-/// in place, using the same per-token `redact_secrets` heuristic used
-/// for error sanitization. Object keys are left untouched (only values
-/// are caller-controlled data); array elements and nested
-/// objects/arrays are visited recursively.
-fn redact_json_value_strings(value: &mut serde_json::Value) {
-    match value {
-        serde_json::Value::String(s) => {
-            *s = redact_secrets(s);
-        }
-        serde_json::Value::Array(items) => {
-            for item in items {
-                redact_json_value_strings(item);
-            }
-        }
-        serde_json::Value::Object(map) => {
-            for (_, v) in map.iter_mut() {
-                redact_json_value_strings(v);
-            }
-        }
-        _ => {}
-    }
 }
 
 fn hostname_best_effort() -> String {

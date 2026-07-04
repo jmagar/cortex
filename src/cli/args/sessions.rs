@@ -32,6 +32,82 @@ pub(crate) enum SessionsCommand {
     /// same dispatch function (`dispatch::run_assess_skill`) so the two
     /// entry points never drift on behavior, only on discoverability.
     SkillAssess(super::assess::AssessSkillArgs),
+    McpEvents(SessionsMcpEventsListArgs),
+    McpEventsBackfill(SessionsMcpEventsBackfillArgs),
+    McpIncidents(SessionsMcpIncidentsArgs),
+    McpInvestigate(SessionsMcpInvestigateArgs),
+    /// Low-level alias for `cortex assess mcp` — forwards to the exact same
+    /// dispatch function (`dispatch::run_assess_mcp`) so the two entry
+    /// points never drift on behavior, only on discoverability.
+    McpAssess(super::assess::AssessMcpArgs),
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct SessionsMcpIncidentsArgs {
+    pub json: bool,
+    pub mcp_server: Option<String>,
+    pub mcp_tool: Option<String>,
+    pub tool_name: Option<String>,
+    pub tool: Option<String>,
+    pub project: Option<String>,
+    pub session_id: Option<String>,
+    pub hostname: Option<String>,
+    pub since: Option<String>,
+    pub until: Option<String>,
+    pub limit: Option<u32>,
+    pub window_minutes: Option<u32>,
+    pub signals: Vec<String>,
+    /// Validated (not just stored) at flag-scan time via `parse_f64_flag`
+    /// — an invalid `--min-score` value is a hard CLI error rather than a
+    /// silently-dropped filter, unlike the pre-existing
+    /// `SessionsSkillIncidentsArgs.min_score`. Kept as `String` (not
+    /// `f64`) purely so this struct can keep deriving `Eq`.
+    pub min_score: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct SessionsMcpInvestigateArgs {
+    /// Bare positional argument — an mcp_server, mcp_tool, or raw tool
+    /// name (e.g. `labby`, `mcp__labby__search`). `None` when the caller
+    /// used `--incident-id`, `--mcp-server`, or `--mcp-tool` instead.
+    pub target: Option<String>,
+    pub mcp_server: Option<String>,
+    pub mcp_tool: Option<String>,
+    pub tool_name: Option<String>,
+    pub incident_id: Option<String>,
+    pub tool: Option<String>,
+    pub project: Option<String>,
+    pub since: Option<String>,
+    pub until: Option<String>,
+    pub limit: Option<u32>,
+    pub window_minutes: Option<u32>,
+    pub correlation_window_minutes: Option<u32>,
+    pub all: bool,
+    pub json: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct SessionsMcpEventsListArgs {
+    pub json: bool,
+    pub tool_name: Option<String>,
+    pub mcp_server: Option<String>,
+    pub mcp_tool: Option<String>,
+    pub tool: Option<String>,
+    pub project: Option<String>,
+    pub session_id: Option<String>,
+    pub host: Option<String>,
+    pub is_error: Option<bool>,
+    pub since: Option<String>,
+    pub until: Option<String>,
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct SessionsMcpEventsBackfillArgs {
+    pub json: bool,
+    pub since: Option<String>,
+    pub limit: Option<u64>,
+    pub dry_run: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

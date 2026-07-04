@@ -15,8 +15,9 @@ use super::models::{
     AbuseAssessRequest, AbuseAssessResponse, AbuseSearchRequest, AbuseSearchResponse,
     AiAssessEvidenceSummary, AiAssessRequest, AiAssessResponse, AiCorrelateLimitPolicy,
     AiCorrelateRequest, AiCorrelateResponse, AiCorrelationAnchor, AiIncidentRequest,
-    AiIncidentResponse, AiInvestigateRequest, AiInvestigateResponse, AiLimitPolicy, AiSessionEntry,
-    AiSkillIncidentRequest, AiSkillIncidentResponse, AiSkillInvestigateRequest,
+    AiIncidentResponse, AiInvestigateRequest, AiInvestigateResponse, AiLimitPolicy,
+    AiMcpIncidentRequest, AiMcpIncidentResponse, AiMcpInvestigateRequest, AiMcpInvestigateResponse,
+    AiSessionEntry, AiSkillIncidentRequest, AiSkillIncidentResponse, AiSkillInvestigateRequest,
     AiSkillInvestigateResponse, AnomaliesRequest, AnomaliesResponse, AppGraphResponse,
     AskHistoryRequest, AskHistoryResponse, AskInvestigationRequest, AskInvestigationResponse,
     ClockSkewRequest, ClockSkewResponse, CompareRequest, CompareResponse, ContextRequest,
@@ -41,16 +42,16 @@ use super::models::{
     ListAiProjectsResponse, ListAiToolsRequest, ListAiToolsResponse, ListAppsRequest,
     ListAppsResponse, ListHostsResponse, ListSessionsRequest, ListSessionsResponse,
     ListSourceIpsRequest, ListSourceIpsResponse, LlmInvocationsRequest, LogEntry,
-    MaintenanceJobStatus, NotificationsRecentRequest, PatternsRequest, PatternsResponse,
-    ProjectContextRequest, ProjectContextResponse, RequestActor, ResolvedTopicEntity,
-    SearchLogsRequest, SearchLogsResponse, SearchSessionsRequest, SearchSessionsResponse,
-    ServiceJournalEntry, ServiceLogsRequest, ServiceLogsResponse, SilentHostsRequest,
-    SilentHostsResponse, SimilarIncidentsRequest, SimilarIncidentsResponse, SkillIncidentEvidence,
-    SkillIncidentSummary, TailLogsRequest, TimelineRequest, TimelineResponse,
-    TopicCorrelateRequest, TopicCorrelateResponse, TopicExpansionEntity, TopicTimelineEntry,
-    TopologyFinding, TopologyFindingEntity, TopologyFindingEvidence, UsageBlocksRequest,
-    UsageBlocksResponse, app_entity_summary, app_graph_from_explain_response, app_log_summary,
-    safe_passive_text,
+    MaintenanceJobStatus, McpIncidentEvidence, McpIncidentSummary, NotificationsRecentRequest,
+    PatternsRequest, PatternsResponse, ProjectContextRequest, ProjectContextResponse, RequestActor,
+    ResolvedTopicEntity, SearchLogsRequest, SearchLogsResponse, SearchSessionsRequest,
+    SearchSessionsResponse, ServiceJournalEntry, ServiceLogsRequest, ServiceLogsResponse,
+    SilentHostsRequest, SilentHostsResponse, SimilarIncidentsRequest, SimilarIncidentsResponse,
+    SkillIncidentEvidence, SkillIncidentSummary, TailLogsRequest, TimelineRequest,
+    TimelineResponse, TopicCorrelateRequest, TopicCorrelateResponse, TopicExpansionEntity,
+    TopicTimelineEntry, TopologyFinding, TopologyFindingEntity, TopologyFindingEvidence,
+    UsageBlocksRequest, UsageBlocksResponse, app_entity_summary, app_graph_from_explain_response,
+    app_log_summary, safe_passive_text,
 };
 use super::os_adapter::{OsAdapter, SystemOsAdapter};
 use super::time::{parse_optional_timestamp, parse_required_timestamp, rfc3339_z};
@@ -85,6 +86,10 @@ mod maintenance;
 mod map;
 mod map_answers;
 mod map_findings;
+mod mcp_assessment;
+mod mcp_backfill;
+mod mcp_events;
+mod mcp_incidents;
 mod rag;
 mod skill_assessment;
 mod skill_backfill;

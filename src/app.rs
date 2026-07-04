@@ -4,6 +4,8 @@ pub(crate) mod error_detection;
 pub(crate) mod heartbeat_flags;
 pub(crate) mod incident_findings;
 pub mod llm_runner;
+pub(crate) mod mcp_incident_findings;
+pub mod mcp_signal_detectors;
 mod models;
 mod os_adapter;
 mod services;
@@ -38,6 +40,10 @@ pub use models::{
     AiInvestigateRequest,
     AiInvestigateResponse,
     AiLimitPolicy,
+    AiMcpIncidentRequest,
+    AiMcpIncidentResponse,
+    AiMcpInvestigateRequest,
+    AiMcpInvestigateResponse,
     AiParseErrorsRequest,
     AiProjectEntry,
     AiPruneCheckpointsRequest,
@@ -150,6 +156,8 @@ pub use models::{
     ListAppsRequest,
     ListAppsResponse,
     ListHostsResponse,
+    ListMcpEventsRequest,
+    ListMcpEventsResponse,
     ListSessionsRequest,
     ListSessionsResponse,
     ListSkillEventsRequest,
@@ -159,6 +167,14 @@ pub use models::{
     LlmInvocationsRequest,
     LogEntry,
     MaintenanceJobStatus,
+    McpAssessRequest,
+    McpAssessResponse,
+    McpAssessResult,
+    McpBackfillRequest,
+    McpBackfillResult,
+    McpEventEntry,
+    McpIncidentEvidence,
+    McpIncidentSummary,
     NotificationsRecentRequest,
     PatternsRequest,
     PatternsResponse,

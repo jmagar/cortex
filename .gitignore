@@ -72,7 +72,7 @@ data/
 
 # Personal local cheatsheet (never commit)
 CLAUDE.md.local
-logs/
+/logs/
 backups/
 /bin/
 .claude/scheduled_tasks.lock

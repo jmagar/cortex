@@ -438,6 +438,41 @@ pub(crate) fn looks_secretish(token: &str) -> bool {
         || token.starts_with("atk_")
 }
 
+/// Recursively redact every string leaf in a `serde_json::Value` tree in
+/// place, using the same per-token `redact_secrets` heuristic used for
+/// error sanitization. Object keys are left untouched (only values are
+/// caller-controlled data); array elements and nested objects/arrays are
+/// visited recursively.
+///
+/// `redact_secrets` tokenizes on whitespace, so redacting a *serialized*
+/// JSON blob directly misses secrets carried as JSON values: a value like
+/// `{"token":"sk-realsecret"}` serializes to a single whitespace-free
+/// token that doesn't start with `sk-` (it starts with `{`), so
+/// `looks_secretish` never matches it. Walking the `Value` tree and
+/// redacting each string leaf BEFORE serialization means `looks_secretish`
+/// sees the real token boundaries. It also guarantees the result stays
+/// valid JSON — blob-redaction on the serialized string could in
+/// principle replace a token overlapping a quote character and corrupt
+/// the JSON structure.
+pub(crate) fn redact_json_value_strings(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::String(s) => {
+            *s = redact_secrets(s);
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                redact_json_value_strings(item);
+            }
+        }
+        serde_json::Value::Object(map) => {
+            for v in map.values_mut() {
+                redact_json_value_strings(v);
+            }
+        }
+        _ => {}
+    }
+}
+
 #[cfg(test)]
 #[path = "assessment_tests.rs"]
 mod tests;

@@ -28,7 +28,13 @@ pub fn parse_line(
         message,
         session_id,
         ai_project,
-        raw_value: None,
+        // `raw_value` is `Some` here (unlike the historical `None`) because
+        // MCP event extraction (GH #104) needs the full `payload.arguments`/
+        // `payload.output`/`payload.call_id` structure for `function_call`/
+        // `function_call_output` rows, which `message` (a short summary,
+        // see `extract_message`) does not carry. Codex's skill-tag scanner
+        // still reads `message` directly and is unaffected.
+        raw_value: Some(value),
     }))
 }
 
@@ -113,10 +119,41 @@ fn extract_message(value: &Value) -> String {
         return text.to_string();
     }
     if let Some(items) = value.pointer("/payload/content").and_then(Value::as_array) {
-        return join_content_items(items);
+        let joined = join_content_items(items);
+        if !joined.is_empty() {
+            return joined;
+        }
     }
     if let Some(items) = value.pointer("/message/content").and_then(Value::as_array) {
-        return join_content_items(items);
+        let joined = join_content_items(items);
+        if !joined.is_empty() {
+            return joined;
+        }
+    }
+    // `function_call`/`function_call_output` payloads carry no free-text
+    // field at all — without this branch `extract_message` returns empty
+    // and `parse_line` drops the row entirely, meaning MCP event extraction
+    // (GH #104) would have nothing to extract from for Codex tool calls. A
+    // short synthetic summary keeps the row non-empty and human-readable;
+    // the full structured payload is separately available via `raw_value`.
+    if let Some(payload_type) = value.pointer("/payload/type").and_then(Value::as_str) {
+        match payload_type {
+            "function_call" => {
+                let name = value
+                    .pointer("/payload/name")
+                    .and_then(Value::as_str)
+                    .unwrap_or("?");
+                return format!("[function_call {name}]");
+            }
+            "function_call_output" => {
+                let call_id = value
+                    .pointer("/payload/call_id")
+                    .and_then(Value::as_str)
+                    .unwrap_or("?");
+                return format!("[function_call_output {call_id}]");
+            }
+            _ => {}
+        }
     }
     String::new()
 }

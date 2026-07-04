@@ -35,7 +35,7 @@ MCP is an exposure surface, not the owner of log-intelligence business policy. S
 
 ## Tools
 
-One MCP tool, `cortex`, is exposed. Use the required `action` argument to run `search`, `filter`, `tail`, `errors`, `hosts`, `map`, `sessions`, `search_sessions`, `abuse`, `abuse_incidents`, `abuse_investigate`, `ai_correlate`, `topic_correlate`, `usage_blocks`, `project_context`, `list_ai_tools`, `list_ai_projects`, `correlate`, `stats`, `status`, `apps`, `source_ips`, `timeline`, `patterns`, `context`, `get`, `ingest_rate`, `silent_hosts`, `clock_skew`, `anomalies`, `compare`, `compose_status`, `compose_doctor`, `unaddressed_errors`, `ack_error`, `unack_error`, `notifications_recent`, `notifications_test`, `llm_invocations`, `similar_incidents`, `ask_history`, `incident_context`, `graph`, `skill_events`, `skill_incidents`, `skill_investigate`, or `help`.
+One MCP tool, `cortex`, is exposed. Use the required `action` argument to run `search`, `filter`, `tail`, `errors`, `hosts`, `map`, `sessions`, `search_sessions`, `abuse`, `abuse_incidents`, `abuse_investigate`, `ai_correlate`, `topic_correlate`, `usage_blocks`, `project_context`, `list_ai_tools`, `list_ai_projects`, `correlate`, `stats`, `status`, `apps`, `source_ips`, `timeline`, `patterns`, `context`, `get`, `ingest_rate`, `silent_hosts`, `clock_skew`, `anomalies`, `compare`, `compose_status`, `compose_doctor`, `unaddressed_errors`, `ack_error`, `unack_error`, `notifications_recent`, `notifications_test`, `llm_invocations`, `similar_incidents`, `ask_history`, `incident_context`, `graph`, `skill_events`, `skill_incidents`, `skill_investigate`, `mcp_events`, `mcp_incidents`, `mcp_investigate`, or `help`.
 
 For the complete action-specific parameter reference, see [`docs/mcp/SCHEMA.md`](docs/mcp/SCHEMA.md). For correlation behavior and AI/non-AI inclusion rules, see [`docs/mcp/CORRELATION.md`](docs/mcp/CORRELATION.md).
 
@@ -87,6 +87,9 @@ For the complete action-specific parameter reference, see [`docs/mcp/SCHEMA.md`]
 | `skill_events` | List extracted AI skill-invocation events |
 | `skill_incidents` | Groups negative-signal transcript hits following a skill invocation into scored incident candidates |
 | `skill_investigate` | Expands skill-usage incidents into deterministic evidence bundles, skill-first |
+| `mcp_events` | List extracted AI MCP tool-call events |
+| `mcp_incidents` | Groups negative-signal transcript hits following an MCP tool call into scored incident candidates |
+| `mcp_investigate` | Expands MCP-usage incidents into deterministic evidence bundles, server/tool-first |
 | `help` | Markdown reference for all actions |
 
 ## Homelab Inventory
@@ -1027,14 +1030,14 @@ cortex analysis compare     --a-from 2026-05-20T00:00:00Z --a-to 2026-05-20T23:5
 cortex apps         --host dookie --limit 50
 ```
 
-### Skill and abuse assessment (`cortex assess`)
+### Skill, MCP, and abuse assessment (`cortex assess`)
 
 `cortex assess` is the primary UX for LLM-guarded incident assessment. It
 runs through the LLM invocation guard (`LlmRunner` — rate-limited,
 circuit-breaker-protected, fully audited in `llm_invocations`) and, for
-`assess skill`, sources evidence from `investigate_ai_skill_incidents` — a
-purpose-built skill-incident detector, not a repurposed abuse-incident
-search.
+`assess skill`/`assess mcp`, sources evidence from
+`investigate_ai_skill_incidents`/`investigate_ai_mcp_incidents` —
+purpose-built incident detectors, not a repurposed abuse-incident search.
 
 ```bash
 # Assess the highest-priority incident touching a given skill
@@ -1053,6 +1056,14 @@ cortex assess skill --plugin lavra --since 7d
 # Deterministic findings only — no Gemini call, safe to script/automate
 cortex assess skill cortex-frustration-assessment --no-llm
 
+# Assess the highest-priority incident touching a given MCP server/tool
+cortex assess mcp labby
+cortex assess mcp --tool-name mcp__labby__search --since 7d
+
+# Assess every matching MCP incident, not just the top one
+cortex assess mcp labby --all
+cortex assess mcp labby --no-llm
+
 # Abuse-incident assessment: auto-picks the top matching incident
 cortex assess abuse
 
@@ -1060,13 +1071,13 @@ cortex assess abuse
 cortex assess abuse --incident-id <id>
 ```
 
-Both `assess skill` and `assess abuse` run the guarded Gemini assessment
-step **by default** (matching `cortex sessions assess`'s existing
+`assess skill`, `assess mcp`, and `assess abuse` all run the guarded Gemini
+assessment step **by default** (matching `cortex sessions assess`'s existing
 behavior) — pass `--no-llm` to get deterministic findings only. The LLM
 step is **local-CLI-only**: `--http` mode is rejected unless `--no-llm` is
 also passed, since it spawns a Gemini subprocess on the local host via
-`LlmRunner`. `cortex assess mcp` and `cortex assess hooks` are reserved
-subcommands, not yet implemented.
+`LlmRunner`. `cortex assess hooks` remains a reserved subcommand, not yet
+implemented.
 
 Related commands:
 - `cortex sessions assess <incident_id>` — abuse-incident assessment by
@@ -1075,6 +1086,13 @@ Related commands:
 - `cortex sessions skill-investigate <skill>` — deterministic-only
   skill-incident evidence command (no LLM step, ever); use this to inspect
   evidence before deciding whether to spend an `assess skill` call.
+- `cortex sessions mcp-assess <server-or-tool>` — same as `cortex assess mcp`.
+- `cortex sessions mcp-investigate <server-or-tool>` — deterministic-only
+  MCP-incident evidence command (no LLM step, ever); use this to inspect
+  evidence before deciding whether to spend an `assess mcp` call.
+- `cortex sessions mcp-events` / `cortex sessions mcp-incidents` — list raw
+  MCP tool-call events / grouped incident candidates without an evidence
+  bundle.
 
 ### REST endpoints (2026-05-22 surface parity)
 

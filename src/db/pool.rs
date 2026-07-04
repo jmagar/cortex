@@ -2,7 +2,7 @@
 //! core.
 //!
 //! Owns the full schema: the `logs` table + FTS5 index, AI/graph/heartbeat
-//! projections, and the **37 sequential migrations** tracked by
+//! projections, and the **39 sequential migrations** tracked by
 //! `KNOWN_SCHEMA_VERSION`. Migrations run at startup; heavy ones log
 //! `Migration N: starting ...` lines, and the one-time
 //! `auto_vacuum=INCREMENTAL` conversion VACUUM is logged loudly (it can take
@@ -39,7 +39,7 @@ pub fn write_lock() -> parking_lot::ReentrantMutexGuard<'static, ()> {
     WRITE_LOCK.lock()
 }
 
-pub const KNOWN_SCHEMA_VERSION: i64 = 38;
+pub const KNOWN_SCHEMA_VERSION: i64 = 39;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SchemaVersionInfo {
@@ -2088,6 +2088,83 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
              COMMIT;",
         )?;
         tracing::info!("Migration 38: created ai_skill_events table + idx_logs_ai_tool_id");
+    }
+
+    // Migration 39: ai_mcp_events — one row per normalized MCP/tool-call
+    // event extracted from an AI transcript log row (Claude `tool_use` /
+    // `tool_result` content items linked by `id`/`tool_use_id`; Codex
+    // `response_item.payload.type = "function_call"` /
+    // `"function_call_output"` linked by `payload.call_id`). Schema matches
+    // GH #94's "MCP assessment design" section verbatim.
+    //
+    // Idempotency key is `(ai_tool, ai_session_id, call_id, event_kind)`,
+    // enforced via an expression index over `COALESCE(ai_session_id, '')`
+    // rather than a plain `UNIQUE(...)` table constraint — SQLite (like
+    // standard SQL) never treats two NULLs as equal in a UNIQUE index, so a
+    // plain constraint on a nullable `ai_session_id` would silently let
+    // duplicate rows back in for sessionless transcripts (verified by a
+    // regression test in `mcp_events_tests.rs`). This makes `INSERT OR
+    // IGNORE` idempotent across re-ingest and backfill re-runs, mirroring
+    // the ai_skill_events idempotency pattern from migration 38 (whose own
+    // UNIQUE key is safe because its `log_id` column is NOT NULL).
+    //
+    // Index set is designed against the actual shipped query filter surface
+    // (search_ai_mcp_incidents groups/filters on mcp_server+mcp_tool+time,
+    // list_mcp_events filters on tool_name+time and the session tuple) —
+    // deliberately NOT copy-pasted blind from the skill_events index set,
+    // per the eng-review lesson called out in GH #104 (PR1/PR2 both shipped
+    // indexes that didn't match their query's actual filter/sort shape).
+    if !migration_applied(&conn, 39)? {
+        conn.execute_batch(
+            "BEGIN IMMEDIATE;
+
+             CREATE TABLE IF NOT EXISTS ai_mcp_events (
+               id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+               call_log_id        INTEGER REFERENCES logs(id) ON DELETE CASCADE,
+               result_log_id      INTEGER REFERENCES logs(id) ON DELETE SET NULL,
+               ai_tool            TEXT NOT NULL,
+               ai_project         TEXT,
+               ai_session_id      TEXT,
+               hostname           TEXT NOT NULL,
+               timestamp          TEXT NOT NULL,
+               turn_id            TEXT,
+               call_id            TEXT NOT NULL,
+               tool_name          TEXT NOT NULL,
+               mcp_server         TEXT,
+               mcp_tool           TEXT,
+               event_kind         TEXT NOT NULL,
+               status             TEXT,
+               duration_ms        INTEGER,
+               is_error           INTEGER,
+               arguments_json     TEXT,
+               output_preview     TEXT,
+               error_text         TEXT,
+               metadata_json      TEXT,
+               created_at         TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+             );
+
+             CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_mcp_events_dedupe
+                 ON ai_mcp_events(ai_tool, COALESCE(ai_session_id, ''), call_id, event_kind);
+             CREATE INDEX IF NOT EXISTS idx_ai_mcp_events_hostname_time
+                 ON ai_mcp_events(hostname, timestamp);
+             CREATE INDEX IF NOT EXISTS idx_ai_mcp_events_tool_time
+                 ON ai_mcp_events(tool_name, timestamp);
+             CREATE INDEX IF NOT EXISTS idx_ai_mcp_events_server_time
+                 ON ai_mcp_events(mcp_server, timestamp)
+                 WHERE mcp_server IS NOT NULL;
+             CREATE INDEX IF NOT EXISTS idx_ai_mcp_events_server_tool_time
+                 ON ai_mcp_events(mcp_server, mcp_tool, timestamp)
+                 WHERE mcp_server IS NOT NULL;
+             CREATE INDEX IF NOT EXISTS idx_ai_mcp_events_session_time
+                 ON ai_mcp_events(ai_tool, ai_project, ai_session_id, timestamp);
+             CREATE INDEX IF NOT EXISTS idx_ai_mcp_events_error_time
+                 ON ai_mcp_events(is_error, timestamp)
+                 WHERE is_error = 1;
+
+             INSERT OR IGNORE INTO schema_migrations (version) VALUES (39);
+             COMMIT;",
+        )?;
+        tracing::info!("Migration 39: created ai_mcp_events table");
     }
 
     // A server crash/restart mid-check leaves an orphaned 'running' maintenance
