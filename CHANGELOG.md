@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.6.4] - 2026-07-03
+
+### Fixed (CodeRabbit review round)
+
+- `hook_invoked_too_often` findings always reported "medium" confidence via a hardcoded `confidence_for(2)`; now scales with the actual invocation count like every other hook failure mode.
+- `HookIncident::has_runtime_evidence` used `.any()` against its own doc ("true when *every* hook event... is `runtime_transcript`"), so a mixed runtime/config-evidence incident was incorrectly reported as proven-executed. Changed to `.all()`.
+- `idx_ai_hook_events_unique` omitted `hostname`, so two different hosts collecting identical `config_inventory`/`trusted_hash_state` rows (both `ai_session_id = NULL`) at the same timestamp would collide under `INSERT OR IGNORE` and silently drop one host's row. Added `hostname` to the index (safe — this migration is unreleased).
+- `LlmEvidenceCounts.truncated` in `cortex assess hooks` only considered signal-anchor/transcript truncation, undercounting the audit signal for `hook_events_truncated`/`nearby_tool_calls_truncated`/`nearby_logs_truncated`/`nearby_errors_truncated`, all of which are part of the same serialized evidence bundle.
+- `cortex sessions hook-events`/`hooks-backfill` reported unknown flags with a bare error instead of the shared `suggest::unknown_option` "did you mean" UX every other new parser in this PR uses.
+- `scripts/smoke-test.sh`'s `hook_investigate` probe passed an unsupported `hook=` filter key; `AiHookInvestigateRequest` uses `#[serde(deny_unknown_fields)]` and only accepts `hook_name`/`hook_event`/`hook_source`, so this call was being rejected. Fixed to `hook_name=`.
+- `tool_hook_events` (MCP) was missing the `tracing::debug!` completion log its sibling `tool_hook_incidents`/`tool_hook_investigate` handlers both emit.
+- `with_temp_home` in `hook_config_tests.rs` only restored `$HOME` on the success path; a panic inside the test body left the process-global `$HOME` pointed at a dropped temp dir for the rest of the test binary. Switched to an RAII guard.
+- Docs: `CLAUDE.md`'s action count/table and `docs/api.md`'s route counts were stale after the hook actions landed (54→57 actions; table was missing `mcp_*`/`hook_*` rows entirely; route total 59→63; "AI session queries (9)" section header now says (14) to match its actual row count); `docs/api.md`'s hook_events row still cited migration 39 instead of 40.
+
+Not fixed (tracked separately — pre-existing patterns shared with `skill_incident_evidence.rs`/`mcp_incident_evidence.rs`, not specific to this PR): `incident_id` lookups in `hook_incident_evidence.rs` are still capped by the top-100 candidate search even when an exact ID is given, and `nearby_logs` correlation doesn't scope by `hostname`. See follow-up task.
+
 ## [3.6.2] - 2026-07-03
 
 ### Added
