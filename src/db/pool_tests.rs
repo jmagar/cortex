@@ -2030,7 +2030,7 @@ fn migration_38_creates_ai_skill_events_table() {
     // UNIQUE constraint + idempotent re-run of the whole insert on identical
     // (log_id, skill_name, event_kind, evidence_kind) is exercised in Task 6;
     // here we only assert the migration ran and the schema is fully caught up
-    // (later migrations, e.g. 39, run in the same init_db pass).
+    // (later migrations, e.g. 39/40, run in the same init_db pass).
     let version = crate::db::read_schema_version_info_conn(&conn)
         .unwrap()
         .version;

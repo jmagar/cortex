@@ -82,7 +82,7 @@ Action registry covered by live/script references: `search`, `filter`, `tail`, `
 `notifications_recent`, `file_tails`, `notifications_test`, `llm_invocations`,
 `similar_incidents`, `ask_history`, `incident_context`, `graph`, `skill_events`,
 `skill_incidents`, `skill_investigate`, `mcp_events`, `mcp_incidents`,
-`mcp_investigate`, `help`.
+`mcp_investigate`, `hook_events`, `hook_incidents`, `hook_investigate`, `help`.
 
 ### mcporter-based testing
 

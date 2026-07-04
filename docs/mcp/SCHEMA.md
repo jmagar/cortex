@@ -20,7 +20,7 @@ wins.
 ## Current Actions
 
 cortex exposes one MCP tool named `cortex`. The required `action` argument
-selects one of these 48 actions:
+selects one of these 54 actions:
 
 | Action | Scope | Cost | Purpose |
 | --- | --- | --- | --- |
@@ -72,6 +72,9 @@ selects one of these 48 actions:
 | `mcp_events` | `cortex:read` | cheap | List extracted AI MCP tool-call events |
 | `mcp_incidents` | `cortex:read` | moderate | Grouped MCP-usage incident candidates |
 | `mcp_investigate` | `cortex:read` | expensive | Evidence bundles for MCP-usage incidents, server/tool-first |
+| `hook_events` | `cortex:read` | cheap | List extracted/collected AI hook events (runtime + config inventory) |
+| `hook_incidents` | `cortex:read` | moderate | Grouped hook-usage incident candidates |
+| `hook_investigate` | `cortex:read` | expensive | Evidence bundles for hook-usage incidents, hook-first |
 | `ack_error` | `cortex:admin` | write | Acknowledge an error signature |
 | `unack_error` | `cortex:admin` | write | Revoke an error acknowledgement |
 | `file_tails` | `cortex:admin` | write | Manage Cortex-owned file-tail ingest sources |

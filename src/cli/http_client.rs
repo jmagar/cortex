@@ -578,6 +578,13 @@ impl HttpClient {
         self.get_json("/api/sessions/skills", Some(req)).await
     }
 
+    pub async fn ai_hook_events(
+        &self,
+        req: &cortex::app::ListHookEventsRequest,
+    ) -> Result<cortex::app::ListHookEventsResponse> {
+        self.get_json("/api/sessions/hook-events", Some(req)).await
+    }
+
     pub async fn ai_projects(&self, req: &ListAiProjectsRequest) -> Result<ListAiProjectsResponse> {
         self.get_json("/api/sessions/projects", Some(req)).await
     }

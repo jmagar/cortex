@@ -2,7 +2,7 @@
 //! core.
 //!
 //! Owns the full schema: the `logs` table + FTS5 index, AI/graph/heartbeat
-//! projections, and the **39 sequential migrations** tracked by
+//! projections, and the **40 sequential migrations** tracked by
 //! `KNOWN_SCHEMA_VERSION`. Migrations run at startup; heavy ones log
 //! `Migration N: starting ...` lines, and the one-time
 //! `auto_vacuum=INCREMENTAL` conversion VACUUM is logged loudly (it can take
@@ -39,7 +39,7 @@ pub fn write_lock() -> parking_lot::ReentrantMutexGuard<'static, ()> {
     WRITE_LOCK.lock()
 }
 
-pub const KNOWN_SCHEMA_VERSION: i64 = 39;
+pub const KNOWN_SCHEMA_VERSION: i64 = 40;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SchemaVersionInfo {
@@ -2165,6 +2165,85 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
              COMMIT;",
         )?;
         tracing::info!("Migration 39: created ai_mcp_events table");
+    }
+
+    // Migration 40: ai_hook_events — one row per detected hook signal, either
+    // a Claude runtime hook-execution attachment (`evidence_kind =
+    // 'runtime_transcript'`) or a Claude/Codex hook config-inventory /
+    // trust-state entry (`evidence_kind = 'config_inventory'` /
+    // `'trusted_hash_state'`). `log_id` is nullable because config-inventory
+    // rows are collected from local host config files, not a transcript log
+    // row — see GH #105's "Hook assessment design" section.
+    //
+    // Uniqueness is enforced via a UNIQUE INDEX over
+    // ai_tool, hostname, COALESCE(ai_session_id, ''), hook_event,
+    // COALESCE(hook_name, ''), timestamp, evidence_kind rather than a
+    // table-level UNIQUE(...) constraint: SQLite treats every NULL as
+    // distinct from every other NULL in a UNIQUE constraint, and
+    // config-inventory rows always have `ai_session_id = NULL` (they are
+    // host-global, not session-scoped) — a bare UNIQUE(ai_session_id, ...)
+    // would let `collect_and_store` insert an unbounded number of duplicate
+    // rows on every repeated collection instead of deduping via
+    // `INSERT OR IGNORE`. Wrapping the nullable columns in COALESCE collapses
+    // NULL to a consistent sentinel so repeated collections at the same
+    // hook_event/hook_name/timestamp/evidence_kind correctly dedupe.
+    // `hostname` is part of the key so two different hosts collecting
+    // identical config/trust-state rows at the same timestamp (both with
+    // `ai_session_id = NULL`) don't collide and silently drop one host's row.
+    if !migration_applied(&conn, 40)? {
+        conn.execute_batch(
+            "BEGIN IMMEDIATE;
+
+             CREATE TABLE IF NOT EXISTS ai_hook_events (
+               id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+               log_id                 INTEGER REFERENCES logs(id) ON DELETE SET NULL,
+               ai_tool                TEXT NOT NULL,
+               ai_project             TEXT,
+               ai_session_id          TEXT,
+               hostname               TEXT NOT NULL,
+               timestamp              TEXT NOT NULL,
+               hook_event             TEXT NOT NULL,
+               hook_name              TEXT,
+               hook_source            TEXT,
+               hook_command           TEXT,
+               status                 TEXT NOT NULL,
+               exit_code              INTEGER,
+               duration_ms            INTEGER,
+               stdout_preview         TEXT,
+               stderr_preview         TEXT,
+               persisted_output_path  TEXT,
+               trusted_hash           TEXT,
+               evidence_kind          TEXT NOT NULL,
+               metadata_json          TEXT,
+               created_at             TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+             );
+
+             CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_hook_events_unique
+                 ON ai_hook_events(
+                   ai_tool,
+                   hostname,
+                   COALESCE(ai_session_id, ''),
+                   hook_event,
+                   COALESCE(hook_name, ''),
+                   timestamp,
+                   evidence_kind
+                 );
+
+             CREATE INDEX IF NOT EXISTS idx_ai_hook_events_hostname_time
+                 ON ai_hook_events(hostname, timestamp);
+             CREATE INDEX IF NOT EXISTS idx_ai_hook_events_hook_time
+                 ON ai_hook_events(hook_event, hook_name, timestamp);
+             CREATE INDEX IF NOT EXISTS idx_ai_hook_events_status_time
+                 ON ai_hook_events(status, timestamp);
+             CREATE INDEX IF NOT EXISTS idx_ai_hook_events_session_time
+                 ON ai_hook_events(ai_tool, ai_project, ai_session_id, timestamp);
+             CREATE INDEX IF NOT EXISTS idx_ai_hook_events_evidence_time
+                 ON ai_hook_events(evidence_kind, timestamp);
+
+             INSERT OR IGNORE INTO schema_migrations (version) VALUES (40);
+             COMMIT;",
+        )?;
+        tracing::info!("Migration 40: created ai_hook_events table");
     }
 
     // A server crash/restart mid-check leaves an orphaned 'running' maintenance
