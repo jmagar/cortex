@@ -71,12 +71,31 @@ fn extract_message(value: &Value) -> String {
 }
 
 fn join_content_items(items: &[Value]) -> Option<String> {
-    let parts: Vec<&str> = items
+    let parts: Vec<String> = items
         .iter()
         .filter_map(|item| {
-            item.as_str()
+            if let Some(text) = item
+                .as_str()
                 .or_else(|| item.get("text").and_then(Value::as_str))
                 .or_else(|| item.get("content").and_then(Value::as_str))
+            {
+                return Some(text.to_string());
+            }
+            // `tool_use` content items (assistant tool calls) carry no
+            // `.text`/`.content` string field, so without this branch
+            // `extract_message` returns empty and `parse_line` drops the
+            // row entirely — before this fix, Claude tool-call rows never
+            // reached `logs` at all, which meant MCP event extraction
+            // (GH #104) had nothing to extract from. A short synthetic
+            // summary keeps the row non-empty and human-readable; the full
+            // structured input is separately available via `raw_value` for
+            // MCP event extraction, so this summary is not the only copy
+            // of the call data.
+            if item.get("type").and_then(Value::as_str) == Some("tool_use") {
+                let name = item.get("name").and_then(Value::as_str).unwrap_or("?");
+                return Some(format!("[tool_use {name}]"));
+            }
+            None
         })
         .collect();
     (!parts.is_empty()).then(|| parts.join(" "))

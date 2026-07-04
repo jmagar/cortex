@@ -8,9 +8,48 @@ fn parse_assess_requires_subcommand() {
 }
 
 #[test]
-fn parse_assess_mcp_is_a_clear_not_yet_implemented_stub() {
-    let err = parse_assess(&["mcp".to_string(), "some-tool".to_string()]).unwrap_err();
-    assert!(format!("{err}").contains("not yet implemented"));
+fn parse_assess_mcp_parses_positional_target() {
+    let cmd = parse_assess(&["mcp".to_string(), "labby".to_string()]).unwrap();
+    match cmd {
+        CliCommand::Assess(AssessCommand::Mcp(args)) => {
+            assert_eq!(args.target.as_deref(), Some("labby"));
+            assert_eq!(args.server, None);
+            assert_eq!(args.tool_name, None);
+            assert!(
+                !args.no_llm,
+                "LLM assessment must run by default (mirrors `cortex assess skill`)"
+            );
+            assert!(!args.all);
+            assert_eq!(args.limit, None);
+        }
+        other => panic!("expected AssessCommand::Mcp, got {other:?}"),
+    }
+}
+
+#[test]
+fn parse_assess_mcp_accepts_server_and_tool_name_only() {
+    let cmd = parse_assess(&[
+        "mcp".to_string(),
+        "--server".to_string(),
+        "labby".to_string(),
+        "--tool-name".to_string(),
+        "search".to_string(),
+    ])
+    .unwrap();
+    match cmd {
+        CliCommand::Assess(AssessCommand::Mcp(args)) => {
+            assert_eq!(args.target, None);
+            assert_eq!(args.server.as_deref(), Some("labby"));
+            assert_eq!(args.tool_name.as_deref(), Some("search"));
+        }
+        other => panic!("expected AssessCommand::Mcp, got {other:?}"),
+    }
+}
+
+#[test]
+fn parse_assess_mcp_rejects_missing_target_server_and_tool_name() {
+    let err = parse_assess(&["mcp".to_string()]).unwrap_err();
+    assert!(format!("{err}").contains("an mcp server/tool name is required"));
 }
 
 #[test]

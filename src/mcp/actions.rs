@@ -102,6 +102,9 @@ pub(super) enum ActionHandler {
     SkillEvents,
     SkillIncidents,
     SkillInvestigate,
+    McpEvents,
+    McpIncidents,
+    McpInvestigate,
     Help,
 }
 
@@ -561,6 +564,46 @@ pub(super) const ACTION_SPECS: &[ActionSpec] = &[
             "cortex sessions skill-investigate --plugin lavra --all --limit 5",
         ],
         positional: Some("--skill"),
+        defaults: Defaults::new()
+    ),
+    action_spec!(
+        "mcp_events",
+        Read,
+        "List extracted AI MCP tool-call events",
+        Cheap,
+        McpEvents,
+        flags: &[],
+        examples: &[
+            "cortex sessions mcp-events --project cortex --limit 20",
+            "cortex sessions mcp-events --mcp-server labby --since 1h",
+        ]
+    ),
+    action_spec!(
+        "mcp_incidents",
+        Read,
+        "List detected MCP-usage incidents (negative signals after a tool call)",
+        Moderate,
+        McpIncidents,
+        flags: &[],
+        examples: &[
+            "cortex sessions mcp-incidents --mcp-server labby --since 7d",
+            "cortex sessions mcp-incidents --mcp-tool search --min-score 35",
+        ]
+    ),
+    action_spec!(
+        "mcp_investigate",
+        Read,
+        "Deep-dive investigation of an MCP-usage incident, server/tool-first",
+        Expensive,
+        McpInvestigate,
+        flags: &[],
+        examples: &[
+            "cortex sessions mcp-investigate labby",
+            "cortex sessions mcp-investigate labby --since 7d",
+            "cortex sessions mcp-investigate labby --tool codex --project /home/jmagar/workspace/cortex",
+            "cortex sessions mcp-investigate --mcp-tool search --all --limit 5",
+        ],
+        positional: Some("--mcp-server"),
         defaults: Defaults::new()
     ),
     // ── Admin / write actions ──────────────────────────────────────────────

@@ -5,17 +5,20 @@ use cortex::app::{
     AbuseSearchRequest, AiAssessRequest, AiCheckpointsRequest, AiCorrelateRequest,
     AiIncidentRequest, AiInvestigateRequest, AiParseErrorsRequest, AiPruneCheckpointsRequest,
     AskHistoryRequest, IncidentContextRequest, ListAiProjectsRequest, ListAiToolsRequest,
-    ProjectContextRequest, SearchSessionsRequest, SimilarIncidentsRequest, SkillAssessRequest,
-    UsageBlocksRequest,
+    McpAssessRequest, ProjectContextRequest, SearchSessionsRequest, SimilarIncidentsRequest,
+    SkillAssessRequest, UsageBlocksRequest,
 };
 use std::io::Write;
 
 use super::output::common::print_json;
+use super::output::logs::events::{print_mcp_events_response, print_skill_events_response};
 use super::output::logs::{
     UsageBlocksPrintOptions, print_abuse_search_response, print_ai_correlate_response,
     print_ai_projects_response, print_ai_tools_response, print_project_context_response,
-    print_search_sessions_response, print_skill_events_response,
-    print_usage_blocks_response_with_options,
+    print_search_sessions_response, print_usage_blocks_response_with_options,
+};
+use super::output::sessions::mcp_incidents::{
+    print_ai_mcp_incidents_response, print_ai_mcp_investigate_response,
 };
 use super::output::sessions::more::{
     AiInvestigatePrintOptions, print_ai_incidents_response,
@@ -32,11 +35,13 @@ use super::output::sessions::{
 };
 use super::sessions_watch::ai_smoke_watch;
 use super::{
-    AssessAbuseArgs, AssessSkillArgs, CliMode, OutputArgs, SessionsAbuseArgs, SessionsAddArgs,
-    SessionsAskHistoryArgs, SessionsAssessArgs, SessionsBlocksArgs, SessionsCheckpointsArgs,
-    SessionsContextArgs, SessionsCorrelateArgs, SessionsDoctorArgs, SessionsErrorsArgs,
-    SessionsIncidentContextArgs, SessionsIncidentsArgs, SessionsIndexArgs, SessionsInvestigateArgs,
-    SessionsListArgs, SessionsLlmInvocationsArgs, SessionsPruneCheckpointsArgs, SessionsSearchArgs,
+    AssessAbuseArgs, AssessMcpArgs, AssessSkillArgs, CliMode, OutputArgs, SessionsAbuseArgs,
+    SessionsAddArgs, SessionsAskHistoryArgs, SessionsAssessArgs, SessionsBlocksArgs,
+    SessionsCheckpointsArgs, SessionsContextArgs, SessionsCorrelateArgs, SessionsDoctorArgs,
+    SessionsErrorsArgs, SessionsIncidentContextArgs, SessionsIncidentsArgs, SessionsIndexArgs,
+    SessionsInvestigateArgs, SessionsListArgs, SessionsLlmInvocationsArgs,
+    SessionsMcpEventsBackfillArgs, SessionsMcpEventsListArgs, SessionsMcpIncidentsArgs,
+    SessionsMcpInvestigateArgs, SessionsPruneCheckpointsArgs, SessionsSearchArgs,
     SessionsSimilarArgs, SessionsSkillIncidentsArgs, SessionsSkillInvestigateArgs,
     SessionsSkillsBackfillArgs, SessionsSkillsListArgs, SessionsWatchArgs,
 };
@@ -378,6 +383,60 @@ pub(crate) async fn run_ai_skills(mode: &CliMode, args: SessionsSkillsListArgs) 
     print_skill_events_response(&response, json)
 }
 
+pub(crate) async fn run_mcp_events_backfill(
+    mode: &CliMode,
+    args: SessionsMcpEventsBackfillArgs,
+) -> Result<()> {
+    let service = match mode {
+        CliMode::Http(_) => bail!("sessions mcp-events backfill runs local DB scans; omit --http"),
+        CliMode::Local(service) => service,
+    };
+    let response = service
+        .backfill_mcp_events(cortex::app::McpBackfillRequest {
+            since: args.since,
+            limit: args.limit,
+            dry_run: args.dry_run,
+        })
+        .await?;
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&response)?);
+    } else {
+        println!(
+            "scanned={} inserted={} skipped_duplicates={} parse_errors={} truncated={} dry_run={}",
+            response.scanned,
+            response.inserted,
+            response.skipped_duplicates,
+            response.parse_errors,
+            response.truncated,
+            response.dry_run
+        );
+    }
+    Ok(())
+}
+
+pub(crate) async fn run_mcp_events(mode: &CliMode, args: SessionsMcpEventsListArgs) -> Result<()> {
+    let json = args.json;
+    let req = cortex::app::ListMcpEventsRequest {
+        tool_name: args.tool_name,
+        mcp_server: args.mcp_server,
+        mcp_tool: args.mcp_tool,
+        tool: args.tool,
+        project: args.project,
+        session_id: args.session_id,
+        hostname: args.host,
+        is_error: args.is_error,
+        from: args.since,
+        to: args.until,
+        limit: args.limit,
+    };
+    let service = match mode {
+        CliMode::Http(_) => bail!("sessions mcp-events runs against the local DB; omit --http"),
+        CliMode::Local(service) => service,
+    };
+    let response = service.list_mcp_events(req).await?;
+    print_mcp_events_response(&response, json)
+}
+
 pub(crate) async fn run_ai_index(mode: &CliMode, args: SessionsIndexArgs) -> Result<()> {
     let service = match mode {
         CliMode::Http(_) => bail!("sessions index reads host ~/.claude/projects; omit --http"),
@@ -627,6 +686,108 @@ pub(crate) async fn run_ai_skill_investigate(
     print_ai_skill_investigate_response(&response, json)
 }
 
+impl SessionsMcpIncidentsArgs {
+    pub(crate) fn into_request(self) -> cortex::app::AiMcpIncidentRequest {
+        cortex::app::AiMcpIncidentRequest {
+            mcp_server: self.mcp_server,
+            mcp_tool: self.mcp_tool,
+            tool_name: self.tool_name,
+            tool: self.tool,
+            project: self.project,
+            session_id: self.session_id,
+            hostname: self.hostname,
+            since: self.since,
+            until: self.until,
+            limit: self.limit,
+            window_minutes: self.window_minutes,
+            signals: self.signals,
+            // Already validated as a well-formed f64 by
+            // parse_sessions_mcp_incidents (parse_f64_flag) — this can
+            // only fail if that invariant is broken, which is a bug worth
+            // panicking on rather than silently dropping the filter.
+            min_score: self.min_score.map(|s| {
+                s.parse::<f64>()
+                    .expect("min_score validated at CLI-parse time")
+            }),
+        }
+    }
+}
+
+impl SessionsMcpInvestigateArgs {
+    /// The bare positional `target` resolves to `mcp_server` when no
+    /// `--mcp-server`/`--mcp-tool`/`--tool-name` flag was given, mirroring
+    /// the skill-investigate positional-binds-to-skill-name contract.
+    /// Callers wanting to target a bare tool name (not a server) should use
+    /// `--tool-name` explicitly.
+    pub(crate) fn into_request(self) -> cortex::app::AiMcpInvestigateRequest {
+        let mcp_server = self.mcp_server.or_else(|| {
+            if self.mcp_tool.is_none() && self.tool_name.is_none() {
+                self.target.clone()
+            } else {
+                None
+            }
+        });
+        cortex::app::AiMcpInvestigateRequest {
+            incident_id: self.incident_id,
+            mcp_server,
+            mcp_tool: self.mcp_tool,
+            tool_name: self.tool_name,
+            tool: self.tool,
+            project: self.project,
+            since: self.since,
+            until: self.until,
+            limit: if self.all {
+                self.limit.or(Some(3))
+            } else {
+                self.limit.or(Some(1))
+            },
+            window_minutes: self.window_minutes,
+            correlation_window_minutes: self.correlation_window_minutes,
+        }
+    }
+}
+
+pub(crate) async fn run_mcp_incidents(
+    mode: &CliMode,
+    args: SessionsMcpIncidentsArgs,
+) -> Result<()> {
+    let json = args.json;
+    let req = args.into_request();
+    let service = match mode {
+        CliMode::Http(_) => bail!("sessions mcp-incidents runs against the local DB; omit --http"),
+        CliMode::Local(service) => service,
+    };
+    let response = service.list_ai_mcp_incidents(req).await?;
+    print_ai_mcp_incidents_response(&response, json)
+}
+
+pub(crate) async fn run_mcp_investigate(
+    mode: &CliMode,
+    args: SessionsMcpInvestigateArgs,
+) -> Result<()> {
+    let json = args.json;
+    if args.target.is_none()
+        && args.mcp_server.is_none()
+        && args.mcp_tool.is_none()
+        && args.tool_name.is_none()
+        && args.incident_id.is_none()
+    {
+        bail!(
+            "sessions mcp-investigate requires an mcp server/tool (positional), --mcp-server, \
+             --mcp-tool, --tool-name, or --incident-id, e.g. `cortex sessions mcp-investigate labby`"
+        );
+    }
+    let req = args.into_request();
+    let service = match mode {
+        CliMode::Http(_) => {
+            bail!("sessions mcp-investigate runs against the local DB; omit --http")
+        }
+        CliMode::Local(service) => service,
+    };
+    let response = service.investigate_ai_mcp_incidents(req).await?;
+    print_ai_mcp_investigate_response(&response, json)
+}
+
 pub(crate) async fn run_ai_assess(mode: &CliMode, args: SessionsAssessArgs) -> Result<()> {
     let service = match mode {
         CliMode::Http(_) => {
@@ -868,6 +1029,109 @@ pub(crate) async fn run_assess_skill(mode: &CliMode, args: AssessSkillArgs) -> R
         // the HTTP client wiring itself is future work.
         CliMode::Http(_) => {
             bail!("cortex assess skill --http is not yet implemented; run locally")
+        }
+    };
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&response)?);
+        return Ok(());
+    }
+    for result in &response.results {
+        println!("# incident {}", result.incident_id);
+        if let Some(assessment) = &result.assessment {
+            println!("{assessment}");
+        } else {
+            println!("{}", serde_json::to_string_pretty(&result.findings)?);
+        }
+        println!();
+    }
+    if !response.other_matching_incidents.is_empty() {
+        eprintln!(
+            "[{} other matching incident(s) not assessed; pass --all or --limit N: {}]",
+            response.other_matching_incidents.len(),
+            response
+                .other_matching_incidents
+                .iter()
+                .map(|s| s.incident_id.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
+    if response.no_incident_low_severity_summary {
+        eprintln!("[note: single low-signal incident — no negative signals detected]");
+    }
+    Ok(())
+}
+
+/// `cortex assess mcp <tool-or-server>` — LLM-guarded MCP-incident
+/// assessment. Resolves the highest-priority (or all, with `--all`)
+/// matching MCP incident via `CortexService::run_mcp_assessment_with_delta`,
+/// which itself sources evidence from `investigate_ai_mcp_incidents` and
+/// runs the guarded Gemini assessment through `LlmRunner`. LLM assessment
+/// is local-only — `--http` is rejected unless `--no-llm` is also passed
+/// (mirrors `run_assess_skill`'s guard exactly).
+pub(crate) async fn run_assess_mcp(mode: &CliMode, args: AssessMcpArgs) -> Result<()> {
+    let run_llm = !args.no_llm;
+    if run_llm {
+        if let CliMode::Http(_) = mode {
+            bail!(
+                "cortex assess mcp spawns Gemini CLI on the local host; omit --http or pass --no-llm"
+            );
+        }
+    }
+    // The bare positional `target` resolves to `mcp_server` unless a
+    // `--tool-name` was given (in which case the positional is ambiguous
+    // and the explicit flag wins) — mirrors `SessionsMcpInvestigateArgs`'s
+    // resolution rule.
+    let mcp_server = args.server.clone().or_else(|| {
+        if args.tool_name.is_none() {
+            args.target.clone()
+        } else {
+            None
+        }
+    });
+    let req = McpAssessRequest {
+        mcp_server,
+        mcp_tool: None,
+        tool_name: args.tool_name.clone(),
+        model: args.model.clone(),
+        project: args.project.clone(),
+        tool: args.tool.clone(),
+        since: args.since.clone(),
+        until: args.until.clone(),
+        window_minutes: args.window_minutes,
+        correlation_window_minutes: args.correlation_window_minutes,
+        limit: args.limit,
+        all: args.all,
+    };
+    let response = match mode {
+        CliMode::Local(service) => {
+            if args.json {
+                service
+                    .run_mcp_assessment_with_delta(req, run_llm, |_| Ok(()))
+                    .await?
+            } else {
+                let mut streamed = false;
+                let response = service
+                    .run_mcp_assessment_with_delta(req, run_llm, |delta| {
+                        streamed = true;
+                        print!("{delta}");
+                        std::io::stdout().flush()?;
+                        Ok(())
+                    })
+                    .await?;
+                if streamed
+                    && !response
+                        .results
+                        .iter()
+                        .any(|r| r.assessment.as_deref().is_some_and(|a| a.ends_with('\n')))
+                {
+                    println!();
+                }
+                response
+            }
+        }
+        CliMode::Http(_) => {
+            bail!("cortex assess mcp --http is not yet implemented; run locally")
         }
     };
     if args.json {

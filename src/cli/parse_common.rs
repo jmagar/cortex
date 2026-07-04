@@ -84,6 +84,12 @@ pub(crate) fn parse_i64_flag(flag: &str, value: String) -> Result<i64> {
         .map_err(|e| anyhow!("{flag} must be a number: {e}"))
 }
 
+pub(crate) fn parse_f64_flag(flag: &str, value: String) -> Result<f64> {
+    value
+        .parse::<f64>()
+        .map_err(|e| anyhow!("{flag} must be a number: {e}"))
+}
+
 pub(crate) fn parse_positive_u64_flag(flag: &str, value: String) -> Result<u64> {
     let parsed = value
         .parse::<u64>()

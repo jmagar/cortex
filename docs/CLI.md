@@ -405,6 +405,70 @@ are permanently unrecoverable via this command and need no action. An
 unexpectedly high count on recently-ingested rows suggests the transcript
 source directory moved; verify `ai_transcript_path` still resolves.
 
+### `cortex sessions mcp-events`
+
+List extracted AI MCP tool-call events (Claude `tool_use`/`tool_result`,
+Codex `function_call`/`function_call_output`), classified via the
+`mcp__<server>__<tool>` naming convention.
+
+```bash
+cortex sessions mcp-events --project cortex --limit 20
+cortex sessions mcp-events --mcp-server labby --since 1h --json
+```
+
+All flags are optional filters: `--tool-name`, `--mcp-server`, `--mcp-tool`,
+`--tool`, `--project`, `--session-id`, `--host`, `--is-error`, `--since`,
+`--until` (normalized time expressions), and `--limit` (defaults to 50,
+clamped to `1..=500`). This is a `cortex:read`-scoped action.
+
+### `cortex sessions mcp-events backfill`
+
+Chunked, bounded, dry-run-capable backfill of `ai_mcp_events` from existing
+`logs` rows — catches up rows ingested before this phase shipped. Scans the
+`raw` column (the original transcript JSON), not `message` (a scrubbed
+summary).
+
+```bash
+cortex sessions mcp-events backfill --since 30d --limit 10000 --dry-run
+cortex sessions mcp-events backfill --limit 50000
+```
+
+`--since` (optional, normalized time expression) restricts the scan to
+rows at or after that timestamp. `--limit` (optional, defaults to 10000,
+hard-capped at 1,000,000) bounds the number of `logs` rows scanned in one
+call. `--dry-run` reports `scanned`/`parse_errors` without inserting any
+rows. Insertion is idempotent, so re-running backfill is always safe. Only
+one backfill can run at a time process-wide; a concurrent second call
+fails fast with a "already running" error. Local mode only — this is a
+DB-heavy batch job that runs against the local `CortexService`, not
+proxied over HTTP.
+
+### `cortex sessions mcp-incidents`
+
+Groups `ai_mcp_events` rows into incident candidates by `(mcp_server,
+mcp_tool, tool, project, session_id, hostname, window_bucket)`.
+
+```bash
+cortex sessions mcp-incidents --mcp-server labby --since 7d
+cortex sessions mcp-incidents --mcp-tool search --min-score 35 --json
+```
+
+### `cortex sessions mcp-investigate`
+
+Deep-dive investigation of MCP-usage incidents, server/tool-first (mirrors
+`cortex sessions skill-investigate`'s skill-first resolution rule).
+
+```bash
+cortex sessions mcp-investigate labby
+cortex sessions mcp-investigate labby --since 7d --all --limit 5
+```
+
+### `cortex sessions mcp-assess`
+
+Low-level alias for `cortex assess mcp` — see the "Skill, MCP, and abuse
+assessment" section in [README.md](../README.md) for the full flag
+reference and LLM-guard behavior.
+
 ### `cortex sessions blocks`
 
 Bucket AI activity into 5-hour UTC windows.
@@ -1160,6 +1224,7 @@ models.
 | `cortex sessions ask-history` | `cortex` with `action="ask_history"` |
 | `cortex sessions incident-context` | `cortex` with `action="incident_context"` |
 | `cortex sessions skills` | `cortex` with `action="skill_events"` |
+| `cortex sessions mcp-events` | `cortex` with `action="mcp_events"` |
 | `cortex correlate events` | `cortex` with `action="correlate"` |
 | `cortex state host` | `cortex` with `action="host_state"` |
 | `cortex state fleet` | `cortex` with `action="fleet_state"` |

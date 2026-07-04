@@ -6,7 +6,7 @@ use super::*;
 // re-auditing the run_llm=false contract.
 #[test]
 fn no_mcp_action_spec_invokes_gemini_assessment() {
-    let forbidden = ["skill_assess", "abuse_assess"];
+    let forbidden = ["skill_assess", "abuse_assess", "mcp_assess"];
     for name in forbidden {
         assert!(
             !ACTION_SPECS.iter().any(|spec| spec.name == name),

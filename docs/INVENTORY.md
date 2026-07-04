@@ -62,6 +62,9 @@ that registry by `src/mcp/schemas.rs::tool_definitions()`.
 | `skill_events` | List extracted AI skill-invocation events | no |
 | `skill_incidents` | Groups negative-signal transcript hits following a skill invocation into scored incident candidates | no |
 | `skill_investigate` | Expands skill-usage incidents into deterministic evidence bundles, skill-first | no |
+| `mcp_events` | List extracted AI MCP tool-call events | no |
+| `mcp_incidents` | Groups negative-signal transcript hits following an MCP tool call into scored incident candidates | no |
+| `mcp_investigate` | Expands MCP-usage incidents into deterministic evidence bundles, server/tool-first | no |
 | `ack_error` | Acknowledge an error signature | yes |
 | `unack_error` | Revoke an error acknowledgement | yes |
 | `file_tails` | Manage Cortex-owned file-tail ingest sources | yes |

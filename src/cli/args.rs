@@ -10,16 +10,17 @@ pub(crate) use alerts::{
     AlertsCommand, NotifyCommand, NotifyRecentArgs, NotifyTestArgs, SigAckArgs, SigCommand,
     SigListArgs, SigUnackArgs,
 };
-pub(crate) use assess::{AssessAbuseArgs, AssessCommand, AssessSkillArgs};
+pub(crate) use assess::{AssessAbuseArgs, AssessCommand, AssessMcpArgs, AssessSkillArgs};
 pub(crate) use sessions::{
     SessionsAbuseArgs, SessionsAddArgs, SessionsAskHistoryArgs, SessionsAssessArgs,
     SessionsBlocksArgs, SessionsCheckpointsArgs, SessionsCommand, SessionsContextArgs,
     SessionsCorrelateArgs, SessionsDoctorArgs, SessionsErrorsArgs, SessionsIncidentContextArgs,
     SessionsIncidentsArgs, SessionsIndexArgs, SessionsInvestigateArgs, SessionsListArgs,
-    SessionsLlmInvocationsArgs, SessionsOutputDetail, SessionsPruneCheckpointsArgs,
-    SessionsSearchArgs, SessionsSimilarArgs, SessionsSkillIncidentsArgs,
-    SessionsSkillInvestigateArgs, SessionsSkillsBackfillArgs, SessionsSkillsListArgs,
-    SessionsWatchArgs,
+    SessionsLlmInvocationsArgs, SessionsMcpEventsBackfillArgs, SessionsMcpEventsListArgs,
+    SessionsMcpIncidentsArgs, SessionsMcpInvestigateArgs, SessionsOutputDetail,
+    SessionsPruneCheckpointsArgs, SessionsSearchArgs, SessionsSimilarArgs,
+    SessionsSkillIncidentsArgs, SessionsSkillInvestigateArgs, SessionsSkillsBackfillArgs,
+    SessionsSkillsListArgs, SessionsWatchArgs,
 };
 pub(crate) use surface::{
     AnomaliesArgs, AppsArgs, ClockSkewArgs, CompareArgs, CorrelateStateArgs, FleetStateArgs,

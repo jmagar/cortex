@@ -63,6 +63,9 @@ A single MCP tool, `mcp__cortex__cortex`, dispatches on a required `action` argu
 | `skill_events` | List extracted AI skill-invocation events |
 | `skill_incidents` | Groups negative-signal transcript hits following a skill invocation into scored incident candidates |
 | `skill_investigate` | Expands skill-usage incidents into deterministic evidence bundles, skill-first |
+| `mcp_events` | List extracted AI MCP tool-call events |
+| `mcp_incidents` | Groups negative-signal transcript hits following an MCP tool call into scored incident candidates |
+| `mcp_investigate` | Expands MCP-usage incidents into deterministic evidence bundles, server/tool-first |
 | `help` | Canonical in-tree action reference (use as ground truth if this doc drifts) |
 
 **Always prefer the MCP tool**. Fall back to HTTP only when MCP is unavailable.

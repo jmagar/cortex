@@ -10,6 +10,9 @@ mod heartbeat;
 mod ingest;
 pub(crate) mod llm_invocations;
 mod maintenance;
+mod mcp_events;
+mod mcp_incident_evidence;
+mod mcp_incidents;
 mod models;
 pub(crate) mod notifications;
 mod pool;
@@ -54,6 +57,18 @@ pub use maintenance::{
     purge_old_logs, wal_checkpoint_complete,
 };
 pub(crate) use maintenance::{PragmaName, db_pragma_i64, db_pragma_string, sqlite_sidecar_path};
+pub(crate) use mcp_events::insert_mcp_events_in_tx;
+pub use mcp_events::{
+    AiMcpEventEntry, AiMcpEventParams, ListMcpEventsResult, McpEventInsert, insert_mcp_events,
+    list_mcp_events,
+};
+pub use mcp_incident_evidence::{
+    AiMcpInvestigateParams, AiMcpInvestigateResult, McpIncidentEvidence,
+    investigate_ai_mcp_incidents,
+};
+pub use mcp_incidents::{
+    AiMcpIncidentParams, AiMcpIncidentResult, McpIncident, McpSignalCounts, search_ai_mcp_incidents,
+};
 pub use models::{
     AbuseIncident, AiAbuseMatch, AiAbuseParams, AiAbuseResult, AiCorrelateParams, AiIncidentParams,
     AiIncidentResult, AiInvestigateParams, AiInvestigateResult, AiProjectContext,

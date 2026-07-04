@@ -263,7 +263,7 @@ fn collector_state(name: &str, status: &str, warnings: Vec<&str>) -> CollectorSt
 async fn tool_get_stats_returns_storage_guard_fields() {
     let h = TestHarness::new();
     let state = h.state;
-    let value = tool_get_stats(&state, json!({})).await.unwrap();
+    let value = status::tool_get_stats(&state, json!({})).await.unwrap();
     assert!(value.get("logical_db_size_mb").is_some());
     assert!(value.get("physical_db_size_mb").is_some());
     assert!(value.get("write_blocked").is_some());
@@ -275,7 +275,7 @@ async fn tool_get_stats_returns_storage_guard_fields() {
 #[tokio::test]
 async fn tool_get_status_returns_runtime_observability() {
     let h = TestHarness::new();
-    let value = tool_get_status(&h.state, json!({})).await.unwrap();
+    let value = status::tool_get_status(&h.state, json!({})).await.unwrap();
     assert_eq!(value["status"], "ok");
     assert_eq!(value["db_ok"], true);
     assert_eq!(value["file_tails"]["blocked_count"], 0);
@@ -1198,6 +1198,9 @@ fn sample_args_for_action(action: &str) -> Option<serde_json::Value> {
         | "llm_invocations"
         | "skill_events"
         | "skill_incidents"
+        | "mcp_events"
+        | "mcp_incidents"
+        | "mcp_investigate"
         | "help" => json!({"action": action}),
         "skill_investigate" => json!({"action": action, "skill": "schema-test-skill"}),
         _ => return None,
