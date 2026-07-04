@@ -53,9 +53,47 @@ fn parse_assess_mcp_rejects_missing_target_server_and_tool_name() {
 }
 
 #[test]
-fn parse_assess_hooks_is_a_clear_not_yet_implemented_stub() {
-    let err = parse_assess(&["hooks".to_string()]).unwrap_err();
-    assert!(format!("{err}").contains("not yet implemented"));
+fn parse_assess_hooks_parses_with_no_args() {
+    let cmd = parse_assess(&["hooks".to_string()]).unwrap();
+    match cmd {
+        CliCommand::Assess(AssessCommand::Hooks(args)) => {
+            assert_eq!(args.hook_name, None);
+            assert!(
+                !args.no_llm,
+                "LLM assessment must run by default (mirrors `cortex assess skill`)"
+            );
+            assert!(!args.all);
+            assert_eq!(args.limit, None);
+        }
+        other => panic!("expected AssessCommand::Hooks, got {other:?}"),
+    }
+}
+
+#[test]
+fn parse_assess_hooks_parses_positional_hook_name() {
+    let cmd = parse_assess(&["hooks".to_string(), "format-on-save".to_string()]).unwrap();
+    match cmd {
+        CliCommand::Assess(AssessCommand::Hooks(args)) => {
+            assert_eq!(args.hook_name.as_deref(), Some("format-on-save"));
+        }
+        other => panic!("expected AssessCommand::Hooks, got {other:?}"),
+    }
+}
+
+#[test]
+fn parse_assess_hooks_flag_overrides_positional() {
+    let cmd = parse_assess(&[
+        "hooks".to_string(),
+        "--hook".to_string(),
+        "flag-hook".to_string(),
+    ])
+    .unwrap();
+    match cmd {
+        CliCommand::Assess(AssessCommand::Hooks(args)) => {
+            assert_eq!(args.hook_name.as_deref(), Some("flag-hook"));
+        }
+        other => panic!("expected AssessCommand::Hooks, got {other:?}"),
+    }
 }
 
 #[test]

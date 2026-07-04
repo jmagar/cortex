@@ -65,6 +65,9 @@ that registry by `src/mcp/schemas.rs::tool_definitions()`.
 | `mcp_events` | List extracted AI MCP tool-call events | no |
 | `mcp_incidents` | Groups negative-signal transcript hits following an MCP tool call into scored incident candidates | no |
 | `mcp_investigate` | Expands MCP-usage incidents into deterministic evidence bundles, server/tool-first | no |
+| `hook_events` | List extracted/collected AI hook events (runtime execution and config inventory) | no |
+| `hook_incidents` | Groups hook failures/timeouts and other negative signals into scored incident candidates | no |
+| `hook_investigate` | Expands hook-usage incidents into deterministic evidence bundles, hook-first | no |
 | `ack_error` | Acknowledge an error signature | yes |
 | `unack_error` | Revoke an error acknowledgement | yes |
 | `file_tails` | Manage Cortex-owned file-tail ingest sources | yes |

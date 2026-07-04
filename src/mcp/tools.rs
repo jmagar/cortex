@@ -21,8 +21,8 @@ use crate::app::{
     AnomaliesRequest, ClockSkewRequest, CompareRequest, ContextRequest, CorrelateEventsRequest,
     CorrelateStateRequest, FilterLogsRequest, FleetStateRequest, GetErrorsRequest, GetLogRequest,
     HomelabMapRequest, HostStateRequest, IngestRateRequest, ListAiProjectsRequest,
-    ListAiToolsRequest, ListAppsRequest, ListMcpEventsRequest, ListSessionsRequest,
-    ListSkillEventsRequest, ListSourceIpsRequest, LlmInvocationsRequest,
+    ListAiToolsRequest, ListAppsRequest, ListHookEventsRequest, ListMcpEventsRequest,
+    ListSessionsRequest, ListSkillEventsRequest, ListSourceIpsRequest, LlmInvocationsRequest,
     NotificationsRecentRequest, PatternsRequest, ProjectContextRequest, SearchLogsRequest,
     SearchSessionsRequest, SilentHostsRequest, TailLogsRequest, TimelineRequest,
     TopicCorrelateRequest, UnaddressedErrorsRequest, UsageBlocksRequest,
@@ -36,6 +36,7 @@ use help::tool_cortex_help;
 mod admin;
 mod context;
 mod help;
+mod hook_incidents;
 mod mcp_incidents;
 mod skill_incidents;
 mod status;
@@ -131,6 +132,9 @@ async fn dispatch_cortex_action(
         H::McpEvents => tool_mcp_events(state, args).await,
         H::McpIncidents => mcp_incidents::tool_mcp_incidents(state, args).await,
         H::McpInvestigate => mcp_incidents::tool_mcp_investigate(state, args).await,
+        H::HookEvents => tool_hook_events(state, args).await,
+        H::HookIncidents => hook_incidents::tool_hook_incidents(state, args).await,
+        H::HookInvestigate => hook_incidents::tool_hook_investigate(state, args).await,
         H::Help => help::tool_cortex_help().await,
     }
 }
@@ -284,6 +288,13 @@ async fn tool_skill_events(state: &AppState, args: Value) -> anyhow::Result<Valu
 async fn tool_mcp_events(state: &AppState, args: Value) -> anyhow::Result<Value> {
     let req: ListMcpEventsRequest = action_payload(args, "mcp_events")?;
     let response = state.service.list_mcp_events(req).await?;
+    Ok(serde_json::to_value(response)?)
+}
+
+async fn tool_hook_events(state: &AppState, args: Value) -> anyhow::Result<Value> {
+    let req: ListHookEventsRequest = action_payload(args, "hook_events")?;
+    let response = state.service.list_hook_events(req).await?;
+    tracing::debug!(event_count = response.events.len(), "hook_events completed");
     Ok(serde_json::to_value(response)?)
 }
 

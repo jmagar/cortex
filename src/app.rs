@@ -2,6 +2,8 @@ mod correlate;
 mod error;
 pub(crate) mod error_detection;
 pub(crate) mod heartbeat_flags;
+pub(crate) mod hook_incident_findings;
+pub mod hook_signal_detectors;
 pub(crate) mod incident_findings;
 pub mod llm_runner;
 pub(crate) mod mcp_incident_findings;
@@ -35,6 +37,10 @@ pub use models::{
     AiCorrelateRequest,
     AiCorrelateResponse,
     AiCorrelationAnchor,
+    AiHookIncidentRequest,
+    AiHookIncidentResponse,
+    AiHookInvestigateRequest,
+    AiHookInvestigateResponse,
     AiIncidentRequest,
     AiIncidentResponse,
     AiInvestigateRequest,
@@ -129,6 +135,16 @@ pub use models::{
     GraphSourceLogSummary,
     HomelabMapRequest,
     HomelabMapResponse,
+    HookAssessRequest,
+    HookAssessResponse,
+    HookAssessResult,
+    HookBackfillRequest,
+    HookBackfillResult,
+    HookEventEntry,
+    HookIncident,
+    HookIncidentEvidence,
+    HookIncidentSummary,
+    HookSignalCounts,
     HostEntry,
     HostStateRequest,
     HostStateResponse,
@@ -155,6 +171,8 @@ pub use models::{
     ListAiToolsResponse,
     ListAppsRequest,
     ListAppsResponse,
+    ListHookEventsRequest,
+    ListHookEventsResponse,
     ListHostsResponse,
     ListMcpEventsRequest,
     ListMcpEventsResponse,

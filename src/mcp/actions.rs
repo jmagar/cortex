@@ -105,6 +105,9 @@ pub(super) enum ActionHandler {
     McpEvents,
     McpIncidents,
     McpInvestigate,
+    HookEvents,
+    HookIncidents,
+    HookInvestigate,
     Help,
 }
 
@@ -604,6 +607,45 @@ pub(super) const ACTION_SPECS: &[ActionSpec] = &[
             "cortex sessions mcp-investigate --mcp-tool search --all --limit 5",
         ],
         positional: Some("--mcp-server"),
+        defaults: Defaults::new()
+    ),
+    action_spec!(
+        "hook_events",
+        Read,
+        "List extracted/collected AI hook events (runtime execution and config inventory)",
+        Cheap,
+        HookEvents,
+        flags: &[],
+        examples: &[
+            "cortex sessions hook-events --hook format-on-save --since 1h",
+            "cortex sessions hook-events --evidence-kind runtime_transcript",
+        ]
+    ),
+    action_spec!(
+        "hook_incidents",
+        Read,
+        "List detected hook-usage incidents (failures, timeouts, and other negative signals)",
+        Moderate,
+        HookIncidents,
+        flags: &[],
+        examples: &[
+            "cortex sessions hook-incidents --hook format-on-save --since 7d",
+            "cortex sessions hook-incidents --hook-event PostToolUse --min-score 35",
+        ]
+    ),
+    action_spec!(
+        "hook_investigate",
+        Read,
+        "Deep-dive investigation of a hook-usage incident, hook-first",
+        Expensive,
+        HookInvestigate,
+        flags: &[],
+        examples: &[
+            "cortex sessions hook-investigate format-on-save",
+            "cortex sessions hook-investigate format-on-save --since 7d",
+            "cortex sessions hook-investigate --hook-event PostToolUse --all --limit 5",
+        ],
+        positional: Some("--hook"),
         defaults: Defaults::new()
     ),
     // ── Admin / write actions ──────────────────────────────────────────────

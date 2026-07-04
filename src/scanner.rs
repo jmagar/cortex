@@ -9,11 +9,13 @@ use sha2::{Digest, Sha256};
 use crate::ai_project::normalize_local_ai_project_path;
 use crate::config::StorageConfig;
 use crate::db::{
-    DbPool, LogBatchEntry, McpEventInsert, SkillEventInsert, enforce_storage_budget,
-    insert_logs_batch_in_tx, insert_mcp_events_in_tx, insert_skill_events_in_tx,
+    DbPool, HookEventInsert, LogBatchEntry, McpEventInsert, SkillEventInsert,
+    enforce_storage_budget, insert_hook_events_in_tx, insert_logs_batch_in_tx,
+    insert_mcp_events_in_tx, insert_skill_events_in_tx,
 };
 use crate::ingest_metadata::bounded_metadata_json;
 use crate::receiver::enrichment::{project_from_transcript_path, scrub_ai_message};
+use crate::scanner::hook_events::extract_claude_hook_events;
 use crate::scanner::mcp_events::{extract_claude_mcp_events, extract_codex_mcp_events};
 use crate::scanner::skill_events::{extract_claude_skill_events, extract_codex_skill_events};
 
@@ -21,6 +23,7 @@ mod checkpoint;
 mod claude;
 mod codex;
 mod gemini;
+pub(crate) mod hook_events;
 pub(crate) mod mcp_events;
 pub(crate) mod skill_events;
 
@@ -587,8 +590,17 @@ pub fn index_file_with_options(
                         }
                     }
                     SourceKind::ClaudeProject | SourceKind::ExplicitFile => {
+                        // Carry the already-parsed Claude JSON forward when the
+                        // line could hold EITHER a skill attribution OR a hook
+                        // attachment — both extractors read from this same
+                        // value in flush_chunk (no second parse). The cheap
+                        // substring guard keeps the common no-skill/no-hook
+                        // line as `None`.
                         match &parsed.raw_value {
-                            Some(value) if line_text.contains("attributionSkill") => {
+                            Some(value)
+                                if line_text.contains("attributionSkill")
+                                    || line_text.contains("hook_") =>
+                            {
                                 ChunkSkillSource::Claude(value.clone())
                             }
                             _ => ChunkSkillSource::None,
@@ -932,6 +944,7 @@ fn flush_chunk(
         let log_ids = insert_logs_batch_in_tx(&tx, &claimed_batch)?;
         let mut skill_inserts = Vec::new();
         let mut mcp_inserts = Vec::new();
+        let mut hook_inserts = Vec::new();
         for (((entry, log_id), skill_source), mcp_source) in claimed_batch
             .iter()
             .zip(log_ids.iter().copied())
@@ -970,12 +983,36 @@ fn flush_chunk(
                     event,
                 });
             }
+
+            // Hook runtime events reuse the already-parsed Claude `value` from
+            // the same side-channel (no second JSON parse). Only Claude
+            // transcripts carry a runtime hook attachment shape; Codex/Gemini
+            // rows produce none (config/trust-state hook evidence is collected
+            // separately by `crate::hook_config`, not at ingest time).
+            let hook_events = match skill_source {
+                ChunkSkillSource::Claude(value) => extract_claude_hook_events(value),
+                _ => Vec::new(),
+            };
+            for event in hook_events {
+                hook_inserts.push(HookEventInsert {
+                    log_id: Some(log_id),
+                    ai_tool: entry.ai_tool.clone().unwrap_or_default(),
+                    ai_project: entry.ai_project.clone(),
+                    ai_session_id: entry.ai_session_id.clone(),
+                    hostname: entry.hostname.clone(),
+                    timestamp: entry.timestamp.clone(),
+                    event,
+                });
+            }
         }
         if !skill_inserts.is_empty() {
             insert_skill_events_in_tx(&tx, &skill_inserts)?;
         }
         if !mcp_inserts.is_empty() {
             insert_mcp_events_in_tx(&tx, &mcp_inserts)?;
+        }
+        if !hook_inserts.is_empty() {
+            insert_hook_events_in_tx(&tx, &hook_inserts)?;
         }
     }
     if let Some(file_metadata) = completion_metadata {
@@ -1470,7 +1507,7 @@ fn normalize_timestamp(timestamp: Option<&str>) -> Result<String> {
     }
 }
 
-fn local_hostname() -> String {
+pub(crate) fn local_hostname() -> String {
     #[cfg(unix)]
     {
         let mut buf = vec![0u8; 256];

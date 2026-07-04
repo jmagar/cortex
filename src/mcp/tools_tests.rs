@@ -1201,6 +1201,9 @@ fn sample_args_for_action(action: &str) -> Option<serde_json::Value> {
         | "mcp_events"
         | "mcp_incidents"
         | "mcp_investigate"
+        | "hook_events"
+        | "hook_incidents"
+        | "hook_investigate"
         | "help" => json!({"action": action}),
         "skill_investigate" => json!({"action": action, "skill": "schema-test-skill"}),
         _ => return None,

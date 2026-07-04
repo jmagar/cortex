@@ -16,6 +16,7 @@
 #   cortex similar_incidents, cortex ask_history, cortex incident_context, cortex graph,
 #   cortex skill_events, cortex skill_incidents, cortex skill_investigate,
 #   cortex mcp_events, cortex mcp_incidents, cortex mcp_investigate,
+#   cortex hook_events, cortex hook_incidents, cortex hook_investigate,
 #   cortex help
 #
 # The server runs as a Docker container over HTTP. No stdio launch needed.
