@@ -14,7 +14,8 @@ use super::correlate::{group_by_host, severity_at_or_above};
 use super::models::{
     AbuseAssessRequest, AbuseAssessResponse, AbuseSearchRequest, AbuseSearchResponse,
     AiAssessEvidenceSummary, AiAssessRequest, AiAssessResponse, AiCorrelateLimitPolicy,
-    AiCorrelateRequest, AiCorrelateResponse, AiCorrelationAnchor, AiIncidentRequest,
+    AiCorrelateRequest, AiCorrelateResponse, AiCorrelationAnchor, AiHookIncidentRequest,
+    AiHookIncidentResponse, AiHookInvestigateRequest, AiHookInvestigateResponse, AiIncidentRequest,
     AiIncidentResponse, AiInvestigateRequest, AiInvestigateResponse, AiLimitPolicy,
     AiMcpIncidentRequest, AiMcpIncidentResponse, AiMcpInvestigateRequest, AiMcpInvestigateResponse,
     AiSessionEntry, AiSkillIncidentRequest, AiSkillIncidentResponse, AiSkillInvestigateRequest,
@@ -35,23 +36,23 @@ use super::models::{
     GraphRelationship, GraphResponseMetadata, GraphSessionCorrelation, GraphSourceLogSummary,
     HomelabMapAnswerRow, HomelabMapAnswerTruncation, HomelabMapGraphAnswer, HomelabMapGraphTarget,
     HomelabMapNextQuery, HomelabMapNode, HomelabMapProofQuery, HomelabMapRequest,
-    HomelabMapResponse, HomelabMapSummary, INVESTIGATION_UI_VERSION, IncidentContextRequest,
-    IncidentContextResponse, IncidentEvent, IncidentRequest, IncidentResponse, IngestRateRequest,
-    IngestRateResponse, InvestigationBudget, InvestigationBudgetUsed, InvestigationClaim,
-    InvestigationClaimType, InvestigationEnvelope, InvestigationMetadata, ListAiProjectsRequest,
-    ListAiProjectsResponse, ListAiToolsRequest, ListAiToolsResponse, ListAppsRequest,
-    ListAppsResponse, ListHostsResponse, ListSessionsRequest, ListSessionsResponse,
-    ListSourceIpsRequest, ListSourceIpsResponse, LlmInvocationsRequest, LogEntry,
-    MaintenanceJobStatus, McpIncidentEvidence, McpIncidentSummary, NotificationsRecentRequest,
-    PatternsRequest, PatternsResponse, ProjectContextRequest, ProjectContextResponse, RequestActor,
-    ResolvedTopicEntity, SearchLogsRequest, SearchLogsResponse, SearchSessionsRequest,
-    SearchSessionsResponse, ServiceJournalEntry, ServiceLogsRequest, ServiceLogsResponse,
-    SilentHostsRequest, SilentHostsResponse, SimilarIncidentsRequest, SimilarIncidentsResponse,
-    SkillIncidentEvidence, SkillIncidentSummary, TailLogsRequest, TimelineRequest,
-    TimelineResponse, TopicCorrelateRequest, TopicCorrelateResponse, TopicExpansionEntity,
-    TopicTimelineEntry, TopologyFinding, TopologyFindingEntity, TopologyFindingEvidence,
-    UsageBlocksRequest, UsageBlocksResponse, app_entity_summary, app_graph_from_explain_response,
-    app_log_summary, safe_passive_text,
+    HomelabMapResponse, HomelabMapSummary, HookIncidentEvidence, HookIncidentSummary,
+    INVESTIGATION_UI_VERSION, IncidentContextRequest, IncidentContextResponse, IncidentEvent,
+    IncidentRequest, IncidentResponse, IngestRateRequest, IngestRateResponse, InvestigationBudget,
+    InvestigationBudgetUsed, InvestigationClaim, InvestigationClaimType, InvestigationEnvelope,
+    InvestigationMetadata, ListAiProjectsRequest, ListAiProjectsResponse, ListAiToolsRequest,
+    ListAiToolsResponse, ListAppsRequest, ListAppsResponse, ListHostsResponse, ListSessionsRequest,
+    ListSessionsResponse, ListSourceIpsRequest, ListSourceIpsResponse, LlmInvocationsRequest,
+    LogEntry, MaintenanceJobStatus, McpIncidentEvidence, McpIncidentSummary,
+    NotificationsRecentRequest, PatternsRequest, PatternsResponse, ProjectContextRequest,
+    ProjectContextResponse, RequestActor, ResolvedTopicEntity, SearchLogsRequest,
+    SearchLogsResponse, SearchSessionsRequest, SearchSessionsResponse, ServiceJournalEntry,
+    ServiceLogsRequest, ServiceLogsResponse, SilentHostsRequest, SilentHostsResponse,
+    SimilarIncidentsRequest, SimilarIncidentsResponse, SkillIncidentEvidence, SkillIncidentSummary,
+    TailLogsRequest, TimelineRequest, TimelineResponse, TopicCorrelateRequest,
+    TopicCorrelateResponse, TopicExpansionEntity, TopicTimelineEntry, TopologyFinding,
+    TopologyFindingEntity, TopologyFindingEvidence, UsageBlocksRequest, UsageBlocksResponse,
+    app_entity_summary, app_graph_from_explain_response, app_log_summary, safe_passive_text,
 };
 use super::os_adapter::{OsAdapter, SystemOsAdapter};
 use super::time::{parse_optional_timestamp, parse_required_timestamp, rfc3339_z};
@@ -77,6 +78,10 @@ mod graph;
 mod graph_limits;
 mod graph_safety;
 mod graph_support;
+mod hook_assessment;
+mod hook_backfill;
+mod hook_events;
+mod hook_incidents;
 mod imports;
 mod incidents;
 mod investigation;

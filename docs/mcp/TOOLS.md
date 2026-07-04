@@ -60,6 +60,9 @@ cortex exposes one MCP tool named `cortex`. The required
 | `mcp_events` | List extracted AI MCP tool-call events |
 | `mcp_incidents` | Groups negative-signal transcript hits following an MCP tool call into scored incident candidates |
 | `mcp_investigate` | Expands MCP-usage incidents into deterministic evidence bundles, server/tool-first |
+| `hook_events` | List extracted/collected AI hook events (runtime execution and config inventory) |
+| `hook_incidents` | Groups hook failures/timeouts and other negative signals into scored incident candidates |
+| `hook_investigate` | Expands hook-usage incidents into deterministic evidence bundles, hook-first |
 | `help` | Markdown reference for all actions |
 
 ## cortex search
@@ -395,6 +398,47 @@ Response includes `evidence`, `total_incidents`, `truncated`,
 `suggested_filters` (populated only when `no_data` is true).
 
 Optional arguments: `incident_id`, `mcp_server`, `mcp_tool`, `tool_name`,
+`tool`, `project`, `since`, `until`, `limit`, `window_minutes` (default 10,
+max 120), `correlation_window_minutes` (default 5, max 120).
+
+## cortex hook_events
+
+Lists `ai_hook_events` rows — Claude runtime hook-execution attachments
+(`evidence_kind = runtime_transcript`) and Claude/Codex config-inventory /
+trusted-hash-state rows (`evidence_kind = config_inventory` /
+`trusted_hash_state`). A configured/trusted hook is NOT proof it executed; the
+`evidence_kind` and `status` (`configured` for config rows) columns make the
+provenance explicit.
+
+Optional arguments: `hook_event`, `hook_name`, `hook_source`, `status`,
+`evidence_kind`, `tool`, `project`, `session_id`, `hostname`, `from`, `to`,
+`limit` (default 50, max 500).
+
+## cortex hook_incidents
+
+Groups `ai_hook_events` rows into incident candidates by `(hook_event,
+hook_name, hook_source, tool, project, session_id, hostname, window_bucket)`,
+deriving six deterministic anchors: `hook_failed`, `hook_timed_out`,
+`hook_output_parse_error`, `hook_invoked_too_often`,
+`user_correction_after_hook`, and (via same-session config-vs-runtime
+comparison) `hook_not_invoked`. Each incident carries `has_runtime_evidence`
+so callers can tell runtime-proven incidents from config/trust-only ones.
+
+Optional arguments: `hook_event`, `hook_name`, `hook_source`, `tool`,
+`project`, `session_id`, `hostname`, `evidence_kind`, `since`, `until`,
+`limit` (default 20, max 100), `window_minutes` (default 10, max 120),
+`signals`, `min_score`.
+
+## cortex hook_investigate
+
+Deep-dive investigation of hook-usage incidents. When filtered by
+`hook`/`hook-event` (without an exact `incident_id`), resolves **hook-first**:
+returns the top-priority incident(s) in `evidence` and summarizes the rest into
+`other_matching_incidents`. Each bundle carries `findings` with an explicit
+`evidence_basis` string stating whether the incident rests on runtime hook
+execution evidence or only config/trust-state evidence.
+
+Optional arguments: `incident_id`, `hook_event`, `hook_name`, `hook_source`,
 `tool`, `project`, `since`, `until`, `limit`, `window_minutes` (default 10,
 max 120), `correlation_window_minutes` (default 5, max 120).
 

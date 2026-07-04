@@ -7,6 +7,9 @@ pub(crate) mod graph_confidence;
 pub mod graph_findings;
 pub mod graph_inventory;
 mod heartbeat;
+mod hook_events;
+mod hook_incident_evidence;
+mod hook_incidents;
 mod ingest;
 pub(crate) mod llm_invocations;
 mod maintenance;
@@ -45,6 +48,19 @@ pub use heartbeat::{
     HeartbeatHostLookup, HeartbeatHostState, HeartbeatLatestEntry, HeartbeatMetricSnapshot,
     HeartbeatSampleState, HeartbeatStateFlags, HeartbeatWindowSummary, heartbeat_host_state,
     heartbeat_latest_all, heartbeat_metric_snapshot_batch, heartbeat_window_summaries,
+};
+pub(crate) use hook_events::insert_hook_events_in_tx;
+pub use hook_events::{
+    AiHookEventEntry, AiHookEventParams, HookEventInsert, ListHookEventsResult, insert_hook_events,
+    list_hook_events,
+};
+pub use hook_incident_evidence::{
+    AiHookInvestigateParams, AiHookInvestigateResult, HookIncidentEvidence,
+    investigate_ai_hook_incidents,
+};
+pub use hook_incidents::{
+    AiHookIncidentParams, AiHookIncidentResult, HookIncident, HookSignalCounts,
+    search_ai_hook_incidents,
 };
 pub use ingest::insert_logs_batch;
 pub(crate) use ingest::insert_logs_batch_in_tx;

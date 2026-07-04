@@ -80,6 +80,9 @@ The live registry currently contains 51 actions (this snapshot may lag
 | `skill_events` | `cortex:read` | cheap | List extracted AI skill-invocation events |
 | `skill_incidents` | `cortex:read` | moderate | Grouped skill-usage incident candidates |
 | `skill_investigate` | `cortex:read` | expensive | Evidence bundles for skill-usage incidents, skill-first |
+| `hook_events` | `cortex:read` | cheap | List extracted/collected AI hook events (runtime execution and config inventory) |
+| `hook_incidents` | `cortex:read` | moderate | Grouped hook-usage incident candidates |
+| `hook_investigate` | `cortex:read` | expensive | Evidence bundles for hook-usage incidents, hook-first |
 | `ack_error` | `cortex:admin` | write | Acknowledge an error signature |
 | `unack_error` | `cortex:admin` | write | Revoke an error acknowledgement |
 | `file_tails` | `cortex:admin` | write | Manage local file-tail ingest sources |
@@ -115,6 +118,7 @@ AI-aware correlation path. Use:
 - `ai_correlate` for AI transcript anchors plus nearby non-AI logs.
 - `abuse_investigate` for deterministic abuse evidence bundles.
 - `skill_investigate` for deterministic skill-usage-incident evidence bundles, skill-first.
+- `hook_investigate` for deterministic hook-usage-incident evidence bundles, hook-first.
 - `similar_incidents` for FTS5 historical incident clusters.
 - `ask_history` for AI transcript history with nearby log context.
 - `incident_context` for a caller-provided time-window bundle.

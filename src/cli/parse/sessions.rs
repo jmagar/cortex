@@ -21,6 +21,7 @@ use mcp_events::parse_sessions_mcp_events;
 use mcp_incidents::{parse_sessions_mcp_incidents, parse_sessions_mcp_investigate};
 use skill_incidents::{parse_sessions_skill_incidents, parse_sessions_skill_investigate};
 
+mod hooks;
 mod mcp_events;
 mod mcp_incidents;
 mod more;
@@ -60,6 +61,8 @@ const SESSIONS_SUBCOMMANDS: &[&str] = &[
     "mcp-incidents",
     "mcp-investigate",
     "mcp-assess",
+    "hook-events",
+    "hooks-backfill",
 ];
 
 pub(crate) fn parse_sessions_command(args: &[String]) -> Result<CliCommand> {
@@ -105,6 +108,8 @@ pub(crate) fn parse_sessions_command(args: &[String]) -> Result<CliCommand> {
         "mcp-incidents" => parse_sessions_mcp_incidents(rest),
         "mcp-investigate" => parse_sessions_mcp_investigate(rest),
         "mcp-assess" => parse_sessions_mcp_assess(rest),
+        "hook-events" => self::hooks::parse_sessions_hook_events(rest),
+        "hooks-backfill" => self::hooks::parse_sessions_hooks_backfill(rest),
         _ => bail!(
             "{}",
             super::suggest::unknown_command(

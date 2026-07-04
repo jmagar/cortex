@@ -29,17 +29,18 @@ use tower_http::cors::CorsLayer;
 
 use crate::app::{
     AbuseSearchRequest, AckErrorRequest, AiCheckpointsRequest, AiCorrelateLimitPolicy,
-    AiCorrelateRequest, AiIncidentRequest, AiInvestigateRequest, AiLimitPolicy,
-    AiParseErrorsRequest, AiPruneCheckpointsRequest, AiSkillIncidentRequest,
-    AiSkillInvestigateRequest, AnomaliesRequest, AskHistoryRequest, ClockSkewRequest,
-    CompareRequest, ContextRequest, CorrelateEventsRequest, CorrelateStateRequest, CortexService,
-    DbBackupRequest, DbCheckpointRequest, DbIntegrityRequest, DbVacuumRequest, FileTailRequest,
-    FilterLogsRequest, FleetStateRequest, GetErrorsRequest, GetLogRequest, GraphAroundRequest,
-    GraphEntityLookupRequest, GraphEvidenceLookupRequest, GraphExplainRequest, HostStateRequest,
-    IncidentContextRequest, IngestRateRequest, ListAiProjectsRequest, ListAiToolsRequest,
-    ListAppsRequest, ListSessionsRequest, ListSkillEventsRequest, ListSourceIpsRequest,
-    LlmInvocationsRequest, NotificationsRecentRequest, PatternsRequest, ProjectContextRequest,
-    RequestActor, SearchLogsRequest, SearchSessionsRequest, ServiceError, SilentHostsRequest,
+    AiCorrelateRequest, AiHookIncidentRequest, AiHookInvestigateRequest, AiIncidentRequest,
+    AiInvestigateRequest, AiLimitPolicy, AiParseErrorsRequest, AiPruneCheckpointsRequest,
+    AiSkillIncidentRequest, AiSkillInvestigateRequest, AnomaliesRequest, AskHistoryRequest,
+    ClockSkewRequest, CompareRequest, ContextRequest, CorrelateEventsRequest,
+    CorrelateStateRequest, CortexService, DbBackupRequest, DbCheckpointRequest, DbIntegrityRequest,
+    DbVacuumRequest, FileTailRequest, FilterLogsRequest, FleetStateRequest, GetErrorsRequest,
+    GetLogRequest, GraphAroundRequest, GraphEntityLookupRequest, GraphEvidenceLookupRequest,
+    GraphExplainRequest, HostStateRequest, IncidentContextRequest, IngestRateRequest,
+    ListAiProjectsRequest, ListAiToolsRequest, ListAppsRequest, ListHookEventsRequest,
+    ListSessionsRequest, ListSkillEventsRequest, ListSourceIpsRequest, LlmInvocationsRequest,
+    NotificationsRecentRequest, PatternsRequest, ProjectContextRequest, RequestActor,
+    SearchLogsRequest, SearchSessionsRequest, ServiceError, SilentHostsRequest,
     SimilarIncidentsRequest, TailLogsRequest, TimelineRequest, TopicCorrelateRequest,
     UnackErrorRequest, UnaddressedErrorsRequest, UsageBlocksRequest,
 };
@@ -269,6 +270,9 @@ pub fn router(state: ApiState) -> anyhow::Result<Router> {
         .route("/api/sessions/skills", get(ai_skills))
         .route("/api/sessions/skill-incidents", get(ai_skill_incidents))
         .route("/api/sessions/skill-investigate", get(ai_skill_investigate))
+        .route("/api/sessions/hooks", get(ai_hooks))
+        .route("/api/sessions/hook-incidents", get(ai_hook_incidents))
+        .route("/api/sessions/hook-investigate", get(ai_hook_investigate))
         .route("/api/compose/status", get(compose_status))
         .route("/api/compose/doctor", get(compose_doctor))
         // --- ai session queries ---
@@ -854,6 +858,28 @@ async fn ai_skills(
     respond(state.service.list_skill_events(req).await)
 }
 
+/// `GET /api/sessions/hooks` — `cortex:read`-scoped, mirrors `ai_skills`
+/// above one-for-one (GH #105).
+async fn ai_hooks(
+    State(state): State<ApiState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    Query(req): Query<ListHookEventsRequest>,
+) -> impl IntoResponse {
+    tracing::info!(
+        caller_ip = %peer.ip(),
+        hook_event = ?req.hook_event,
+        hook_name = ?req.hook_name,
+        hook_source = ?req.hook_source,
+        evidence_kind = ?req.evidence_kind,
+        tool = ?req.tool,
+        project = ?req.project,
+        session_id = ?req.session_id,
+        hostname = ?req.hostname,
+        "read: hook_events queried"
+    );
+    respond(state.service.list_hook_events(req).await)
+}
+
 async fn notifications_test() -> impl IntoResponse {
     (
         axum::http::StatusCode::NOT_IMPLEMENTED,
@@ -1249,6 +1275,94 @@ async fn ai_skill_investigate(
                 incident_id: None,
                 skill: q.skill,
                 plugin: q.plugin,
+                tool: q.tool,
+                project: q.project,
+                since: q.since,
+                until: q.until,
+                limit: q.limit,
+                window_minutes: q.window_minutes,
+                correlation_window_minutes: q.correlation_window_minutes,
+            })
+            .await,
+    )
+}
+
+/// Hook incidents — mirrors `AiSkillIncidentsQuery`/`ai_skill_incidents`
+/// one-for-one (GH #105).
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AiHookIncidentsQuery {
+    hook_event: Option<String>,
+    hook_name: Option<String>,
+    hook_source: Option<String>,
+    tool: Option<String>,
+    project: Option<String>,
+    session_id: Option<String>,
+    hostname: Option<String>,
+    evidence_kind: Option<String>,
+    since: Option<String>,
+    until: Option<String>,
+    limit: Option<u32>,
+    window_minutes: Option<u32>,
+    #[serde(default)]
+    signals: Vec<String>,
+    min_score: Option<f64>,
+}
+
+async fn ai_hook_incidents(
+    State(state): State<ApiState>,
+    serde_qs::axum::QsQuery(q): serde_qs::axum::QsQuery<AiHookIncidentsQuery>,
+) -> impl IntoResponse {
+    respond(
+        state
+            .service
+            .list_ai_hook_incidents(AiHookIncidentRequest {
+                hook_event: q.hook_event,
+                hook_name: q.hook_name,
+                hook_source: q.hook_source,
+                tool: q.tool,
+                project: q.project,
+                session_id: q.session_id,
+                hostname: q.hostname,
+                evidence_kind: q.evidence_kind,
+                since: q.since,
+                until: q.until,
+                limit: q.limit,
+                window_minutes: q.window_minutes,
+                signals: q.signals,
+                min_score: q.min_score,
+            })
+            .await,
+    )
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AiHookInvestigateQuery {
+    hook_event: Option<String>,
+    hook_name: Option<String>,
+    hook_source: Option<String>,
+    tool: Option<String>,
+    project: Option<String>,
+    since: Option<String>,
+    until: Option<String>,
+    limit: Option<u32>,
+    window_minutes: Option<u32>,
+    correlation_window_minutes: Option<u32>,
+}
+
+async fn ai_hook_investigate(
+    State(state): State<ApiState>,
+    serde_qs::axum::QsQuery(q): serde_qs::axum::QsQuery<AiHookInvestigateQuery>,
+) -> impl IntoResponse {
+    respond(
+        state
+            .service
+            .investigate_ai_hook_incidents(AiHookInvestigateRequest {
+                incident_id: None,
+                hook_event: q.hook_event,
+                hook_name: q.hook_name,
+                hook_source: q.hook_source,
                 tool: q.tool,
                 project: q.project,
                 since: q.since,
