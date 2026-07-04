@@ -200,3 +200,173 @@ fn investigate_with_no_matching_hook_returns_empty_evidence() {
     assert!(result.evidence.is_empty());
     assert_eq!(result.total_incidents, 0);
 }
+
+/// Regression test for a bug where an exact `incident_id` lookup routed
+/// through `search_ai_hook_incidents` with `limit: Some(100)` and then
+/// filtered client-side for the matching id — if the target incident ranked
+/// below the top 100 by priority score, investigation silently returned
+/// empty evidence for an incident that actually existed. This constructs
+/// 100 higher-scored decoy incidents (failed hook status) plus one
+/// lower-scored target (successful hook status) so the target provably
+/// ranks outside any top-100 window, then asserts the exact lookup still
+/// finds it.
+#[test]
+fn investigate_ai_hook_incidents_exact_incident_id_beyond_top_100_candidates() {
+    let (pool, _dir) = test_pool();
+
+    for i in 0..100 {
+        insert_hook_event_row(
+            &pool,
+            None,
+            "claude",
+            "/tmp/project-g",
+            &format!("sess-decoy-{i:03}"),
+            "host-a",
+            "2026-01-01T00:00:00.000Z",
+            "PostToolUse",
+            "format-on-save",
+            "failed",
+            "runtime_transcript",
+        );
+    }
+
+    // Target group: successful status, no failure signal, guaranteeing it
+    // ranks last among the 101 total matching incidents.
+    let target_session_id = "sess-target";
+    insert_hook_event_row(
+        &pool,
+        None,
+        "claude",
+        "/tmp/project-g",
+        target_session_id,
+        "host-a",
+        "2026-01-01T00:00:00.000Z",
+        "PostToolUse",
+        "format-on-save",
+        "success",
+        "runtime_transcript",
+    );
+
+    let target_lookup = search_ai_hook_incidents(
+        &pool,
+        &AiHookIncidentParams {
+            hook_name: Some("format-on-save".to_string()),
+            ai_session_id: Some(target_session_id.to_string()),
+            limit: Some(1),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(target_lookup.incidents.len(), 1);
+    let target_id = target_lookup.incidents[0].incident_id.clone();
+
+    let top100 = search_ai_hook_incidents(
+        &pool,
+        &AiHookIncidentParams {
+            hook_name: Some("format-on-save".to_string()),
+            limit: Some(100),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(top100.total_incidents, 101, "100 decoys + 1 target");
+    assert_eq!(top100.incidents.len(), 100);
+    assert!(
+        !top100
+            .incidents
+            .iter()
+            .any(|inc| inc.incident_id == target_id),
+        "test setup invariant: target must rank outside the top 100"
+    );
+
+    // The regression check: an exact incident_id lookup must still find the
+    // target even though it ranks outside the top-100 candidate window.
+    let exact = investigate_ai_hook_incidents(
+        &pool,
+        &AiHookInvestigateParams {
+            incident_id: Some(target_id.clone()),
+            hook_name: Some("format-on-save".to_string()),
+            limit: Some(1),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        exact.evidence.len(),
+        1,
+        "exact incident_id lookup must find an incident ranked outside the top 100"
+    );
+    assert_eq!(exact.evidence[0].incident.incident_id, target_id);
+}
+
+/// Regression test for a bug where the `nearby_logs` query only filtered by
+/// timestamp range, with no hostname scope, so an incident on one host could
+/// pull in unrelated log rows from a different host in the same time window.
+#[test]
+fn investigate_ai_hook_incidents_nearby_logs_scoped_to_incident_hostname() {
+    let (pool, _dir) = test_pool();
+
+    insert_hook_event_row(
+        &pool,
+        None,
+        "claude",
+        "/tmp/project-h",
+        "sess-h",
+        "host-a",
+        "2026-01-01T00:00:00.000Z",
+        "PostToolUse",
+        "format-on-save",
+        "success",
+        "runtime_transcript",
+    );
+
+    // Unrelated non-AI log on a DIFFERENT host, within the correlation window.
+    let other_host_log = LogBatchEntry {
+        timestamp: "2026-01-01T00:01:00Z".to_string(),
+        hostname: "host-b".to_string(),
+        facility: Some("local0".to_string()),
+        severity: "error".to_string(),
+        app_name: Some("nginx".to_string()),
+        process_id: None,
+        message: "connection refused".to_string(),
+        raw: "connection refused".to_string(),
+        source_ip: "10.0.0.5:514".to_string(),
+        docker_checkpoint: None,
+        ai_tool: None,
+        ai_project: None,
+        ai_session_id: None,
+        ai_transcript_path: None,
+        metadata_json: None,
+        http_status: None,
+        auth_outcome: None,
+        dns_blocked: None,
+        event_action: None,
+        parse_error: None,
+    };
+    insert_logs_batch(&pool, &[other_host_log]).unwrap();
+
+    let result = investigate_ai_hook_incidents(
+        &pool,
+        &AiHookInvestigateParams {
+            hook_name: Some("format-on-save".to_string()),
+            limit: Some(1),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(result.evidence.len(), 1);
+    let bundle = &result.evidence[0];
+    assert!(
+        bundle.nearby_logs.iter().all(|e| e.hostname == "host-a"),
+        "nearby_logs leaked a cross-host row: {:?}",
+        bundle.nearby_logs
+    );
+    assert!(
+        !bundle
+            .nearby_logs
+            .iter()
+            .any(|e| e.message.contains("connection refused")),
+        "cross-host log should not appear in nearby_logs"
+    );
+}

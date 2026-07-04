@@ -37,6 +37,11 @@ pub struct AiHookIncidentParams {
     pub evidence_kind: Option<String>,
     pub since: Option<String>,
     pub until: Option<String>,
+    /// Exact incident_id match. When set, filters the full computed incident
+    /// set (bounded only by `HOOK_INCIDENT_CANDIDATE_CAP`, not `limit`)
+    /// before the priority-ranked truncation, so a match ranked below
+    /// `limit` is still found.
+    pub incident_id: Option<String>,
     /// Max incidents to return. Default 20, clamp 1..=100.
     pub limit: Option<u32>,
     /// Grouping window in minutes. Default 10, clamp 1..=120.
@@ -430,6 +435,9 @@ pub fn search_ai_hook_incidents(
         });
     }
 
+    if let Some(incident_id) = &params.incident_id {
+        incidents.retain(|inc| &inc.incident_id == incident_id);
+    }
     if !params.signals.is_empty() {
         incidents.retain(|inc| {
             inc.signals_present

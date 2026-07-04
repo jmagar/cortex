@@ -26,6 +26,7 @@ impl CortexService {
                         hostname: req.hostname,
                         since: from,
                         until: to,
+                        incident_id: None,
                         limit: req.limit,
                         window_minutes: req.window_minutes,
                         signals: req.signals,
