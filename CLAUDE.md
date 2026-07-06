@@ -136,6 +136,17 @@ Scope taxonomy: every action requires `cortex:read` except the five **admin** ac
 
 `cortex` (primary log-intelligence skill), `cortex-deploy-dropins` (push rsyslog forwarding configs to `fleet_hosts` via SSH), `cortex-dr` (full health check; named `dr` to avoid colliding with Claude Code's built-in `/doctor`), `cortex-frustration-assessment` (analyze `abuse_investigate` evidence bundles), `cortex-logs` (Compose service log tailing), `cortex-redeploy` (re-run plugin setup hook), `cortex-report` (time-bounded markdown health reports), `cortex-troubleshoot` (connection/ingest failure triage), `cortex-version-check` (running container vs local Compose image).
 
+## OpenWiki
+
+This repository has documentation located in the /openwiki directory.
+
+Start here:
+- [OpenWiki quickstart](openwiki/quickstart.md)
+
+OpenWiki includes repository overview, architecture notes, workflows, domain concepts, operations, integrations, testing guidance, and source maps.
+
+When working in this repository, read the OpenWiki quickstart first, then follow its links to the relevant architecture, workflow, domain, operation, and testing notes.
+
 ## Config
 
 `config.toml` at repo root for local dev. **Not copied into Docker** — the Dockerfile was cleaned up (no COPY for config.toml). In Docker, defaults + env vars apply exclusively.
