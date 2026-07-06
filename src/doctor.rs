@@ -78,7 +78,7 @@ pub async fn run_binary_doctor(json: bool) -> Result<()> {
         report.render_text();
     }
     if report.runtime_current == Some(false) {
-        anyhow::bail!("running syslog container is not current");
+        anyhow::bail!("running cortex container is not current");
     }
     Ok(())
 }
