@@ -420,12 +420,17 @@ fn is_agent_command_ingest_spool_invocation(command_args: &[String]) -> bool {
         return false;
     }
     let rest: Vec<&str> = command_args[1..].iter().map(String::as_str).collect();
-    // New grouped grammar: `cortex ingest agent-command ingest-spool`.
-    // Legacy pre-move grammar (`cortex agent-command ingest-spool`) is accepted
-    // defensively so a lingering caller can never be self-ingested.
+    // Canonical grammar: `cortex ingest shell agent index`. Grouped
+    // pre-restructure grammar: `cortex ingest agent-command ingest-spool` —
+    // the one immediately-prior grammar already deployed on live hosts (e.g.
+    // dookie), accepted defensively so a lingering unregenerated
+    // wrapper/timer can never be self-ingested. The even-older bare
+    // `cortex agent-command ingest-spool` (no `ingest` prefix) is
+    // deliberately NOT tolerated here — it's unreachable, since the CLI's
+    // top-level parser rejects that form outright (see `src/surfaces.rs`).
     matches!(
         rest.as_slice(),
-        ["ingest", "agent-command", "ingest-spool", ..] | ["agent-command", "ingest-spool", ..]
+        ["ingest", "shell", "agent", "index", ..] | ["ingest", "agent-command", "ingest-spool", ..]
     )
 }
 

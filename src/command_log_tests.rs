@@ -51,29 +51,44 @@ fn command_args_to_shell_command_quotes_multi_arg_invocations() {
 
 #[test]
 fn agent_command_ingest_spool_guard_is_argv_scoped() {
-    // New grouped grammar: `cortex ingest agent-command ingest-spool`.
+    // Canonical grammar: `cortex ingest shell agent index`.
+    assert!(is_agent_command_ingest_spool_invocation(&[
+        "cortex".to_string(),
+        "ingest".to_string(),
+        "shell".to_string(),
+        "agent".to_string(),
+        "index".to_string(),
+    ]));
     assert!(is_agent_command_ingest_spool_invocation(&[
         "/usr/local/bin/cortex".to_string(),
         "ingest".to_string(),
-        "agent-command".to_string(),
-        "ingest-spool".to_string(),
+        "shell".to_string(),
+        "agent".to_string(),
+        "index".to_string(),
         "--path".to_string(),
-        "/tmp/spool.jsonl".to_string(),
+        "/tmp/x.jsonl".to_string(),
     ]));
-    // Legacy pre-move grammar is still accepted defensively.
+    // Grouped grammar predating this rename: `cortex ingest agent-command
+    // ingest-spool`. This is the one already deployed on live hosts (e.g.
+    // dookie) and the only legacy shape worth tolerating here — the even
+    // older bare `cortex agent-command ingest-spool` (no `ingest` prefix) is
+    // unreachable: the CLI's top-level parser rejects it outright (see
+    // `src/surfaces.rs`'s `MovedIntoGroupedDomain` entry), so no process can
+    // ever actually invoke it for this guard to need to catch.
     assert!(is_agent_command_ingest_spool_invocation(&[
-        "/usr/local/bin/cortex".to_string(),
+        "cortex".to_string(),
+        "ingest".to_string(),
         "agent-command".to_string(),
         "ingest-spool".to_string(),
-        "--path".to_string(),
-        "/tmp/spool.jsonl".to_string(),
     ]));
     assert!(!is_agent_command_ingest_spool_invocation(&[
-        "echo".to_string(),
-        "agent-command ingest-spool".to_string(),
+        "sh".to_string(),
+        "-c".to_string(),
+        "cortex ingest shell agent index".to_string(),
     ]));
     assert!(!is_agent_command_ingest_spool_invocation(&[
-        "cortex".to_string(),
+        "bash".to_string(),
+        "-c".to_string(),
         "agent-command ingest-spool".to_string(),
     ]));
 }
