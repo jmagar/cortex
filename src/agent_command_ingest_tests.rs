@@ -11,15 +11,23 @@ use crate::config::StorageConfig;
 use crate::mcp::AuthPolicy;
 
 fn test_app(token: Option<&str>) -> (Router, tempfile::TempDir) {
+    test_app_with(
+        token,
+        AuthPolicy::Mounted { auth_state: None },
+        SocketAddr::from(([10, 0, 0, 7], 41000)),
+    )
+}
+
+fn test_app_with(
+    token: Option<&str>,
+    auth_policy: AuthPolicy,
+    peer: SocketAddr,
+) -> (Router, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
     let storage = StorageConfig::for_test(dir.path().join("agent-command-ingest-test.db"));
     let pool = Arc::new(crate::db::init_pool(&storage).unwrap());
-    let state = AgentCommandIngestState::new(
-        pool,
-        token.map(str::to_string),
-        AuthPolicy::Mounted { auth_state: None },
-    );
-    let app = router(state).layer(MockConnectInfo(SocketAddr::from(([10, 0, 0, 7], 41000))));
+    let state = AgentCommandIngestState::new(pool, token.map(str::to_string), auth_policy);
+    let app = router(state).layer(MockConnectInfo(peer));
     (app, dir)
 }
 
@@ -98,6 +106,73 @@ async fn rejects_malformed_json_body() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn loopback_dev_policy_accepts_loopback_peer_without_bearer_token() {
+    // Test-review addition: no existing test exercised `AuthPolicy::LoopbackDev`
+    // at all — every test used `Mounted`. This proves the loopback bypass
+    // actually gates on the real `ConnectInfo` peer address, not merely on
+    // "no policy configured."
+    let (app, _dir) = test_app_with(
+        None,
+        AuthPolicy::LoopbackDev,
+        SocketAddr::from(([127, 0, 0, 1], 41000)),
+    );
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/agent-commands")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from("[]"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn loopback_dev_policy_rejects_non_loopback_peer() {
+    let (app, _dir) = test_app_with(
+        None,
+        AuthPolicy::LoopbackDev,
+        SocketAddr::from(([10, 0, 0, 7], 41000)),
+    );
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/agent-commands")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from("[]"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn mounted_policy_with_no_configured_token_rejects_every_request() {
+    // Test-review addition: a `Mounted` policy with `api_token: None` (e.g.
+    // before an operator sets CORTEX_TOKEN) must fail closed, not silently
+    // accept requests just because there's no header to check against.
+    let (app, _dir) = test_app(None);
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/agent-commands")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, "Bearer anything")
+                .body(Body::from("[]"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]

@@ -148,17 +148,19 @@ async fn run_cli(invocation: CliInvocation) -> Result<()> {
         if args.token.is_none() {
             args.token = flags.token.clone();
         }
-        if let Some(server) = args.server.clone() {
-            return cli::run_shell_agent_index_remote(args, server).await;
+        match resolve_shell_agent_index_dispatch(&args, &flags)? {
+            ShellAgentIndexDispatch::Remote(server) => {
+                return cli::run_shell_agent_index_remote(args, server).await;
+            }
+            ShellAgentIndexDispatch::Local => {
+                let runtime = RuntimeCore::load_query_only().await?;
+                return cli::run_shell_agent_index_local(
+                    &cli::CliMode::Local(runtime.service()),
+                    args,
+                )
+                .await;
+            }
         }
-        if flags.force_http {
-            anyhow::bail!(
-                "--http requires --server URL for `ingest shell agent index`; pass --server explicitly"
-            );
-        }
-        let runtime = RuntimeCore::load_query_only().await?;
-        return cli::run_shell_agent_index_local(&cli::CliMode::Local(runtime.service()), args)
-            .await;
     }
 
     if let cli::CliCommand::Heartbeat(mut command) = command {
@@ -490,8 +492,9 @@ async fn serve_mcp() -> Result<()> {
     if runtime.config.mcp.api_token.is_none() && !runtime.config.mcp.host.starts_with("127.") {
         tracing::warn!(
             bind = %runtime.config.mcp.bind_addr(),
-            "OTLP /v1/logs and heartbeat /v1/heartbeats are mounted WITHOUT authentication on a \
-             non-loopback bind. Anyone reachable on this address can write telemetry. \
+            "OTLP /v1/logs, heartbeat /v1/heartbeats, and agent-command forwarding \
+             /v1/agent-commands are mounted WITHOUT authentication on a non-loopback bind. \
+             Anyone reachable on this address can write telemetry. \
              Set CORTEX_TOKEN to require Bearer auth."
         );
     }
@@ -985,6 +988,43 @@ fn parse_deploy_command(args: &[String]) -> Result<DeployCommand> {
         other => anyhow::bail!("unknown deploy subcommand: {other}"),
     };
     Ok(DeployCommand { kind, json })
+}
+
+/// Which path `ingest shell agent index` should take, given its own flags
+/// plus the global `--http`/`--server`/`--token` flags already folded into
+/// `args` by the caller. Pure decision logic, deliberately separated from
+/// the side-effecting dispatch (constructing a `RuntimeCore`, making the
+/// network call) so the precedence rules are unit-testable without mocking
+/// either of those.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ShellAgentIndexDispatch {
+    Remote(String),
+    Local,
+}
+
+/// Test-review addition: this precedence logic (per-command `--server`
+/// overrides global; `--http` alone with no resolvable server bails;
+/// `--token` with no resolvable server bails rather than silently
+/// discarding the token) had zero test coverage prior to this extraction —
+/// see `main_tests.rs`'s `resolve_shell_agent_index_dispatch_*` tests.
+fn resolve_shell_agent_index_dispatch(
+    args: &cli::ShellAgentIndexArgs,
+    flags: &cli::GlobalFlags,
+) -> Result<ShellAgentIndexDispatch> {
+    if let Some(server) = args.server.clone() {
+        return Ok(ShellAgentIndexDispatch::Remote(server));
+    }
+    if flags.force_http {
+        anyhow::bail!(
+            "--http requires --server URL for `ingest shell agent index`; pass --server explicitly"
+        );
+    }
+    if args.token.is_some() {
+        anyhow::bail!(
+            "--token has no effect without --server for `ingest shell agent index`; pass --server to forward, or drop --token to import locally"
+        );
+    }
+    Ok(ShellAgentIndexDispatch::Local)
 }
 
 fn parse_setup_subcommand_args<'a>(

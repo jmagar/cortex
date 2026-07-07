@@ -569,18 +569,38 @@ async fn forward_agent_command_spool_preserves_records_appended_during_slow_post
     // concurrent `ingest shell agent wrap` invocation appending a new record
     // while a slow forward is in flight would stall behind the lock, and if
     // the lock-release/truncate logic were wrong, that concurrently
-    // appended record could be silently lost. This proves both: the append
-    // succeeds without blocking on the in-flight POST, and its content
+    // appended record could be silently lost.
+    //
+    // Test-review fix: the appender below now goes through the crate's real
+    // `append_spool_record` (which takes the same `flock(LOCK_EX)` as
+    // `forward_agent_command_spool`), not a bare `OpenOptions` write — an
+    // earlier version of this test bypassed the lock entirely, so it could
+    // never have detected the bug it claimed to guard against (it would
+    // have passed identically even with the old "hold the lock across the
+    // whole POST" behavior, since nothing on the append side ever contended
+    // for that lock). This version proves both: an append using the real
+    // locking path completes promptly (not stalled behind an
+    // already-released lock) while the POST is in flight, and its content
     // survives the post-POST truncate.
     let dir = tempfile::tempdir().unwrap();
     let spool_path = dir.path().join("agent-command.jsonl");
-    let first_line = r#"{"started_at":"2026-07-06T00:00:00Z","finished_at":"2026-07-06T00:00:01Z","duration_ms":1000,"exit_status":0,"command":"echo first","cwd":null,"agent":"claude-code","command_surface":null,"hostname":"testhost","user":null,"pid":1234,"session_id":null,"schema_version":1,"content_scrubbed":true}"#;
-    std::fs::write(&spool_path, format!("{first_line}\n")).unwrap();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&spool_path, std::fs::Permissions::from_mode(0o600)).unwrap();
-    }
+    let first_record = AgentCommandSpoolRecord {
+        started_at: "2026-07-06T00:00:00Z".to_string(),
+        finished_at: "2026-07-06T00:00:01Z".to_string(),
+        duration_ms: 1000,
+        exit_status: Some(0),
+        command: "echo first".to_string(),
+        cwd: None,
+        agent: "claude-code".to_string(),
+        command_surface: None,
+        hostname: "testhost".to_string(),
+        user: None,
+        pid: 1234,
+        session_id: None,
+        schema_version: 1,
+        content_scrubbed: true,
+    };
+    append_spool_record(&spool_path, &first_record).unwrap();
 
     let server = MockServer::start().await;
     Mock::given(method("POST"))
@@ -600,19 +620,34 @@ async fn forward_agent_command_spool_preserves_records_appended_during_slow_post
     let forward = forward_agent_command_spool(&spool_path, &server_uri, Some("secret"));
 
     // While the POST above is still in flight (thanks to the 300ms mock
-    // delay), append a second record directly to the spool file the way a
-    // concurrent `ingest shell agent wrap` invocation would. This must not
-    // block on the (already-released) forwarding lock.
+    // delay), append a second record through the same locking helper a
+    // concurrent `ingest shell agent wrap` invocation would use. If the fix
+    // regressed (lock held across the whole POST), this `flock(LOCK_EX)`
+    // would block until the forward's `File` drops at ~300ms; with the fix,
+    // the initial lock was already released well before this point (the
+    // 50ms delay below is generous margin), so this should return almost
+    // immediately.
     let append_path = spool_path.clone();
-    let second_line = r#"{"started_at":"2026-07-06T00:00:02Z","finished_at":"2026-07-06T00:00:03Z","duration_ms":500,"exit_status":0,"command":"echo second","cwd":null,"agent":"claude-code","command_surface":null,"hostname":"testhost","user":null,"pid":5678,"session_id":null,"schema_version":1,"content_scrubbed":true}"#;
-    let appended = tokio::spawn(async move {
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    let second_record = AgentCommandSpoolRecord {
+        started_at: "2026-07-06T00:00:02Z".to_string(),
+        finished_at: "2026-07-06T00:00:03Z".to_string(),
+        duration_ms: 500,
+        exit_status: Some(0),
+        command: "echo second".to_string(),
+        cwd: None,
+        agent: "claude-code".to_string(),
+        command_surface: None,
+        hostname: "testhost".to_string(),
+        user: None,
+        pid: 5678,
+        session_id: None,
+        schema_version: 1,
+        content_scrubbed: true,
+    };
+    let appended = tokio::task::spawn_blocking(move || {
+        std::thread::sleep(std::time::Duration::from_millis(50));
         let start = std::time::Instant::now();
-        let mut file = std::fs::OpenOptions::new()
-            .append(true)
-            .open(&append_path)
-            .unwrap();
-        writeln!(file, "{second_line}").unwrap();
+        append_spool_record(&append_path, &second_record).unwrap();
         start.elapsed()
     });
 
@@ -623,7 +658,8 @@ async fn forward_agent_command_spool_preserves_records_appended_during_slow_post
     assert_eq!(result.imported, 1, "the first record was forwarded");
     assert!(
         append_elapsed < std::time::Duration::from_millis(250),
-        "append while POST is in flight must not block on the forwarding lock, took {append_elapsed:?}"
+        "a real flock(LOCK_EX)-taking append while the POST is in flight must not block on \
+         the (already-released) forwarding lock, took {append_elapsed:?}"
     );
 
     let remaining = std::fs::read_to_string(&spool_path).unwrap();

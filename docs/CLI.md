@@ -675,14 +675,14 @@ cortex sessions smoke-watch --json
 This is a live command. It requires `syslog-sessions-watch.service` to be running and
 writing to the same `CORTEX_DB_PATH` used by the CLI process.
 
-### `cortex ingest shell`
+### `cortex ingest shell user`
 
-Backfill local shell history into the main log corpus.
+Backfill local, human-typed shell history into the main log corpus.
 
 ```bash
-cortex ingest shell index --path ~/.zsh_history
-cortex ingest shell index --path ~/.zsh_history --shell zsh --json
-cortex ingest shell atuin-index --path ~/.local/share/atuin/history.db --json
+cortex ingest shell user index --path ~/.zsh_history
+cortex ingest shell user index --path ~/.zsh_history --shell zsh --json
+cortex ingest shell user atuin-index --path ~/.local/share/atuin/history.db --json
 ```
 
 The importer currently supports zsh extended history lines in the

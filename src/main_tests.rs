@@ -1,4 +1,4 @@
-use super::{Mode, cli};
+use super::{Mode, ShellAgentIndexDispatch, cli, resolve_shell_agent_index_dispatch};
 
 #[test]
 fn mode_parse_accepts_single_binary_transport_commands() {
@@ -1073,4 +1073,75 @@ fn install_color_from_args_parses_and_strips() {
     // Bad value errors.
     let mut f = vec!["--color=technicolor".to_string()];
     assert!(install_color_from_args(&mut f).is_err());
+}
+
+fn shell_agent_index_args(server: Option<&str>, token: Option<&str>) -> cli::ShellAgentIndexArgs {
+    cli::ShellAgentIndexArgs {
+        path: "/tmp/spool.jsonl".to_string(),
+        json: false,
+        server: server.map(str::to_string),
+        token: token.map(str::to_string),
+    }
+}
+
+#[test]
+fn resolve_shell_agent_index_dispatch_prefers_resolved_server_for_remote() {
+    // By the time this function runs, the caller has already folded any
+    // global `--server` into `args.server` — this only asserts that once
+    // `args.server` is `Some`, the dispatch is Remote regardless of --http.
+    let args = shell_agent_index_args(Some("https://cortex.example.test"), None);
+    let flags = cli::GlobalFlags::default();
+    assert_eq!(
+        resolve_shell_agent_index_dispatch(&args, &flags).unwrap(),
+        ShellAgentIndexDispatch::Remote("https://cortex.example.test".to_string())
+    );
+}
+
+#[test]
+fn resolve_shell_agent_index_dispatch_local_when_no_server_or_token() {
+    let args = shell_agent_index_args(None, None);
+    let flags = cli::GlobalFlags::default();
+    assert_eq!(
+        resolve_shell_agent_index_dispatch(&args, &flags).unwrap(),
+        ShellAgentIndexDispatch::Local
+    );
+}
+
+#[test]
+fn resolve_shell_agent_index_dispatch_bails_on_http_without_resolvable_server() {
+    let args = shell_agent_index_args(None, None);
+    let flags = cli::GlobalFlags {
+        force_http: true,
+        ..cli::GlobalFlags::default()
+    };
+    let error = resolve_shell_agent_index_dispatch(&args, &flags)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("--http requires --server"), "got: {error}");
+}
+
+#[test]
+fn resolve_shell_agent_index_dispatch_bails_on_token_without_resolvable_server() {
+    // Code-review finding this test guards: a `--token` with no `--server`
+    // anywhere used to silently fall through to the local path, which never
+    // reads `args.token` — the token was accepted and quietly discarded.
+    let args = shell_agent_index_args(None, Some("secret"));
+    let flags = cli::GlobalFlags::default();
+    let error = resolve_shell_agent_index_dispatch(&args, &flags)
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("--token has no effect without --server"),
+        "got: {error}"
+    );
+}
+
+#[test]
+fn resolve_shell_agent_index_dispatch_server_and_token_together_is_remote() {
+    let args = shell_agent_index_args(Some("https://cortex.example.test"), Some("secret"));
+    let flags = cli::GlobalFlags::default();
+    assert_eq!(
+        resolve_shell_agent_index_dispatch(&args, &flags).unwrap(),
+        ShellAgentIndexDispatch::Remote("https://cortex.example.test".to_string())
+    );
 }
