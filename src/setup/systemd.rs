@@ -70,7 +70,7 @@ pub(crate) fn systemctl_user_state(command: &str, unit: &str) -> Option<String> 
     (!stdout.is_empty()).then_some(stdout)
 }
 
-pub(super) fn run_systemctl_user(args: &[&str]) -> io::Result<std::process::Output> {
+pub(crate) fn run_systemctl_user(args: &[&str]) -> io::Result<std::process::Output> {
     let output = Command::new("systemctl")
         .arg("--user")
         .args(args)

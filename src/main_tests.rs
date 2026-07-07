@@ -634,7 +634,12 @@ fn mode_default_log_filter_matches_operational_noise_profile() {
         "warn"
     );
     assert_eq!(
-        Mode::DoctorFull(super::DoctorFullCommand { json: false }).default_log_filter(),
+        Mode::DoctorFull(super::DoctorFullCommand {
+            json: false,
+            fix: false,
+            yes: false
+        })
+        .default_log_filter(),
         "warn"
     );
     assert_eq!(

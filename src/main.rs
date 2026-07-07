@@ -49,7 +49,9 @@ async fn run() -> Result<()> {
         Mode::Setup(command) => run_setup(command).await,
         Mode::Deploy(command) => run_deploy(command).await,
         Mode::DoctorBinary(command) => doctor::run_binary_doctor(command.json).await,
-        Mode::DoctorFull(command) => doctor::run_full_doctor(command.json).await,
+        Mode::DoctorFull(command) => {
+            doctor::run_full_doctor(command.json, command.fix, command.yes).await
+        }
         Mode::Help => unreachable!("handled before logging initialization"),
         Mode::Version => unreachable!("handled before logging initialization"),
     }
@@ -365,7 +367,10 @@ async fn run_setup(command: SetupCommand) -> Result<()> {
         SetupCommandKind::DebugCompose(action) => {
             cortex::setup::run_debug_compose_setup(action).await?
         }
-        SetupCommandKind::Doctor => cortex::setup::run_setup_doctor().await?,
+        // `cortex setup doctor` has no `--fix`/`--yes` flags of its own — the
+        // stale-agent-command-grammar fix path is exposed only via the
+        // top-level `cortex doctor --fix --yes`.
+        SetupCommandKind::Doctor => cortex::setup::run_setup_doctor(false, false).await?,
     };
     if command.json {
         println!("{}", serde_json::to_string_pretty(&report)?);
@@ -408,9 +413,13 @@ fn colorize_setup_status(status: &cortex::setup::SetupStatus) -> String {
 
 fn parse_doctor_full_command(args: &[String]) -> Result<DoctorFullCommand> {
     let mut json = false;
+    let mut fix = false;
+    let mut yes = false;
     for arg in args {
         match arg.as_str() {
             "--json" => json = true,
+            "--fix" => fix = true,
+            "--yes" => yes = true,
             "--help" | "-h" => {
                 print_usage();
                 std::process::exit(0);
@@ -418,7 +427,7 @@ fn parse_doctor_full_command(args: &[String]) -> Result<DoctorFullCommand> {
             other => anyhow::bail!("unknown doctor argument: {other}"),
         }
     }
-    Ok(DoctorFullCommand { json })
+    Ok(DoctorFullCommand { json, fix, yes })
 }
 
 async fn serve_mcp() -> Result<()> {
@@ -541,6 +550,8 @@ struct CliInvocation {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct DoctorFullCommand {
     json: bool,
+    fix: bool,
+    yes: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

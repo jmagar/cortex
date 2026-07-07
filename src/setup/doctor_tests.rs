@@ -172,7 +172,7 @@ async fn run_setup_doctor_collects_temp_home_sections_without_live_services() {
     let _db_path = EnvGuard::set("CORTEX_DB_PATH", &db_path);
     let _path = EnvGuard::set("PATH", path_with_prepended(&bin_dir));
 
-    let report = run_setup_doctor().await.unwrap();
+    let report = run_setup_doctor(false, false).await.unwrap();
 
     assert_eq!(report.mode, "doctor");
     assert_eq!(report.home, cortex_home);
@@ -194,5 +194,67 @@ async fn run_setup_doctor_collects_temp_home_sections_without_live_services() {
             .phases
             .iter()
             .any(|phase| phase.name == "sessions-watch-service-content")
+    );
+    assert!(
+        report
+            .phases
+            .iter()
+            .any(|phase| phase.name == "stale-agent-command-units")
+    );
+}
+
+#[test]
+fn stale_agent_command_grammar_detects_old_grammar_in_exec_start() {
+    let unit_text = "\
+[Unit]\nDescription=agent command drain\n\n[Service]\nExecStart=/usr/local/bin/cortex ingest agent-command ingest-spool --path /home/jmagar/.local/state/cortex/agent-command.jsonl\n";
+    assert!(agent_command_unit_uses_stale_grammar(unit_text));
+}
+
+#[test]
+fn stale_agent_command_grammar_accepts_current_grammar_in_exec_start() {
+    let unit_text = "\
+[Unit]\nDescription=agent command drain\n\n[Service]\nExecStart=/usr/local/bin/cortex ingest shell agent index --path /home/jmagar/.local/state/cortex/agent-command.jsonl\n";
+    assert!(!agent_command_unit_uses_stale_grammar(unit_text));
+}
+
+#[test]
+fn stale_agent_command_grammar_ignores_unrelated_unit_text() {
+    let unit_text = "\
+[Unit]\nDescription=some other timer\n\n[Service]\nExecStart=/usr/bin/true\n";
+    assert!(!agent_command_unit_uses_stale_grammar(unit_text));
+}
+
+#[test]
+fn stale_agent_command_grammar_ignores_mentions_outside_exec_start() {
+    // A unit whose Description/comment merely *mentions* the old grammar
+    // string must NOT be flagged — only the actual ExecStart= invocation
+    // counts. This is the false-positive this task's ExecStart-anchored
+    // check exists specifically to prevent.
+    let unit_text = "\
+[Unit]\nDescription=watches for agent-command ingest-spool usage in logs\n\n[Service]\nExecStart=/usr/bin/true\n";
+    assert!(!agent_command_unit_uses_stale_grammar(unit_text));
+}
+
+#[test]
+fn stale_agent_command_grammar_ignores_non_cortex_binary() {
+    let unit_text = "\
+[Unit]\nDescription=unrelated\n\n[Service]\nExecStart=/usr/bin/some-other-tool agent-command ingest-spool\n";
+    assert!(!agent_command_unit_uses_stale_grammar(unit_text));
+}
+
+#[test]
+fn stale_agent_command_fix_requires_yes() {
+    let stale = vec!["cortex-agent-command-ingest.timer".to_string()];
+    assert!(
+        !should_disable(true, false, &stale),
+        "fix without yes must not disable"
+    );
+    assert!(
+        should_disable(true, true, &stale),
+        "fix with yes should disable"
+    );
+    assert!(
+        !should_disable(false, true, &stale),
+        "yes alone without fix must not disable"
     );
 }
