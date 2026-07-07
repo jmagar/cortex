@@ -190,17 +190,41 @@ fn mode_parse_rejects_old_ai_setup_namespaces() {
 }
 
 #[test]
-fn mode_parse_accepts_agent_command_setup_namespace() {
+fn mode_parse_accepts_shell_agent_setup_namespace() {
     assert!(matches!(
         Mode::parse(vec![
             "setup".into(),
-            "agent-command".into(),
+            "shell".into(),
+            "agent".into(),
             "install".into(),
             "--json".into()
         ])
         .unwrap(),
         Mode::Setup(_)
     ));
+}
+
+#[test]
+fn mode_parse_accepts_shell_completions_setup_namespace() {
+    assert!(matches!(
+        Mode::parse(vec![
+            "setup".into(),
+            "shell".into(),
+            "completions".into(),
+            "install".into(),
+            "--json".into()
+        ])
+        .unwrap(),
+        Mode::Setup(_)
+    ));
+}
+
+#[test]
+fn mode_parse_rejects_unknown_setup_shell_subcommand() {
+    let error = Mode::parse(vec!["setup".into(), "shell".into(), "bogus".into()])
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("agent|completions"), "got: {error}");
 }
 
 #[test]
@@ -223,6 +247,7 @@ fn mode_parse_accepts_command_ingest_namespace() {
         Mode::parse(vec![
             "ingest".into(),
             "shell".into(),
+            "user".into(),
             "index".into(),
             "--path".into(),
             "/tmp/history".into(),
@@ -248,8 +273,9 @@ fn mode_parse_accepts_command_ingest_namespace() {
     assert!(matches!(
         Mode::parse(vec![
             "ingest".into(),
-            "agent-command".into(),
-            "ingest-spool".into(),
+            "shell".into(),
+            "agent".into(),
+            "index".into(),
             "--path".into(),
             "/tmp/spool.jsonl".into(),
             "--json".into()
@@ -260,12 +286,25 @@ fn mode_parse_accepts_command_ingest_namespace() {
     assert!(matches!(
         Mode::parse(vec![
             "ingest".into(),
-            "agent-command".into(),
+            "shell".into(),
+            "agent".into(),
             "wrap".into(),
             "--spool".into(),
             "/tmp/spool.jsonl".into(),
             "--".into(),
             "true".into()
+        ])
+        .unwrap(),
+        Mode::Cli(_)
+    ));
+    assert!(matches!(
+        Mode::parse(vec![
+            "ingest".into(),
+            "agent-command".into(),
+            "ingest-spool".into(),
+            "--path".into(),
+            "/tmp/spool.jsonl".into(),
+            "--json".into()
         ])
         .unwrap(),
         Mode::Cli(_)
@@ -276,7 +315,8 @@ fn mode_parse_accepts_command_ingest_namespace() {
 fn mode_parse_preserves_wrapped_command_http_like_flags() {
     let mode = Mode::parse(vec![
         "ingest".into(),
-        "agent-command".into(),
+        "shell".into(),
+        "agent".into(),
         "wrap".into(),
         "--spool".into(),
         "/tmp/spool.jsonl".into(),
@@ -293,11 +333,11 @@ fn mode_parse_preserves_wrapped_command_http_like_flags() {
         panic!("expected CLI mode");
     };
     assert_eq!(invocation.flags, cli::GlobalFlags::default());
-    let cli::CliCommand::Ingest(cli::IngestCommand::AgentCommand(cli::AgentCommandCommand::Wrap(
-        args,
+    let cli::CliCommand::Ingest(cli::IngestCommand::Shell(cli::ShellCommand::Agent(
+        cli::ShellAgentCommand::Wrap(args),
     ))) = invocation.command
     else {
-        panic!("expected agent-command wrap");
+        panic!("expected shell agent wrap");
     };
     assert_eq!(
         args.command,
@@ -517,8 +557,8 @@ fn mode_parse_setup_subcommands_default_to_check_and_parse_remove() {
             "sessions-watch-service remove",
         ),
         (
-            vec!["setup", "agent-command", "remove", "--json"],
-            "agent-command remove",
+            vec!["setup", "shell", "agent", "remove", "--json"],
+            "shell agent remove",
         ),
         (
             vec!["setup", "heartbeat-agent", "remove", "--json"],
@@ -921,7 +961,8 @@ async fn run_cli_rejects_http_flags_for_agent_local_surfaces() {
         (
             &[
                 "ingest",
-                "agent-command",
+                "shell",
+                "agent",
                 "wrap",
                 "--server",
                 "http://127.0.0.1:3100",
@@ -930,19 +971,20 @@ async fn run_cli_rejects_http_flags_for_agent_local_surfaces() {
                 "--",
                 "true",
             ][..],
-            "`ingest agent-command wrap` (wrapper command)",
+            "`ingest shell agent wrap` (wrapper command)",
         ),
         (
             &[
                 "ingest",
                 "shell",
+                "user",
                 "index",
                 "--path",
                 "/tmp/history",
                 "--token",
                 "secret",
             ][..],
-            "local agent commands",
+            "local shell commands",
         ),
     ] {
         let err = super::run_cli(cli_invocation(args)).await.unwrap_err();
