@@ -1,6 +1,7 @@
 #![recursion_limit = "512"]
 
 pub mod agent;
+pub mod agent_command_ingest;
 pub mod agent_deploy;
 pub(crate) mod ai_project;
 pub mod ai_watch;

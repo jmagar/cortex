@@ -354,7 +354,7 @@ async fn run_setup(command: SetupCommand) -> Result<()> {
             cortex::setup::run_shell_agent_setup(action).await?
         }
         SetupCommandKind::Shell(ShellSetupCommand::Completions(action)) => {
-            cortex::setup::run_shell_completions_setup(action)?
+            cortex::setup::run_shell_completions_setup(action).await?
         }
         SetupCommandKind::HeartbeatAgent(action) => {
             cortex::setup::run_heartbeat_agent_setup(action).await?

@@ -228,10 +228,64 @@ async fn runtime_accessors_build_shared_state_and_ingest_routers() {
     let _pool = runtime.pool();
     let _otlp = runtime.otlp_router();
     let _heartbeat = runtime.heartbeat_router();
+    let _agent_command = runtime.agent_command_router();
     let state = runtime.mcp_state();
 
     assert_eq!(state.config.server_name, "cortex");
     assert!(matches!(runtime.auth_policy(), AuthPolicy::LoopbackDev));
+
+    runtime.shutdown(std::time::Duration::from_secs(1)).await;
+}
+
+/// **Engineering-review addition.** `axum::Router::merge` panics at
+/// *runtime*, not compile time, on duplicate route registration. This proves
+/// `heartbeat_router()` and `agent_command_router()` can be merged into one
+/// app (mirroring the merge chain in `main.rs`'s `serve_mcp()`) without a
+/// route collision, and that both paths resolve to something other than 404.
+#[tokio::test]
+async fn merged_app_serves_both_heartbeat_and_agent_command_routers_without_panicking() {
+    use axum::body::Body;
+    use axum::extract::connect_info::MockConnectInfo;
+    use axum::http::{Request, StatusCode, header};
+    use std::net::SocketAddr;
+    use tower::ServiceExt;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let runtime = RuntimeCore::for_server(test_config(tmp.path(), loopback_mcp()))
+        .await
+        .expect("runtime");
+
+    let app = axum::Router::new()
+        .merge(runtime.heartbeat_router())
+        .merge(runtime.agent_command_router())
+        .layer(MockConnectInfo(SocketAddr::from(([127, 0, 0, 1], 9000))));
+
+    let heartbeat_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/heartbeats")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_ne!(heartbeat_response.status(), StatusCode::NOT_FOUND);
+
+    let agent_command_response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/agent-commands")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from("[]"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_ne!(agent_command_response.status(), StatusCode::NOT_FOUND);
 
     runtime.shutdown(std::time::Duration::from_secs(1)).await;
 }
