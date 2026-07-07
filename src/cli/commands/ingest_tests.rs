@@ -5,27 +5,39 @@ fn strings(values: &[&str]) -> Vec<String> {
 }
 
 #[test]
-fn parse_ingest_shell_agent_inventory_and_file_tail() {
-    let shell = parse_ingest(&strings(&["shell", "index", "--path", "/tmp/history"])).unwrap();
+fn parse_ingest_shell_user_and_agent_inventory_and_file_tail() {
+    let shell_user = parse_ingest(&strings(&[
+        "shell",
+        "user",
+        "index",
+        "--path",
+        "/tmp/history",
+    ]))
+    .unwrap();
     assert!(matches!(
-        shell,
+        shell_user,
         CliCommand::Ingest(IngestCommand::Shell(
-            super::super::super::ShellCommand::Index(_)
+            super::super::super::ShellCommand::User(super::super::super::ShellUserCommand::Index(
+                _
+            ))
         ))
     ));
 
-    let agent = parse_ingest(&strings(&[
-        "agent-command",
-        "ingest-spool",
+    let shell_agent = parse_ingest(&strings(&[
+        "shell",
+        "agent",
+        "index",
         "--path",
         "/tmp/spool.jsonl",
         "--json",
     ]))
     .unwrap();
     assert!(matches!(
-        agent,
-        CliCommand::Ingest(IngestCommand::AgentCommand(
-            super::super::super::AgentCommandCommand::IngestSpool(_)
+        shell_agent,
+        CliCommand::Ingest(IngestCommand::Shell(
+            super::super::super::ShellCommand::Agent(
+                super::super::super::ShellAgentCommand::Index(_)
+            )
         ))
     ));
 
@@ -42,6 +54,25 @@ fn parse_ingest_shell_agent_inventory_and_file_tail() {
         file_tail,
         CliCommand::Ingest(IngestCommand::FileTail(
             super::super::super::FileTailCommand::List(_)
+        ))
+    ));
+}
+
+#[test]
+fn parse_ingest_accepts_legacy_agent_command_grammar() {
+    let legacy = parse_ingest(&strings(&[
+        "agent-command",
+        "ingest-spool",
+        "--path",
+        "/tmp/spool.jsonl",
+    ]))
+    .unwrap();
+    assert!(matches!(
+        legacy,
+        CliCommand::Ingest(IngestCommand::Shell(
+            super::super::super::ShellCommand::Agent(
+                super::super::super::ShellAgentCommand::Index(_)
+            )
         ))
     ));
 }

@@ -323,6 +323,16 @@ impl RuntimeCore {
         crate::heartbeat::router(state)
     }
 
+    /// Build the forwarded agent-command ingest router.
+    pub fn agent_command_router(&self) -> axum::Router {
+        let state = crate::agent_command_ingest::AgentCommandIngestState::new(
+            Arc::clone(&self.pool),
+            self.config.mcp.api_token.0.clone(),
+            self.auth_policy.clone(),
+        );
+        crate::agent_command_ingest::router(state)
+    }
+
     pub fn mcp_state(&self) -> mcp::AppState {
         mcp::AppState {
             service: self.service(),

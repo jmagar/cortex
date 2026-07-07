@@ -212,10 +212,10 @@ const CATALOG: &[CommandDoc] = &[
         name: "ingest",
         summary: "Manual ingest and ingest-source management",
         usage: &[
-            "cortex ingest shell index --path PATH [--shell zsh] [--json]",
-            "cortex ingest shell atuin-index --path PATH [--json]",
-            "cortex ingest agent-command ingest-spool --path PATH [--json]",
-            "cortex ingest agent-command wrap --spool PATH -- COMMAND...",
+            "cortex ingest shell user index --path PATH [--shell zsh] [--json]",
+            "cortex ingest shell user atuin-index --path PATH [--json]",
+            "cortex ingest shell agent index --path PATH [--json] [--server URL] [--token TOKEN]",
+            "cortex ingest shell agent wrap --spool PATH -- COMMAND...",
             "cortex ingest inventory refresh|status [--json]",
             "cortex ingest file-tail list|status [--json]",
             "cortex ingest file-tail add --id ID --path PATH --tag TAG --host HOST [--facility FACILITY] [--severity SEVERITY] [--from-start] [--json]",
@@ -254,7 +254,10 @@ const CATALOG: &[CommandDoc] = &[
     CommandDoc {
         name: "doctor",
         summary: "Run all health checks (setup, compose, binary, AI)",
-        usage: &["cortex doctor [--json]", "cortex doctor binary [--json]"],
+        usage: &[
+            "cortex doctor [--json] [--fix] [--yes]",
+            "cortex doctor binary [--json]",
+        ],
     },
     CommandDoc {
         name: "db",
@@ -286,7 +289,8 @@ const CATALOG: &[CommandDoc] = &[
             "cortex setup sessions-index-timer install|remove|check [--json]",
             "cortex setup sessions-watch-service install|remove|check [--json]",
             "cortex setup sessions-watch-health-check [--json]",
-            "cortex setup agent-command install|remove|check [--json]",
+            "cortex setup shell agent install|remove|check [--json]",
+            "cortex setup shell completions install|remove|check [--json]",
             "cortex setup heartbeat-agent install|remove|check [--json]",
             "cortex setup debug-wrapper install|remove|check [--json]",
             "cortex setup debug-compose install|remove|check [--json]",
@@ -575,19 +579,19 @@ const NESTED_CATALOG: &[NestedCommandDoc] = &[
         ],
     },
     NestedCommandDoc {
-        path: "ingest shell",
-        summary: "Index shell history",
+        path: "ingest shell user",
+        summary: "Index shell history typed by a human",
         usage: &[
-            "cortex ingest shell index --path PATH [--shell zsh] [--json]",
-            "cortex ingest shell atuin-index --path PATH [--json]",
+            "cortex ingest shell user index --path PATH [--shell zsh] [--json]",
+            "cortex ingest shell user atuin-index --path PATH [--json]",
         ],
     },
     NestedCommandDoc {
-        path: "ingest agent-command",
-        summary: "Ingest agent command spool files",
+        path: "ingest shell agent",
+        summary: "Ingest AI-agent-issued shell commands",
         usage: &[
-            "cortex ingest agent-command ingest-spool --path PATH [--json]",
-            "cortex ingest agent-command wrap --spool PATH -- COMMAND...",
+            "cortex ingest shell agent index --path PATH [--json] [--server URL] [--token TOKEN]",
+            "cortex ingest shell agent wrap --spool PATH -- COMMAND...",
         ],
     },
     NestedCommandDoc {

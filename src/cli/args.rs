@@ -98,7 +98,6 @@ pub(crate) enum FileTailCommand {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum IngestCommand {
     Shell(ShellCommand),
-    AgentCommand(AgentCommandCommand),
     Inventory(InventoryCommand),
     FileTail(FileTailCommand),
     SyslogStatus(OutputArgs),
@@ -151,14 +150,20 @@ pub(crate) struct InventoryArgs {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ShellCommand {
+    User(ShellUserCommand),
+    Agent(ShellAgentCommand),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ShellUserCommand {
     Index(ShellIndexArgs),
     AtuinIndex(ShellAtuinIndexArgs),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum AgentCommandCommand {
-    IngestSpool(AgentCommandIngestSpoolArgs),
-    Wrap(AgentCommandWrapArgs),
+pub(crate) enum ShellAgentCommand {
+    Index(ShellAgentIndexArgs),
+    Wrap(ShellAgentWrapArgs),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -180,13 +185,18 @@ pub(crate) struct ShellAtuinIndexArgs {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct AgentCommandIngestSpoolArgs {
+pub(crate) struct ShellAgentIndexArgs {
     pub path: String,
     pub json: bool,
+    /// Remote Cortex base URL to forward the spool to instead of writing
+    /// locally. Populated from `--server` directly or from the `--server`
+    /// global flag if the command doesn't set its own.
+    pub server: Option<String>,
+    pub token: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct AgentCommandWrapArgs {
+pub(crate) struct ShellAgentWrapArgs {
     pub spool: String,
     pub command: Vec<String>,
     /// Liveness probe used by the generated shell wrapper: when true, the command

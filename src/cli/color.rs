@@ -31,7 +31,7 @@ pub(crate) fn color_enabled_stderr() -> bool {
 ///
 /// Accepts: `--no-color`, `--color` (bare ⇒ always), `--color=VALUE`,
 /// `--color VALUE` where VALUE ∈ `always|never|auto`. Stops at a `--` sentinel
-/// so wrapped commands (`cortex agent-command wrap -- cmd --color`) are left
+/// so wrapped commands (`cortex ingest shell agent wrap -- cmd --color`) are left
 /// untouched, mirroring [`super::run::GlobalFlags::extract`].
 pub(crate) fn install_color_from_args(args: &mut Vec<String>) -> Result<()> {
     let mut i = 0;

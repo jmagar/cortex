@@ -3,6 +3,8 @@ use std::io::Write;
 use crate::config::StorageConfig;
 use crate::db::{SearchParams, init_pool, search_logs};
 use serial_test::serial;
+use wiremock::matchers::{method, path};
+use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use super::*;
 
@@ -51,29 +53,44 @@ fn command_args_to_shell_command_quotes_multi_arg_invocations() {
 
 #[test]
 fn agent_command_ingest_spool_guard_is_argv_scoped() {
-    // New grouped grammar: `cortex ingest agent-command ingest-spool`.
+    // Canonical grammar: `cortex ingest shell agent index`.
+    assert!(is_agent_command_ingest_spool_invocation(&[
+        "cortex".to_string(),
+        "ingest".to_string(),
+        "shell".to_string(),
+        "agent".to_string(),
+        "index".to_string(),
+    ]));
     assert!(is_agent_command_ingest_spool_invocation(&[
         "/usr/local/bin/cortex".to_string(),
         "ingest".to_string(),
-        "agent-command".to_string(),
-        "ingest-spool".to_string(),
+        "shell".to_string(),
+        "agent".to_string(),
+        "index".to_string(),
         "--path".to_string(),
-        "/tmp/spool.jsonl".to_string(),
+        "/tmp/x.jsonl".to_string(),
     ]));
-    // Legacy pre-move grammar is still accepted defensively.
+    // Grouped grammar predating this rename: `cortex ingest agent-command
+    // ingest-spool`. This is the one already deployed on live hosts (e.g.
+    // dookie) and the only legacy shape worth tolerating here — the even
+    // older bare `cortex agent-command ingest-spool` (no `ingest` prefix) is
+    // unreachable: the CLI's top-level parser rejects it outright (see
+    // `src/surfaces.rs`'s `MovedIntoGroupedDomain` entry), so no process can
+    // ever actually invoke it for this guard to need to catch.
     assert!(is_agent_command_ingest_spool_invocation(&[
-        "/usr/local/bin/cortex".to_string(),
+        "cortex".to_string(),
+        "ingest".to_string(),
         "agent-command".to_string(),
         "ingest-spool".to_string(),
-        "--path".to_string(),
-        "/tmp/spool.jsonl".to_string(),
     ]));
     assert!(!is_agent_command_ingest_spool_invocation(&[
-        "echo".to_string(),
-        "agent-command ingest-spool".to_string(),
+        "sh".to_string(),
+        "-c".to_string(),
+        "cortex ingest shell agent index".to_string(),
     ]));
     assert!(!is_agent_command_ingest_spool_invocation(&[
-        "cortex".to_string(),
+        "bash".to_string(),
+        "-c".to_string(),
         "agent-command ingest-spool".to_string(),
     ]));
 }
@@ -419,6 +436,280 @@ fn imports_agent_spool_as_agent_command_rows() {
     let second = import_agent_command_spool(&pool, &spool).unwrap();
     assert_eq!(second.scanned, 0);
     assert_eq!(second.imported, 0);
+}
+
+fn sample_agent_command_record(command: &str) -> AgentCommandSpoolRecord {
+    AgentCommandSpoolRecord {
+        started_at: "2026-07-06T00:00:00Z".to_string(),
+        finished_at: "2026-07-06T00:00:01Z".to_string(),
+        duration_ms: 1000,
+        exit_status: Some(0),
+        command: command.to_string(),
+        cwd: None,
+        agent: "claude-code".to_string(),
+        command_surface: None,
+        hostname: "testhost".to_string(),
+        user: None,
+        pid: 1234,
+        session_id: None,
+        schema_version: 1,
+        content_scrubbed: true,
+    }
+}
+
+#[test]
+fn import_agent_command_records_dedupes_against_existing_rows() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("cortex.db");
+    let pool = init_pool(&StorageConfig::for_test(db_path)).unwrap();
+    let record = sample_agent_command_record("echo hi");
+
+    let first = import_agent_command_records(&pool, std::slice::from_ref(&record), None).unwrap();
+    assert_eq!(first.imported, 1);
+    assert_eq!(first.skipped_duplicates, 0);
+
+    let second = import_agent_command_records(&pool, &[record], None).unwrap();
+    assert_eq!(second.imported, 0);
+    assert_eq!(second.skipped_duplicates, 1);
+}
+
+#[test]
+fn import_agent_command_records_annotates_forwarded_peer_when_present() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("cortex.db");
+    let pool = init_pool(&StorageConfig::for_test(db_path)).unwrap();
+    let record = sample_agent_command_record("echo hi");
+
+    let result = import_agent_command_records(&pool, &[record], Some("203.0.113.7")).unwrap();
+    assert_eq!(result.imported, 1);
+
+    // Query the inserted row directly to prove the peer IP actually landed
+    // in metadata_json, rather than just asserting the call didn't panic.
+    // Acquire and drop a pool connection per query rather than holding one
+    // across the second `import_agent_command_records` call below, which
+    // also needs a connection from the same (small, test-sized) pool.
+    let metadata_json: String = pool
+        .get()
+        .unwrap()
+        .query_row(
+            "SELECT metadata_json FROM logs WHERE message = ?1",
+            ["echo hi"],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(
+        metadata_json.contains("203.0.113.7"),
+        "expected forwarded_from_peer_ip in metadata_json, got: {metadata_json}"
+    );
+
+    // A second record with no forwarding peer must NOT gain the field.
+    let local_record = sample_agent_command_record("echo local");
+    import_agent_command_records(&pool, &[local_record], None).unwrap();
+    let local_metadata_json: String = pool
+        .get()
+        .unwrap()
+        .query_row(
+            "SELECT metadata_json FROM logs WHERE message = ?1",
+            ["echo local"],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(!local_metadata_json.contains("forwarded_from_peer_ip"));
+}
+
+#[tokio::test]
+async fn forward_agent_command_spool_posts_and_truncates_on_success() {
+    let dir = tempfile::tempdir().unwrap();
+    let spool_path = dir.path().join("agent-command.jsonl");
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(&spool_path)
+        .unwrap();
+    writeln!(
+        file,
+        r#"{{"started_at":"2026-07-06T00:00:00Z","finished_at":"2026-07-06T00:00:01Z","duration_ms":1000,"exit_status":0,"command":"echo hi","cwd":null,"agent":"claude-code","command_surface":null,"hostname":"testhost","user":null,"pid":1234,"session_id":null,"schema_version":1,"content_scrubbed":true}}"#
+    )
+    .unwrap();
+    drop(file);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&spool_path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
+
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/agent-commands"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(
+            r#"{"scanned":0,"imported":1,"skipped":0,"skipped_duplicates":0,"errors":0}"#,
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let result = forward_agent_command_spool(&spool_path, &server.uri(), Some("secret"))
+        .await
+        .unwrap();
+
+    assert_eq!(result.imported, 1);
+    let remaining = std::fs::metadata(&spool_path).unwrap();
+    assert_eq!(
+        remaining.len(),
+        0,
+        "spool must be truncated after a successful forward"
+    );
+}
+
+#[tokio::test]
+async fn forward_agent_command_spool_preserves_records_appended_during_slow_post() {
+    // Engineering-review regression test: the exclusive spool lock must be
+    // released before the network POST, not held across it — otherwise a
+    // concurrent `ingest shell agent wrap` invocation appending a new record
+    // while a slow forward is in flight would stall behind the lock, and if
+    // the lock-release/truncate logic were wrong, that concurrently
+    // appended record could be silently lost.
+    //
+    // Test-review fix: the appender below now goes through the crate's real
+    // `append_spool_record` (which takes the same `flock(LOCK_EX)` as
+    // `forward_agent_command_spool`), not a bare `OpenOptions` write — an
+    // earlier version of this test bypassed the lock entirely, so it could
+    // never have detected the bug it claimed to guard against (it would
+    // have passed identically even with the old "hold the lock across the
+    // whole POST" behavior, since nothing on the append side ever contended
+    // for that lock). This version proves both: an append using the real
+    // locking path completes promptly (not stalled behind an
+    // already-released lock) while the POST is in flight, and its content
+    // survives the post-POST truncate.
+    let dir = tempfile::tempdir().unwrap();
+    let spool_path = dir.path().join("agent-command.jsonl");
+    let first_record = AgentCommandSpoolRecord {
+        started_at: "2026-07-06T00:00:00Z".to_string(),
+        finished_at: "2026-07-06T00:00:01Z".to_string(),
+        duration_ms: 1000,
+        exit_status: Some(0),
+        command: "echo first".to_string(),
+        cwd: None,
+        agent: "claude-code".to_string(),
+        command_surface: None,
+        hostname: "testhost".to_string(),
+        user: None,
+        pid: 1234,
+        session_id: None,
+        schema_version: 1,
+        content_scrubbed: true,
+    };
+    append_spool_record(&spool_path, &first_record).unwrap();
+
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/agent-commands"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(
+                    r#"{"scanned":0,"imported":1,"skipped":0,"skipped_duplicates":0,"errors":0}"#,
+                )
+                .set_delay(std::time::Duration::from_millis(300)),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let server_uri = server.uri();
+    let forward = forward_agent_command_spool(&spool_path, &server_uri, Some("secret"));
+
+    // While the POST above is still in flight (thanks to the 300ms mock
+    // delay), append a second record through the same locking helper a
+    // concurrent `ingest shell agent wrap` invocation would use. If the fix
+    // regressed (lock held across the whole POST), this `flock(LOCK_EX)`
+    // would block until the forward's `File` drops at ~300ms; with the fix,
+    // the initial lock was already released well before this point (the
+    // 50ms delay below is generous margin), so this should return almost
+    // immediately.
+    let append_path = spool_path.clone();
+    let second_record = AgentCommandSpoolRecord {
+        started_at: "2026-07-06T00:00:02Z".to_string(),
+        finished_at: "2026-07-06T00:00:03Z".to_string(),
+        duration_ms: 500,
+        exit_status: Some(0),
+        command: "echo second".to_string(),
+        cwd: None,
+        agent: "claude-code".to_string(),
+        command_surface: None,
+        hostname: "testhost".to_string(),
+        user: None,
+        pid: 5678,
+        session_id: None,
+        schema_version: 1,
+        content_scrubbed: true,
+    };
+    let appended = tokio::task::spawn_blocking(move || {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        let start = std::time::Instant::now();
+        append_spool_record(&append_path, &second_record).unwrap();
+        start.elapsed()
+    });
+
+    let (result, append_elapsed) = tokio::join!(forward, appended);
+    let result = result.unwrap();
+    let append_elapsed = append_elapsed.unwrap();
+
+    assert_eq!(result.imported, 1, "the first record was forwarded");
+    assert!(
+        append_elapsed < std::time::Duration::from_millis(250),
+        "a real flock(LOCK_EX)-taking append while the POST is in flight must not block on \
+         the (already-released) forwarding lock, took {append_elapsed:?}"
+    );
+
+    let remaining = std::fs::read_to_string(&spool_path).unwrap();
+    assert!(
+        remaining.contains("echo second"),
+        "record appended during the in-flight POST must survive the post-forward truncate, got: {remaining:?}"
+    );
+    assert!(
+        !remaining.contains("echo first"),
+        "the already-forwarded record must be consumed, got: {remaining:?}"
+    );
+}
+
+#[tokio::test]
+async fn forward_agent_command_spool_keeps_file_on_http_failure() {
+    let dir = tempfile::tempdir().unwrap();
+    let spool_path = dir.path().join("agent-command.jsonl");
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(&spool_path)
+        .unwrap();
+    writeln!(
+        file,
+        r#"{{"started_at":"2026-07-06T00:00:00Z","finished_at":"2026-07-06T00:00:01Z","duration_ms":1000,"exit_status":0,"command":"echo hi","cwd":null,"agent":"claude-code","command_surface":null,"hostname":"testhost","user":null,"pid":1234,"session_id":null,"schema_version":1,"content_scrubbed":true}}"#
+    )
+    .unwrap();
+    drop(file);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&spool_path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
+
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/agent-commands"))
+        .respond_with(ResponseTemplate::new(503))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let error = forward_agent_command_spool(&spool_path, &server.uri(), None)
+        .await
+        .unwrap_err();
+
+    assert!(error.to_string().contains("503"), "got: {error}");
+    let remaining = std::fs::metadata(&spool_path).unwrap();
+    assert!(remaining.len() > 0, "spool must survive a failed forward");
 }
 
 #[test]

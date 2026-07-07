@@ -1,31 +1,66 @@
 use anyhow::{Result, bail};
 
 use super::{
-    AgentCommandCommand, AgentCommandIngestSpoolArgs, AgentCommandWrapArgs, ShellAtuinIndexArgs,
-    ShellCommand, ShellIndexArgs,
+    ShellAgentCommand, ShellAgentIndexArgs, ShellAgentWrapArgs, ShellAtuinIndexArgs, ShellCommand,
+    ShellIndexArgs, ShellUserCommand,
 };
 
 pub(crate) fn parse_shell_command(args: &[String]) -> Result<ShellCommand> {
+    let (group, rest) = args
+        .split_first()
+        .ok_or_else(|| anyhow::anyhow!("shell requires a subcommand (user|agent)"))?;
+    match group.as_str() {
+        "user" => Ok(ShellCommand::User(parse_shell_user_command(rest)?)),
+        "agent" => Ok(ShellCommand::Agent(parse_shell_agent_command(rest)?)),
+        _ => bail!(
+            "{}",
+            super::suggest::unknown_command("shell subcommand", group, &["user", "agent"])
+        ),
+    }
+}
+
+fn parse_shell_user_command(args: &[String]) -> Result<ShellUserCommand> {
     let (command, rest) = args
         .split_first()
-        .ok_or_else(|| anyhow::anyhow!("shell subcommand is required"))?;
+        .ok_or_else(|| anyhow::anyhow!("shell user subcommand is required"))?;
     match command.as_str() {
         "index" => parse_shell_index(rest),
         "atuin-index" => parse_shell_atuin_index(rest),
         _ => bail!(
             "{}",
-            super::suggest::unknown_command("shell subcommand", command, &["index", "atuin-index"])
+            super::suggest::unknown_command(
+                "shell user subcommand",
+                command,
+                &["index", "atuin-index"],
+            )
         ),
     }
 }
 
-pub(crate) fn parse_agent_command_command(args: &[String]) -> Result<AgentCommandCommand> {
+pub(crate) fn parse_shell_agent_command(args: &[String]) -> Result<ShellAgentCommand> {
+    let (command, rest) = args
+        .split_first()
+        .ok_or_else(|| anyhow::anyhow!("shell agent subcommand is required"))?;
+    match command.as_str() {
+        "index" => parse_shell_agent_index(rest),
+        "wrap" => parse_shell_agent_wrap(rest),
+        _ => bail!(
+            "{}",
+            super::suggest::unknown_command("shell agent subcommand", command, &["index", "wrap"])
+        ),
+    }
+}
+
+/// Back-compat shim for the pre-restructure grammar: `ingest agent-command
+/// {ingest-spool|wrap}`. `ingest-spool` maps to the same `Index` variant as
+/// the canonical `index` verb.
+pub(crate) fn parse_shell_agent_command_legacy(args: &[String]) -> Result<ShellAgentCommand> {
     let (command, rest) = args
         .split_first()
         .ok_or_else(|| anyhow::anyhow!("agent-command subcommand is required"))?;
     match command.as_str() {
-        "ingest-spool" => parse_agent_command_ingest_spool(rest),
-        "wrap" => parse_agent_command_wrap(rest),
+        "ingest-spool" => parse_shell_agent_index(rest),
+        "wrap" => parse_shell_agent_wrap(rest),
         _ => bail!(
             "{}",
             super::suggest::unknown_command(
@@ -37,7 +72,7 @@ pub(crate) fn parse_agent_command_command(args: &[String]) -> Result<AgentComman
     }
 }
 
-fn parse_shell_index(args: &[String]) -> Result<ShellCommand> {
+fn parse_shell_index(args: &[String]) -> Result<ShellUserCommand> {
     let mut path = None;
     let mut shell = "zsh".to_string();
     let mut json = false;
@@ -61,10 +96,14 @@ fn parse_shell_index(args: &[String]) -> Result<ShellCommand> {
     if shell != "zsh" {
         bail!("shell index currently supports only --shell zsh");
     }
-    Ok(ShellCommand::Index(ShellIndexArgs { path, shell, json }))
+    Ok(ShellUserCommand::Index(ShellIndexArgs {
+        path,
+        shell,
+        json,
+    }))
 }
 
-fn parse_shell_atuin_index(args: &[String]) -> Result<ShellCommand> {
+fn parse_shell_atuin_index(args: &[String]) -> Result<ShellUserCommand> {
     let mut path = None;
     let mut json = false;
     let mut i = 0usize;
@@ -80,12 +119,17 @@ fn parse_shell_atuin_index(args: &[String]) -> Result<ShellCommand> {
         i += 1;
     }
     let path = path.ok_or_else(|| anyhow::anyhow!("shell atuin-index requires --path PATH"))?;
-    Ok(ShellCommand::AtuinIndex(ShellAtuinIndexArgs { path, json }))
+    Ok(ShellUserCommand::AtuinIndex(ShellAtuinIndexArgs {
+        path,
+        json,
+    }))
 }
 
-fn parse_agent_command_ingest_spool(args: &[String]) -> Result<AgentCommandCommand> {
+fn parse_shell_agent_index(args: &[String]) -> Result<ShellAgentCommand> {
     let mut path = None;
     let mut json = false;
+    let mut server = None;
+    let mut token = None;
     let mut i = 0usize;
     while i < args.len() {
         match args[i].as_str() {
@@ -94,18 +138,28 @@ fn parse_agent_command_ingest_spool(args: &[String]) -> Result<AgentCommandComma
                 path = Some(required_value(args, i, "--path")?);
             }
             "--json" => json = true,
-            other => bail!("unknown agent-command ingest-spool argument: {other}"),
+            "--server" => {
+                i += 1;
+                server = Some(required_value(args, i, "--server")?);
+            }
+            "--token" => {
+                i += 1;
+                token = Some(required_value(args, i, "--token")?);
+            }
+            other => bail!("unknown shell agent index argument: {other}"),
         }
         i += 1;
     }
-    let path =
-        path.ok_or_else(|| anyhow::anyhow!("agent-command ingest-spool requires --path PATH"))?;
-    Ok(AgentCommandCommand::IngestSpool(
-        AgentCommandIngestSpoolArgs { path, json },
-    ))
+    let path = path.ok_or_else(|| anyhow::anyhow!("shell agent index requires --path PATH"))?;
+    Ok(ShellAgentCommand::Index(ShellAgentIndexArgs {
+        path,
+        json,
+        server,
+        token,
+    }))
 }
 
-fn parse_agent_command_wrap(args: &[String]) -> Result<AgentCommandCommand> {
+fn parse_shell_agent_wrap(args: &[String]) -> Result<ShellAgentCommand> {
     let mut spool = None;
     let mut probe = false;
     let mut command_start = None;
@@ -123,27 +177,27 @@ fn parse_agent_command_wrap(args: &[String]) -> Result<AgentCommandCommand> {
                 command_start = Some(i + 1);
                 break;
             }
-            other => bail!("unknown agent-command wrap argument: {other}"),
+            other => bail!("unknown shell agent wrap argument: {other}"),
         }
         i += 1;
     }
     // A probe is a liveness check the generated wrapper runs before delegating;
     // it needs neither a spool nor a command.
     if probe {
-        return Ok(AgentCommandCommand::Wrap(AgentCommandWrapArgs {
+        return Ok(ShellAgentCommand::Wrap(ShellAgentWrapArgs {
             spool: spool.unwrap_or_default(),
             command: Vec::new(),
             probe: true,
         }));
     }
-    let spool = spool.ok_or_else(|| anyhow::anyhow!("agent-command wrap requires --spool PATH"))?;
+    let spool = spool.ok_or_else(|| anyhow::anyhow!("shell agent wrap requires --spool PATH"))?;
     let start =
-        command_start.ok_or_else(|| anyhow::anyhow!("agent-command wrap requires -- COMMAND"))?;
+        command_start.ok_or_else(|| anyhow::anyhow!("shell agent wrap requires -- COMMAND"))?;
     let command = args[start..].to_vec();
     if command.is_empty() {
-        bail!("agent-command wrap requires COMMAND after --");
+        bail!("shell agent wrap requires COMMAND after --");
     }
-    Ok(AgentCommandCommand::Wrap(AgentCommandWrapArgs {
+    Ok(ShellAgentCommand::Wrap(ShellAgentWrapArgs {
         spool,
         command,
         probe: false,
