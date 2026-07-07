@@ -24,7 +24,7 @@ pub async fn run_shell_agent_setup(action: ShellAgentAction) -> io::Result<Setup
 
     match action {
         ShellAgentAction::Install => {
-            let cortex_bin = resolve_agent_command_cortex_binary()?;
+            let cortex_bin = resolve_agent_command_cortex_binary().await?;
             phases.push(install_agent_command_files(
                 &wrapper_path,
                 &spool_path,
@@ -38,7 +38,7 @@ pub async fn run_shell_agent_setup(action: ShellAgentAction) -> io::Result<Setup
             phases.push(agent_command_env_phase(&wrapper_path, &user_home));
         }
         ShellAgentAction::Check => {
-            let cortex_bin = resolve_agent_command_cortex_binary()?;
+            let cortex_bin = resolve_agent_command_cortex_binary().await?;
             phases.push(check_file_phase(
                 "agent-command-wrapper",
                 &wrapper_path,
@@ -270,7 +270,20 @@ exec "$@"
     )
 }
 
-fn resolve_agent_command_cortex_binary() -> io::Result<std::path::PathBuf> {
+/// Resolves and validates the cortex binary to embed in the generated
+/// wrapper script. Runs on the blocking thread pool: `validate_agent_command_binary`
+/// spawns a `cortex --version` subprocess (`Command::output()`), which would
+/// otherwise block a Tokio worker thread for the subprocess's duration —
+/// the same anti-pattern already fixed elsewhere in this codebase (see
+/// `src/app/watch_status.rs`'s `ai_watcher_process_start_time()` and
+/// `src/setup/doctor.rs`'s `stale_agent_command_units_phase`).
+async fn resolve_agent_command_cortex_binary() -> io::Result<std::path::PathBuf> {
+    tokio::task::spawn_blocking(resolve_agent_command_cortex_binary_blocking)
+        .await
+        .map_err(|error| io::Error::other(format!("resolve cortex binary task failed: {error}")))?
+}
+
+fn resolve_agent_command_cortex_binary_blocking() -> io::Result<std::path::PathBuf> {
     let path = super::resolve_cortex_binary()?;
     validate_agent_command_binary(&path)?;
     Ok(path)
