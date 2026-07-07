@@ -301,7 +301,7 @@ fn removed_top_level_commands_fail_with_replacement_guidance() {
         ("notify", "cortex alerts notifications"),
         ("file-tail", "cortex ingest file-tail"),
         ("shell", "cortex ingest shell"),
-        ("agent-command", "cortex ingest agent-command"),
+        ("agent-command", "cortex ingest shell agent"),
         ("inventory", "cortex ingest inventory"),
         ("errors", "cortex analysis errors"),
         ("incident", "cortex analysis incident"),
@@ -337,7 +337,8 @@ fn removed_command_replacements_parse() {
         vec!["alerts", "signatures"],
         vec!["alerts", "notifications"],
         vec!["ingest", "file-tail", "list"],
-        vec!["ingest", "shell", "index", "--path", "/tmp/history"],
+        vec!["ingest", "shell", "user", "index", "--path", "/tmp/history"],
+        vec!["ingest", "shell", "agent", "index", "--path", "/tmp/spool"],
         vec![
             "ingest",
             "agent-command",
