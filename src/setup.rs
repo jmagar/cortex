@@ -18,6 +18,7 @@ mod sessions_watch;
 mod sessions_watch_health;
 mod sessions_watch_legacy;
 mod shell_agent;
+mod shell_completions;
 mod systemd;
 
 pub use debug_wrapper::{run_debug_compose_setup, run_debug_wrapper_setup};
@@ -30,6 +31,7 @@ pub use heartbeat_agent::run_heartbeat_agent_setup;
 pub use sessions_index::run_sessions_index_timer_setup;
 pub use sessions_watch::run_sessions_watch_service_setup;
 pub use shell_agent::run_shell_agent_setup;
+pub use shell_completions::run_shell_completions_setup;
 
 // Test-only re-exports of private items accessed via `use super::*` in setup_tests.rs.
 #[cfg(test)]
