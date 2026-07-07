@@ -464,7 +464,7 @@ fn import_agent_command_records_dedupes_against_existing_rows() {
     let pool = init_pool(&StorageConfig::for_test(db_path)).unwrap();
     let record = sample_agent_command_record("echo hi");
 
-    let first = import_agent_command_records(&pool, &[record.clone()], None).unwrap();
+    let first = import_agent_command_records(&pool, std::slice::from_ref(&record), None).unwrap();
     assert_eq!(first.imported, 1);
     assert_eq!(first.skipped_duplicates, 0);
 
@@ -524,6 +524,7 @@ async fn forward_agent_command_spool_posts_and_truncates_on_success() {
     let mut file = std::fs::OpenOptions::new()
         .create(true)
         .write(true)
+        .truncate(true)
         .open(&spool_path)
         .unwrap();
     writeln!(
@@ -568,6 +569,7 @@ async fn forward_agent_command_spool_keeps_file_on_http_failure() {
     let mut file = std::fs::OpenOptions::new()
         .create(true)
         .write(true)
+        .truncate(true)
         .open(&spool_path)
         .unwrap();
     writeln!(

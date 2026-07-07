@@ -122,9 +122,8 @@ async fn rejects_batch_over_max_records() {
         "schema_version": 1,
         "content_scrubbed": true
     });
-    let too_many: Vec<serde_json::Value> = std::iter::repeat(one_record)
-        .take(MAX_RECORDS_PER_BATCH + 1)
-        .collect();
+    let too_many: Vec<serde_json::Value> =
+        std::iter::repeat_n(one_record, MAX_RECORDS_PER_BATCH + 1).collect();
     let body = serde_json::to_string(&too_many).unwrap();
 
     let response = app
