@@ -7,9 +7,8 @@ use cortex::compose::{
 mod args;
 mod args_config;
 pub(crate) use args::{
-    AgentCommandCommand, AgentCommandIngestSpoolArgs, AgentCommandWrapArgs, AssessAbuseArgs,
-    AssessCommand, AssessHooksArgs, AssessMcpArgs, AssessSkillArgs, CliCommand, ComposeArgs,
-    ComposeCommand, ComposeLogsArgs, ComposeMutationArgs, CorrelateArgs, DbBackupArgs,
+    AssessAbuseArgs, AssessCommand, AssessHooksArgs, AssessMcpArgs, AssessSkillArgs, CliCommand,
+    ComposeArgs, ComposeCommand, ComposeLogsArgs, ComposeMutationArgs, CorrelateArgs, DbBackupArgs,
     DbCheckpointArgs, DbCommand, DbIntegrityArgs, DbIntegrityStatusArgs, DbStatusArgs,
     DbVacuumArgs, EntityArgs, FileTailAddArgs, FileTailCommand, FileTailIdArgs, FileTailListArgs,
     FilterArgs, GraphAroundArgs, GraphCommand, GraphEvidenceArgs, GraphExplainArgs,
@@ -25,7 +24,8 @@ pub(crate) use args::{
     SessionsMcpInvestigateArgs, SessionsOutputDetail, SessionsPruneCheckpointsArgs,
     SessionsSearchArgs, SessionsSimilarArgs, SessionsSkillIncidentsArgs,
     SessionsSkillInvestigateArgs, SessionsSkillsBackfillArgs, SessionsSkillsListArgs,
-    SessionsWatchArgs, SetupArgs, SetupCommand, ShellAtuinIndexArgs, ShellCommand, ShellIndexArgs,
+    SessionsWatchArgs, SetupArgs, SetupCommand, ShellAgentCommand, ShellAgentIndexArgs,
+    ShellAgentWrapArgs, ShellAtuinIndexArgs, ShellCommand, ShellIndexArgs, ShellUserCommand,
     SigAckArgs, SigListArgs, SigUnackArgs, SilentHostsArgs, SourceIpsArgs, TailArgs, TimeRangeArgs,
     TimelineArgs,
 };
@@ -38,7 +38,9 @@ pub(crate) use args_config::{
 mod commands;
 
 mod run;
-pub(crate) use dispatch_command_log::run_agent_command_wrap;
+pub(crate) use dispatch_command_log::{
+    run_shell_agent_index_local, run_shell_agent_index_remote, run_shell_agent_wrap,
+};
 #[allow(unused_imports)]
 pub(crate) use run::ENV_USE_HTTP;
 pub(crate) use run::{CliMode, GlobalFlags, run};
