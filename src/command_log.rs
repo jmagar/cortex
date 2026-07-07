@@ -322,13 +322,36 @@ pub fn import_agent_command_records(
     forwarded_from_peer: Option<&str>,
 ) -> Result<CommandLogImportResult> {
     let mut result = CommandLogImportResult::default();
-    let mut batch = Vec::new();
+    if records.is_empty() {
+        return Ok(result);
+    }
+
+    let mut entries = Vec::with_capacity(records.len());
     for record in records {
         let mut entry = agent_record_to_entry(record);
         if let Some(peer_ip) = forwarded_from_peer {
             annotate_forwarded_peer(&mut entry, peer_ip);
         }
-        if entry_exists(pool, &entry)? {
+        entries.push(entry);
+    }
+
+    // Engineering-review fix: one dedupe query for the whole batch instead of
+    // one `SELECT COUNT(*)` per record. The original per-record loop was a
+    // check-then-insert race even within a single batch (two identical
+    // records both check "not present" before either inserts) and, now that
+    // `/v1/agent-commands` exposes this path over the network to repeatedly-
+    // retrying satellite hosts, an O(n) query-per-record cost that scales
+    // with untrusted batch size rather than a fixed per-request cost.
+    let existing = existing_entry_keys(pool, &entries)?;
+    let mut seen_in_batch = std::collections::HashSet::new();
+    let mut batch = Vec::new();
+    for entry in entries {
+        let key = (
+            entry.source_ip.clone(),
+            entry.timestamp.clone(),
+            entry.message.clone(),
+        );
+        if existing.contains(&key) || !seen_in_batch.insert(key) {
             result.skipped_duplicates += 1;
         } else {
             batch.push(entry);
@@ -338,6 +361,65 @@ pub fn import_agent_command_records(
         result.imported = db::insert_logs_batch(pool, &batch)?;
     }
     Ok(result)
+}
+
+/// Returns the `(source_ip, timestamp, message)` dedupe keys already present
+/// in `logs` for any row that could possibly collide with `entries` — one
+/// query for the whole batch, narrowed by `source_ip IN (...)` plus the
+/// batch's timestamp range so it uses the existing
+/// `idx_logs_source_ip_timestamp` index rather than scanning full history
+/// for each distinct `source_ip`. Exact three-column matching happens
+/// in-process against the returned candidate set, since SQLite has no
+/// convenient multi-column `IN` syntax for the exact-tuple check.
+fn existing_entry_keys(
+    pool: &db::DbPool,
+    entries: &[LogBatchEntry],
+) -> Result<std::collections::HashSet<(String, String, String)>> {
+    let mut source_ips: Vec<&str> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for entry in entries {
+        if seen.insert(entry.source_ip.as_str()) {
+            source_ips.push(entry.source_ip.as_str());
+        }
+    }
+    let min_ts = entries
+        .iter()
+        .map(|e| e.timestamp.as_str())
+        .min()
+        .unwrap_or_default();
+    let max_ts = entries
+        .iter()
+        .map(|e| e.timestamp.as_str())
+        .max()
+        .unwrap_or_default();
+
+    let conn = pool.get()?;
+    let placeholders = std::iter::repeat_n("?", source_ips.len())
+        .collect::<Vec<_>>()
+        .join(",");
+    let sql = format!(
+        "SELECT source_ip, timestamp, message FROM logs \
+         WHERE source_ip IN ({placeholders}) AND timestamp >= ? AND timestamp <= ?"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let mut params: Vec<&dyn rusqlite::ToSql> = source_ips
+        .iter()
+        .map(|ip| ip as &dyn rusqlite::ToSql)
+        .collect();
+    params.push(&min_ts);
+    params.push(&max_ts);
+    let rows = stmt.query_map(params.as_slice(), |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+        ))
+    })?;
+    let mut keys = std::collections::HashSet::new();
+    for row in rows {
+        keys.insert(row?);
+    }
+    Ok(keys)
 }
 
 /// Merges a `forwarded_from_peer_ip` field into an already-built entry's

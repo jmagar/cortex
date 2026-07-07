@@ -474,6 +474,23 @@ fn import_agent_command_records_dedupes_against_existing_rows() {
 }
 
 #[test]
+fn import_agent_command_records_dedupes_within_same_batch() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("cortex.db");
+    let pool = init_pool(&StorageConfig::for_test(db_path)).unwrap();
+    let record = sample_agent_command_record("echo hi");
+
+    // Two identical records in the SAME call: a per-record check-then-insert
+    // loop would let both pass a "not already present" check before either
+    // is inserted. The batch-level `existing_entry_keys` query alone doesn't
+    // catch this either, since neither record is in the DB yet — dedup must
+    // also happen against keys already accepted earlier in this same batch.
+    let result = import_agent_command_records(&pool, &[record.clone(), record], None).unwrap();
+    assert_eq!(result.imported, 1);
+    assert_eq!(result.skipped_duplicates, 1);
+}
+
+#[test]
 fn import_agent_command_records_annotates_forwarded_peer_when_present() {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("cortex.db");
