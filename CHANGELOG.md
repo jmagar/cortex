@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.7.1] - 2026-07-07
+
+### Fixed
+
+- The heartbeat agent's `reqwest::Client` now carries a 30s request timeout (matching the one added to the agent-command spool forwarding client in #123), so a remote Cortex that's hung rather than down fails fast and retries instead of blocking the heartbeat loop indefinitely.
+
 ## [3.7.0] - 2026-07-06
 
 ### Added
