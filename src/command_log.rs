@@ -1,5 +1,5 @@
 use std::fs::{self, OpenOptions};
-use std::io::{BufRead, BufReader, Seek, SeekFrom, Write};
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus};
 use std::sync::LazyLock;
@@ -395,17 +395,39 @@ pub fn import_agent_command_spool(
 /// however, review flagged that a brand-new client shouldn't repeat the same
 /// omission). Without this, a remote Cortex that's *hung* rather than down
 /// would block the CLI invocation indefinitely with no feedback.
+///
+/// **Engineering-review fix:** the exclusive spool lock is held only for the
+/// two brief local file operations (initial read, final consume-or-splice),
+/// NOT across the network POST. An earlier version held the lock via a
+/// single open `File` spanning the whole `.await` chain, including the
+/// timeout — since `ingest shell agent wrap` also takes this same lock to
+/// append each new command record, a slow-but-not-dead remote (up to the 30s
+/// timeout) would have stalled every concurrent wrapped shell command on the
+/// host for the duration of one forward attempt. Releasing the lock before
+/// the POST and re-acquiring it only to consume what was actually forwarded
+/// (see [`consume_forwarded_spool_prefix`]) fixes that without losing
+/// records appended to the spool while the POST was in flight.
 pub async fn forward_agent_command_spool(
     path: &Path,
     target: &str,
     token: Option<&str>,
 ) -> Result<CommandLogImportResult> {
     validate_spool_path_for_read(path)?;
-    let mut file = open_spool_for_update(path)?;
-    lock_file_exclusive(&file, path)?;
-    file.seek(SeekFrom::Start(0))
-        .with_context(|| format!("seek agent command spool {}", path.display()))?;
-    let parsed = parse_agent_command_spool_lines(BufReader::new(&mut file));
+
+    let (parsed, original_len) = {
+        let mut file = open_spool_for_update(path)?;
+        lock_file_exclusive(&file, path)?;
+        file.seek(SeekFrom::Start(0))
+            .with_context(|| format!("seek agent command spool {}", path.display()))?;
+        let parsed = parse_agent_command_spool_lines(BufReader::new(&mut file));
+        let original_len = file
+            .metadata()
+            .with_context(|| format!("stat agent command spool {}", path.display()))?
+            .len();
+        (parsed, original_len)
+        // `file` drops here, releasing the exclusive lock before any network I/O.
+    };
+
     let mut result = CommandLogImportResult {
         scanned: parsed.scanned,
         skipped: parsed.skipped,
@@ -439,13 +461,48 @@ pub async fn forward_agent_command_spool(
         result.imported = remote.imported;
         result.skipped_duplicates = remote.skipped_duplicates;
         result.errors += remote.errors;
+
+        consume_forwarded_spool_prefix(path, original_len)?;
     }
 
+    Ok(result)
+}
+
+/// Removes the first `original_len` bytes (everything already forwarded)
+/// from the spool, preserving any bytes appended after the original read —
+/// e.g. by a concurrent `ingest shell agent wrap` invocation while the
+/// network POST above was in flight. Re-acquires the exclusive lock only for
+/// this brief local operation.
+fn consume_forwarded_spool_prefix(path: &Path, original_len: u64) -> Result<()> {
+    let mut file = open_spool_for_update(path)?;
+    lock_file_exclusive(&file, path)?;
+    let current_len = file
+        .metadata()
+        .with_context(|| format!("stat agent command spool {}", path.display()))?
+        .len();
+    if current_len <= original_len {
+        // Nothing new was appended (or something else already drained it) —
+        // safe to truncate fully.
+        file.set_len(0)
+            .with_context(|| format!("truncate agent command spool {}", path.display()))?;
+        file.seek(SeekFrom::Start(0))
+            .with_context(|| format!("rewind agent command spool {}", path.display()))?;
+        return Ok(());
+    }
+    // New records were appended after we read `original_len` bytes — keep
+    // only that tail.
+    let mut tail = Vec::with_capacity((current_len - original_len) as usize);
+    file.seek(SeekFrom::Start(original_len))
+        .with_context(|| format!("seek agent command spool tail {}", path.display()))?;
+    file.read_to_end(&mut tail)
+        .with_context(|| format!("read agent command spool tail {}", path.display()))?;
     file.set_len(0)
         .with_context(|| format!("truncate agent command spool {}", path.display()))?;
     file.seek(SeekFrom::Start(0))
         .with_context(|| format!("rewind agent command spool {}", path.display()))?;
-    Ok(result)
+    file.write_all(&tail)
+        .with_context(|| format!("write agent command spool tail {}", path.display()))?;
+    Ok(())
 }
 
 fn agent_command_forward_url(target: &str) -> Result<String> {
@@ -541,30 +598,49 @@ fn should_run_agent_command_unwrapped(command_args: &[String]) -> bool {
         || is_agent_command_ingest_spool_invocation(command_args)
 }
 
+/// True when `argv0`'s basename is `cortex`. Shared by the self-ingest guard
+/// below and `setup/doctor.rs`'s stale-unit `ExecStart=` scan, so both agree
+/// on what counts as "this is a cortex invocation" from one place.
+pub(crate) fn cortex_argv_program_matches(argv0: &str) -> bool {
+    Path::new(argv0)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or(argv0)
+        == "cortex"
+}
+
+/// True for the canonical grammar: `ingest shell agent index`.
+pub(crate) fn is_current_shell_agent_index_argv(rest: &[&str]) -> bool {
+    matches!(rest, ["ingest", "shell", "agent", "index", ..])
+}
+
+/// True for the grouped pre-restructure grammar: `ingest agent-command
+/// ingest-spool` — the one immediately-prior grammar already deployed on
+/// live hosts (e.g. dookie).
+pub(crate) fn is_grouped_legacy_agent_command_argv(rest: &[&str]) -> bool {
+    matches!(rest, ["ingest", "agent-command", "ingest-spool", ..])
+}
+
+/// True for the even-older bare grammar: `agent-command ingest-spool` (no
+/// `ingest` prefix). This form is unreachable through the CLI's own
+/// top-level parser (see `src/surfaces.rs`), so callers that only care about
+/// what the live CLI can produce (the self-ingest guard below) deliberately
+/// don't tolerate it. `setup/doctor.rs`'s stale-unit scan does tolerate it,
+/// since it's scanning static, possibly very old `ExecStart=` text rather
+/// than argv the current CLI could have produced.
+pub(crate) fn is_bare_legacy_agent_command_argv(rest: &[&str]) -> bool {
+    matches!(rest, ["agent-command", "ingest-spool", ..])
+}
+
 fn is_agent_command_ingest_spool_invocation(command_args: &[String]) -> bool {
     let Some(program) = command_args.first() else {
         return false;
     };
-    let program_name = Path::new(program)
-        .file_name()
-        .and_then(|value| value.to_str())
-        .unwrap_or(program);
-    if program_name != "cortex" {
+    if !cortex_argv_program_matches(program) {
         return false;
     }
     let rest: Vec<&str> = command_args[1..].iter().map(String::as_str).collect();
-    // Canonical grammar: `cortex ingest shell agent index`. Grouped
-    // pre-restructure grammar: `cortex ingest agent-command ingest-spool` —
-    // the one immediately-prior grammar already deployed on live hosts (e.g.
-    // dookie), accepted defensively so a lingering unregenerated
-    // wrapper/timer can never be self-ingested. The even-older bare
-    // `cortex agent-command ingest-spool` (no `ingest` prefix) is
-    // deliberately NOT tolerated here — it's unreachable, since the CLI's
-    // top-level parser rejects that form outright (see `src/surfaces.rs`).
-    matches!(
-        rest.as_slice(),
-        ["ingest", "shell", "agent", "index", ..] | ["ingest", "agent-command", "ingest-spool", ..]
-    )
+    is_current_shell_agent_index_argv(&rest) || is_grouped_legacy_agent_command_argv(&rest)
 }
 
 fn shell_quote(value: &str) -> String {

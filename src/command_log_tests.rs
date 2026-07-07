@@ -563,6 +563,81 @@ async fn forward_agent_command_spool_posts_and_truncates_on_success() {
 }
 
 #[tokio::test]
+async fn forward_agent_command_spool_preserves_records_appended_during_slow_post() {
+    // Engineering-review regression test: the exclusive spool lock must be
+    // released before the network POST, not held across it — otherwise a
+    // concurrent `ingest shell agent wrap` invocation appending a new record
+    // while a slow forward is in flight would stall behind the lock, and if
+    // the lock-release/truncate logic were wrong, that concurrently
+    // appended record could be silently lost. This proves both: the append
+    // succeeds without blocking on the in-flight POST, and its content
+    // survives the post-POST truncate.
+    let dir = tempfile::tempdir().unwrap();
+    let spool_path = dir.path().join("agent-command.jsonl");
+    let first_line = r#"{"started_at":"2026-07-06T00:00:00Z","finished_at":"2026-07-06T00:00:01Z","duration_ms":1000,"exit_status":0,"command":"echo first","cwd":null,"agent":"claude-code","command_surface":null,"hostname":"testhost","user":null,"pid":1234,"session_id":null,"schema_version":1,"content_scrubbed":true}"#;
+    std::fs::write(&spool_path, format!("{first_line}\n")).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&spool_path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
+
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/agent-commands"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(
+                    r#"{"scanned":0,"imported":1,"skipped":0,"skipped_duplicates":0,"errors":0}"#,
+                )
+                .set_delay(std::time::Duration::from_millis(300)),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let server_uri = server.uri();
+    let forward = forward_agent_command_spool(&spool_path, &server_uri, Some("secret"));
+
+    // While the POST above is still in flight (thanks to the 300ms mock
+    // delay), append a second record directly to the spool file the way a
+    // concurrent `ingest shell agent wrap` invocation would. This must not
+    // block on the (already-released) forwarding lock.
+    let append_path = spool_path.clone();
+    let second_line = r#"{"started_at":"2026-07-06T00:00:02Z","finished_at":"2026-07-06T00:00:03Z","duration_ms":500,"exit_status":0,"command":"echo second","cwd":null,"agent":"claude-code","command_surface":null,"hostname":"testhost","user":null,"pid":5678,"session_id":null,"schema_version":1,"content_scrubbed":true}"#;
+    let appended = tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let start = std::time::Instant::now();
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&append_path)
+            .unwrap();
+        writeln!(file, "{second_line}").unwrap();
+        start.elapsed()
+    });
+
+    let (result, append_elapsed) = tokio::join!(forward, appended);
+    let result = result.unwrap();
+    let append_elapsed = append_elapsed.unwrap();
+
+    assert_eq!(result.imported, 1, "the first record was forwarded");
+    assert!(
+        append_elapsed < std::time::Duration::from_millis(250),
+        "append while POST is in flight must not block on the forwarding lock, took {append_elapsed:?}"
+    );
+
+    let remaining = std::fs::read_to_string(&spool_path).unwrap();
+    assert!(
+        remaining.contains("echo second"),
+        "record appended during the in-flight POST must survive the post-forward truncate, got: {remaining:?}"
+    );
+    assert!(
+        !remaining.contains("echo first"),
+        "the already-forwarded record must be consumed, got: {remaining:?}"
+    );
+}
+
+#[tokio::test]
 async fn forward_agent_command_spool_keeps_file_on_http_failure() {
     let dir = tempfile::tempdir().unwrap();
     let spool_path = dir.path().join("agent-command.jsonl");

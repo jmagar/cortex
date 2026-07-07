@@ -131,11 +131,12 @@ fn runtime_current_phase(repo_path: &Path) -> SetupPhase {
 /// <unit>`) has an `ExecStart=` line invoking cortex's agent-command
 /// spool-drain path using grammar older than the current canonical `ingest
 /// shell agent index`. Anchored to `ExecStart=` specifically — using the
-/// same basename+argv-shape approach as `is_agent_command_ingest_spool_invocation`
-/// (see `src/command_log.rs`) — rather than a raw substring search over the
-/// whole unit file, so a `Description=`/comment that merely *mentions* the
-/// old grammar can never cause a false positive. Doesn't attempt to judge
-/// whether the unit's target host is "correct" (that's an operator
+/// same shared basename+argv-shape primitives as
+/// `is_agent_command_ingest_spool_invocation` (`src/command_log.rs`, see
+/// engineering-review note there) — rather than a raw substring search over
+/// the whole unit file, so a `Description=`/comment that merely *mentions*
+/// the old grammar can never cause a false positive. Doesn't attempt to
+/// judge whether the unit's target host is "correct" (that's an operator
 /// decision); it only flags a stale, mechanically-detectable fact.
 pub(crate) fn agent_command_unit_uses_stale_grammar(unit_text: &str) -> bool {
     unit_text
@@ -149,30 +150,14 @@ fn exec_start_uses_stale_grammar(exec_start: &str) -> bool {
     let Some(program) = tokens.first() else {
         return false;
     };
-    let program_name = std::path::Path::new(program)
-        .file_name()
-        .and_then(|value| value.to_str())
-        .unwrap_or(program);
-    if program_name != "cortex" {
+    if !crate::command_log::cortex_argv_program_matches(program) {
         return false;
     }
     let rest = &tokens[1..];
-    let uses_current_grammar = matches!(rest, ["ingest", "shell", "agent", "index", ..]);
-    let uses_stale_grammar = matches!(rest, ["ingest", "agent-command", "ingest-spool", ..])
-        || matches!(rest, ["agent-command", "ingest-spool", ..]);
+    let uses_current_grammar = crate::command_log::is_current_shell_agent_index_argv(rest);
+    let uses_stale_grammar = crate::command_log::is_grouped_legacy_agent_command_argv(rest)
+        || crate::command_log::is_bare_legacy_agent_command_argv(rest);
     uses_stale_grammar && !uses_current_grammar
-}
-
-/// Cheap pre-filter applied before `cat`-ing every discovered unit: a unit
-/// whose *name* doesn't even plausibly relate to cortex/agent-command is
-/// skipped without a `systemctl cat` call at all. On a host with hundreds of
-/// unrelated systemd --user units, catting every single one is wasteful even
-/// once the scan is off the async runtime (see `stale_agent_command_units_phase`)
-/// — this bounds the fan-out to plausible candidates without guessing at
-/// "the right host".
-fn unit_name_plausibly_agent_command_related(name: &str) -> bool {
-    let lower = name.to_ascii_lowercase();
-    lower.contains("cortex") || lower.contains("agent") || lower.contains("command")
 }
 
 /// Pure gating logic for whether `--fix` should actually disable stale
@@ -198,11 +183,18 @@ fn stale_agent_command_units_scan(fix: bool, yes: bool) -> SetupPhase {
     let Some(unit_list) = super::systemd::systemctl_user_state("list-units", "--all") else {
         return timer.finish(SetupStatus::Ok, "systemctl --user unavailable; skipped");
     };
+    // Engineering-review fix: no unit-name pre-filter. A name-substring
+    // filter here (dropped from an earlier version) could silently exclude
+    // a renamed drain unit that doesn't happen to contain "cortex"/"agent"/
+    // "command" in its name, producing a false all-clear from `doctor`. A
+    // `systemctl --user cat` per `.service`/`.timer` unit is cheap and this
+    // scan already runs off the async runtime (see
+    // `stale_agent_command_units_phase` below), so there's no correctness
+    // reason to skip any candidate unit.
     let unit_names: Vec<&str> = unit_list
         .lines()
         .filter_map(|line| line.split_whitespace().next())
         .filter(|name| name.ends_with(".service") || name.ends_with(".timer"))
-        .filter(|name| unit_name_plausibly_agent_command_related(name))
         .collect();
 
     let mut stale = Vec::new();
