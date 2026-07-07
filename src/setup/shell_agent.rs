@@ -5,12 +5,12 @@ use std::time::Instant;
 
 use super::firstrun::ensure_private_dir;
 use super::{
-    AgentCommandAction, PhaseTimer, SetupPhase, SetupReport, SetupStatus, check_file_phase,
+    PhaseTimer, SetupPhase, SetupReport, SetupStatus, ShellAgentAction, check_file_phase,
     host_local_report_input, setup_path_value, setup_report, write_executable_file,
     write_private_file,
 };
 
-pub async fn run_agent_command_setup(action: AgentCommandAction) -> io::Result<SetupReport> {
+pub async fn run_shell_agent_setup(action: ShellAgentAction) -> io::Result<SetupReport> {
     let started = Instant::now();
     let home = super::cortex_home_dir()?;
     let env_path = home.join(".env");
@@ -23,7 +23,7 @@ pub async fn run_agent_command_setup(action: AgentCommandAction) -> io::Result<S
     let mut phases = Vec::new();
 
     match action {
-        AgentCommandAction::Install => {
+        ShellAgentAction::Install => {
             let cortex_bin = resolve_agent_command_cortex_binary()?;
             phases.push(install_agent_command_files(
                 &wrapper_path,
@@ -33,16 +33,16 @@ pub async fn run_agent_command_setup(action: AgentCommandAction) -> io::Result<S
             )?);
             phases.push(agent_command_env_phase(&wrapper_path, &user_home));
         }
-        AgentCommandAction::Remove => {
+        ShellAgentAction::Remove => {
             phases.push(remove_agent_command_wrapper(&wrapper_path)?);
             phases.push(agent_command_env_phase(&wrapper_path, &user_home));
         }
-        AgentCommandAction::Check => {
+        ShellAgentAction::Check => {
             let cortex_bin = resolve_agent_command_cortex_binary()?;
             phases.push(check_file_phase(
                 "agent-command-wrapper",
                 &wrapper_path,
-                "run cortex setup agent-command install",
+                "run cortex setup shell agent install",
             ));
             phases.push(agent_command_content_phase(
                 &wrapper_path,
@@ -164,7 +164,7 @@ fn agent_command_state_phase(state_dir: &Path, spool_path: &Path) -> SetupPhase 
             return timer.finish(
                 SetupStatus::Warn,
                 format!(
-                    "missing {}; run cortex setup agent-command install",
+                    "missing {}; run cortex setup shell agent install",
                     state_dir.display()
                 ),
             );
@@ -184,7 +184,7 @@ fn agent_command_state_phase(state_dir: &Path, spool_path: &Path) -> SetupPhase 
             return timer.finish(
                 SetupStatus::Warn,
                 format!(
-                    "missing {}; run cortex setup agent-command install",
+                    "missing {}; run cortex setup shell agent install",
                     spool_path.display()
                 ),
             );
@@ -207,7 +207,7 @@ fn agent_command_state_phase(state_dir: &Path, spool_path: &Path) -> SetupPhase 
             return timer.finish(
                 SetupStatus::Error,
                 format!(
-                    "unsafe permissions state={state_mode:o} spool={spool_mode:o}; run cortex setup agent-command install"
+                    "unsafe permissions state={state_mode:o} spool={spool_mode:o}; run cortex setup shell agent install"
                 ),
             );
         }
@@ -259,11 +259,11 @@ fn agent_command_wrapper_script(cortex_bin: &Path, spool_path: &Path) -> String 
     let spool_path = setup_path_value(spool_path).expect("validated agent command spool path");
     format!(
         r#"#!/usr/bin/env sh
-# Best-effort agent-command logging. The probe confirms `ingest agent-command
+# Best-effort agent-command logging. The probe confirms `ingest shell agent
 # wrap` is runnable; if cortex is missing or its CLI changed, fall through and
 # exec the command directly so logging can never brick the shell.
-if {cortex_bin} ingest agent-command wrap --probe >/dev/null 2>&1; then
-  exec {cortex_bin} ingest agent-command wrap --spool {spool_path} -- "$@"
+if {cortex_bin} ingest shell agent wrap --probe >/dev/null 2>&1; then
+  exec {cortex_bin} ingest shell agent wrap --spool {spool_path} -- "$@"
 fi
 exec "$@"
 "#
@@ -321,5 +321,5 @@ fn claude_settings_shell_prefix(user_home: &Path) -> io::Result<Option<String>> 
 }
 
 #[cfg(test)]
-#[path = "agent_command_tests.rs"]
+#[path = "shell_agent_tests.rs"]
 mod tests;

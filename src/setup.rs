@@ -8,7 +8,6 @@ use std::time::Instant;
 const COMPOSE_ASSET: &str = include_str!("../docker-compose.prod.yml");
 const DOCKERFILE_ASSET: &str = include_str!("../config/Dockerfile");
 
-mod agent_command;
 mod debug_wrapper;
 mod doctor;
 mod firstrun;
@@ -18,9 +17,9 @@ mod sessions_index;
 mod sessions_watch;
 mod sessions_watch_health;
 mod sessions_watch_legacy;
+mod shell_agent;
 mod systemd;
 
-pub use agent_command::run_agent_command_setup;
 pub use debug_wrapper::{run_debug_compose_setup, run_debug_wrapper_setup};
 pub use doctor::run_setup_doctor;
 pub use firstrun::run_setup;
@@ -30,6 +29,7 @@ pub(crate) use firstrun::{
 pub use heartbeat_agent::run_heartbeat_agent_setup;
 pub use sessions_index::run_sessions_index_timer_setup;
 pub use sessions_watch::run_sessions_watch_service_setup;
+pub use shell_agent::run_shell_agent_setup;
 
 // Test-only re-exports of private items accessed via `use super::*` in setup_tests.rs.
 #[cfg(test)]
@@ -83,7 +83,14 @@ pub enum SessionsWatchServiceAction {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AgentCommandAction {
+pub enum ShellAgentAction {
+    Install,
+    Remove,
+    Check,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShellCompletionsAction {
     Install,
     Remove,
     Check,
@@ -141,12 +148,22 @@ impl SessionsWatchServiceAction {
     }
 }
 
-impl AgentCommandAction {
+impl ShellAgentAction {
     fn as_str(self) -> &'static str {
         match self {
-            Self::Install => "agent-command-install",
-            Self::Remove => "agent-command-remove",
-            Self::Check => "agent-command-check",
+            Self::Install => "shell-agent-install",
+            Self::Remove => "shell-agent-remove",
+            Self::Check => "shell-agent-check",
+        }
+    }
+}
+
+impl ShellCompletionsAction {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Install => "shell-completions-install",
+            Self::Remove => "shell-completions-remove",
+            Self::Check => "shell-completions-check",
         }
     }
 }
