@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.7.0] - 2026-07-06
+
+### Added
+
+- CLI grammar rename: `cortex ingest agent-command {ingest-spool|wrap}` is now `cortex ingest shell user {index|atuin-index}` (human-typed shell history) and `cortex ingest shell agent {index|wrap}` (AI-agent-issued command capture), matching `cortex ingest shell`'s existing nesting style. The old `ingest agent-command ingest-spool`/`wrap` grammar is still accepted as a deprecated alias so already-deployed wrapper scripts and systemd timers are never bricked by this rename.
+- `cortex setup agent-command install|remove|check` is renamed to `cortex setup shell agent install|remove|check` (no back-compat alias — this is an interactively-typed operator command, not embedded in any unattended artifact).
+- New `cortex setup shell completions install|remove|check` — installs the zsh completion script to `~/.local/share/cortex/completions/_cortex`, alongside the existing `cortex completions zsh` (which still just prints the script to stdout).
+- `cortex ingest shell agent index` gains `--server URL` / `--token TOKEN`: instead of writing to the local SQLite database, the spool is forwarded over HTTP to a remote Cortex's new `POST /v1/agent-commands` endpoint. The spool is truncated only after a successful forward, so a network failure leaves it intact for the next attempt (mirroring the heartbeat agent's retry-safe pattern).
+- New `POST /v1/agent-commands` server endpoint (mounted on the shared HTTP listener, port 3100) accepts forwarded agent-command batches from satellite hosts, deduping the same way local ingest does. Capped at 1 MiB body size and 5,000 records per batch; inserted rows record the verified TCP peer IP (`forwarded_from_peer_ip` in `metadata_json`) alongside the client-claimed `hostname`/`agent` fields.
+- `cortex doctor` gains a `stale-agent-command-units` check that scans `systemctl --user` service/timer units for `ExecStart=` lines still invoking the pre-rename `agent-command ingest-spool` grammar, plus `--fix`/`--yes` flags (both required together) to disable flagged units.
+
 ## [3.6.5] - 2026-07-04
 
 ### Fixed

@@ -38,7 +38,7 @@ compatibility shims.
 | `cortex sig ...` | `cortex alerts signatures ...` |
 | `cortex notify ...` | `cortex alerts notifications ...` |
 | `cortex shell ...` | `cortex ingest shell ...` |
-| `cortex agent-command ...` | `cortex ingest agent-command ...` |
+| `cortex agent-command ...` | `cortex ingest shell agent ...` |
 | `cortex inventory ...` | `cortex ingest inventory ...` |
 | `cortex file-tail ...` | `cortex ingest file-tail ...` |
 
@@ -694,18 +694,24 @@ Rows are deduped by source identity, timestamp, and scrubbed command text, and
 the importer records a private byte-offset cursor under the cortex state
 directory so repeated imports only read newly appended history.
 
-### `cortex ingest agent-command`
+### `cortex ingest shell agent`
 
 Capture shell commands launched by agent tools, then ingest the private JSONL
-spool into SQLite.
+spool into SQLite (or forward it to a remote Cortex — see `--server`/`--token`
+below).
 
 ```bash
-cortex setup agent-command install
+cortex setup shell agent install
 export CLAUDE_CODE_SHELL_PREFIX="$HOME/.local/bin/cortex-agent-command-wrapper"
 
-cortex ingest agent-command ingest-spool --path ~/.local/state/cortex/agent-command.jsonl
-cortex ingest agent-command wrap --spool ~/.local/state/cortex/agent-command.jsonl -- cargo test
+cortex ingest shell agent index --path ~/.local/state/cortex/agent-command.jsonl
+cortex ingest shell agent index --path ~/.local/state/cortex/agent-command.jsonl --server https://cortex.example.test --token secret
+cortex ingest shell agent wrap --spool ~/.local/state/cortex/agent-command.jsonl -- cargo test
 ```
+
+The legacy grammar `cortex ingest agent-command {ingest-spool|wrap}` is still
+accepted as a deprecated alias so already-deployed wrappers/timers keep
+working until `cortex setup shell agent install` is rerun.
 
 `CLAUDE_CODE_SHELL_PREFIX` is the Claude Code hook point for commands spawned by
 Claude Code, including Bash tool calls, hook commands, and stdio MCP server
