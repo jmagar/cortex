@@ -1242,7 +1242,10 @@ pub async fn run_agent(config: HeartbeatAgentConfig) -> Result<()> {
     }
 
     let collector = HeartbeatCollector::linux();
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .context("failed to build heartbeat reqwest::Client")?;
     let mut retry = RetryBuffer::new(config.retry_buffer_limit);
     let mut sequence = chrono::Utc::now().timestamp_millis();
     let mut attempt = 0u32;

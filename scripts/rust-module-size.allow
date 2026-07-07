@@ -11,6 +11,7 @@ src/config.rs
 src/db/maintenance.rs
 src/db/pool.rs
 src/doctor.rs
+src/heartbeat_agent.rs
 src/main.rs
 src/mcp/actions.rs
 src/mcp/schemas.rs
