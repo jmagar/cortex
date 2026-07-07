@@ -315,6 +315,17 @@ pub fn import_agent_command_spool(
     Ok(result)
 }
 
+/// Forwards a local agent-command spool to a remote Cortex instead of
+/// writing to a local `DbPool`. Real implementation lands in Phase 3 (Task
+/// 8) — this stub exists so Phase 1's CLI rename compiles independently.
+pub async fn forward_agent_command_spool(
+    _path: &Path,
+    _target: &str,
+    _token: Option<&str>,
+) -> Result<CommandLogImportResult> {
+    anyhow::bail!("forwarding not yet implemented")
+}
+
 pub fn run_agent_command_wrapper(spool_path: &Path, command_args: &[String]) -> Result<i32> {
     anyhow::ensure!(
         !command_args.is_empty(),
