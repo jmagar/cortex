@@ -3,6 +3,8 @@ use std::io::Write;
 use crate::config::StorageConfig;
 use crate::db::{SearchParams, init_pool, search_logs};
 use serial_test::serial;
+use wiremock::matchers::{method, path};
+use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use super::*;
 
@@ -513,6 +515,88 @@ fn import_agent_command_records_annotates_forwarded_peer_when_present() {
         )
         .unwrap();
     assert!(!local_metadata_json.contains("forwarded_from_peer_ip"));
+}
+
+#[tokio::test]
+async fn forward_agent_command_spool_posts_and_truncates_on_success() {
+    let dir = tempfile::tempdir().unwrap();
+    let spool_path = dir.path().join("agent-command.jsonl");
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .open(&spool_path)
+        .unwrap();
+    writeln!(
+        file,
+        r#"{{"started_at":"2026-07-06T00:00:00Z","finished_at":"2026-07-06T00:00:01Z","duration_ms":1000,"exit_status":0,"command":"echo hi","cwd":null,"agent":"claude-code","command_surface":null,"hostname":"testhost","user":null,"pid":1234,"session_id":null,"schema_version":1,"content_scrubbed":true}}"#
+    )
+    .unwrap();
+    drop(file);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&spool_path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
+
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/agent-commands"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(
+            r#"{"scanned":0,"imported":1,"skipped":0,"skipped_duplicates":0,"errors":0}"#,
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let result = forward_agent_command_spool(&spool_path, &server.uri(), Some("secret"))
+        .await
+        .unwrap();
+
+    assert_eq!(result.imported, 1);
+    let remaining = std::fs::metadata(&spool_path).unwrap();
+    assert_eq!(
+        remaining.len(),
+        0,
+        "spool must be truncated after a successful forward"
+    );
+}
+
+#[tokio::test]
+async fn forward_agent_command_spool_keeps_file_on_http_failure() {
+    let dir = tempfile::tempdir().unwrap();
+    let spool_path = dir.path().join("agent-command.jsonl");
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .open(&spool_path)
+        .unwrap();
+    writeln!(
+        file,
+        r#"{{"started_at":"2026-07-06T00:00:00Z","finished_at":"2026-07-06T00:00:01Z","duration_ms":1000,"exit_status":0,"command":"echo hi","cwd":null,"agent":"claude-code","command_surface":null,"hostname":"testhost","user":null,"pid":1234,"session_id":null,"schema_version":1,"content_scrubbed":true}}"#
+    )
+    .unwrap();
+    drop(file);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&spool_path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
+
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/agent-commands"))
+        .respond_with(ResponseTemplate::new(503))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let error = forward_agent_command_spool(&spool_path, &server.uri(), None)
+        .await
+        .unwrap_err();
+
+    assert!(error.to_string().contains("503"), "got: {error}");
+    let remaining = std::fs::metadata(&spool_path).unwrap();
+    assert!(remaining.len() > 0, "spool must survive a failed forward");
 }
 
 #[test]

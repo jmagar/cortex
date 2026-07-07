@@ -5,7 +5,7 @@ use std::process::{Command, ExitStatus};
 use std::sync::LazyLock;
 use std::time::Instant;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use chrono::{DateTime, SecondsFormat, TimeZone, Utc};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -381,15 +381,82 @@ pub fn import_agent_command_spool(
     Ok(result)
 }
 
-/// Forwards a local agent-command spool to a remote Cortex instead of
-/// writing to a local `DbPool`. Real implementation lands in Phase 3 (Task
-/// 8) — this stub exists so Phase 1's CLI rename compiles independently.
+/// Reads and truncates the on-disk agent-command spool the same way
+/// [`import_agent_command_spool`] does, but POSTs the parsed records to a
+/// remote Cortex's `/v1/agent-commands` endpoint instead of writing to a
+/// local `DbPool`. Truncates only after the remote POST succeeds, so a
+/// network failure leaves the spool intact for the next attempt — mirroring
+/// the heartbeat agent's retry-safe POST-then-truncate pattern in
+/// `heartbeat_agent.rs`.
+///
+/// **Engineering-review addition:** the client has an explicit 30s request
+/// timeout (`heartbeat_agent.rs`'s own `reqwest::Client::new()` has none
+/// either, but this plan isn't the place to fix that pre-existing gap —
+/// however, review flagged that a brand-new client shouldn't repeat the same
+/// omission). Without this, a remote Cortex that's *hung* rather than down
+/// would block the CLI invocation indefinitely with no feedback.
 pub async fn forward_agent_command_spool(
-    _path: &Path,
-    _target: &str,
-    _token: Option<&str>,
+    path: &Path,
+    target: &str,
+    token: Option<&str>,
 ) -> Result<CommandLogImportResult> {
-    anyhow::bail!("forwarding not yet implemented")
+    validate_spool_path_for_read(path)?;
+    let mut file = open_spool_for_update(path)?;
+    lock_file_exclusive(&file, path)?;
+    file.seek(SeekFrom::Start(0))
+        .with_context(|| format!("seek agent command spool {}", path.display()))?;
+    let parsed = parse_agent_command_spool_lines(BufReader::new(&mut file));
+    let mut result = CommandLogImportResult {
+        scanned: parsed.scanned,
+        skipped: parsed.skipped,
+        errors: parsed.errors,
+        ..Default::default()
+    };
+
+    if !parsed.records.is_empty() {
+        let url = agent_command_forward_url(target)?;
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+            .context("failed to build agent-command forwarding reqwest::Client")?;
+        let mut request = client.post(url).json(&parsed.records);
+        if let Some(token) = token {
+            request = request.bearer_auth(token);
+        }
+        let response = request
+            .send()
+            .await
+            .context("agent command forward POST failed")?;
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            bail!("agent command forward POST returned {status}: {body}");
+        }
+        let remote: CommandLogImportResult = response
+            .json()
+            .await
+            .context("agent command forward response was not valid JSON")?;
+        result.imported = remote.imported;
+        result.skipped_duplicates = remote.skipped_duplicates;
+        result.errors += remote.errors;
+    }
+
+    file.set_len(0)
+        .with_context(|| format!("truncate agent command spool {}", path.display()))?;
+    file.seek(SeekFrom::Start(0))
+        .with_context(|| format!("rewind agent command spool {}", path.display()))?;
+    Ok(result)
+}
+
+fn agent_command_forward_url(target: &str) -> Result<String> {
+    let trimmed = target.trim_end_matches('/');
+    if trimmed.ends_with("/v1/agent-commands") {
+        return Ok(trimmed.to_string());
+    }
+    if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+        return Ok(format!("{trimmed}/v1/agent-commands"));
+    }
+    bail!("agent command forward target must start with http:// or https://");
 }
 
 pub fn run_agent_command_wrapper(spool_path: &Path, command_args: &[String]) -> Result<i32> {
