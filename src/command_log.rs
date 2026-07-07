@@ -390,11 +390,9 @@ pub fn import_agent_command_spool(
 /// `heartbeat_agent.rs`.
 ///
 /// **Engineering-review addition:** the client has an explicit 30s request
-/// timeout (`heartbeat_agent.rs`'s own `reqwest::Client::new()` has none
-/// either, but this plan isn't the place to fix that pre-existing gap —
-/// however, review flagged that a brand-new client shouldn't repeat the same
-/// omission). Without this, a remote Cortex that's *hung* rather than down
-/// would block the CLI invocation indefinitely with no feedback.
+/// timeout (`heartbeat_agent.rs`'s client now carries the same timeout).
+/// Without this, a remote Cortex that's *hung* rather than down would block
+/// the CLI invocation indefinitely with no feedback.
 ///
 /// **Engineering-review fix:** the exclusive spool lock is held only for the
 /// two brief local file operations (initial read, final consume-or-splice),
