@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.7.2] - 2026-07-07
+
+### Fixed
+
+- `cortex setup shell agent install`/`check` now run the `cortex --version` validation subprocess on the blocking thread pool instead of the async runtime, avoiding a stalled Tokio worker thread for the subprocess's duration.
+- `import_agent_command_records` now dedupes agent-command spool entries with a single batch query against already-inserted rows plus an in-batch seen-set, closing both the cross-call check-then-insert race and a same-batch duplicate gap the prior per-record loop had.
+- Added a regression test covering the full `serve_mcp()` router chain (`mcp`, `api`, OTLP, heartbeat, agent-command, and web-app routers merged together) to catch route-collision panics that only surface at runtime.
+
 ## [3.7.1] - 2026-07-07
 
 ### Fixed

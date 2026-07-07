@@ -290,6 +290,104 @@ async fn merged_app_serves_both_heartbeat_and_agent_command_routers_without_pani
     runtime.shutdown(std::time::Duration::from_secs(1)).await;
 }
 
+/// **Backlog-review addition (syslog-mcp-uail9).** The prior merge test above
+/// only covered `heartbeat_router()` + `agent_command_router()`. `serve_mcp()`
+/// in `main.rs` merges the full chain — `mcp::router`, `api::router`,
+/// `otlp_router()`, `heartbeat_router()`, `agent_command_router()`, and
+/// `web_app::router()` — so a route collision between any two of those (which
+/// only panics at runtime, not compile time) would only surface in
+/// production. This test builds and merges the same chain and probes one
+/// route per router.
+#[tokio::test]
+async fn full_serve_mcp_router_chain_merges_without_panicking() {
+    use axum::body::Body;
+    use axum::extract::connect_info::MockConnectInfo;
+    use axum::http::{Request, StatusCode, header};
+    use std::net::SocketAddr;
+    use tower::ServiceExt;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let mut config = test_config(tmp.path(), loopback_mcp());
+    config.api.api_token = crate::config::Secret(Some("test-api-token".to_string()));
+    let runtime = RuntimeCore::for_server(config).await.expect("runtime");
+
+    let api_state = crate::api::ApiState::new(
+        runtime.service(),
+        runtime.config.api.clone(),
+        runtime.config.mcp.port,
+        crate::config::mcp_bind_is_loopback(&runtime.config),
+        runtime.config.mcp.allowed_origins.clone(),
+        runtime.auth_policy().clone(),
+        runtime.config.mcp.static_token_is_admin,
+    )
+    .expect("ApiState::new should succeed against a fresh pool");
+
+    let app = crate::mcp::router(runtime.mcp_state())
+        .merge(crate::api::router(api_state).expect("api::router requires CORTEX_API_TOKEN"))
+        .merge(runtime.otlp_router())
+        .merge(runtime.heartbeat_router())
+        .merge(runtime.agent_command_router())
+        .merge(crate::web_app::router())
+        .layer(MockConnectInfo(SocketAddr::from(([127, 0, 0, 1], 9000))));
+
+    let get = |uri: &'static str| {
+        Request::builder()
+            .method("GET")
+            .uri(uri)
+            .body(Body::empty())
+            .unwrap()
+    };
+
+    let api_response = app.clone().oneshot(get("/api/hosts")).await.unwrap();
+    assert_ne!(api_response.status(), StatusCode::NOT_FOUND);
+
+    let web_app_response = app.clone().oneshot(get("/app")).await.unwrap();
+    assert_ne!(web_app_response.status(), StatusCode::NOT_FOUND);
+
+    let otlp_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/logs")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_ne!(otlp_response.status(), StatusCode::NOT_FOUND);
+
+    let heartbeat_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/heartbeats")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_ne!(heartbeat_response.status(), StatusCode::NOT_FOUND);
+
+    let agent_command_response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/agent-commands")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from("[]"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_ne!(agent_command_response.status(), StatusCode::NOT_FOUND);
+
+    runtime.shutdown(std::time::Duration::from_secs(1)).await;
+}
+
 #[tokio::test]
 async fn spawn_maintenance_tasks_constructs_expected_handles_and_shutdowns_cleanly() {
     let tmp = tempfile::tempdir().unwrap();
