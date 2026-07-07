@@ -251,6 +251,115 @@ fn import_atuin_history_with_state(
     Ok(result)
 }
 
+struct ParsedAgentCommandSpool {
+    records: Vec<AgentCommandSpoolRecord>,
+    scanned: usize,
+    skipped: usize,
+    errors: usize,
+}
+
+fn parse_agent_command_spool_lines(reader: impl BufRead) -> ParsedAgentCommandSpool {
+    let mut parsed = ParsedAgentCommandSpool {
+        records: Vec::new(),
+        scanned: 0,
+        skipped: 0,
+        errors: 0,
+    };
+    for line in reader.lines() {
+        parsed.scanned += 1;
+        let line = match line {
+            Ok(line) => line,
+            Err(e) => {
+                tracing::warn!(
+                    line = parsed.scanned,
+                    error_kind = "io",
+                    error = %e,
+                    "failed to read line from agent command spool"
+                );
+                parsed.errors += 1;
+                continue;
+            }
+        };
+        if line.trim().is_empty() {
+            parsed.skipped += 1;
+            continue;
+        }
+        match serde_json::from_str::<AgentCommandSpoolRecord>(&line) {
+            Ok(record) => parsed.records.push(record),
+            Err(e) => {
+                tracing::warn!(
+                    line = parsed.scanned,
+                    error_kind = "json",
+                    error = %e,
+                    line_preview = %truncate_utf8(&line, 80),
+                    "failed to parse agent command spool record"
+                );
+                parsed.errors += 1;
+            }
+        }
+    }
+    parsed
+}
+
+/// Dedupes `records` against existing rows and inserts the remainder.
+/// Shared by the local file-based import below and the server-side handler
+/// in `agent_command_ingest.rs` that receives a forwarded batch over HTTP.
+///
+/// `forwarded_from_peer`: **engineering-review addition.** When `Some`, every
+/// inserted row's `metadata_json` gets a `forwarded_from_peer_ip` field set
+/// to this value. The rest of each record (`hostname`, `agent`,
+/// `session_id`, which feed `source_ip`/`app_name`/`ai_tool`) remains fully
+/// client-claimed and unverified — same as the pre-existing local-only
+/// behavior — but recording the actual verified TCP peer alongside it means
+/// a forged `hostname`/`agent` claim can be cross-referenced against which
+/// token/peer really sent it, which local-only ingest never needed but the
+/// network-reachable forwarding path (Task 13) does. Local callers
+/// (`import_agent_command_spool` below) pass `None` — there's no remote peer
+/// to record for a locally-read spool file.
+pub fn import_agent_command_records(
+    pool: &db::DbPool,
+    records: &[AgentCommandSpoolRecord],
+    forwarded_from_peer: Option<&str>,
+) -> Result<CommandLogImportResult> {
+    let mut result = CommandLogImportResult::default();
+    let mut batch = Vec::new();
+    for record in records {
+        let mut entry = agent_record_to_entry(record);
+        if let Some(peer_ip) = forwarded_from_peer {
+            annotate_forwarded_peer(&mut entry, peer_ip);
+        }
+        if entry_exists(pool, &entry)? {
+            result.skipped_duplicates += 1;
+        } else {
+            batch.push(entry);
+        }
+    }
+    if !batch.is_empty() {
+        result.imported = db::insert_logs_batch(pool, &batch)?;
+    }
+    Ok(result)
+}
+
+/// Merges a `forwarded_from_peer_ip` field into an already-built entry's
+/// `metadata_json`, preserving whatever `agent_record_to_entry` already put
+/// there. `metadata_json` is always `Some` coming out of
+/// `agent_record_to_entry` (it always calls `bounded_metadata_json`), so the
+/// `unwrap_or_default` here is defensive only.
+fn annotate_forwarded_peer(entry: &mut LogBatchEntry, peer_ip: &str) {
+    let mut value: serde_json::Value = entry
+        .metadata_json
+        .as_deref()
+        .and_then(|raw| serde_json::from_str(raw).ok())
+        .unwrap_or_else(|| serde_json::json!({}));
+    if let serde_json::Value::Object(map) = &mut value {
+        map.insert(
+            "forwarded_from_peer_ip".to_string(),
+            serde_json::Value::String(peer_ip.to_string()),
+        );
+    }
+    entry.metadata_json = Some(bounded_metadata_json(value));
+}
+
 pub fn import_agent_command_spool(
     pool: &db::DbPool,
     path: &Path,
@@ -260,54 +369,11 @@ pub fn import_agent_command_spool(
     lock_file_exclusive(&file, path)?;
     file.seek(SeekFrom::Start(0))
         .with_context(|| format!("seek agent command spool {}", path.display()))?;
-    let reader = BufReader::new(&mut file);
-    let mut result = CommandLogImportResult::default();
-    let mut batch = Vec::new();
-
-    for line in reader.lines() {
-        result.scanned += 1;
-        let line = match line {
-            Ok(line) => line,
-            Err(e) => {
-                tracing::warn!(
-                    line = result.scanned,
-                    error_kind = "io",
-                    error = %e,
-                    "failed to read line from agent command spool"
-                );
-                result.errors += 1;
-                continue;
-            }
-        };
-        if line.trim().is_empty() {
-            result.skipped += 1;
-            continue;
-        }
-        match serde_json::from_str::<AgentCommandSpoolRecord>(&line) {
-            Ok(record) => {
-                let entry = agent_record_to_entry(&record);
-                if entry_exists(pool, &entry)? {
-                    result.skipped_duplicates += 1;
-                } else {
-                    batch.push(entry);
-                }
-            }
-            Err(e) => {
-                tracing::warn!(
-                    line = result.scanned,
-                    error_kind = "json",
-                    error = %e,
-                    line_preview = %truncate_utf8(&line, 80),
-                    "failed to parse agent command spool record"
-                );
-                result.errors += 1;
-            }
-        }
-    }
-
-    if !batch.is_empty() {
-        result.imported = db::insert_logs_batch(pool, &batch)?;
-    }
+    let parsed = parse_agent_command_spool_lines(BufReader::new(&mut file));
+    let mut result = import_agent_command_records(pool, &parsed.records, None)?;
+    result.scanned = parsed.scanned;
+    result.skipped += parsed.skipped;
+    result.errors += parsed.errors;
     file.set_len(0)
         .with_context(|| format!("truncate agent command spool {}", path.display()))?;
     file.seek(SeekFrom::Start(0))

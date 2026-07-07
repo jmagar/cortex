@@ -436,6 +436,85 @@ fn imports_agent_spool_as_agent_command_rows() {
     assert_eq!(second.imported, 0);
 }
 
+fn sample_agent_command_record(command: &str) -> AgentCommandSpoolRecord {
+    AgentCommandSpoolRecord {
+        started_at: "2026-07-06T00:00:00Z".to_string(),
+        finished_at: "2026-07-06T00:00:01Z".to_string(),
+        duration_ms: 1000,
+        exit_status: Some(0),
+        command: command.to_string(),
+        cwd: None,
+        agent: "claude-code".to_string(),
+        command_surface: None,
+        hostname: "testhost".to_string(),
+        user: None,
+        pid: 1234,
+        session_id: None,
+        schema_version: 1,
+        content_scrubbed: true,
+    }
+}
+
+#[test]
+fn import_agent_command_records_dedupes_against_existing_rows() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("cortex.db");
+    let pool = init_pool(&StorageConfig::for_test(db_path)).unwrap();
+    let record = sample_agent_command_record("echo hi");
+
+    let first = import_agent_command_records(&pool, &[record.clone()], None).unwrap();
+    assert_eq!(first.imported, 1);
+    assert_eq!(first.skipped_duplicates, 0);
+
+    let second = import_agent_command_records(&pool, &[record], None).unwrap();
+    assert_eq!(second.imported, 0);
+    assert_eq!(second.skipped_duplicates, 1);
+}
+
+#[test]
+fn import_agent_command_records_annotates_forwarded_peer_when_present() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("cortex.db");
+    let pool = init_pool(&StorageConfig::for_test(db_path)).unwrap();
+    let record = sample_agent_command_record("echo hi");
+
+    let result = import_agent_command_records(&pool, &[record], Some("203.0.113.7")).unwrap();
+    assert_eq!(result.imported, 1);
+
+    // Query the inserted row directly to prove the peer IP actually landed
+    // in metadata_json, rather than just asserting the call didn't panic.
+    // Acquire and drop a pool connection per query rather than holding one
+    // across the second `import_agent_command_records` call below, which
+    // also needs a connection from the same (small, test-sized) pool.
+    let metadata_json: String = pool
+        .get()
+        .unwrap()
+        .query_row(
+            "SELECT metadata_json FROM logs WHERE message = ?1",
+            ["echo hi"],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(
+        metadata_json.contains("203.0.113.7"),
+        "expected forwarded_from_peer_ip in metadata_json, got: {metadata_json}"
+    );
+
+    // A second record with no forwarding peer must NOT gain the field.
+    let local_record = sample_agent_command_record("echo local");
+    import_agent_command_records(&pool, &[local_record], None).unwrap();
+    let local_metadata_json: String = pool
+        .get()
+        .unwrap()
+        .query_row(
+            "SELECT metadata_json FROM logs WHERE message = ?1",
+            ["echo local"],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(!local_metadata_json.contains("forwarded_from_peer_ip"));
+}
+
 #[test]
 fn agent_spool_malformed_line_with_multibyte_at_preview_boundary_no_panic() {
     // Regression (bead syslog-mcp-8ouq): the JSON-parse error branch logs an
