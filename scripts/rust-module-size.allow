@@ -17,3 +17,4 @@ src/mcp/actions.rs
 src/mcp/schemas.rs
 src/runtime.rs
 src/scanner.rs
+xtask/src/version.rs

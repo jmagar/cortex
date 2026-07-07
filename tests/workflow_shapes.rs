@@ -59,17 +59,32 @@ fn ci_uses_changed_path_classifier_and_stable_gate() {
 }
 
 #[test]
-fn auto_tag_dispatches_release_as_publish_not_dry_run() {
-    let auto_tag = include_str!("../.github/workflows/auto-tag.yml");
+fn release_please_opens_prs_and_fixes_up_regex_carriers() {
+    let release_please = include_str!("../.github/workflows/release-please.yml");
     let release = include_str!("../.github/workflows/release.yml");
 
     assert!(
-        auto_tag.contains("gh workflow run release.yml --ref"),
-        "auto-tag must explicitly dispatch release.yml after pushing a tag"
+        release_please.contains("googleapis/release-please-action"),
+        "release-please.yml must run the googleapis release-please-action"
     );
     assert!(
-        auto_tag.contains("-f publish=true"),
-        "auto-tag dispatch must request a real publish; workflow_dispatch defaults to dry-run"
+        release_please.contains("config-file: release-please-config.json")
+            && release_please.contains("manifest-file: .release-please-manifest.json"),
+        "release-please.yml must point at the repo's config/manifest files"
+    );
+    assert!(
+        release_please.contains("RELEASE_PLEASE_TOKEN"),
+        "release-please must require a non-default token so it can trigger downstream workflows"
+    );
+    assert!(
+        release_please.contains("cargo xtask sync-version")
+            && release_please.contains("cargo xtask check-release-versions"),
+        "the release-pr-fixup job must sync regex-based version carriers and re-verify them"
+    );
+
+    assert!(
+        release.contains("tags: [\"v*\"]"),
+        "release.yml must still trigger on the vX.Y.Z tags release-please creates"
     );
     assert!(
         release.contains("publish:") && release.contains("type: boolean"),
@@ -79,6 +94,42 @@ fn auto_tag_dispatches_release_as_publish_not_dry_run() {
         release.contains("github.event.inputs.publish == 'true'"),
         "release publish job must run for tagged workflow_dispatch when publish=true"
     );
+    assert!(
+        !release.contains("generate_release_notes: true"),
+        "release.yml must not overwrite the changelog-derived notes release-please already wrote"
+    );
+}
+
+#[test]
+fn release_please_config_and_manifest_agree_with_components_toml() {
+    let config = include_str!("../release-please-config.json");
+    let manifest = include_str!("../.release-please-manifest.json");
+    let components = include_str!("../release/components.toml");
+
+    assert!(
+        config.contains("\"release-type\": \"rust\""),
+        "cortex is a single-crate Rust package"
+    );
+    for extra_file in ["server.json", "mcpb/manifest.json"] {
+        assert!(
+            config.contains(extra_file),
+            "release-please-config.json must declare an extra-files entry for {extra_file}"
+        );
+    }
+    assert!(
+        manifest.contains("\".\""),
+        ".release-please-manifest.json must track the root package"
+    );
+
+    // The two regex_version carriers release-please's extra-files schema
+    // can't express must stay declared in components.toml so the
+    // release-pr-fixup job's `cargo xtask sync-version` step covers them.
+    for regex_carrier in ["server.json", "docker-compose.prod.yml"] {
+        assert!(
+            components.contains(&format!("regex_version\", path = \"{regex_carrier}\"")),
+            "release/components.toml must keep a regex_version carrier for {regex_carrier}"
+        );
+    }
 }
 
 #[test]
