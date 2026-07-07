@@ -570,22 +570,28 @@ Local command history can be correlated with system logs without introducing a
 separate table:
 
 ```bash
-cortex ingest shell index --path ~/.zsh_history --shell zsh
-cortex setup agent-command install
+cortex ingest shell user index --path ~/.zsh_history --shell zsh
+cortex setup shell agent install
 export CLAUDE_CODE_SHELL_PREFIX="$HOME/.local/bin/cortex-agent-command-wrapper"
-cortex ingest agent-command ingest-spool --path ~/.local/state/cortex/agent-command.jsonl
+cortex ingest shell agent index --path ~/.local/state/cortex/agent-command.jsonl
 ```
 
-`cortex ingest shell index` imports zsh extended history lines with timestamps and
+`cortex ingest shell agent index` also accepts `--server URL`/`--token TOKEN`
+to forward the spool to a remote Cortex's `POST /v1/agent-commands` endpoint
+instead of writing to the local database — the spool is only truncated after
+a successful forward. The legacy grammar `cortex ingest agent-command
+{ingest-spool|wrap}` is still accepted as a deprecated alias.
+
+`cortex ingest shell user index` imports zsh extended history lines with timestamps and
 durations as `source_kind="shell-history"` rows. Plain untimestamped history is
 skipped because it cannot support time-window correlation.
 
-`cortex setup agent-command install` writes a small local wrapper for Claude
+`cortex setup shell agent install` writes a small local wrapper for Claude
 Code's `CLAUDE_CODE_SHELL_PREFIX`. Claude Code invokes that prefix for spawned
 shell commands, including Bash tool calls, hook commands, and stdio MCP server
 startup commands. The wrapper preserves stdio and exit code, appends one
 scrubbed JSONL record under `~/.local/state/cortex/`, and
-`cortex ingest agent-command ingest-spool` imports those records as
+`cortex ingest shell agent index` imports those records as
 `source_kind="agent-command"` rows, then truncates the locked spool after a
 successful import so repeated runs only process new commands. The wrapper
 records command text, cwd, duration, exit status, agent name, PID, host/user, and

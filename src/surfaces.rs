@@ -203,7 +203,7 @@ pub const SURFACE_SPECS: &[SurfaceSpec] = &[
     cli!("stats", Stats, Canonical, Read),
     cli!("ingest-rate", Stats, MovedIntoGroupedDomain, Read, replace: "stats ingest-rate", reason: "ingest throughput is a stats mode"),
     cli!("shell", Ingest, MovedIntoGroupedDomain, Admin, replace: "ingest shell", reason: "manual ingestion commands live under ingest"),
-    cli!("agent-command", Ingest, MovedIntoGroupedDomain, Admin, replace: "ingest agent-command", reason: "agent command ingestion lives under ingest"),
+    cli!("agent-command", Ingest, MovedIntoGroupedDomain, Admin, replace: "ingest shell agent", reason: "agent command ingestion lives under ingest shell agent"),
     local_cli!("heartbeat", Ingest, RetainedTopLevelOperational),
     cli!("inventory", Ingest, MovedIntoGroupedDomain, Read, replace: "ingest inventory", reason: "inventory refresh/status is an ingest-adjacent cache operation"),
     cli!("file-tail", Ingest, MovedIntoGroupedDomain, Admin, replace: "ingest file-tail", reason: "file-tail management lives under ingest"),

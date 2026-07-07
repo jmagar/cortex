@@ -11,7 +11,7 @@ use super::{
     check_file_phase, setup_report,
 };
 
-pub async fn run_setup_doctor() -> io::Result<SetupReport> {
+pub async fn run_setup_doctor(fix: bool, yes: bool) -> io::Result<SetupReport> {
     let started = Instant::now();
     let home = super::cortex_home_dir()?;
     let env_path = home.join(".env");
@@ -57,6 +57,7 @@ pub async fn run_setup_doctor() -> io::Result<SetupReport> {
             .phases,
     );
     phases.push(runtime_current_phase(&repo_path));
+    phases.push(stale_agent_command_units_phase(fix, yes).await);
 
     let elapsed_ms = started.elapsed().as_millis();
     Ok(setup_report(
@@ -123,6 +124,168 @@ fn runtime_current_phase(repo_path: &Path) -> SetupPhase {
             .to_string(),
         ),
         Err(error) => timer.finish(SetupStatus::Error, error.to_string()),
+    }
+}
+
+/// Returns `true` when `unit_text` (the output of `systemctl --user cat
+/// <unit>`) has an `ExecStart=` line invoking cortex's agent-command
+/// spool-drain path using grammar older than the current canonical `ingest
+/// shell agent index`. Anchored to `ExecStart=` specifically — using the
+/// same shared basename+argv-shape primitives as
+/// `is_agent_command_ingest_spool_invocation` (`src/command_log.rs`, see
+/// engineering-review note there) — rather than a raw substring search over
+/// the whole unit file, so a `Description=`/comment that merely *mentions*
+/// the old grammar can never cause a false positive. Doesn't attempt to
+/// judge whether the unit's target host is "correct" (that's an operator
+/// decision); it only flags a stale, mechanically-detectable fact.
+pub(crate) fn agent_command_unit_uses_stale_grammar(unit_text: &str) -> bool {
+    unit_text
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("ExecStart="))
+        .any(exec_start_uses_stale_grammar)
+}
+
+fn exec_start_uses_stale_grammar(exec_start: &str) -> bool {
+    let tokens: Vec<&str> = exec_start.split_whitespace().collect();
+    let Some(program) = tokens.first() else {
+        return false;
+    };
+    if !crate::command_log::cortex_argv_program_matches(program) {
+        return false;
+    }
+    let rest = &tokens[1..];
+    let uses_current_grammar = crate::command_log::is_current_shell_agent_index_argv(rest);
+    let uses_stale_grammar = crate::command_log::is_grouped_legacy_agent_command_argv(rest)
+        || crate::command_log::is_bare_legacy_agent_command_argv(rest);
+    uses_stale_grammar && !uses_current_grammar
+}
+
+/// Pure gating logic for whether `--fix` should actually disable stale
+/// units: requires both `fix` AND `yes`, and only when there's something
+/// stale to act on. Extracted so it's unit-testable without any
+/// `systemctl` dependency.
+fn should_disable(fix: bool, yes: bool, stale: &[String]) -> bool {
+    fix && yes && !stale.is_empty()
+}
+
+/// Scans `systemctl --user` service/timer units for ones whose `ExecStart=`
+/// still invokes the pre-rename `agent-command ingest-spool` grammar, and
+/// reports them so an operator can rerun `cortex setup shell agent install`
+/// (which regenerates the wrapper) or manually fix the unit. Requires both
+/// `fix: true` AND `yes: true` before disabling anything — matching this
+/// repo's own `cortex compose down` precedent of refusing destructive action
+/// without an explicit `--yes` — since a false positive here would silently
+/// kill an unrelated running service. This is synchronous, blocking code:
+/// callers MUST run it via `tokio::task::spawn_blocking` (see the async
+/// wrapper below) rather than calling it directly from an async context.
+fn stale_agent_command_units_scan(fix: bool, yes: bool) -> SetupPhase {
+    let timer = PhaseTimer::start("stale-agent-command-units");
+    let Some(unit_list) = super::systemd::systemctl_user_state("list-units", "--all") else {
+        return timer.finish(SetupStatus::Ok, "systemctl --user unavailable; skipped");
+    };
+    // Engineering-review fix: no unit-name pre-filter. A name-substring
+    // filter here (dropped from an earlier version) could silently exclude
+    // a renamed drain unit that doesn't happen to contain "cortex"/"agent"/
+    // "command" in its name, producing a false all-clear from `doctor`. A
+    // `systemctl --user cat` per `.service`/`.timer` unit is cheap and this
+    // scan already runs off the async runtime (see
+    // `stale_agent_command_units_phase` below), so there's no correctness
+    // reason to skip any candidate unit.
+    let unit_names: Vec<&str> = unit_list
+        .lines()
+        .filter_map(|line| line.split_whitespace().next())
+        .filter(|name| name.ends_with(".service") || name.ends_with(".timer"))
+        .collect();
+
+    let mut stale = Vec::new();
+    for unit in unit_names {
+        let Some(unit_text) = super::systemd::systemctl_user_state("cat", unit) else {
+            tracing::debug!(
+                unit,
+                "systemctl --user cat failed; skipping stale-grammar check for this unit \
+                 (result is inconclusive, not a confirmed clean bill of health)"
+            );
+            continue;
+        };
+        if agent_command_unit_uses_stale_grammar(&unit_text) {
+            stale.push(unit.to_string());
+        }
+    }
+
+    if stale.is_empty() {
+        return timer.finish(
+            SetupStatus::Ok,
+            "no stale agent-command grammar found in systemd --user units",
+        );
+    }
+
+    if fix && !yes {
+        return timer.finish(
+            SetupStatus::Warn,
+            format!(
+                "stale agent-command grammar in: {} — rerun with `cortex doctor --fix --yes` \
+                 to disable, or fix/regenerate manually with `cortex setup shell agent install`",
+                stale.join(", ")
+            ),
+        );
+    }
+
+    if should_disable(fix, yes, &stale) {
+        let mut disabled = Vec::new();
+        let mut failed = Vec::new();
+        for unit in &stale {
+            match super::systemd::run_systemctl_user(&["disable", "--now", unit]) {
+                Ok(output) if output.status.success() => disabled.push(unit.clone()),
+                Ok(output) => failed.push(format!("{unit} (systemctl exited {})", output.status)),
+                Err(error) => failed.push(format!("{unit} ({error})")),
+            }
+        }
+        if failed.is_empty() {
+            return timer.finish(
+                SetupStatus::Warn,
+                format!(
+                    "disabled stale agent-command units: {}",
+                    disabled.join(", ")
+                ),
+            );
+        }
+        return timer.finish(
+            SetupStatus::Error,
+            format!(
+                "disabled {} unit(s) [{}]; FAILED to disable: {}",
+                disabled.len(),
+                disabled.join(", "),
+                failed.join("; ")
+            ),
+        );
+    }
+
+    timer.finish(
+        SetupStatus::Warn,
+        format!(
+            "stale agent-command grammar in: {} — run `cortex setup shell agent install` then \
+             `cortex doctor --fix --yes`, or fix/disable manually",
+            stale.join(", ")
+        ),
+    )
+}
+
+/// Async entry point: offloads the blocking systemd scan (subprocess spawns
+/// via `Command::output()`, no timeout) onto the blocking thread pool so it
+/// can never stall a Tokio worker thread, regardless of how many systemd
+/// --user units the host has. This codebase has one prior incident
+/// (`ai_watcher_process_start_time()` in `src/app/watch_status.rs`) where a
+/// blocking `Command::output()` call was made directly inside an `async fn`
+/// and stalled a Tokio worker thread; this scan loops over every systemd
+/// --user unit and would reproduce the same bug, worse, via fan-out.
+pub(crate) async fn stale_agent_command_units_phase(fix: bool, yes: bool) -> SetupPhase {
+    let timer = PhaseTimer::start("stale-agent-command-units");
+    match tokio::task::spawn_blocking(move || stale_agent_command_units_scan(fix, yes)).await {
+        Ok(phase) => phase,
+        Err(error) => timer.finish(
+            SetupStatus::Error,
+            format!("stale agent-command unit scan task panicked: {error}"),
+        ),
     }
 }
 

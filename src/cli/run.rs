@@ -2,8 +2,8 @@ use anyhow::{Result, anyhow, bail};
 use cortex::app::CortexService;
 
 use super::args::{
-    AgentCommandCommand, AlertsCommand, CliCommand, DbCommand, GraphCommand, IngestCommand,
-    NotifyCommand, ShellCommand, SigCommand, StateCommand, StatsCommand,
+    AlertsCommand, CliCommand, DbCommand, GraphCommand, IngestCommand, NotifyCommand, ShellCommand,
+    ShellUserCommand, SigCommand, StateCommand, StatsCommand,
 };
 use super::dispatch;
 
@@ -68,20 +68,22 @@ pub(crate) async fn run(mode: CliMode, command: CliCommand) -> Result<()> {
         },
         CliCommand::Ingest(command) => match command {
             IngestCommand::Shell(shell) => match shell {
-                ShellCommand::Index(args) => {
-                    super::dispatch_command_log::run_shell_index(&mode, args).await
-                }
-                ShellCommand::AtuinIndex(args) => {
-                    super::dispatch_command_log::run_shell_atuin_index(&mode, args).await
-                }
-            },
-            IngestCommand::AgentCommand(command) => match command {
-                AgentCommandCommand::IngestSpool(args) => {
-                    super::dispatch_command_log::run_agent_command_ingest_spool(&mode, args).await
-                }
-                AgentCommandCommand::Wrap(_) => {
+                ShellCommand::User(user) => match user {
+                    ShellUserCommand::Index(args) => {
+                        super::dispatch_command_log::run_shell_index(&mode, args).await
+                    }
+                    ShellUserCommand::AtuinIndex(args) => {
+                        super::dispatch_command_log::run_shell_atuin_index(&mode, args).await
+                    }
+                },
+                // Both `ShellAgentCommand` variants are intercepted in
+                // `main.rs` before `CliMode`/`RuntimeCore` construction —
+                // `Index` because it may forward instead of touching a local
+                // DB, `Wrap` because of its liveness-probe fast path. Neither
+                // should ever reach this generic dispatcher.
+                ShellCommand::Agent(_) => {
                     bail!(
-                        "internal: ingest agent-command wrap must be dispatched before CliMode creation"
+                        "internal: ingest shell agent commands must be dispatched before CliMode creation"
                     )
                 }
             },

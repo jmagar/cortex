@@ -185,10 +185,10 @@ struct TextDoctorReport {
 }
 
 impl TextDoctorReport {
-    async fn collect() -> Self {
+    async fn collect(fix: bool, yes: bool) -> Self {
         Self {
             sections: vec![
-                collect_setup_section().await,
+                collect_setup_section(fix, yes).await,
                 collect_compose_section(),
                 collect_binary_section(),
                 collect_ai_section().await,
@@ -229,8 +229,8 @@ struct JsonDoctorReport {
 }
 
 impl JsonDoctorReport {
-    async fn collect() -> Self {
-        let setup = crate::setup::run_setup_doctor()
+    async fn collect(fix: bool, yes: bool) -> Self {
+        let setup = crate::setup::run_setup_doctor(fix, yes)
             .await
             .map(|r| serde_json::to_value(&r).unwrap_or_default())
             .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}));
@@ -317,9 +317,9 @@ impl JsonDoctorReport {
     }
 }
 
-pub async fn run_full_doctor(json: bool) -> Result<()> {
+pub async fn run_full_doctor(json: bool, fix: bool, yes: bool) -> Result<()> {
     if json {
-        let report = JsonDoctorReport::collect().await;
+        let report = JsonDoctorReport::collect(fix, yes).await;
         let total = report.error_count();
         println!("{}", serde_json::to_string_pretty(&report)?);
         if total > 0 {
@@ -328,13 +328,13 @@ pub async fn run_full_doctor(json: bool) -> Result<()> {
         return Ok(());
     }
 
-    TextDoctorReport::collect().await.render()
+    TextDoctorReport::collect(fix, yes).await.render()
 }
 
-async fn collect_setup_section() -> DoctorSection {
+async fn collect_setup_section(fix: bool, yes: bool) -> DoctorSection {
     let mut phases = Vec::new();
     let mut seen = std::collections::HashSet::new();
-    match crate::setup::run_setup_doctor().await {
+    match crate::setup::run_setup_doctor(fix, yes).await {
         Ok(report) => {
             for phase in &report.phases {
                 if phase.name == "runtime-current" || !seen.insert(phase.name.to_string()) {

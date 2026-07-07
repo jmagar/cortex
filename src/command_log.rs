@@ -1,11 +1,11 @@
 use std::fs::{self, OpenOptions};
-use std::io::{BufRead, BufReader, Seek, SeekFrom, Write};
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus};
 use std::sync::LazyLock;
 use std::time::Instant;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use chrono::{DateTime, SecondsFormat, TimeZone, Utc};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -251,6 +251,115 @@ fn import_atuin_history_with_state(
     Ok(result)
 }
 
+struct ParsedAgentCommandSpool {
+    records: Vec<AgentCommandSpoolRecord>,
+    scanned: usize,
+    skipped: usize,
+    errors: usize,
+}
+
+fn parse_agent_command_spool_lines(reader: impl BufRead) -> ParsedAgentCommandSpool {
+    let mut parsed = ParsedAgentCommandSpool {
+        records: Vec::new(),
+        scanned: 0,
+        skipped: 0,
+        errors: 0,
+    };
+    for line in reader.lines() {
+        parsed.scanned += 1;
+        let line = match line {
+            Ok(line) => line,
+            Err(e) => {
+                tracing::warn!(
+                    line = parsed.scanned,
+                    error_kind = "io",
+                    error = %e,
+                    "failed to read line from agent command spool"
+                );
+                parsed.errors += 1;
+                continue;
+            }
+        };
+        if line.trim().is_empty() {
+            parsed.skipped += 1;
+            continue;
+        }
+        match serde_json::from_str::<AgentCommandSpoolRecord>(&line) {
+            Ok(record) => parsed.records.push(record),
+            Err(e) => {
+                tracing::warn!(
+                    line = parsed.scanned,
+                    error_kind = "json",
+                    error = %e,
+                    line_preview = %truncate_utf8(&line, 80),
+                    "failed to parse agent command spool record"
+                );
+                parsed.errors += 1;
+            }
+        }
+    }
+    parsed
+}
+
+/// Dedupes `records` against existing rows and inserts the remainder.
+/// Shared by the local file-based import below and the server-side handler
+/// in `agent_command_ingest.rs` that receives a forwarded batch over HTTP.
+///
+/// `forwarded_from_peer`: **engineering-review addition.** When `Some`, every
+/// inserted row's `metadata_json` gets a `forwarded_from_peer_ip` field set
+/// to this value. The rest of each record (`hostname`, `agent`,
+/// `session_id`, which feed `source_ip`/`app_name`/`ai_tool`) remains fully
+/// client-claimed and unverified — same as the pre-existing local-only
+/// behavior — but recording the actual verified TCP peer alongside it means
+/// a forged `hostname`/`agent` claim can be cross-referenced against which
+/// token/peer really sent it, which local-only ingest never needed but the
+/// network-reachable forwarding path (Task 13) does. Local callers
+/// (`import_agent_command_spool` below) pass `None` — there's no remote peer
+/// to record for a locally-read spool file.
+pub fn import_agent_command_records(
+    pool: &db::DbPool,
+    records: &[AgentCommandSpoolRecord],
+    forwarded_from_peer: Option<&str>,
+) -> Result<CommandLogImportResult> {
+    let mut result = CommandLogImportResult::default();
+    let mut batch = Vec::new();
+    for record in records {
+        let mut entry = agent_record_to_entry(record);
+        if let Some(peer_ip) = forwarded_from_peer {
+            annotate_forwarded_peer(&mut entry, peer_ip);
+        }
+        if entry_exists(pool, &entry)? {
+            result.skipped_duplicates += 1;
+        } else {
+            batch.push(entry);
+        }
+    }
+    if !batch.is_empty() {
+        result.imported = db::insert_logs_batch(pool, &batch)?;
+    }
+    Ok(result)
+}
+
+/// Merges a `forwarded_from_peer_ip` field into an already-built entry's
+/// `metadata_json`, preserving whatever `agent_record_to_entry` already put
+/// there. `metadata_json` is always `Some` coming out of
+/// `agent_record_to_entry` (it always calls `bounded_metadata_json`), so the
+/// `unwrap_or_default` here is defensive only.
+fn annotate_forwarded_peer(entry: &mut LogBatchEntry, peer_ip: &str) {
+    let mut value: serde_json::Value = entry
+        .metadata_json
+        .as_deref()
+        .and_then(|raw| serde_json::from_str(raw).ok())
+        .unwrap_or_else(|| serde_json::json!({}));
+    if let serde_json::Value::Object(map) = &mut value {
+        map.insert(
+            "forwarded_from_peer_ip".to_string(),
+            serde_json::Value::String(peer_ip.to_string()),
+        );
+    }
+    entry.metadata_json = Some(bounded_metadata_json(value));
+}
+
 pub fn import_agent_command_spool(
     pool: &db::DbPool,
     path: &Path,
@@ -260,59 +369,151 @@ pub fn import_agent_command_spool(
     lock_file_exclusive(&file, path)?;
     file.seek(SeekFrom::Start(0))
         .with_context(|| format!("seek agent command spool {}", path.display()))?;
-    let reader = BufReader::new(&mut file);
-    let mut result = CommandLogImportResult::default();
-    let mut batch = Vec::new();
-
-    for line in reader.lines() {
-        result.scanned += 1;
-        let line = match line {
-            Ok(line) => line,
-            Err(e) => {
-                tracing::warn!(
-                    line = result.scanned,
-                    error_kind = "io",
-                    error = %e,
-                    "failed to read line from agent command spool"
-                );
-                result.errors += 1;
-                continue;
-            }
-        };
-        if line.trim().is_empty() {
-            result.skipped += 1;
-            continue;
-        }
-        match serde_json::from_str::<AgentCommandSpoolRecord>(&line) {
-            Ok(record) => {
-                let entry = agent_record_to_entry(&record);
-                if entry_exists(pool, &entry)? {
-                    result.skipped_duplicates += 1;
-                } else {
-                    batch.push(entry);
-                }
-            }
-            Err(e) => {
-                tracing::warn!(
-                    line = result.scanned,
-                    error_kind = "json",
-                    error = %e,
-                    line_preview = %truncate_utf8(&line, 80),
-                    "failed to parse agent command spool record"
-                );
-                result.errors += 1;
-            }
-        }
-    }
-
-    if !batch.is_empty() {
-        result.imported = db::insert_logs_batch(pool, &batch)?;
-    }
+    let parsed = parse_agent_command_spool_lines(BufReader::new(&mut file));
+    let mut result = import_agent_command_records(pool, &parsed.records, None)?;
+    result.scanned = parsed.scanned;
+    result.skipped += parsed.skipped;
+    result.errors += parsed.errors;
     file.set_len(0)
         .with_context(|| format!("truncate agent command spool {}", path.display()))?;
     file.seek(SeekFrom::Start(0))
         .with_context(|| format!("rewind agent command spool {}", path.display()))?;
     Ok(result)
+}
+
+/// Reads and truncates the on-disk agent-command spool the same way
+/// [`import_agent_command_spool`] does, but POSTs the parsed records to a
+/// remote Cortex's `/v1/agent-commands` endpoint instead of writing to a
+/// local `DbPool`. Truncates only after the remote POST succeeds, so a
+/// network failure leaves the spool intact for the next attempt — mirroring
+/// the heartbeat agent's retry-safe POST-then-truncate pattern in
+/// `heartbeat_agent.rs`.
+///
+/// **Engineering-review addition:** the client has an explicit 30s request
+/// timeout (`heartbeat_agent.rs`'s own `reqwest::Client::new()` has none
+/// either, but this plan isn't the place to fix that pre-existing gap —
+/// however, review flagged that a brand-new client shouldn't repeat the same
+/// omission). Without this, a remote Cortex that's *hung* rather than down
+/// would block the CLI invocation indefinitely with no feedback.
+///
+/// **Engineering-review fix:** the exclusive spool lock is held only for the
+/// two brief local file operations (initial read, final consume-or-splice),
+/// NOT across the network POST. An earlier version held the lock via a
+/// single open `File` spanning the whole `.await` chain, including the
+/// timeout — since `ingest shell agent wrap` also takes this same lock to
+/// append each new command record, a slow-but-not-dead remote (up to the 30s
+/// timeout) would have stalled every concurrent wrapped shell command on the
+/// host for the duration of one forward attempt. Releasing the lock before
+/// the POST and re-acquiring it only to consume what was actually forwarded
+/// (see [`consume_forwarded_spool_prefix`]) fixes that without losing
+/// records appended to the spool while the POST was in flight.
+pub async fn forward_agent_command_spool(
+    path: &Path,
+    target: &str,
+    token: Option<&str>,
+) -> Result<CommandLogImportResult> {
+    validate_spool_path_for_read(path)?;
+
+    let (parsed, original_len) = {
+        let mut file = open_spool_for_update(path)?;
+        lock_file_exclusive(&file, path)?;
+        file.seek(SeekFrom::Start(0))
+            .with_context(|| format!("seek agent command spool {}", path.display()))?;
+        let parsed = parse_agent_command_spool_lines(BufReader::new(&mut file));
+        let original_len = file
+            .metadata()
+            .with_context(|| format!("stat agent command spool {}", path.display()))?
+            .len();
+        (parsed, original_len)
+        // `file` drops here, releasing the exclusive lock before any network I/O.
+    };
+
+    let mut result = CommandLogImportResult {
+        scanned: parsed.scanned,
+        skipped: parsed.skipped,
+        errors: parsed.errors,
+        ..Default::default()
+    };
+
+    if !parsed.records.is_empty() {
+        let url = agent_command_forward_url(target)?;
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+            .context("failed to build agent-command forwarding reqwest::Client")?;
+        let mut request = client.post(url).json(&parsed.records);
+        if let Some(token) = token {
+            request = request.bearer_auth(token);
+        }
+        let response = request
+            .send()
+            .await
+            .context("agent command forward POST failed")?;
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            bail!("agent command forward POST returned {status}: {body}");
+        }
+        let remote: CommandLogImportResult = response
+            .json()
+            .await
+            .context("agent command forward response was not valid JSON")?;
+        result.imported = remote.imported;
+        result.skipped_duplicates = remote.skipped_duplicates;
+        result.errors += remote.errors;
+
+        consume_forwarded_spool_prefix(path, original_len)?;
+    }
+
+    Ok(result)
+}
+
+/// Removes the first `original_len` bytes (everything already forwarded)
+/// from the spool, preserving any bytes appended after the original read —
+/// e.g. by a concurrent `ingest shell agent wrap` invocation while the
+/// network POST above was in flight. Re-acquires the exclusive lock only for
+/// this brief local operation.
+fn consume_forwarded_spool_prefix(path: &Path, original_len: u64) -> Result<()> {
+    let mut file = open_spool_for_update(path)?;
+    lock_file_exclusive(&file, path)?;
+    let current_len = file
+        .metadata()
+        .with_context(|| format!("stat agent command spool {}", path.display()))?
+        .len();
+    if current_len <= original_len {
+        // Nothing new was appended (or something else already drained it) —
+        // safe to truncate fully.
+        file.set_len(0)
+            .with_context(|| format!("truncate agent command spool {}", path.display()))?;
+        file.seek(SeekFrom::Start(0))
+            .with_context(|| format!("rewind agent command spool {}", path.display()))?;
+        return Ok(());
+    }
+    // New records were appended after we read `original_len` bytes — keep
+    // only that tail.
+    let mut tail = Vec::with_capacity((current_len - original_len) as usize);
+    file.seek(SeekFrom::Start(original_len))
+        .with_context(|| format!("seek agent command spool tail {}", path.display()))?;
+    file.read_to_end(&mut tail)
+        .with_context(|| format!("read agent command spool tail {}", path.display()))?;
+    file.set_len(0)
+        .with_context(|| format!("truncate agent command spool {}", path.display()))?;
+    file.seek(SeekFrom::Start(0))
+        .with_context(|| format!("rewind agent command spool {}", path.display()))?;
+    file.write_all(&tail)
+        .with_context(|| format!("write agent command spool tail {}", path.display()))?;
+    Ok(())
+}
+
+fn agent_command_forward_url(target: &str) -> Result<String> {
+    let trimmed = target.trim_end_matches('/');
+    if trimmed.ends_with("/v1/agent-commands") {
+        return Ok(trimmed.to_string());
+    }
+    if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+        return Ok(format!("{trimmed}/v1/agent-commands"));
+    }
+    bail!("agent command forward target must start with http:// or https://");
 }
 
 pub fn run_agent_command_wrapper(spool_path: &Path, command_args: &[String]) -> Result<i32> {
@@ -397,25 +598,49 @@ fn should_run_agent_command_unwrapped(command_args: &[String]) -> bool {
         || is_agent_command_ingest_spool_invocation(command_args)
 }
 
+/// True when `argv0`'s basename is `cortex`. Shared by the self-ingest guard
+/// below and `setup/doctor.rs`'s stale-unit `ExecStart=` scan, so both agree
+/// on what counts as "this is a cortex invocation" from one place.
+pub(crate) fn cortex_argv_program_matches(argv0: &str) -> bool {
+    Path::new(argv0)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or(argv0)
+        == "cortex"
+}
+
+/// True for the canonical grammar: `ingest shell agent index`.
+pub(crate) fn is_current_shell_agent_index_argv(rest: &[&str]) -> bool {
+    matches!(rest, ["ingest", "shell", "agent", "index", ..])
+}
+
+/// True for the grouped pre-restructure grammar: `ingest agent-command
+/// ingest-spool` — the one immediately-prior grammar already deployed on
+/// live hosts (e.g. dookie).
+pub(crate) fn is_grouped_legacy_agent_command_argv(rest: &[&str]) -> bool {
+    matches!(rest, ["ingest", "agent-command", "ingest-spool", ..])
+}
+
+/// True for the even-older bare grammar: `agent-command ingest-spool` (no
+/// `ingest` prefix). This form is unreachable through the CLI's own
+/// top-level parser (see `src/surfaces.rs`), so callers that only care about
+/// what the live CLI can produce (the self-ingest guard below) deliberately
+/// don't tolerate it. `setup/doctor.rs`'s stale-unit scan does tolerate it,
+/// since it's scanning static, possibly very old `ExecStart=` text rather
+/// than argv the current CLI could have produced.
+pub(crate) fn is_bare_legacy_agent_command_argv(rest: &[&str]) -> bool {
+    matches!(rest, ["agent-command", "ingest-spool", ..])
+}
+
 fn is_agent_command_ingest_spool_invocation(command_args: &[String]) -> bool {
     let Some(program) = command_args.first() else {
         return false;
     };
-    let program_name = Path::new(program)
-        .file_name()
-        .and_then(|value| value.to_str())
-        .unwrap_or(program);
-    if program_name != "cortex" {
+    if !cortex_argv_program_matches(program) {
         return false;
     }
     let rest: Vec<&str> = command_args[1..].iter().map(String::as_str).collect();
-    // New grouped grammar: `cortex ingest agent-command ingest-spool`.
-    // Legacy pre-move grammar (`cortex agent-command ingest-spool`) is accepted
-    // defensively so a lingering caller can never be self-ingested.
-    matches!(
-        rest.as_slice(),
-        ["ingest", "agent-command", "ingest-spool", ..] | ["agent-command", "ingest-spool", ..]
-    )
+    is_current_shell_agent_index_argv(&rest) || is_grouped_legacy_agent_command_argv(&rest)
 }
 
 fn shell_quote(value: &str) -> String {

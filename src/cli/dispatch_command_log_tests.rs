@@ -24,7 +24,11 @@ async fn shell_import_commands_are_local_only() {
     )
     .await
     .unwrap_err();
-    assert!(shell_err.to_string().contains("shell index is local-only"));
+    assert!(
+        shell_err
+            .to_string()
+            .contains("shell user index is local-only")
+    );
 
     let atuin_err = run_shell_atuin_index(
         &mode,
@@ -38,17 +42,19 @@ async fn shell_import_commands_are_local_only() {
     assert!(
         atuin_err
             .to_string()
-            .contains("shell atuin-index is local-only")
+            .contains("shell user atuin-index is local-only")
     );
 }
 
 #[tokio::test]
 async fn agent_command_spool_import_is_local_only() {
-    let err = run_agent_command_ingest_spool(
+    let err = run_shell_agent_index_local(
         &http_mode(),
-        AgentCommandIngestSpoolArgs {
+        ShellAgentIndexArgs {
             path: "/tmp/spool".to_string(),
             json: false,
+            server: None,
+            token: None,
         },
     )
     .await
@@ -56,6 +62,6 @@ async fn agent_command_spool_import_is_local_only() {
 
     assert!(
         err.to_string()
-            .contains("agent-command ingest-spool is local-only")
+            .contains("shell agent index is local-only without --server")
     );
 }

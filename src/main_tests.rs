@@ -1,4 +1,4 @@
-use super::{Mode, cli};
+use super::{Mode, ShellAgentIndexDispatch, cli, resolve_shell_agent_index_dispatch};
 
 #[test]
 fn mode_parse_accepts_single_binary_transport_commands() {
@@ -190,17 +190,41 @@ fn mode_parse_rejects_old_ai_setup_namespaces() {
 }
 
 #[test]
-fn mode_parse_accepts_agent_command_setup_namespace() {
+fn mode_parse_accepts_shell_agent_setup_namespace() {
     assert!(matches!(
         Mode::parse(vec![
             "setup".into(),
-            "agent-command".into(),
+            "shell".into(),
+            "agent".into(),
             "install".into(),
             "--json".into()
         ])
         .unwrap(),
         Mode::Setup(_)
     ));
+}
+
+#[test]
+fn mode_parse_accepts_shell_completions_setup_namespace() {
+    assert!(matches!(
+        Mode::parse(vec![
+            "setup".into(),
+            "shell".into(),
+            "completions".into(),
+            "install".into(),
+            "--json".into()
+        ])
+        .unwrap(),
+        Mode::Setup(_)
+    ));
+}
+
+#[test]
+fn mode_parse_rejects_unknown_setup_shell_subcommand() {
+    let error = Mode::parse(vec!["setup".into(), "shell".into(), "bogus".into()])
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("agent|completions"), "got: {error}");
 }
 
 #[test]
@@ -223,6 +247,7 @@ fn mode_parse_accepts_command_ingest_namespace() {
         Mode::parse(vec![
             "ingest".into(),
             "shell".into(),
+            "user".into(),
             "index".into(),
             "--path".into(),
             "/tmp/history".into(),
@@ -248,8 +273,9 @@ fn mode_parse_accepts_command_ingest_namespace() {
     assert!(matches!(
         Mode::parse(vec![
             "ingest".into(),
-            "agent-command".into(),
-            "ingest-spool".into(),
+            "shell".into(),
+            "agent".into(),
+            "index".into(),
             "--path".into(),
             "/tmp/spool.jsonl".into(),
             "--json".into()
@@ -260,12 +286,25 @@ fn mode_parse_accepts_command_ingest_namespace() {
     assert!(matches!(
         Mode::parse(vec![
             "ingest".into(),
-            "agent-command".into(),
+            "shell".into(),
+            "agent".into(),
             "wrap".into(),
             "--spool".into(),
             "/tmp/spool.jsonl".into(),
             "--".into(),
             "true".into()
+        ])
+        .unwrap(),
+        Mode::Cli(_)
+    ));
+    assert!(matches!(
+        Mode::parse(vec![
+            "ingest".into(),
+            "agent-command".into(),
+            "ingest-spool".into(),
+            "--path".into(),
+            "/tmp/spool.jsonl".into(),
+            "--json".into()
         ])
         .unwrap(),
         Mode::Cli(_)
@@ -276,7 +315,8 @@ fn mode_parse_accepts_command_ingest_namespace() {
 fn mode_parse_preserves_wrapped_command_http_like_flags() {
     let mode = Mode::parse(vec![
         "ingest".into(),
-        "agent-command".into(),
+        "shell".into(),
+        "agent".into(),
         "wrap".into(),
         "--spool".into(),
         "/tmp/spool.jsonl".into(),
@@ -293,11 +333,11 @@ fn mode_parse_preserves_wrapped_command_http_like_flags() {
         panic!("expected CLI mode");
     };
     assert_eq!(invocation.flags, cli::GlobalFlags::default());
-    let cli::CliCommand::Ingest(cli::IngestCommand::AgentCommand(cli::AgentCommandCommand::Wrap(
-        args,
+    let cli::CliCommand::Ingest(cli::IngestCommand::Shell(cli::ShellCommand::Agent(
+        cli::ShellAgentCommand::Wrap(args),
     ))) = invocation.command
     else {
-        panic!("expected agent-command wrap");
+        panic!("expected shell agent wrap");
     };
     assert_eq!(
         args.command,
@@ -517,8 +557,8 @@ fn mode_parse_setup_subcommands_default_to_check_and_parse_remove() {
             "sessions-watch-service remove",
         ),
         (
-            vec!["setup", "agent-command", "remove", "--json"],
-            "agent-command remove",
+            vec!["setup", "shell", "agent", "remove", "--json"],
+            "shell agent remove",
         ),
         (
             vec!["setup", "heartbeat-agent", "remove", "--json"],
@@ -594,7 +634,12 @@ fn mode_default_log_filter_matches_operational_noise_profile() {
         "warn"
     );
     assert_eq!(
-        Mode::DoctorFull(super::DoctorFullCommand { json: false }).default_log_filter(),
+        Mode::DoctorFull(super::DoctorFullCommand {
+            json: false,
+            fix: false,
+            yes: false
+        })
+        .default_log_filter(),
         "warn"
     );
     assert_eq!(
@@ -921,7 +966,8 @@ async fn run_cli_rejects_http_flags_for_agent_local_surfaces() {
         (
             &[
                 "ingest",
-                "agent-command",
+                "shell",
+                "agent",
                 "wrap",
                 "--server",
                 "http://127.0.0.1:3100",
@@ -930,19 +976,20 @@ async fn run_cli_rejects_http_flags_for_agent_local_surfaces() {
                 "--",
                 "true",
             ][..],
-            "`ingest agent-command wrap` (wrapper command)",
+            "`ingest shell agent wrap` (wrapper command)",
         ),
         (
             &[
                 "ingest",
                 "shell",
+                "user",
                 "index",
                 "--path",
                 "/tmp/history",
                 "--token",
                 "secret",
             ][..],
-            "local agent commands",
+            "local shell commands",
         ),
     ] {
         let err = super::run_cli(cli_invocation(args)).await.unwrap_err();
@@ -1026,4 +1073,75 @@ fn install_color_from_args_parses_and_strips() {
     // Bad value errors.
     let mut f = vec!["--color=technicolor".to_string()];
     assert!(install_color_from_args(&mut f).is_err());
+}
+
+fn shell_agent_index_args(server: Option<&str>, token: Option<&str>) -> cli::ShellAgentIndexArgs {
+    cli::ShellAgentIndexArgs {
+        path: "/tmp/spool.jsonl".to_string(),
+        json: false,
+        server: server.map(str::to_string),
+        token: token.map(str::to_string),
+    }
+}
+
+#[test]
+fn resolve_shell_agent_index_dispatch_prefers_resolved_server_for_remote() {
+    // By the time this function runs, the caller has already folded any
+    // global `--server` into `args.server` — this only asserts that once
+    // `args.server` is `Some`, the dispatch is Remote regardless of --http.
+    let args = shell_agent_index_args(Some("https://cortex.example.test"), None);
+    let flags = cli::GlobalFlags::default();
+    assert_eq!(
+        resolve_shell_agent_index_dispatch(&args, &flags).unwrap(),
+        ShellAgentIndexDispatch::Remote("https://cortex.example.test".to_string())
+    );
+}
+
+#[test]
+fn resolve_shell_agent_index_dispatch_local_when_no_server_or_token() {
+    let args = shell_agent_index_args(None, None);
+    let flags = cli::GlobalFlags::default();
+    assert_eq!(
+        resolve_shell_agent_index_dispatch(&args, &flags).unwrap(),
+        ShellAgentIndexDispatch::Local
+    );
+}
+
+#[test]
+fn resolve_shell_agent_index_dispatch_bails_on_http_without_resolvable_server() {
+    let args = shell_agent_index_args(None, None);
+    let flags = cli::GlobalFlags {
+        force_http: true,
+        ..cli::GlobalFlags::default()
+    };
+    let error = resolve_shell_agent_index_dispatch(&args, &flags)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("--http requires --server"), "got: {error}");
+}
+
+#[test]
+fn resolve_shell_agent_index_dispatch_bails_on_token_without_resolvable_server() {
+    // Code-review finding this test guards: a `--token` with no `--server`
+    // anywhere used to silently fall through to the local path, which never
+    // reads `args.token` — the token was accepted and quietly discarded.
+    let args = shell_agent_index_args(None, Some("secret"));
+    let flags = cli::GlobalFlags::default();
+    let error = resolve_shell_agent_index_dispatch(&args, &flags)
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("--token has no effect without --server"),
+        "got: {error}"
+    );
+}
+
+#[test]
+fn resolve_shell_agent_index_dispatch_server_and_token_together_is_remote() {
+    let args = shell_agent_index_args(Some("https://cortex.example.test"), Some("secret"));
+    let flags = cli::GlobalFlags::default();
+    assert_eq!(
+        resolve_shell_agent_index_dispatch(&args, &flags).unwrap(),
+        ShellAgentIndexDispatch::Remote("https://cortex.example.test".to_string())
+    );
 }

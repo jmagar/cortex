@@ -4,43 +4,56 @@ use anyhow::{Result, bail};
 use cortex::command_log::{self, CommandLogImportResult};
 
 use super::{
-    AgentCommandIngestSpoolArgs, AgentCommandWrapArgs, CliMode, ShellAtuinIndexArgs, ShellIndexArgs,
+    CliMode, ShellAgentIndexArgs, ShellAgentWrapArgs, ShellAtuinIndexArgs, ShellIndexArgs,
 };
 
 pub(crate) async fn run_shell_index(mode: &CliMode, args: ShellIndexArgs) -> Result<()> {
     let CliMode::Local(service) = mode else {
-        bail!("shell index is local-only; run without --http/--server/--token");
+        bail!("shell user index is local-only; run without --http/--server/--token");
     };
     let result = service
         .import_shell_history(PathBuf::from(args.path), args.shell)
         .await?;
-    print_import_result("shell index", &result, args.json)
+    print_import_result("shell user index", &result, args.json)
 }
 
 pub(crate) async fn run_shell_atuin_index(mode: &CliMode, args: ShellAtuinIndexArgs) -> Result<()> {
     let CliMode::Local(service) = mode else {
-        bail!("shell atuin-index is local-only; run without --http/--server/--token");
+        bail!("shell user atuin-index is local-only; run without --http/--server/--token");
     };
     let result = service
         .import_atuin_history(PathBuf::from(args.path))
         .await?;
-    print_import_result("shell atuin-index", &result, args.json)
+    print_import_result("shell user atuin-index", &result, args.json)
 }
 
-pub(crate) async fn run_agent_command_ingest_spool(
+pub(crate) async fn run_shell_agent_index_local(
     mode: &CliMode,
-    args: AgentCommandIngestSpoolArgs,
+    args: ShellAgentIndexArgs,
 ) -> Result<()> {
     let CliMode::Local(service) = mode else {
-        bail!("agent-command ingest-spool is local-only; run without --http/--server/--token");
+        bail!("shell agent index is local-only without --server; pass --server URL to forward");
     };
     let result = service
         .import_agent_command_spool(PathBuf::from(args.path))
         .await?;
-    print_import_result("agent-command ingest-spool", &result, args.json)
+    print_import_result("shell agent index", &result, args.json)
 }
 
-pub(crate) fn run_agent_command_wrap(args: AgentCommandWrapArgs) -> Result<i32> {
+pub(crate) async fn run_shell_agent_index_remote(
+    args: ShellAgentIndexArgs,
+    server: String,
+) -> Result<()> {
+    let result = command_log::forward_agent_command_spool(
+        std::path::Path::new(&args.path),
+        &server,
+        args.token.as_deref(),
+    )
+    .await?;
+    print_import_result("shell agent index (forwarded)", &result, args.json)
+}
+
+pub(crate) fn run_shell_agent_wrap(args: ShellAgentWrapArgs) -> Result<i32> {
     command_log::run_agent_command_wrapper(PathBuf::from(args.spool).as_path(), &args.command)
 }
 

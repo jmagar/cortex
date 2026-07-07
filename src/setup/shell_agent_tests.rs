@@ -138,8 +138,8 @@ fn agent_command_wrapper_script_execs_cortex_with_spool_and_passthrough_args() {
 
     assert!(script.starts_with("#!/usr/bin/env sh\n"));
     // Fail-open: probe the subcommand first, only delegate when it is runnable.
-    assert!(script.contains("ingest agent-command wrap --probe >/dev/null 2>&1"));
-    assert!(script.contains("exec /home/me/.local/bin/cortex ingest agent-command wrap"));
+    assert!(script.contains("ingest shell agent wrap --probe >/dev/null 2>&1"));
+    assert!(script.contains("exec /home/me/.local/bin/cortex ingest shell agent wrap"));
     assert!(script.contains("--spool /home/me/.local/state/cortex/agent-command.jsonl -- \"$@\""));
     // ...and run the command directly if the probe fails, so logging can never
     // brick the shell.
@@ -216,7 +216,7 @@ fn agent_command_env_phase_warns_on_mismatched_or_malformed_settings() {
 #[cfg(unix)]
 #[tokio::test]
 #[serial]
-async fn run_agent_command_setup_install_check_and_remove_round_trip() {
+async fn run_shell_agent_setup_install_check_and_remove_round_trip() {
     let dir = tempfile::tempdir().unwrap();
     let home = dir.path().join("home");
     let cortex_home = home.join(".cortex");
@@ -238,10 +238,10 @@ async fn run_agent_command_setup_install_check_and_remove_round_trip() {
     let wrapper = home.join(".local/bin/cortex-agent-command-wrapper");
     let _prefix = EnvGuard::set("CLAUDE_CODE_SHELL_PREFIX", &wrapper);
 
-    let install = run_agent_command_setup(AgentCommandAction::Install)
+    let install = run_shell_agent_setup(ShellAgentAction::Install)
         .await
         .unwrap();
-    assert_eq!(install.mode, "agent-command-install");
+    assert_eq!(install.mode, "shell-agent-install");
     assert!(
         install
             .phases
@@ -254,10 +254,10 @@ async fn run_agent_command_setup_install_check_and_remove_round_trip() {
             .is_file()
     );
 
-    let check = run_agent_command_setup(AgentCommandAction::Check)
+    let check = run_shell_agent_setup(ShellAgentAction::Check)
         .await
         .unwrap();
-    assert_eq!(check.mode, "agent-command-check");
+    assert_eq!(check.mode, "shell-agent-check");
     assert!(
         check
             .phases
@@ -271,10 +271,10 @@ async fn run_agent_command_setup_install_check_and_remove_round_trip() {
             .any(|phase| phase.name == "agent-command-state" && phase.status == SetupStatus::Ok)
     );
 
-    let remove = run_agent_command_setup(AgentCommandAction::Remove)
+    let remove = run_shell_agent_setup(ShellAgentAction::Remove)
         .await
         .unwrap();
-    assert_eq!(remove.mode, "agent-command-remove");
+    assert_eq!(remove.mode, "shell-agent-remove");
     assert!(!wrapper.exists());
     assert!(
         remove
@@ -287,7 +287,7 @@ async fn run_agent_command_setup_install_check_and_remove_round_trip() {
 #[cfg(unix)]
 #[tokio::test]
 #[serial]
-async fn run_agent_command_setup_rejects_stale_cortex_binary_before_writing() {
+async fn run_shell_agent_setup_rejects_stale_cortex_binary_before_writing() {
     let dir = tempfile::tempdir().unwrap();
     let home = dir.path().join("home");
     let cortex_home = home.join(".cortex");
@@ -304,7 +304,7 @@ async fn run_agent_command_setup_rejects_stale_cortex_binary_before_writing() {
     let _cortex_home = EnvGuard::set("CORTEX_HOME", &cortex_home);
     let _path = EnvGuard::set("PATH", path_with_prepended(&bin_dir));
 
-    let error = run_agent_command_setup(AgentCommandAction::Install)
+    let error = run_shell_agent_setup(ShellAgentAction::Install)
         .await
         .unwrap_err();
 
