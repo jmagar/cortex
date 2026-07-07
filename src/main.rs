@@ -117,9 +117,9 @@ async fn run_cli(invocation: CliInvocation) -> Result<()> {
         return cli::run_inventory(command).await;
     }
 
-    if let cli::CliCommand::Ingest(cli::IngestCommand::AgentCommand(
-        cli::AgentCommandCommand::Wrap(args),
-    )) = command
+    if let cli::CliCommand::Ingest(cli::IngestCommand::Shell(cli::ShellCommand::Agent(
+        cli::ShellAgentCommand::Wrap(args),
+    ))) = command
     {
         // Liveness probe from the generated wrapper: succeed fast, run nothing.
         // Keep this ahead of the http-flag check so a probe never errors.
@@ -128,12 +128,35 @@ async fn run_cli(invocation: CliInvocation) -> Result<()> {
         }
         if let Some(trigger) = flags.http_flag_trigger() {
             anyhow::bail!(
-                "{} has no effect on `ingest agent-command wrap` (wrapper command); remove --http / --server / --token",
+                "{} has no effect on `ingest shell agent wrap` (wrapper command); remove --http / --server / --token",
                 trigger
             );
         }
-        let code = cli::run_agent_command_wrap(args)?;
+        let code = cli::run_shell_agent_wrap(args)?;
         std::process::exit(code);
+    }
+
+    if let cli::CliCommand::Ingest(cli::IngestCommand::Shell(cli::ShellCommand::Agent(
+        cli::ShellAgentCommand::Index(mut args),
+    ))) = command
+    {
+        if args.server.is_none() {
+            args.server = flags.server.clone();
+        }
+        if args.token.is_none() {
+            args.token = flags.token.clone();
+        }
+        if let Some(server) = args.server.clone() {
+            return cli::run_shell_agent_index_remote(args, server).await;
+        }
+        if flags.force_http {
+            anyhow::bail!(
+                "--http requires --server URL for `ingest shell agent index`; pass --server explicitly"
+            );
+        }
+        let runtime = RuntimeCore::load_query_only().await?;
+        return cli::run_shell_agent_index_local(&cli::CliMode::Local(runtime.service()), args)
+            .await;
     }
 
     if let cli::CliCommand::Heartbeat(mut command) = command {
@@ -157,14 +180,11 @@ async fn run_cli(invocation: CliInvocation) -> Result<()> {
 
     if matches!(
         command,
-        cli::CliCommand::Ingest(cli::IngestCommand::Shell(_))
-            | cli::CliCommand::Ingest(cli::IngestCommand::AgentCommand(
-                cli::AgentCommandCommand::IngestSpool(_)
-            ))
+        cli::CliCommand::Ingest(cli::IngestCommand::Shell(cli::ShellCommand::User(_)))
     ) {
         if let Some(trigger) = flags.http_flag_trigger() {
             anyhow::bail!(
-                "{} has no effect on local agent commands; remove --http / --server / --token",
+                "{} has no effect on local shell commands; remove --http / --server / --token",
                 trigger
             );
         }
@@ -330,8 +350,11 @@ async fn run_setup(command: SetupCommand) -> Result<()> {
         SetupCommandKind::SessionsWatchService(action) => {
             cortex::setup::run_sessions_watch_service_setup(action).await?
         }
-        SetupCommandKind::AgentCommand(action) => {
-            cortex::setup::run_agent_command_setup(action).await?
+        SetupCommandKind::Shell(ShellSetupCommand::Agent(action)) => {
+            cortex::setup::run_shell_agent_setup(action).await?
+        }
+        SetupCommandKind::Shell(ShellSetupCommand::Completions(action)) => {
+            cortex::setup::run_shell_completions_setup(action)?
         }
         SetupCommandKind::HeartbeatAgent(action) => {
             cortex::setup::run_heartbeat_agent_setup(action).await?
@@ -451,6 +474,8 @@ async fn serve_mcp() -> Result<()> {
     info!("OTLP receiver mounted at /v1/logs (and /v1/metrics, /v1/traces → 404)");
     app = app.merge(runtime.heartbeat_router());
     info!("Heartbeat receiver mounted at /v1/heartbeats");
+    app = app.merge(runtime.agent_command_router());
+    info!("Agent-command forward receiver mounted at /v1/agent-commands");
     app = app.merge(web_app::router());
     info!("Investigation workspace mounted under /app");
     if runtime.config.mcp.api_token.is_none() && !runtime.config.mcp.host.starts_with("127.") {
@@ -557,11 +582,17 @@ enum SetupCommandKind {
     Main(cortex::setup::SetupMode),
     SessionsIndexTimer(cortex::setup::SessionsIndexTimerAction),
     SessionsWatchService(cortex::setup::SessionsWatchServiceAction),
-    AgentCommand(cortex::setup::AgentCommandAction),
+    Shell(ShellSetupCommand),
     HeartbeatAgent(cortex::setup::HeartbeatAgentAction),
     DebugWrapper(cortex::setup::DebugWrapperAction),
     DebugCompose(cortex::setup::DebugComposeAction),
     Doctor,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ShellSetupCommand {
+    Agent(cortex::setup::ShellAgentAction),
+    Completions(cortex::setup::ShellCompletionsAction),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -758,20 +789,38 @@ fn parse_setup_command(args: &[String]) -> Result<SetupCommand> {
             json,
         });
     }
-    if matches!(
-        iter.clone().next().map(String::as_str),
-        Some("agent-command")
-    ) {
+    if matches!(iter.clone().next().map(String::as_str), Some("shell")) {
         let _ = iter.next();
-        let (action, json) = parse_setup_subcommand_args("agent-command", iter)?;
-        return Ok(SetupCommand {
-            kind: SetupCommandKind::AgentCommand(match action {
-                "install" => cortex::setup::AgentCommandAction::Install,
-                "remove" => cortex::setup::AgentCommandAction::Remove,
-                _ => cortex::setup::AgentCommandAction::Check,
-            }),
-            json,
-        });
+        match iter.next().map(String::as_str) {
+            Some("agent") => {
+                let (action, json) = parse_setup_subcommand_args("shell agent", iter)?;
+                return Ok(SetupCommand {
+                    kind: SetupCommandKind::Shell(ShellSetupCommand::Agent(match action {
+                        "install" => cortex::setup::ShellAgentAction::Install,
+                        "remove" => cortex::setup::ShellAgentAction::Remove,
+                        _ => cortex::setup::ShellAgentAction::Check,
+                    })),
+                    json,
+                });
+            }
+            Some("completions") => {
+                let (action, json) = parse_setup_subcommand_args("shell completions", iter)?;
+                return Ok(SetupCommand {
+                    kind: SetupCommandKind::Shell(ShellSetupCommand::Completions(match action {
+                        "install" => cortex::setup::ShellCompletionsAction::Install,
+                        "remove" => cortex::setup::ShellCompletionsAction::Remove,
+                        _ => cortex::setup::ShellCompletionsAction::Check,
+                    })),
+                    json,
+                });
+            }
+            Some(other) => {
+                anyhow::bail!(
+                    "unknown setup shell subcommand: {other} (expected agent|completions)"
+                )
+            }
+            None => anyhow::bail!("setup shell requires a subcommand (agent|completions)"),
+        }
     }
     if matches!(
         iter.clone().next().map(String::as_str),
