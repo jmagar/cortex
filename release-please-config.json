@@ -3,7 +3,7 @@
   "release-type": "rust",
   "include-v-in-tag": true,
   "include-component-in-tag": false,
-  "bootstrap-sha": "fb8e4869f2c006dd2302b466d4c216882ef7c304",
+  "bootstrap-sha": "b42134e8074f5e7e1de2f79f4b7dd99c093d24cb",
   "changelog-sections": [
     { "type": "feat", "section": "Added" },
     { "type": "fix", "section": "Fixed" },
