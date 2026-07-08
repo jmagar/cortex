@@ -362,7 +362,10 @@ fn systemd_backup_phase(mode: SetupMode) -> SetupPhase {
             return SetupPhase {
                 name: "systemd-backup",
                 status: SetupStatus::Skipped,
-                detail: format!("source {} not found (running from installed binary?)", service_src.display()),
+                detail: format!(
+                    "source {} not found (running from installed binary?)",
+                    service_src.display()
+                ),
             };
         }
 
@@ -387,13 +390,11 @@ fn systemd_backup_phase(mode: SetupMode) -> SetupPhase {
             .output();
 
         match (reload_result, enable_result) {
-            (Ok(_), Ok(output)) if output.status.success() => {
-                SetupPhase {
-                    name: "systemd-backup",
-                    status: SetupStatus::Ok,
-                    detail: "timer installed and enabled".to_string(),
-                }
-            }
+            (Ok(_), Ok(output)) if output.status.success() => SetupPhase {
+                name: "systemd-backup",
+                status: SetupStatus::Ok,
+                detail: "timer installed and enabled".to_string(),
+            },
             (Ok(reload), Ok(enable)) => {
                 let reload_err = if !reload.status.success() {
                     format!("reload failed: {}", String::from_utf8_lossy(&reload.stderr))
@@ -411,20 +412,16 @@ fn systemd_backup_phase(mode: SetupMode) -> SetupPhase {
                     detail: format!("{}{}", reload_err, enable_err),
                 }
             }
-            (Err(e), _) => {
-                SetupPhase {
-                    name: "systemd-backup",
-                    status: SetupStatus::Warn,
-                    detail: format!("systemctl not available: {}", e),
-                }
-            }
-            _ => {
-                SetupPhase {
-                    name: "systemd-backup",
-                    status: SetupStatus::Warn,
-                    detail: "units copied but timer enable failed".to_string(),
-                }
-            }
+            (Err(e), _) => SetupPhase {
+                name: "systemd-backup",
+                status: SetupStatus::Warn,
+                detail: format!("systemctl not available: {}", e),
+            },
+            _ => SetupPhase {
+                name: "systemd-backup",
+                status: SetupStatus::Warn,
+                detail: "units copied but timer enable failed".to_string(),
+            },
         }
     } else {
         // In Check mode, just report whether the timer is enabled
@@ -433,27 +430,21 @@ fn systemd_backup_phase(mode: SetupMode) -> SetupPhase {
             .output();
 
         match is_active {
-            Ok(output) if output.status.success() => {
-                SetupPhase {
-                    name: "systemd-backup",
-                    status: SetupStatus::Ok,
-                    detail: "timer is enabled".to_string(),
-                }
-            }
-            Ok(_) => {
-                SetupPhase {
-                    name: "systemd-backup",
-                    status: SetupStatus::Warn,
-                    detail: "timer not enabled (run 'cortex setup repair' to enable)".to_string(),
-                }
-            }
-            Err(e) => {
-                SetupPhase {
-                    name: "systemd-backup",
-                    status: SetupStatus::Skipped,
-                    detail: format!("systemctl not available: {}", e),
-                }
-            }
+            Ok(output) if output.status.success() => SetupPhase {
+                name: "systemd-backup",
+                status: SetupStatus::Ok,
+                detail: "timer is enabled".to_string(),
+            },
+            Ok(_) => SetupPhase {
+                name: "systemd-backup",
+                status: SetupStatus::Warn,
+                detail: "timer not enabled (run 'cortex setup repair' to enable)".to_string(),
+            },
+            Err(e) => SetupPhase {
+                name: "systemd-backup",
+                status: SetupStatus::Skipped,
+                detail: format!("systemctl not available: {}", e),
+            },
         }
     }
 }
