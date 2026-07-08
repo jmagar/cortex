@@ -1,7 +1,7 @@
 use super::*;
 
 /// Request for `cortex assess skill <skill>`. Either `skill` (a skill
-/// name, e.g. `cortex-frustration-assessment`) or `plugin` (assess every
+/// name, e.g. `frustration-assessment`) or `plugin` (assess every
 /// skill under a plugin) must be set — the service layer forwards both
 /// straight into PR 3's `AiSkillInvestigateRequest { skill, plugin, .. }`,
 /// which already knows how to resolve either shape. No synthetic string

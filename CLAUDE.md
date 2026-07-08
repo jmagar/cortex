@@ -132,9 +132,9 @@ Scope taxonomy: every action requires `cortex:read` except the five **admin** ac
 
 ## Plugin Skills
 
-9 skills ship with the Claude Code plugin — see `plugins/cortex/skills/<skill>/SKILL.md` for each:
+Skills ship with the Claude Code plugin — see `plugins/cortex/skills/<skill>/SKILL.md` for each:
 
-`cortex` (primary log-intelligence skill), `cortex-deploy-dropins` (push rsyslog forwarding configs to `fleet_hosts` via SSH), `cortex-dr` (full health check; named `dr` to avoid colliding with Claude Code's built-in `/doctor`), `cortex-frustration-assessment` (analyze `abuse_investigate` evidence bundles), `cortex-logs` (Compose service log tailing), `cortex-redeploy` (re-run plugin setup hook), `cortex-report` (time-bounded markdown health reports), `cortex-troubleshoot` (connection/ingest failure triage), `cortex-version-check` (running container vs local Compose image).
+`cortex` (primary log-intelligence skill), `frustration-assessment` (analyze `abuse_investigate` evidence bundles), `hook-friction-assessment` (analyze `hook_investigate` evidence bundles), `incidents` (unaddressed errors, notifications, similar/prior incidents, incident context), `logs` (Compose service log tailing), `mcp-friction-assessment` (analyze `mcp_investigate` evidence bundles), `redeploy` (re-run plugin setup hook), `report` (time-bounded markdown health reports), `session-search` (AI transcript search and exploration), `skill-improvement-assessment` (analyze `skill_investigate` evidence bundles), `topology` (map/host_state/fleet_state/correlate/graph queries), `troubleshoot` (connection/ingest failure triage), `version-check` (running container vs local Compose image).
 
 ## OpenWiki
 

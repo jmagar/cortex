@@ -86,7 +86,7 @@ pub struct LlmInvocationSpec {
     /// (host/pid are always added by the runner itself).
     ///
     /// **CONTRACT (do not violate in PR 2-4):** `extra_metadata` is for small
-    /// structured tags only (e.g. `{"skill": "cortex-frustration-assessment"}`).
+    /// structured tags only (e.g. `{"skill": "frustration-assessment"}`).
     /// It MUST NOT be used to carry prompt text, evidence bundle content, or
     /// any other bulk/sensitive payload — `llm_invocations` is an
     /// operational audit table, not an evidence store, and (per the eng

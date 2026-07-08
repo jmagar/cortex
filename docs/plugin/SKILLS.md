@@ -17,10 +17,30 @@ plugins/
     skills/
       cortex/
         SKILL.md           # Skill definition with tool reference and workflows
-      cortex-dr/
-        SKILL.md           # Full deployment diagnostic workflow
-      cortex-deploy-dropins/
-        SKILL.md           # Fleet rsyslog drop-in deployment workflow
+      troubleshoot/
+        SKILL.md           # Connection/ingest/service failure decision tree
+      report/
+        SKILL.md           # Time-bounded markdown health/log-analysis reports
+      redeploy/
+        SKILL.md           # Re-run plugin setup hook and verify health
+      logs/
+        SKILL.md           # Tail/follow cortex service Docker Compose logs
+      version-check/
+        SKILL.md           # Running container vs local Compose image check
+      incidents/
+        SKILL.md           # Error-signature ack/unack, notifications, prior incidents
+      topology/
+        SKILL.md           # map/host_state/fleet_state/correlate/graph queries
+      session-search/
+        SKILL.md           # AI transcript search and exploration
+      frustration-assessment/
+        SKILL.md           # Analyze abuse_investigate evidence bundles
+      mcp-friction-assessment/
+        SKILL.md           # Analyze mcp_investigate evidence bundles
+      hook-friction-assessment/
+        SKILL.md           # Analyze hook_investigate evidence bundles
+      skill-improvement-assessment/
+        SKILL.md           # Analyze skill_investigate evidence bundles
       ...
 ```
 
@@ -29,13 +49,18 @@ plugins/
 | Skill | Purpose |
 | --- | --- |
 | `cortex` | Client-facing documentation for the cortex MCP tool and its action dispatch. |
-| `cortex-troubleshoot` | Narrow troubleshooting decision tree for MCP, ingest, service, and missing-host issues. |
-| `cortex-report` | Generate actionable 24-hour markdown reports from cortex MCP evidence. |
-| `cortex-dr` | Comprehensive deployment health check, including runtime freshness. |
-| `cortex-deploy-dropins` | Deploy rsyslog forwarding drop-ins to fleet hosts over SSH. |
-| `cortex-redeploy` | Re-run the plugin setup hook and verify health plus runtime freshness. |
-| `cortex-logs` | Tail or follow cortex service logs from Docker Compose. |
-| `cortex-version-check` | Check whether the running container matches the local Compose image. `--pull` checks after refreshing the local image; without it, Docker checks only the local cache. |
+| `troubleshoot` | Narrow troubleshooting decision tree for MCP, ingest, service, and missing-host issues. |
+| `report` | Generate actionable 24-hour markdown reports from cortex MCP evidence. |
+| `redeploy` | Re-run the plugin setup hook and verify health plus runtime freshness. |
+| `logs` | Tail or follow cortex service logs from Docker Compose. |
+| `version-check` | Check whether the running container matches the local Compose image. `--pull` checks after refreshing the local image; without it, Docker checks only the local cache. |
+| `incidents` | Triage unacknowledged error signatures, review recent notifications, find prior incidents, and pull full incident context. |
+| `topology` | Answer homelab topology and cross-host correlation questions via `map`/`host_state`/`fleet_state`/`correlate`/`correlate_state`/`graph`. |
+| `session-search` | Search and explore AI transcript sessions (Claude Code/Codex/Gemini). |
+| `frustration-assessment` | Analyze an `abuse_investigate` evidence bundle into a frustration/abuse report. |
+| `mcp-friction-assessment` | Analyze an `mcp_investigate` evidence bundle for MCP tool reliability issues. |
+| `hook-friction-assessment` | Analyze a `hook_investigate` evidence bundle for hook reliability issues. |
+| `skill-improvement-assessment` | Analyze a `skill_investigate` evidence bundle for skill-quality issues. |
 
 ### Contents
 

@@ -61,8 +61,8 @@ cortex compose doctor
 cortex ingest inventory refresh --json
 ```
 
-Then use the `cortex-deploy-dropins` plugin skill or the documented deploy
-workflow only when the target `fleet_hosts` list is correct and reachable.
+Then push rsyslog drop-ins per [forwarder-dropins.md](contracts/forwarder-dropins.md)
+only when the target `fleet_hosts` list is correct and reachable.
 
 ## Commit Policy
 

@@ -45,7 +45,7 @@ fn embedded_assessment_skill_has_injection_defense() {
 #[test]
 fn assessment_prompt_references_skill_and_wraps_evidence() {
     let prompt = build_assessment_prompt(r#"{"incident_id":"inc-1"}"#);
-    assert!(prompt.contains("cortex-frustration-assessment"));
+    assert!(prompt.contains("frustration-assessment"));
     assert!(prompt.contains("Do not write files"));
     assert!(prompt.contains("Use this skill after running"));
     assert!(prompt.contains("<untrusted-evidence"));

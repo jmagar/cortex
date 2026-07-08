@@ -359,7 +359,7 @@ Response:
 
 **Source:** epic F §8.2.
 
-**Purpose:** Natural-language question over the incident corpus + correlated AI sessions, answered by `axon ask` with synthesis. Used for "what causes qbittorrent to keep dying on squirts?" style queries. Resolves to a Qdrant collection scoped to `cortex-incidents` (locked decision F-§13.1).
+**Purpose:** Natural-language question over the incident corpus + correlated AI sessions, answered by `axon ask` with synthesis. Used for "what causes qbittorrent to keep dying on squirts?" style queries. Resolves to a Qdrant collection scoped to `incidents` (locked decision F-§13.1).
 
 **Params:**
 

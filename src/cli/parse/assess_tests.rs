@@ -98,14 +98,10 @@ fn parse_assess_hooks_flag_overrides_positional() {
 
 #[test]
 fn parse_assess_skill_parses_positional_skill_name() {
-    let cmd = parse_assess(&[
-        "skill".to_string(),
-        "cortex-frustration-assessment".to_string(),
-    ])
-    .unwrap();
+    let cmd = parse_assess(&["skill".to_string(), "frustration-assessment".to_string()]).unwrap();
     match cmd {
         CliCommand::Assess(AssessCommand::Skill(args)) => {
-            assert_eq!(args.skill.as_deref(), Some("cortex-frustration-assessment"));
+            assert_eq!(args.skill.as_deref(), Some("frustration-assessment"));
             assert_eq!(args.plugin, None);
             assert!(
                 !args.no_llm,

@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.8.0] - 2026-07-08
+
+### Added
+
+- Three new plugin skills filling gaps in the assessment/investigation skill family: `hook-friction-assessment` (analyzes `hook_investigate` evidence bundles, mirroring the existing mcp/skill friction-assessment pattern), `incidents` (triage for `unaddressed_errors`, `ack_error`/`unack_error`, `notifications_recent`, `similar_incidents`, `incident_context`), and `topology` (homelab topology/correlation queries via `map`, `host_state`, `fleet_state`, `correlate`, `correlate_state`, `graph`).
+
+### Changed
+
+- Renamed all plugin skill directories to drop the redundant `cortex-` prefix (e.g. `cortex-troubleshoot` → `troubleshoot`), updating the `name:` frontmatter, sibling cross-references, `agents/openai.yaml` prompts, and the Rust `include_str!`/`SKILL_NAME` constants that embed three of these skills (`frustration-assessment`, `mcp-friction-assessment`, `skill-improvement-assessment`) into the binary at compile time.
+
+### Removed
+
+- Removed the `cortex-dr` and `cortex-deploy-dropins` plugin skills. `cortex-troubleshoot` (now `troubleshoot`) inlines the former's health-check description directly; rsyslog drop-in deployment is now a manual, documented process (see `docs/contracts/forwarder-dropins.md`) rather than an automated skill workflow.
+
 ## [3.7.2] - 2026-07-07
 
 ### Fixed

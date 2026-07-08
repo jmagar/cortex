@@ -156,7 +156,7 @@
     "fleet_hosts": {
       "type": "string",
       "title": "Fleet hosts",
-      "description": "Hostnames or SSH config aliases for hosts in your fleet — used by TWO features. (1) Docker ingest: when docker_ingest_enabled is true, each entry becomes the docker-socket-proxy URL http://<host>:2375. (2) The cortex-deploy-dropins skill pushes rsyslog forwarding drop-ins to each host over SSH so they start forwarding logs here. Entries must be reachable by name (resolvable DNS or in /etc/hosts) AND, for deploy-dropins, configured in ~/.ssh/config with a working key. Add one entry per host, e.g. dookie, squirts, tootie. Leave empty if you don't want either feature.",
+      "description": "Hostnames or SSH config aliases for hosts in your fleet. Used for Docker ingest: when docker_ingest_enabled is true, each entry becomes the docker-socket-proxy URL http://<host>:2375. Entries must be reachable by name (resolvable DNS or in /etc/hosts). Add one entry per host, e.g. dookie, squirts, tootie. Leave empty if you don't use Docker ingest.",
       "required": true,
       "multiple": true
     }

@@ -74,8 +74,8 @@ if ($programname == "syslog" or $programname == "rsyslogd") then stop
 
 Without it, the rsyslog daemon's own logs are forwarded back to cortex,
 which re-emits them, which the daemon then forwards — a feedback loop that
-can saturate the listener inside a minute. The `cortex-deploy-dropins` skill
-writes this header automatically.
+can saturate the listener inside a minute. Always include this header when
+writing or pushing a drop-in by hand.
 
 ## 6. Canonical templates
 

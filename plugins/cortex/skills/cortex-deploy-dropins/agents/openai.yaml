@@ -1,4 +1,0 @@
-interface:
-  display_name: "Cortex Deploy Drop-ins"
-  short_description: "Deploy rsyslog forwarding drop-ins"
-  default_prompt: "Use $cortex-deploy-dropins to deploy rsyslog forwarding drop-ins across fleet hosts."

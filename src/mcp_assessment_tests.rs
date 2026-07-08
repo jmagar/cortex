@@ -2,14 +2,14 @@ use super::*;
 
 #[test]
 fn skill_md_embeds_and_is_nonempty() {
-    assert!(MCP_ASSESSMENT_SKILL_MD.contains("cortex-mcp-friction-assessment"));
+    assert!(MCP_ASSESSMENT_SKILL_MD.contains("mcp-friction-assessment"));
     assert!(MCP_ASSESSMENT_SKILL_MD.contains("untrusted"));
 }
 
 #[test]
 fn prompt_references_skill_and_wraps_evidence() {
     let prompt = build_mcp_assessment_prompt(r#"{"incident":{"incident_id":"mcp-inc-1"}}"#);
-    assert!(prompt.contains("cortex-mcp-friction-assessment"));
+    assert!(prompt.contains("mcp-friction-assessment"));
     assert!(prompt.contains("Do not write files"));
     assert!(prompt.contains("<untrusted-evidence"));
     assert!(prompt.contains(r#"source="cortex mcp_investigate json""#));
@@ -51,5 +51,5 @@ fn prompt_injection_inside_evidence_stays_inside_the_untrusted_wrapper() {
 
 #[test]
 fn skill_name_constant_matches_directory() {
-    assert_eq!(MCP_ASSESSMENT_SKILL_NAME, "cortex-mcp-friction-assessment");
+    assert_eq!(MCP_ASSESSMENT_SKILL_NAME, "mcp-friction-assessment");
 }
