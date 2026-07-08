@@ -1,6 +1,6 @@
 ---
 name: cortex-session-search
-description: Search and explore AI/Claude/Codex conversation history stored in cortex. Use when the user asks to "search sessions", "find conversations", "what did I work on", "session history", "past conversations", "ask history", "when did I last use X", "show recent sessions", "list AI projects", "what tools have I used", "investigate skill failures", or mentions AI transcripts, conversation search, session analysis, or past work context retrieval.
+description: Search and explore AI/Claude/Codex conversation history stored in cortex. **Trigger when:** the user asks to "search sessions", "find conversations", "what did I work on", "session history", "past conversations", "ask history", "when did I last use X", "show recent sessions", "list AI projects", "what tools have I used"; OR when **referencing past work** like "we've done this before", "we fixed something similar", "haven't we implemented this", "this was already working", "why did we do that again", "I thought we already solved this"; OR when **questioning past decisions** like "why did we implement it this way", "what was the reasoning for", "didn't we discuss this already", "this seems familiar"; OR when the user is **under the something was done before** or wants to find context about previous implementations, fixes, or decisions. Use for session search, conversation discovery, past work retrieval, implementation history, or decision archaeology.
 ---
 
 # Cortex Session Search
@@ -152,48 +152,185 @@ Start with **cheap** bounded calls, narrow scope with **moderate** actions, rese
 | "What tools have I used?" | `list_ai_tools` | Discovery |
 | "Any abuse incidents?" | `abuse_incidents` | Abuse detection |
 
+## Trigger Scenarios & Action Mapping
+
+### "We've done/fixed this before" → Implementation archaeology
+```
+# Search for the implementation topic
+mcp__cortex__cortex(action="search_sessions", query="database migration", limit=10)
+
+# Or use ask_history for system context
+mcp__cortex__cortex(action="ask_history", query="how did we fix the CORS issue last time")
+```
+
+### "This was already implemented" → Verify implementation history
+```
+# Search for the feature/implementation keywords
+mcp__cortex__cortex(action="search_sessions", query="authentication OAuth", limit=10)
+
+# Check project context for the relevant project
+mcp__cortex__cortex(action="project_context", project="/home/jmagar/workspace/cortex")
+```
+
+### "Why did we do it this way?" → Decision archaeology
+```
+# Search for discussions around the implementation
+mcp__cortex__cortex(action="ask_history", query="why did we choose Postgres over MongoDB")
+
+# Correlate with system events from that time
+mcp__cortex__cortex(action="ai_correlate", session_id="abc123", window_minutes=30)
+```
+
+### "Didn't we already discuss this?" → Conversation retrieval
+```
+# Search for the topic across all sessions
+mcp__cortex__cortex(action="search_sessions", query="rate limiting strategy", limit=10)
+
+# Or ask as a natural question
+mcp__cortex__cortex(action="ask_history", query="when did we last discuss error handling patterns")
+```
+
+### "What was the reasoning for..." → Context recovery
+```
+# Ask history returns both AI conversation and system logs
+mcp__cortex__cortex(action="ask_history", query="what was the reasoning for removing the cache layer")
+```
+
+### "This seems familiar" → Pattern recognition
+```
+# Search for similar implementations or discussions
+mcp__cortex__cortex(action="search_sessions", query="circuit breaker pattern", limit=10)
+
+# List recent projects to orient yourself
+mcp__cortex__cortex(action="list_ai_projects")
+```
+
 ## CLI Examples
 
-The same actions are available via the CLI:
+The same actions are available via the CLI with `--json` output:
 
 ```bash
 # Browse sessions
-cortex sessions --limit 30
+cortex sessions search "" --limit 30 --json
 
 # Search transcripts
-cortex sessions search "nginx ssl" --limit 10
+cortex sessions search "nginx ssl" --limit 10 --json
 
 # Ask history with system context
-cortex sessions ask-history "what causes qbittorrent to keep dying?"
+cortex sessions ask "what causes qbittorrent to keep dying?"
 
 # Project context
-cortex sessions project-context cortex
+cortex sessions context --project /home/jmagar/workspace/cortex --json
 
 # Investigate skill failures
-cortex sessions investigate skill cortex-troubleshoot --limit 5
+cortex sessions investigate --skill cortex-troubleshoot --limit 5 --json
 
 # Usage blocks
-cortex sessions usage-blocks --project cortex --since 7d
+cortex sessions blocks --project /home/jmagar/workspace/cortex --since 7d --json
+
+# List projects
+cortex sessions projects --json
+
+# List tools
+cortex sessions tools --json
 ```
 
-## HTTP Fallback Mode
+## Transport Strategy & CodeMode Patterns
 
-Use only when the MCP tool is unavailable. The plugin exports connection settings as environment variables:
+This skill uses a **three-tier fallback** for session search:
 
-- `CLAUDE_PLUGIN_OPTION_SERVER_URL` — base URL (e.g., `http://localhost:3100`)
-- `CLAUDE_PLUGIN_OPTION_API_TOKEN` — bearer token
+### Tier 1: Labby MCP + CodeMode (Efficient Fan-out)
 
-**Required headers for `POST /mcp`:**
-```bash
--H "Accept: application/json, text/event-stream" \
--H "Content-Type: application/json"
+When Labby gateway is available, use CodeMode for parallel searches and batching:
+
+```javascript
+// Parallel fan-out: search multiple topics at once
+async () => {
+  const [rust, docker, config] = await Promise.all([
+    callTool("cortex::cortex", {action: "search_sessions", query: "rust", limit: 5}),
+    callTool("cortex::cortex", {action: "search_sessions", query: "docker", limit: 5}),
+    callTool("cortex::cortex", {action: "search_sessions", query: "config", limit: 5})
+  ]);
+  return {rust: rust.sessions?.length, docker: docker.sessions?.length, config: config.sessions?.length};
+}
 ```
 
-### Example: Search sessions via HTTP
+```javascript
+// Dependent calls: list projects, then get context for each
+async () => {
+  const projects = await callTool("cortex::cortex", {action: "list_ai_projects"});
+  const top3 = projects.projects?.slice(0, 3) || [];
+  const contexts = await Promise.all(
+    top3.map(p => callTool("cortex::cortex", {
+      action: "project_context",
+      project: p.project,
+      limit: 10
+    }))
+  );
+  return contexts;
+}
+```
+
+```javascript
+// Batch investigation: check multiple skills for incidents
+async () => {
+  const skills = ["cortex-troubleshoot", "cortex-dr", "cortex-logs"];
+  const incidents = await Promise.all(
+    skills.map(skill => callTool("cortex::cortex", {
+      action: "skill_investigate",
+      skill: skill,
+      limit: 3
+    }))
+  );
+  return incidents.filter(r => r.incidents?.length > 0);
+}
+```
+
+### Tier 2: Cortex MCP Tool
+
+When Cortex MCP tool is available (via plugin HTTP connection):
+
+```javascript
+mcp__cortex__cortex({
+  action: "search_sessions",
+  query: "nginx",
+  limit: 10
+})
+```
+
+### Tier 3: Cortex CLI (Fallback)
+
+When MCP tools are unavailable, use CLI commands directly:
+
 ```bash
-curl -s -X POST "$CLAUDE_PLUGIN_OPTION_SERVER_URL/mcp" \
-  -H "Authorization: Bearer $CLAUDE_PLUGIN_OPTION_API_TOKEN" \
-  -H "Accept: application/json, text/event-stream" \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"cortex","arguments":{"action":"search_sessions","query":"nginx","limit":10}}}'
+cortex sessions search "query" --limit N --json
+cortex sessions context --project /path/to/project --json
+cortex sessions projects --json
+cortex sessions tools --json
+```
+
+## CLI Output Parsing (Tier 3)
+
+CLI responses with `--json` return structured data:
+
+```json
+{
+  "total_candidates": 600,
+  "candidate_rows": 5000,
+  "truncated": true,
+  "sessions": [
+    {
+      "session_key": "6:dookie|6:claude|29:/home/jmagar/workspace/cortex|36:SESSION_ID",
+      "project": "/home/jmagar/workspace/cortex",
+      "tool": "claude",
+      "session_id": "...",
+      "hostname": "dookie",
+      "first_seen": "2026-07-08T06:50:01.053Z",
+      "last_seen": "2026-07-08T06:51:11.235Z",
+      "event_count": 152,
+      "match_count": 7,
+      "best_snippet": "..."
+    }
+  ]
+}
 ```
