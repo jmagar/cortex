@@ -195,24 +195,48 @@ pub fn bump(root: &Path, level: BumpLevel) -> ReleaseResult<()> {
     }
     .to_string();
 
+    apply_version(root, component, &next)?;
+    println!("Bumped {} {current} → {next}", component.id);
+    Ok(())
+}
+
+/// Re-apply the canonical version (`version_source`, e.g. Cargo.toml) to every
+/// other version-bearing file. Used as a fixup step after release-please's
+/// native `rust` strategy bumps Cargo.toml/Cargo.lock/CHANGELOG.md directly:
+/// it can't reach the `regex_version` carriers (server.json's image tag,
+/// docker-compose.prod.yml's default tag), so this syncs those — and
+/// re-verifies everything else, idempotently — to match.
+pub fn sync_version(root: &Path) -> ReleaseResult<()> {
+    let manifest = load_manifest(root)?;
+    let component = sole_component(&manifest)?;
+    let version = read_version(root, &component.version_source)?;
+    Version::parse(&version).with_release_context(|| {
+        format!("{} version is not valid semver: {version}", component.id)
+    })?;
+    apply_version(root, component, &version)?;
+    println!("Synced {} version files to {version}", component.id);
+    Ok(())
+}
+
+fn apply_version(root: &Path, component: &Component, next: &str) -> ReleaseResult<()> {
     for file in &component.version_files {
         let path = root.join(&file.path);
         let content = std::fs::read_to_string(&path)
             .with_release_context(|| format!("failed to read {}", file.path))?;
         let updated = match file.kind {
             VersionKind::CargoPackage => {
-                replace_cargo_package_version(&content, file.package.as_deref(), &next)?
+                replace_cargo_package_version(&content, file.package.as_deref(), next)?
             }
             VersionKind::CargoLockPackage => {
-                replace_cargo_lock_package_version(&content, file.package.as_deref(), &next)?
+                replace_cargo_lock_package_version(&content, file.package.as_deref(), next)?
             }
             VersionKind::JsonVersion => {
-                replace_json_version(&content, file.json_pointer.as_deref(), &next)?
+                replace_json_version(&content, file.json_pointer.as_deref(), next)?
             }
             VersionKind::RegexVersion => {
-                replace_regex_version(&content, file.pattern.as_deref(), &next)?
+                replace_regex_version(&content, file.pattern.as_deref(), next)?
             }
-            VersionKind::ChangelogHeading => ensure_changelog_heading(&content, &next)?,
+            VersionKind::ChangelogHeading => ensure_changelog_heading(&content, next)?,
             VersionKind::JsonNoVersion => content.clone(),
         };
         if updated != content {
@@ -220,8 +244,6 @@ pub fn bump(root: &Path, level: BumpLevel) -> ReleaseResult<()> {
                 .with_release_context(|| format!("failed to write {}", file.path))?;
         }
     }
-
-    println!("Bumped {} {current} → {next}", component.id);
     Ok(())
 }
 

@@ -71,13 +71,14 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Publish ghcr:<version> on main pushes, read from Cargo.toml. The
-      # `type=semver` tags below only fire on `v*` tag pushes — but the auto-tag
-      # workflow creates those tags with the default GITHUB_TOKEN, and GitHub
-      # does not trigger workflows from GITHUB_TOKEN-pushed tags (loop
-      # prevention). That left the versioned image (e.g. ghcr:1.32.x) never
-      # published. Tagging from Cargo.toml on the default branch decouples the
-      # version image from the dead tag trigger.
+      # Publish ghcr:<version> on main pushes, read from Cargo.toml, in addition
+      # to the `type=semver` tags below (which fire on the `v*` tag push that
+      # release-please creates when its release PR is merged — release-please
+      # uses a PAT, not the default GITHUB_TOKEN, so that tag push does trigger
+      # this workflow, unlike the old auto-tag.yml it replaced). Reading
+      # Cargo.toml directly on the main-branch push means the versioned image
+      # (e.g. ghcr:3.8.0) is already published the moment the release PR
+      # merges, without waiting on release-please's separate tag push.
       - name: Read crate version
         id: crate
         run: echo "version=$(grep -m1 '^version' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')" >> "$GITHUB_OUTPUT"

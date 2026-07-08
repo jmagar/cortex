@@ -1,0 +1,113 @@
+name: release-please
+
+# Drives versioning + changelog from Conventional Commits.
+#
+# On every green CI run on main, release-please maintains a "release PR" that
+# bumps `[package] version` in Cargo.toml (and the matching Cargo.lock entry,
+# which release-please's rust strategy updates natively) and updates
+# CHANGELOG.md. Merging that PR creates the git tag (vX.Y.Z) and a GitHub
+# Release, which in turn triggers release.yml (push: tags: v*) to build and
+# publish the Linux/Windows archives.
+#
+# release-please's `extra-files` handles the two clean JSON version fields
+# (server.json's $.version, mcpb/manifest.json's $.version) directly. It
+# cannot reach the `regex_version` carriers declared in
+# release/components.toml — server.json's `cortex:vX.Y.Z` image tag and
+# docker-compose.prod.yml's `CORTEX_VERSION:-X.Y.Z` default — because those
+# aren't plain JSON/TOML fields. The release-pr-fixup job below runs
+# `cargo xtask sync-version` on the release PR branch to patch those, then
+# `cargo xtask check-release-versions` to verify every version-bearing file
+# (including the untouched `.claude-plugin/plugin.json`, which must carry no
+# version key at all) agrees before pushing a follow-up fixup commit.
+#
+# This replaces the previous auto-tag.yml, which tagged immediately from
+# whatever version happened to be committed to Cargo.toml on every push to
+# main. That model required every feature branch to pre-bump the version by
+# hand (see CLAUDE.md) and offered no changelog generation. release-please
+# computes the correct bump from commit message prefixes and batches it into
+# a single reviewable PR instead.
+#
+# IMPORTANT: `token` must be a PAT or GitHub App token with `contents: write`
+# and `pull-requests: write`. The default GITHUB_TOKEN deliberately does NOT
+# trigger downstream workflows, so a tag it creates would never reach
+# release.yml. Store the token as the RELEASE_PLEASE_TOKEN secret.
+#
+# WARNING — silent failure mode: a classic PAT EXPIRES SILENTLY. When it
+# lapses, this job simply stops opening/updating release PRs — no error, no
+# alert — and releases quietly halt until someone notices. Prefer a GitHub
+# App installation token (no expiry, scoped to exactly these permissions,
+# and auditable per install) over a classic PAT. If you must use a PAT, set a
+# calendar reminder tied to its expiry date so it gets rotated before it
+# lapses.
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-please-main
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write       # required to create release commits and tags
+      pull-requests: write  # required to create and update release PRs
+    outputs:
+      prs_created: ${{ steps.release.outputs.prs_created }}
+      pr: ${{ steps.release.outputs.pr }}
+    steps:
+      - name: Require release-please token
+        env:
+          RELEASE_PLEASE_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+        run: test -n "$RELEASE_PLEASE_TOKEN"
+      - uses: googleapis/release-please-action@8b8fd2cc23b2e18957157a9d923d75aa0c6f6ad5
+        id: release
+        with:
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  release-pr-fixup:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.prs_created == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # required to push the fixup commit to the release PR branch
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+          ref: ${{ fromJson(needs.release-please.outputs.pr).headBranchName }}
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          shared-key: xtask
+      - name: Sync regex-based version files and verify
+        env:
+          CARGO_BUILD_RUSTC_WRAPPER: ""
+        run: |
+          set -euo pipefail
+          cargo xtask sync-version
+          cargo xtask check-release-versions
+      - name: Push fixup commit if anything changed
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then
+            echo "nothing to fix up"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "chore: sync regex-based version files"
+          git push
