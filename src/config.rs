@@ -1017,6 +1017,18 @@ impl Config {
             &mut config.storage.err_floor_per_source_cap,
         )?;
 
+        // Auto-adjust recovery_db_size_mb if max_db_size_mb is raised but recovery
+        // is still at the naive default (900MB). This prevents silent data loss
+        // when users set CORTEX_MAX_DB_SIZE_MB without CORTEX_RECOVERY_DB_SIZE_MB.
+        // See syslog-mcp-0kjd5 for context.
+        const NAIVE_RECOVERY_DEFAULT_MB: u64 = 900;
+        const DEFAULT_MAX_DB_SIZE_MB: u64 = 1024;
+        if config.storage.max_db_size_mb > DEFAULT_MAX_DB_SIZE_MB * 2
+            && config.storage.recovery_db_size_mb == NAIVE_RECOVERY_DEFAULT_MB
+        {
+            config.storage.recovery_db_size_mb = config.storage.max_db_size_mb * 90 / 100;
+        }
+
         // [llm] env overrides.
         env_override_bool("CORTEX_LLM_ENABLED", &mut config.llm.enabled)?;
 

@@ -1487,3 +1487,74 @@ fn cortex_llm_enabled_env_var_overrides_config() {
     assert!(!cfg.enabled);
     unsafe { std::env::remove_var("CORTEX_LLM_ENABLED") };
 }
+
+#[test]
+#[serial]
+fn recovery_db_size_auto_adjusts_when_max_db_size_raised() {
+    // Regression test for syslog-mcp-0kjd5: when CORTEX_MAX_DB_SIZE_MB is set
+    // significantly higher than the default (1024MB) but CORTEX_RECOVERY_DB_SIZE_MB
+    // is not set, recovery should auto-adjust to 90% of max instead of staying
+    // at the naive default of 900MB, which causes silent data loss.
+    unsafe { std::env::set_var("CORTEX_HOST", "127.0.0.1") };
+    unsafe { std::env::set_var("CORTEX_MAX_DB_SIZE_MB", "51200") };
+    // Explicitly ensure CORTEX_RECOVERY_DB_SIZE_MB is NOT set
+    unsafe { std::env::remove_var("CORTEX_RECOVERY_DB_SIZE_MB") };
+
+    let result = Config::load();
+    unsafe { std::env::remove_var("CORTEX_MAX_DB_SIZE_MB") };
+    unsafe { std::env::remove_var("CORTEX_HOST") };
+
+    let cfg = result.expect("Config::load() should succeed");
+    // 90% of 51200 = 46080
+    assert_eq!(
+        cfg.storage.max_db_size_mb, 51200,
+        "max_db_size_mb should be 51200"
+    );
+    assert_eq!(
+        cfg.storage.recovery_db_size_mb, 46080,
+        "recovery_db_size_mb should auto-adjust to 90% of max (46080), not stay at naive default (900)"
+    );
+}
+
+#[test]
+#[serial]
+fn recovery_db_size_preserves_explicit_setting() {
+    // When CORTEX_RECOVERY_DB_SIZE_MB is explicitly set, it should be
+    // preserved even if max_db_size_mb is high.
+    unsafe { std::env::set_var("CORTEX_HOST", "127.0.0.1") };
+    unsafe { std::env::set_var("CORTEX_MAX_DB_SIZE_MB", "51200") };
+    unsafe { std::env::set_var("CORTEX_RECOVERY_DB_SIZE_MB", "40000") };
+
+    let result = Config::load();
+    unsafe { std::env::remove_var("CORTEX_MAX_DB_SIZE_MB") };
+    unsafe { std::env::remove_var("CORTEX_RECOVERY_DB_SIZE_MB") };
+    unsafe { std::env::remove_var("CORTEX_HOST") };
+
+    let cfg = result.expect("Config::load() should succeed");
+    assert_eq!(cfg.storage.max_db_size_mb, 51200);
+    assert_eq!(
+        cfg.storage.recovery_db_size_mb, 40000,
+        "recovery_db_size_mb should preserve explicit setting (40000)"
+    );
+}
+
+#[test]
+#[serial]
+fn recovery_db_size_no_adjust_when_max_near_default() {
+    // When max_db_size_mb is near the default (1024MB), no auto-adjust
+    // should occur even if recovery is at the naive default.
+    unsafe { std::env::set_var("CORTEX_HOST", "127.0.0.1") };
+    unsafe { std::env::set_var("CORTEX_MAX_DB_SIZE_MB", "2048") };
+    unsafe { std::env::remove_var("CORTEX_RECOVERY_DB_SIZE_MB") };
+
+    let result = Config::load();
+    unsafe { std::env::remove_var("CORTEX_MAX_DB_SIZE_MB") };
+    unsafe { std::env::remove_var("CORTEX_HOST") };
+
+    let cfg = result.expect("Config::load() should succeed");
+    assert_eq!(cfg.storage.max_db_size_mb, 2048);
+    assert_eq!(
+        cfg.storage.recovery_db_size_mb, 900,
+        "recovery_db_size_mb should stay at default (900) when max is only 2x default (2048)"
+    );
+}
