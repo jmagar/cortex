@@ -234,6 +234,7 @@ fn setup_report(mode: SetupMode) -> Result<SetupReport> {
         },
     );
     phases.push(mcp_port_phase());
+    phases.push(systemd_backup_phase(mode));
     // data_mount_phase intentionally NOT included here (bead cortex-0p8r.11).
     // Post-cutover (CORTEX_USE_HTTP=true is the default), the CLI no longer
     // opens SQLite directly, so the SessionStart cost of docker inspect is no
@@ -315,6 +316,146 @@ fn setup_port(env_name: &str, default: u16) -> u16 {
         .ok()
         .and_then(|value| value.parse().ok())
         .unwrap_or(default)
+}
+
+/// Check or install the cortex-backup systemd user timer.
+/// In Check mode: reports whether the timer is enabled.
+/// In Repair mode: installs and enables the timer if not already active.
+fn systemd_backup_phase(mode: SetupMode) -> SetupPhase {
+    let home = match std::env::var_os("HOME") {
+        Some(h) => h,
+        None => {
+            return SetupPhase {
+                name: "systemd-backup",
+                status: SetupStatus::Skipped,
+                detail: "HOME not set".to_string(),
+            };
+        }
+    };
+
+    let systemd_user_dir = std::path::PathBuf::from(home).join(".config/systemd/user");
+    let service_src = std::path::PathBuf::from("config/systemd/cortex-backup.service");
+    let timer_src = std::path::PathBuf::from("config/systemd/cortex-backup.timer");
+    let service_dest = systemd_user_dir.join("cortex-backup.service");
+    let timer_dest = systemd_user_dir.join("cortex-backup.timer");
+
+    // In Repair mode, ensure the systemd user directory exists and copy the units
+    if matches!(mode, SetupMode::Repair) {
+        if let Err(e) = std::fs::create_dir_all(&systemd_user_dir) {
+            return SetupPhase {
+                name: "systemd-backup",
+                status: SetupStatus::Error,
+                detail: format!("failed to create {}: {}", systemd_user_dir.display(), e),
+            };
+        }
+
+        // Copy service unit
+        if service_src.exists() {
+            if let Err(e) = std::fs::copy(&service_src, &service_dest) {
+                return SetupPhase {
+                    name: "systemd-backup",
+                    status: SetupStatus::Error,
+                    detail: format!("failed to copy service unit: {}", e),
+                };
+            }
+        } else {
+            return SetupPhase {
+                name: "systemd-backup",
+                status: SetupStatus::Skipped,
+                detail: format!("source {} not found (running from installed binary?)", service_src.display()),
+            };
+        }
+
+        // Copy timer unit
+        if timer_src.exists() {
+            if let Err(e) = std::fs::copy(&timer_src, &timer_dest) {
+                return SetupPhase {
+                    name: "systemd-backup",
+                    status: SetupStatus::Error,
+                    detail: format!("failed to copy timer unit: {}", e),
+                };
+            }
+        }
+
+        // Reload systemd and enable the timer
+        let reload_result = std::process::Command::new("systemctl")
+            .args(["--user", "daemon-reload"])
+            .output();
+
+        let enable_result = std::process::Command::new("systemctl")
+            .args(["--user", "enable", "--now", "cortex-backup.timer"])
+            .output();
+
+        match (reload_result, enable_result) {
+            (Ok(_), Ok(output)) if output.status.success() => {
+                SetupPhase {
+                    name: "systemd-backup",
+                    status: SetupStatus::Ok,
+                    detail: "timer installed and enabled".to_string(),
+                }
+            }
+            (Ok(reload), Ok(enable)) => {
+                let reload_err = if !reload.status.success() {
+                    format!("reload failed: {}", String::from_utf8_lossy(&reload.stderr))
+                } else {
+                    String::new()
+                };
+                let enable_err = if !enable.status.success() {
+                    format!("enable failed: {}", String::from_utf8_lossy(&enable.stderr))
+                } else {
+                    String::new()
+                };
+                SetupPhase {
+                    name: "systemd-backup",
+                    status: SetupStatus::Warn,
+                    detail: format!("{}{}", reload_err, enable_err),
+                }
+            }
+            (Err(e), _) => {
+                SetupPhase {
+                    name: "systemd-backup",
+                    status: SetupStatus::Warn,
+                    detail: format!("systemctl not available: {}", e),
+                }
+            }
+            _ => {
+                SetupPhase {
+                    name: "systemd-backup",
+                    status: SetupStatus::Warn,
+                    detail: "units copied but timer enable failed".to_string(),
+                }
+            }
+        }
+    } else {
+        // In Check mode, just report whether the timer is enabled
+        let is_active = std::process::Command::new("systemctl")
+            .args(["--user", "is-enabled", "cortex-backup.timer"])
+            .output();
+
+        match is_active {
+            Ok(output) if output.status.success() => {
+                SetupPhase {
+                    name: "systemd-backup",
+                    status: SetupStatus::Ok,
+                    detail: "timer is enabled".to_string(),
+                }
+            }
+            Ok(_) => {
+                SetupPhase {
+                    name: "systemd-backup",
+                    status: SetupStatus::Warn,
+                    detail: "timer not enabled (run 'cortex setup repair' to enable)".to_string(),
+                }
+            }
+            Err(e) => {
+                SetupPhase {
+                    name: "systemd-backup",
+                    status: SetupStatus::Skipped,
+                    detail: format!("systemctl not available: {}", e),
+                }
+            }
+        }
+    }
 }
 
 fn setup_blocking_failures(report: &SetupReport) -> Vec<String> {

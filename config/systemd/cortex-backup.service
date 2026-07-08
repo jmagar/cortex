@@ -19,6 +19,9 @@ Description=cortex WAL-safe SQLite backup
 
 [Service]
 Type=oneshot
+# Systemd user services have minimal PATH; include mise, linuxbrew, and system paths
+# so sqlite3 is found (mise installs to ~/.local/bin, linuxbrew to /home/linuxbrew/.linuxbrew/bin)
+Environment=PATH=%h/.local/bin:/home/linuxbrew/.linuxbrew/bin:/usr/local/bin:/usr/bin:/bin
 # Path to the cortex repo checkout containing scripts/backup.sh.
 WorkingDirectory=%h/workspace/cortex
 # Live database path (host-side bind mount of the container's /data).

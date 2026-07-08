@@ -1,5 +1,5 @@
 ---
-name: cortex-session-search
+name: searching-sessions
 description: Search and explore AI/Claude/Codex conversation history stored in cortex. **Trigger when:** the user asks to "search sessions", "find conversations", "what did I work on", "session history", "past conversations", "ask history", "when did I last use X", "show recent sessions", "list AI projects", "what tools have I used"; OR when **referencing past work** like "we've done this before", "we fixed something similar", "haven't we implemented this", "this was already working", "why did we do that again", "I thought we already solved this"; OR when **questioning past decisions** like "why did we implement it this way", "what was the reasoning for", "didn't we discuss this already", "this seems familiar"; OR when the user is **under the something was done before** or wants to find context about previous implementations, fixes, or decisions. Use for session search, conversation discovery, past work retrieval, implementation history, or decision archaeology.
 ---
 
