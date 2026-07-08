@@ -201,6 +201,67 @@ version_files = [
 }
 
 #[test]
+fn sync_version_applies_canonical_source_to_lagging_files() {
+    use std::fs;
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    fs::create_dir(root.join("release")).unwrap();
+    fs::write(
+        root.join("release/components.toml"),
+        r#"schema_version = 1
+[[components]]
+id = "cortex"
+name = "Cortex"
+tag_prefix = "v"
+version_source = { kind = "cargo_package", path = "Cargo.toml", package = "cortex" }
+version_files = [
+  { kind = "cargo_package", path = "Cargo.toml", package = "cortex" },
+  { kind = "json_version", path = "server.json", json_pointer = "/version" },
+  { kind = "regex_version", path = "server.json", pattern = 'cortex:v(\d+\.\d+\.\d+)' },
+  { kind = "changelog_heading", path = "CHANGELOG.md" },
+  { kind = "json_no_version", path = "plugin.json" },
+]
+"#,
+    )
+    .unwrap();
+    // Simulate release-please's native `rust` strategy having already bumped
+    // Cargo.toml and CHANGELOG.md, while server.json (a regex_version carrier
+    // release-please's schema can't reach) still lags at the old version.
+    fs::write(
+        root.join("Cargo.toml"),
+        "[package]\nname = \"cortex\"\nversion = \"1.3.0\"\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("server.json"),
+        "{\n  \"version\": \"1.2.3\",\n  \"image\": \"ghcr.io/jmagar/cortex:v1.2.3\"\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("CHANGELOG.md"),
+        "# Changelog\n\n## [Unreleased]\n\n## [1.3.0] - 2026-01-01\n",
+    )
+    .unwrap();
+    fs::write(root.join("plugin.json"), "{\n  \"name\": \"cortex\"\n}\n").unwrap();
+
+    assert!(check_sync(root).is_err(), "server.json should lag at first");
+
+    sync_version(root).unwrap();
+
+    let server = fs::read_to_string(root.join("server.json")).unwrap();
+    assert!(server.contains("cortex:v1.3.0"));
+    assert_eq!(
+        read_json_version(&server, Some("/version")).unwrap(),
+        "1.3.0"
+    );
+    check_release(root).unwrap();
+
+    // Idempotent: running again makes no further changes and stays in sync.
+    sync_version(root).unwrap();
+    check_release(root).unwrap();
+}
+
+#[test]
 fn drift_is_detected() {
     use std::fs;
     let dir = tempfile::tempdir().unwrap();

@@ -1,12 +1,14 @@
 name: release
 
-# Triggered when you push a version tag (e.g. `git tag v1.16.1 && git push origin v1.16.1`).
+# Triggered when release-please merges a release PR and pushes the resulting
+# version tag (e.g. v1.16.1) — see .github/workflows/release-please.yml.
 # Builds cortex for Linux + Windows, packages with SHA256 checksums, and
-# publishes a GitHub Release with all artifacts attached.
+# attaches the artifacts to the GitHub Release release-please already created
+# for that tag.
 #
 # Manual workflow_dispatch defaults to a dry-run that builds everything but skips
-# Release creation. Pass publish=true only when auto-tag dispatches a real tag
-# release or when intentionally publishing from a tagged ref.
+# artifact attachment. Pass publish=true only when intentionally publishing
+# from an already-tagged ref.
 #
 # NOTE: cortex uses target-dir = ".cache/cargo" in .cargo/config.toml so all
 # artifact paths use .cache/cargo/release/ instead of target/release/.
@@ -101,7 +103,7 @@ jobs:
     needs: [cortex-linux, cortex-windows]
     runs-on: ubuntu-latest
     # Tag pushes publish automatically. workflow_dispatch stays dry-run unless
-    # auto-tag (or a human) explicitly passes publish=true on a tagged ref.
+    # a human explicitly passes publish=true on a tagged ref.
     if: startsWith(github.ref, 'refs/tags/v') && (github.event_name == 'push' || github.event.inputs.publish == 'true')
     permissions:
       contents: write
@@ -114,7 +116,13 @@ jobs:
       - name: List artifacts
         run: ls -la dist/
 
-      - name: Create GitHub Release
+      # release-please already created the GitHub Release for this tag (with
+      # its own changelog-derived notes) before this workflow's push-tag
+      # trigger fired. Deliberately omit generate_release_notes here — it
+      # would overwrite that body with GitHub's generic auto-generated notes.
+      # This step only attaches the built artifacts to the existing release
+      # (or creates one, for a manual workflow_dispatch on an untagged ref).
+      - name: Attach artifacts to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
@@ -122,5 +130,4 @@ jobs:
             dist/cortex-linux-x86_64.tar.gz.sha256
             dist/cortex-windows-x86_64.zip
             dist/cortex-windows-x86_64.zip.sha256
-          generate_release_notes: true
           fail_on_unmatched_files: true

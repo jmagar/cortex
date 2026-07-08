@@ -29,6 +29,12 @@ enum Command {
         #[arg(value_enum)]
         level: version::BumpLevel,
     },
+    /// Re-apply the canonical version (Cargo.toml) to every other
+    /// version-bearing file. Fixup step for release-please: its native
+    /// `rust` strategy bumps Cargo.toml/Cargo.lock/CHANGELOG.md directly but
+    /// can't reach the regex-based carriers (server.json's image tag,
+    /// docker-compose.prod.yml's default tag).
+    SyncVersion,
     /// Run the path-aware local pre-push router.
     PrePush(pre_push::PrePushArgs),
 }
@@ -40,6 +46,7 @@ fn main() -> Result<()> {
         Command::CheckVersionSync => version::check_sync(&root)?,
         Command::CheckReleaseVersions => version::check_release(&root)?,
         Command::BumpVersion { level } => version::bump(&root, level)?,
+        Command::SyncVersion => version::sync_version(&root)?,
         Command::PrePush(args) => pre_push::run(&root, args)?,
     }
     Ok(())

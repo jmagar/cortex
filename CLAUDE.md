@@ -229,7 +229,9 @@ RUST_LOG=info
 | `scripts/backup.sh` | WAL-safe SQLite backup script (checkpoint + `.backup` method) |
 | `scripts/reset-db.sh` | WAL-safe backup + destructive DB reset helper for local/dev recovery |
 | `release/components.toml` | Declarative source of truth for version-bearing files; consumed by `cargo xtask` |
-| `xtask/` | `cargo xtask` workspace crate: `bump-version`, `check-version-sync`, `check-release-versions` |
+| `xtask/` | `cargo xtask` workspace crate: `bump-version`, `sync-version`, `check-version-sync`, `check-release-versions` |
+| `release-please-config.json` / `.release-please-manifest.json` | release-please config — Conventional-Commits-driven version bump + changelog PRs (see "Version Bumping") |
+| `.github/workflows/release-please.yml` | Opens/updates the release PR on green CI; runs the `cargo xtask sync-version` fixup |
 | `cortex db status\|integrity\|checkpoint\|vacuum\|backup` | Direct SQLite maintenance commands for the configured DB |
 | `scripts/block-env-commits.sh` | Pre-commit hook that blocks commits containing env credential patterns |
 | `CHANGELOG.md` | Version history; entry required per version bump |
@@ -355,41 +357,49 @@ bd close <id>         # Complete work
 
 ## Version Bumping
 
-**Every feature branch push MUST bump the version in ALL version-bearing files.**
+**Versioning is driven by [release-please](https://github.com/googleapis/release-please), not by hand.** Feature branches do NOT need to bump the version — just use a [Conventional Commits](https://www.conventionalcommits.org/) prefix. On every green `CI` run on `main`, `release-please.yml` opens/updates a single release PR that bumps `Cargo.toml`/`Cargo.lock` (native `release-type: rust`) and the `server.json`/`mcpb/manifest.json` `"version"` fields (`extra-files` in `release-please-config.json`), and writes a `CHANGELOG.md` entry from the commits since the last release. A `release-pr-fixup` job then runs `cargo xtask sync-version` on that PR branch to patch the two files release-please's schema can't reach directly — server.json's `cortex:vX.Y.Z` image tag and `docker-compose.prod.yml`'s `CORTEX_VERSION:-X.Y.Z` default — and `cargo xtask check-release-versions` to verify everything agrees before pushing a follow-up fixup commit.
 
-Versioning is managed by `cargo xtask`, a declarative port of axon's release-
-version system. `release/components.toml` is the single source of truth for the
-version-bearing files and how each one is read/rewritten — add a row there to
-track a new carrier, no code change needed. `Cargo.toml` `[package]` is the
-canonical version; every other file must agree with it.
+Merging the release PR creates the `vX.Y.Z` tag and a GitHub Release, which triggers `release.yml` to build and publish the Linux/Windows archives.
 
-```bash
-cargo xtask bump-version patch|minor|major   # bump every version-bearing file at once
-cargo xtask check-version-sync               # all files agree (CI gate)
-cargo xtask check-release-versions           # sync + CHANGELOG entry (release gate)
-```
-
-Bump type is determined by the commit message prefix:
+Commit prefix determines the bump `release-please` computes:
 - `feat!:` or `BREAKING CHANGE` → **major** (X+1.0.0)
 - `feat` or `feat(...)` → **minor** (X.Y+1.0)
 - Everything else (`fix`, `chore`, `refactor`, `test`, `docs`, etc.) → **patch** (X.Y.Z+1)
 
+`cargo xtask` still exists and still governs the version-bearing-files invariant — `release/components.toml` is the single source of truth for which files carry the version and how each one is read/rewritten (add a row there to track a new carrier, no code change needed). `Cargo.toml` `[package]` is the canonical version; every other file must agree with it. Its subcommands:
+
+```bash
+cargo xtask check-version-sync               # all files agree (CI gate, every PR)
+cargo xtask check-release-versions           # sync + CHANGELOG entry (release gate)
+cargo xtask sync-version                     # re-apply the canonical version to every other file (release-please fixup step)
+cargo xtask bump-version patch|minor|major   # manual escape hatch — bump every file by hand, e.g. for a hotfix outside the normal PR flow
+```
+
 **Version-bearing files (declared in `release/components.toml`):**
-- `Cargo.toml` — `version = "X.Y.Z"` in `[package]` (canonical source)
-- `Cargo.lock` — the `cortex` package entry
-- `server.json` — MCP Registry `"version"` plus the `cortex:vX.Y.Z` image tag
-- `mcpb/manifest.json` — MCP Bundle `"version"`
-- `docker-compose.prod.yml` — `${CORTEX_VERSION:-X.Y.Z}` default image tag
-- `CHANGELOG.md` — new entry under the bumped version
+- `Cargo.toml` — `version = "X.Y.Z"` in `[package]` (canonical source; release-please native)
+- `Cargo.lock` — the `cortex` package entry (release-please native)
+- `server.json` — MCP Registry `"version"` (release-please `extra-files`) plus the `cortex:vX.Y.Z` image tag (`cargo xtask sync-version` fixup)
+- `mcpb/manifest.json` — MCP Bundle `"version"` (release-please `extra-files`)
+- `docker-compose.prod.yml` — `${CORTEX_VERSION:-X.Y.Z}` default image tag (`cargo xtask sync-version` fixup)
+- `CHANGELOG.md` — new entry under the bumped version (release-please native)
 
 Claude/Codex/Gemini plugin manifests are intentionally unversioned;
 `release/components.toml` lists `.claude-plugin/plugin.json` with the
 `json_no_version` kind, so `check-version-sync` rejects any top-level
-`version` key. To version-track a new file (e.g. `package.json`), add a row to
-`release/components.toml`.
+`version` key. Release-please never touches it. To version-track a new file
+(e.g. `package.json`), add a row to `release/components.toml` and, if it's not
+a plain JSON/TOML field release-please's `extra-files` can express, add it as
+a `regex_version` carrier so the fixup job picks it up too.
 
-All files MUST have the same version. Never bump only one file.
-CHANGELOG.md must have an entry for every version bump.
+All files MUST have the same version. `check-version-sync` runs on every PR;
+`check-release-versions` (which also requires a matching `CHANGELOG.md`
+heading) runs as part of the release-please fixup.
+
+`RELEASE_PLEASE_TOKEN` (a PAT or GitHub App token with `contents: write` +
+`pull-requests: write`) must be set as a repo secret — the default
+`GITHUB_TOKEN` cannot trigger the downstream `release.yml` workflow. A classic
+PAT expires silently; prefer a GitHub App installation token, or set a
+calendar reminder to rotate it.
 
 ## Plugin setup hooks
 

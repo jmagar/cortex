@@ -1,10 +1,17 @@
 # Release component manifest — the single source of truth for cortex's
 # version-bearing files. Consumed by `cargo xtask` (bump-version,
-# check-version-sync, check-release-versions).
+# sync-version, check-version-sync, check-release-versions).
 #
 # cortex ships exactly one component. The `version_source` is the canonical
 # version (Cargo.toml `[package]`); every entry in `version_files` must agree
 # with it. To add a new version carrier, add a row here — no code changes.
+#
+# release-please (.github/workflows/release-please.yml) owns Cargo.toml,
+# Cargo.lock, and CHANGELOG.md natively, plus server.json's and
+# mcpb/manifest.json's plain "version" fields via its `extra-files` config.
+# `cargo xtask sync-version` fixes up the two `regex_version` carriers below,
+# which aren't expressible as a release-please `extra-files` entry, as a
+# follow-up commit on the release PR.
 
 schema_version = 1
 
