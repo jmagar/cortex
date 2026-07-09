@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.8.1] - 2026-07-09
+
+### Fixed
+
+- Synced the npm package README with the repository README so the npm package page shows the full repo documentation.
+
 ## [3.8.0] - 2026-07-08
 
 ### Added
