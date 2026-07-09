@@ -43,6 +43,7 @@ pub(crate) enum CliCommand {
     Correlate(CorrelateArgs),
     State(StateCommand),
     Stats(StatsCommand),
+    Status(OutputArgs),
     Compose(ComposeCommand),
     Setup(SetupCommand),
     Db(DbCommand),

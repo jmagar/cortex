@@ -104,7 +104,7 @@ impl CortexService {
         Ok(FileTailResponse { sources, statuses })
     }
 
-    pub(crate) fn file_tail_statuses_snapshot(&self) -> Vec<crate::filetail::FileTailStatus> {
+    pub fn file_tail_statuses_snapshot(&self) -> Vec<crate::filetail::FileTailStatus> {
         self.file_tail_statuses
             .as_ref()
             .map(|statuses| statuses())

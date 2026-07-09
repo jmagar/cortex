@@ -280,6 +280,59 @@ pub(crate) async fn run_stats(mode: &CliMode, args: super::OutputArgs) -> Result
     print_stats_response(&response, args.json)
 }
 
+pub(crate) async fn run_status(mode: &CliMode, args: super::OutputArgs) -> Result<()> {
+    match mode {
+        CliMode::Local(service) => {
+            // Local mode: call service methods directly for status
+            let db_ok = service.health_check().await.is_ok();
+            let db_maintenance = service.db_status().await.ok();
+            let file_tail_statuses = service.file_tail_statuses_snapshot();
+            let file_tail_blocked_count = file_tail_statuses
+                .iter()
+                .filter(|status| status.blocked_on_writer_since.is_some())
+                .count();
+            let degraded = db_ok && file_tail_blocked_count > 0;
+
+            let status = if db_ok {
+                if degraded { "degraded" } else { "ok" }
+            } else {
+                "error"
+            };
+
+            if args.json {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "status": status,
+                        "db_ok": db_ok,
+                        "db_maintenance": db_maintenance,
+                        "file_tails": {
+                            "blocked_count": file_tail_blocked_count,
+                            "statuses": file_tail_statuses
+                        }
+                    })
+                );
+            } else {
+                println!("Status: {}", status);
+                println!("Database: {}", if db_ok { "ok" } else { "error" });
+                if let Some(db_maintenance) = db_maintenance {
+                    println!("DB maintenance: {:?}", db_maintenance);
+                }
+                if file_tail_blocked_count > 0 {
+                    println!("File tails blocked: {}", file_tail_blocked_count);
+                }
+                println!("File tails: {} total", file_tail_statuses.len());
+            }
+            Ok(())
+        }
+        CliMode::Http(_) => {
+            bail!(
+                "status command is not yet available in HTTP mode. Use Local mode or run via MCP action=status"
+            )
+        }
+    }
+}
+
 pub(crate) async fn run_sessions(mode: &CliMode, args: SessionsArgs) -> Result<()> {
     let json = args.json;
     let req = args.into_request();

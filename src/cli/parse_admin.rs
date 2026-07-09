@@ -21,6 +21,10 @@ pub(crate) fn parse_stats(args: &[String]) -> Result<CliCommand> {
     )?)))
 }
 
+pub(crate) fn parse_status(args: &[String]) -> Result<CliCommand> {
+    Ok(CliCommand::Status(parse_output_args("status", args)?))
+}
+
 fn parse_service_logs_args(context: &str, args: &[String]) -> Result<ServiceLogsArgs> {
     let (service, rest) = args
         .split_first()
