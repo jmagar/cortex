@@ -198,7 +198,7 @@ These rows are sourced from the design specs under `docs/superpowers/specs/`. Th
 | TOML key | Env var | Type | Default | Sens. | Reload | Notes |
 |---|---|---|---|---|---|---|
 | `enabled` | — | bool | `false` | public | restart-only | |
-| `axon_collection` | — | string | `"cortex-incidents"` | public | restart-only | Locked in spec §13 |
+| `axon_collection` | — | string | `"incidents"` | public | restart-only | Locked in spec §13 |
 | `llm_endpoint` | — | string | — | public | restart-only | Optional; for `suggest_fix` synthesis |
 | `llm_api_key_env` | — | string | — | public | restart-only | **Name** of the env var holding the key (the key itself is **secret** and read at runtime from `std::env`) |
 | `incidents_dir` | — | path | `<db_dir>/incidents` | tuning | restart-only | Card staging path |

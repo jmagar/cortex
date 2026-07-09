@@ -44,7 +44,7 @@ mod assess {
         // deterministic-findings-only is fine over HTTP, LLM assessment is not.
         let (_server, http_mode) = http_mode().await;
         let args = AssessSkillArgs {
-            skill: Some("cortex-frustration-assessment".to_string()),
+            skill: Some("frustration-assessment".to_string()),
             no_llm: false,
             ..Default::default()
         };
@@ -58,7 +58,7 @@ mod assess {
     async fn run_assess_skill_allows_http_mode_with_no_llm() {
         let (_server, http_mode) = http_mode().await;
         let args = AssessSkillArgs {
-            skill: Some("cortex-frustration-assessment".to_string()),
+            skill: Some("frustration-assessment".to_string()),
             no_llm: true,
             ..Default::default()
         };

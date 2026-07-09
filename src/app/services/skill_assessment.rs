@@ -3,7 +3,7 @@
 //! plugin) name to its highest-priority (or all, with `--all`) matching
 //! `SkillIncidentEvidence` bundle(s), and optionally runs the guarded
 //! Gemini assessment through PR 1's `LlmRunner` using the
-//! `cortex-skill-improvement-assessment` skill prompt
+//! `skill-improvement-assessment` skill prompt
 //! (`crate::skill_assessment::build_skill_assessment_prompt`).
 //!
 //! This module does NOT reimplement Gemini process spawning, an audit

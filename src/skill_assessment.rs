@@ -1,4 +1,4 @@
-//! Prompt construction for the `cortex-skill-improvement-assessment`
+//! Prompt construction for the `skill-improvement-assessment`
 //! skill. This module deliberately does **not** spawn Gemini or duplicate
 //! any part of PR 1's `LlmRunner` — the guarded invocation happens in
 //! `src/app/services/skill_assessment.rs` (Task 3), which builds an
@@ -16,19 +16,19 @@
 // pattern `crate::assessment::SKILL_NAME`/`SKILL_MD` would need if they
 // weren't already re-exported elsewhere.
 #[allow(dead_code)]
-pub(crate) const SKILL_ASSESSMENT_SKILL_NAME: &str = "cortex-skill-improvement-assessment";
+pub(crate) const SKILL_ASSESSMENT_SKILL_NAME: &str = "skill-improvement-assessment";
 #[allow(dead_code)]
 pub(crate) const SKILL_ASSESSMENT_SKILL_MD: &str =
-    include_str!("../plugins/cortex/skills/cortex-skill-improvement-assessment/SKILL.md");
+    include_str!("../plugins/cortex/skills/skill-improvement-assessment/SKILL.md");
 
 pub(crate) const SKILL_ASSESSMENT_SYSTEM_PROMPT: &str = concat!(
-    "Use the cortex-skill-improvement-assessment skill to assess the supplied bounded ",
+    "Use the skill-improvement-assessment skill to assess the supplied bounded ",
     "skill-incident evidence bundle.\n\n",
     "Return the assessment as Markdown in the assistant response. Do not write ",
     "files, create plans, or persist artifacts.\n\n",
     "You must also follow these instructions directly if native skill activation ",
     "is unavailable:\n\n",
-    include_str!("../plugins/cortex/skills/cortex-skill-improvement-assessment/SKILL.md"),
+    include_str!("../plugins/cortex/skills/skill-improvement-assessment/SKILL.md"),
 );
 
 /// `evidence_json` must be the serialized PR 3 `SkillIncidentEvidence`

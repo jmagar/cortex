@@ -90,7 +90,7 @@ pub(crate) fn parse_assess_skill_from(args: &[String]) -> Result<CliCommand> {
     parsed.skill = positional;
     if parsed.skill.is_none() && parsed.plugin.is_none() {
         bail!(
-            "assess skill: skill name or --plugin is required, e.g. `cortex assess skill cortex-frustration-assessment` or `cortex assess skill --plugin lavra`"
+            "assess skill: skill name or --plugin is required, e.g. `cortex assess skill frustration-assessment` or `cortex assess skill --plugin lavra`"
         );
     }
     Ok(CliCommand::Assess(AssessCommand::Skill(parsed)))
