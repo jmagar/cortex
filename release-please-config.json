@@ -70,7 +70,8 @@
           "type": "json",
           "path": "mcpb/manifest.json",
           "jsonpath": "$.version"
-        }
+        },
+        "packages/cortex-rmcp/package.json"
       ]
     }
   },

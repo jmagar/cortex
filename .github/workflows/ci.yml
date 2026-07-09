@@ -256,3 +256,20 @@ jobs:
           # of content. The job still runs and reports its own status as a
           # non-blocking advisory check; re-add it to this gate once a
           # license is configured (or the action is swapped/pinned).
+
+  npm:
+    name: npm launcher
+    runs-on: ubuntu-latest
+    needs: [changes]
+    if: ${{ needs.changes.outputs.release == 'true' || needs.changes.outputs.workflow == 'true' || needs.changes.outputs.docs == 'true' }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      - name: Test npm launcher
+        run: npm test --prefix packages/cortex-rmcp
+      - name: Check npm launcher syntax
+        run: npm run check --prefix packages/cortex-rmcp
+      - name: Dry-run npm package
+        run: npm pack --dry-run --json ./packages/cortex-rmcp

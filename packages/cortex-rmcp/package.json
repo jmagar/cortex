@@ -1,0 +1,40 @@
+{
+  "name": "cortex-rmcp",
+  "version": "3.8.0",
+  "description": "Node launcher for the cortex Rust MCP server, CLI, and homelab intelligence binary.",
+  "license": "MIT",
+  "homepage": "https://github.com/jmagar/cortex#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jmagar/cortex.git",
+    "directory": "packages/cortex-rmcp"
+  },
+  "bugs": {
+    "url": "https://github.com/jmagar/cortex/issues"
+  },
+  "bin": {
+    "cortex-rmcp": "bin/cortex.js",
+    "cortex": "bin/cortex.js"
+  },
+  "files": [
+    "bin/",
+    "lib/",
+    "scripts/",
+    "README.md"
+  ],
+  "scripts": {
+    "postinstall": "node scripts/install.js",
+    "test": "node --test",
+    "check": "node --check bin/cortex.js && node --check scripts/install.js && node --check lib/platform.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "mcp",
+    "cortex",
+    "syslog",
+    "logs",
+    "homelab"
+  ]
+}
