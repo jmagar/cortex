@@ -16,18 +16,18 @@ const GEMINI_AUTH_FILES: &[&str] = &[
     "google_accounts.json",
 ];
 
-pub(crate) const SKILL_NAME: &str = "cortex-frustration-assessment";
+pub(crate) const SKILL_NAME: &str = "frustration-assessment";
 pub(crate) const SKILL_MD: &str =
-    include_str!("../plugins/cortex/skills/cortex-frustration-assessment/SKILL.md");
+    include_str!("../plugins/cortex/skills/frustration-assessment/SKILL.md");
 
 pub(crate) const ASSESSMENT_SYSTEM_PROMPT: &str = concat!(
-    "Use the cortex-frustration-assessment skill to assess the supplied bounded ",
+    "Use the frustration-assessment skill to assess the supplied bounded ",
     "syslog abuse incident evidence bundle.\n\n",
     "Return the assessment as Markdown in the assistant response. Do not write ",
     "files, create plans, or persist artifacts.\n\n",
     "You must also follow these instructions directly if native skill activation ",
     "is unavailable:\n\n",
-    include_str!("../plugins/cortex/skills/cortex-frustration-assessment/SKILL.md"),
+    include_str!("../plugins/cortex/skills/frustration-assessment/SKILL.md"),
 );
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -299,7 +299,7 @@ fn write_assessment_skill(gemini_dir: &Path) -> Result<()> {
     let skill_dir = gemini_dir.join("skills").join(SKILL_NAME);
     fs::create_dir_all(&skill_dir).context("failed to create Gemini skill directory")?;
     fs::write(skill_dir.join("SKILL.md"), SKILL_MD)
-        .context("failed to write cortex-frustration-assessment skill")?;
+        .context("failed to write frustration-assessment skill")?;
     Ok(())
 }
 

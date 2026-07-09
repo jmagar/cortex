@@ -216,9 +216,9 @@ CLI-only LLM analysis that generates detailed incident write-ups:
 
 ### Assessment Skills
 Embedded skills that generate the assessment write-up:
-- `cortex-skill-improvement-assessment`: Skill assessment
-- `cortex-mcp-friction-assessment`: MCP assessment
-- `cortex-hook-friction-assessment`: Hook assessment (planned)
+- `skill-improvement-assessment`: Skill assessment
+- `mcp-friction-assessment`: MCP assessment
+- `hook-friction-assessment`: Hook assessment (planned)
 
 ## Backfill
 

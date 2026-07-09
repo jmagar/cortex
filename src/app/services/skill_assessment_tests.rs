@@ -49,7 +49,7 @@ async fn run_skill_assessment_never_touches_gemini_when_run_llm_false() {
     // does not prove run_llm was honored; the audit-table absence does).
     let (service, pool, _dir) = test_service();
     let req = SkillAssessRequest {
-        skill: Some("cortex-frustration-assessment".to_string()),
+        skill: Some("frustration-assessment".to_string()),
         plugin: None,
         model: None,
         project: None,
@@ -110,7 +110,7 @@ async fn plugin_only_request_forwards_plugin_to_investigate_ai_skill_incidents()
 async fn run_skill_assessment_with_delta_run_llm_false_writes_no_llm_invocation_row() {
     let (service, pool, _dir) = test_service();
     let req = SkillAssessRequest {
-        skill: Some("cortex-frustration-assessment".to_string()),
+        skill: Some("frustration-assessment".to_string()),
         plugin: None,
         model: None,
         project: None,

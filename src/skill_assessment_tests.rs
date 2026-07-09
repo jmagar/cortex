@@ -2,14 +2,14 @@ use super::*;
 
 #[test]
 fn skill_md_embeds_and_is_nonempty() {
-    assert!(SKILL_ASSESSMENT_SKILL_MD.contains("cortex-skill-improvement-assessment"));
+    assert!(SKILL_ASSESSMENT_SKILL_MD.contains("skill-improvement-assessment"));
     assert!(SKILL_ASSESSMENT_SKILL_MD.contains("untrusted"));
 }
 
 #[test]
 fn prompt_references_skill_and_wraps_evidence() {
     let prompt = build_skill_assessment_prompt(r#"{"incident":{"incident_id":"inc-1"}}"#);
-    assert!(prompt.contains("cortex-skill-improvement-assessment"));
+    assert!(prompt.contains("skill-improvement-assessment"));
     assert!(prompt.contains("Do not write files"));
     assert!(prompt.contains("<untrusted-evidence"));
     assert!(prompt.contains(r#"source="cortex skill_investigate json""#));
@@ -67,8 +67,5 @@ fn prompt_injection_inside_evidence_stays_inside_the_untrusted_wrapper() {
 
 #[test]
 fn skill_name_constant_matches_directory() {
-    assert_eq!(
-        SKILL_ASSESSMENT_SKILL_NAME,
-        "cortex-skill-improvement-assessment"
-    );
+    assert_eq!(SKILL_ASSESSMENT_SKILL_NAME, "skill-improvement-assessment");
 }

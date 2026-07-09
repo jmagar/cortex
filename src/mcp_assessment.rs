@@ -1,4 +1,4 @@
-//! Prompt construction for the `cortex-mcp-friction-assessment` skill. This
+//! Prompt construction for the `mcp-friction-assessment` skill. This
 //! module deliberately does **not** spawn Gemini or duplicate any part of
 //! `LlmRunner` — the guarded invocation happens in
 //! `src/app/services/mcp_assessment.rs`, which builds an
@@ -15,19 +15,19 @@
 // separately by production code) — mirrors
 // `crate::skill_assessment::SKILL_ASSESSMENT_SKILL_NAME`/`_SKILL_MD`.
 #[allow(dead_code)]
-pub(crate) const MCP_ASSESSMENT_SKILL_NAME: &str = "cortex-mcp-friction-assessment";
+pub(crate) const MCP_ASSESSMENT_SKILL_NAME: &str = "mcp-friction-assessment";
 #[allow(dead_code)]
 pub(crate) const MCP_ASSESSMENT_SKILL_MD: &str =
-    include_str!("../plugins/cortex/skills/cortex-mcp-friction-assessment/SKILL.md");
+    include_str!("../plugins/cortex/skills/mcp-friction-assessment/SKILL.md");
 
 pub(crate) const MCP_ASSESSMENT_SYSTEM_PROMPT: &str = concat!(
-    "Use the cortex-mcp-friction-assessment skill to assess the supplied bounded ",
+    "Use the mcp-friction-assessment skill to assess the supplied bounded ",
     "MCP-incident evidence bundle.\n\n",
     "Return the assessment as Markdown in the assistant response. Do not write ",
     "files, create plans, or persist artifacts.\n\n",
     "You must also follow these instructions directly if native skill activation ",
     "is unavailable:\n\n",
-    include_str!("../plugins/cortex/skills/cortex-mcp-friction-assessment/SKILL.md"),
+    include_str!("../plugins/cortex/skills/mcp-friction-assessment/SKILL.md"),
 );
 
 /// `evidence_json` must be the serialized `McpIncidentEvidence` (see

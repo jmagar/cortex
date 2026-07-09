@@ -77,7 +77,7 @@ box). Operators who run on smaller hosts will commonly set
 | `probe_results` (Epic D) | **Last N per `(host_id, probe_name)` where N=200**, AND a 30-day ceiling. Whichever fires first. | n/a | `db::maintenance::evict_probe_results` (new in Epic D) | hourly | `CORTEX_PROBE_RESULTS_PER_GROUP` (default 200) / `_PROBE_RESULTS_MAX_DAYS` (default 30) | n/a | Epic D spec §6.1 lines 259–262 (composite-index-friendly DELETE) |
 | `alert_state` (Epic E) | Rows where `ack_at IS NOT NULL AND ack_at < now() - 30 days` are GC'd. Active rows (`ack_at IS NULL`) are never aged out. | n/a | Existing purge task — Epic E adds a sub-pass | piggy-backs on the hourly log purge | not configurable in V1 (30 d is hardcoded in the GC SQL — proposed `CORTEX_ALERT_STATE_GC_DAYS` for V1.1) | n/a | Epic E spec §6 line 312 ("Stale clear") |
 | `incidents` (Epic F) | **90-day ceiling.** Resolved-and-acked incidents older than 90 d are GC'd from SQLite. Open incidents (`last_seen` within `window_close`) are never aged. | n/a | `db::maintenance::gc_incidents` (new in Epic F) | daily | `CORTEX_INCIDENT_RETENTION_DAYS` (default 90) | The Qdrant vector for the GC'd incident is also deleted (point id = `incident_id`); see §6. | Epic F spec §11; `docs/contracts/incident-card.md` §7 |
-| Qdrant collection `cortex-incidents` (Epic F) | Follows `incidents` table — deletion cascades to Qdrant point on GC. **Re-embed on `schema_version` bump:** all incidents in the **last 90 days** are re-rendered and re-embedded. Older incidents stay at their previous schema version. | n/a | `db::maintenance::backfill_incident_embeddings` (new in Epic F) — re-embed task triggered by manual CLI or schema-version bump | on-demand | `CORTEX_INCIDENT_REEMBED_DAYS` (default 90, matches incident retention ceiling) | n/a | `docs/contracts/incident-card.md` §7 "Compatibility & schema bumps" |
+| Qdrant collection `incidents` (Epic F) | Follows `incidents` table — deletion cascades to Qdrant point on GC. **Re-embed on `schema_version` bump:** all incidents in the **last 90 days** are re-rendered and re-embedded. Older incidents stay at their previous schema version. | n/a | `db::maintenance::backfill_incident_embeddings` (new in Epic F) — re-embed task triggered by manual CLI or schema-version bump | on-demand | `CORTEX_INCIDENT_REEMBED_DAYS` (default 90, matches incident retention ceiling) | n/a | `docs/contracts/incident-card.md` §7 "Compatibility & schema bumps" |
 | `/data/incidents/{incident_id}.md` (Epic F card staging) | Follows `incidents` table — file is deleted on GC of the SQLite row. Files for `embed_status != embedded` are kept indefinitely so the embed worker can retry. | n/a | `gc_incidents` cascades | daily | `CORTEX_INCIDENT_RETENTION_DAYS` | n/a | Epic F spec §4 |
 
 ---
@@ -200,7 +200,7 @@ batch-writer starvation.
 
 ### Qdrant re-embed (Epic F)
 
-The Qdrant collection `cortex-incidents` is re-embedded on a
+The Qdrant collection `incidents` is re-embedded on a
 schema-version bump for **incidents in the last 90 days** (the freshness
 window). Older incidents stay at their prior `schema_version` — recall@5
 against ancient incidents is already noisy, and re-embedding a year of
@@ -364,7 +364,7 @@ Epic spec migrations is covered in §3:
 - `metrics_gauge`, `metrics_gauge_5m`, `metrics_gauge_1h`,
   `probe_results` — Epic D
 - `alert_state` — Epic E
-- `incidents` (+ Qdrant `cortex-incidents` + `/data/incidents/*.md`) —
+- `incidents` (+ Qdrant `incidents` + `/data/incidents/*.md`) —
   Epic F
 
 If a future migration adds a persistent table, this contract MUST be

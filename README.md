@@ -687,7 +687,7 @@ Install as a Claude Code plugin. The plugin handles deployment automatically —
 | `batch_size` | no | `100` | Number of parsed messages per SQLite batch |
 | `write_channel_capacity` | no | `10000` | Internal parsed-message queue capacity before listener backpressure |
 | `docker_ingest_enabled` | no | `false` | Legacy central pull compatibility mode for explicit remote Docker Engine endpoints; current deployments use the host-local agent |
-| `fleet_hosts` | no | — | SSH aliases of fleet hosts. Used for Docker ingest (when enabled, each becomes `http://<alias>:2375`) and the `cortex-deploy-dropins` skill |
+| `fleet_hosts` | no | — | SSH aliases of fleet hosts. Used for Docker ingest — when enabled, each becomes `http://<alias>:2375` |
 
 **SessionStart hook automation** (in server mode):
 
@@ -697,17 +697,21 @@ Install as a Claude Code plugin. The plugin handles deployment automatically —
 - Repairs shared assets under `~/.cortex` and removes stale user-level `cortex.service` units/drop-ins left by older plugin versions
 - All idempotent — safe to run on every session
 
-**Bundled skills** (all 9, from `plugins/cortex/skills/`):
+**Bundled skills** (all 13, from `plugins/cortex/skills/`):
 
 - `cortex` — primary log-intelligence skill: search, tail, errors, correlate, stats, and the rest of the MCP action surface
-- `cortex-dr` — health check covering MCP, service status, syslog port, fleet drop-ins, and live log flow; tails service logs on failure
-- `cortex-deploy-dropins` — SSH-based one-shot rsyslog drop-in deployment to every host in `fleet_hosts`
-- `cortex-frustration-assessment` — analyze an `abuse_investigate` evidence bundle into a frustration/abuse report
-- `cortex-logs` — Docker Compose service log tailing (the service's own stdout/stderr, not client syslog)
-- `cortex-redeploy` — re-run plugin setup after config or plugin changes
-- `cortex-report` — time-bounded homelab health/log-analysis markdown reports
-- `cortex-troubleshoot` — diagnose connection failures, missing logs, unhealthy containers, and restart loops
-- `cortex-version-check` — check whether the running Docker container matches the local Compose image; add `--pull` to pull first, otherwise checks only the local image cache
+- `frustration-assessment` — analyze an `abuse_investigate` evidence bundle into a frustration/abuse report
+- `mcp-friction-assessment` — analyze an `mcp_investigate` evidence bundle for MCP tool reliability issues
+- `hook-friction-assessment` — analyze a `hook_investigate` evidence bundle for hook reliability issues
+- `skill-improvement-assessment` — analyze a `skill_investigate` evidence bundle for skill-quality issues
+- `incidents` — triage unacknowledged error signatures, notifications, prior incidents, and incident context
+- `topology` — homelab topology and cross-host correlation via `map`/`host_state`/`fleet_state`/`correlate`/`graph`
+- `session-search` — search and explore AI transcript sessions
+- `logs` — Docker Compose service log tailing (the service's own stdout/stderr, not client syslog)
+- `redeploy` — re-run plugin setup after config or plugin changes
+- `report` — time-bounded homelab health/log-analysis markdown reports
+- `troubleshoot` — diagnose connection failures, missing logs, unhealthy containers, and restart loops
+- `version-check` — check whether the running Docker container matches the local Compose image; add `--pull` to pull first, otherwise checks only the local image cache
 
 The plugin deploys the server with Docker Compose through the same `cortex setup`
 path as the one-line installer. You can still build and run the binary locally
@@ -1051,20 +1055,20 @@ repurposed abuse-incident search.
 
 ```bash
 # Assess the highest-priority incident touching a given skill
-cortex assess skill cortex-frustration-assessment
+cortex assess skill frustration-assessment
 
 # Narrow by tool/project/time window
-cortex assess skill cortex-frustration-assessment --since 7d --tool codex --project /home/jmagar/workspace/cortex
+cortex assess skill frustration-assessment --since 7d --tool codex --project /home/jmagar/workspace/cortex
 
 # Assess every matching skill incident, not just the top one
-cortex assess skill cortex-frustration-assessment --all
-cortex assess skill cortex-frustration-assessment --limit 5
+cortex assess skill frustration-assessment --all
+cortex assess skill frustration-assessment --limit 5
 
 # Filter by plugin instead of a single skill name
 cortex assess skill --plugin lavra --since 7d
 
 # Deterministic findings only — no Gemini call, safe to script/automate
-cortex assess skill cortex-frustration-assessment --no-llm
+cortex assess skill frustration-assessment --no-llm
 
 # Assess the highest-priority incident touching a given MCP server/tool
 cortex assess mcp labby

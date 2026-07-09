@@ -348,7 +348,7 @@ structured fields, Codex `<skill><name>` transcript tags).
 
 ```bash
 cortex sessions skills --project cortex --limit 20
-cortex sessions skills --skill cortex-troubleshoot --since 1h --json
+cortex sessions skills --skill troubleshoot --since 1h --json
 ```
 
 All flags are optional filters: `--skill`, `--plugin`, `--tool`,

@@ -236,7 +236,7 @@ The plain JSON API is **always on**: it is mounted under `/api/*` on the same HT
 
 `cortex sessions assess` is local-only and starts the Gemini CLI in an isolated
 temporary HOME. It copies Gemini auth files from the configured source HOME,
-installs the bundled `cortex-frustration-assessment` skill into that isolated
+installs the bundled `frustration-assessment` skill into that isolated
 HOME, disables MCP servers/hooks/context-file loading, and parses Gemini's
 `stream-json` output so only assistant text is emitted.
 

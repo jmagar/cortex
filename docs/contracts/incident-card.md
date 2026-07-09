@@ -10,7 +10,7 @@
 ## 1. Purpose
 
 This contract defines the exact textual format originally designed for embedding
-incident cards into the Qdrant collection `cortex-incidents`.
+incident cards into the Qdrant collection `incidents`.
 
 Current production `similar_incidents` is SQLite FTS5-only. It does not embed
 incident cards, query Qdrant, or call Axon. Keep this document as design context
@@ -199,7 +199,7 @@ sample lines:
 
 ## 5. Qdrant payload schema
 
-Every point in `cortex-incidents` carries this payload (in addition to the embedded card text, which axon stores in `payload.text` by its own convention):
+Every point in `incidents` carries this payload (in addition to the embedded card text, which axon stores in `payload.text` by its own convention):
 
 ```json
 {
@@ -241,7 +241,7 @@ Every point in `cortex-incidents` carries this payload (in addition to the embed
 
 ## 6. Collection identity
 
-- **Collection name:** `cortex-incidents` — **fixed**. Configurable in code only (a `const COLLECTION_NAME: &str` in `src/app/rag.rs`), not via runtime config. Per resolved §13: axon does not expose payload-filter passthrough, so we use a dedicated collection rather than filtering by `source_type` inside axon's default collection.
+- **Collection name:** `incidents` — **fixed**. Configurable in code only (a `const COLLECTION_NAME: &str` in `src/app/rag.rs`), not via runtime config. Per resolved §13: axon does not expose payload-filter passthrough, so we use a dedicated collection rather than filtering by `source_type` inside axon's default collection.
 - **Vector dimension:** inherited from axon's TEI backend. Documented dynamically — the renderer never hardcodes a dimension. If axon swaps TEI models, the entire collection re-embeds (handled axon-side; from our perspective, we re-run the 90-day backfill).
 - **Distance metric:** **cosine** — axon's default for TEI-backed collections. Verify with `axon doctor` on first deployment; if a future axon change defaults to a different metric we accept that change (the embedding model controls what's meaningful, not us).
 - **Indexed payload fields (must be set in collection schema for performant client-side filtering):**
@@ -265,7 +265,7 @@ Every point in `cortex-incidents` carries this payload (in addition to the embed
 - **V1:** `schema_version: 1`. This document defines V1 in its entirety.
 - **Bump policy.** Any change to the card template (§2), placeholder set (§2), or payload field set (§5) requires a `schema_version` increment. Minor allowlist additions for an existing source do **not** bump the version — they trigger a per-source backfill (§4) but the wire format is unchanged.
 - **Backfill on bump.** When `schema_version` bumps, all incidents in the **freshness window (last 90 days)** are re-rendered and re-embedded. Older incidents are left at their previous schema version — recall@5 against ancient incidents is already noisy, and re-embedding a year of history burns axon/TEI capacity for diminishing returns.
-- **Mixed-version reads.** During a backfill, `cortex-incidents` will hold a mix of `schema_version: 1` and `schema_version: N` points. Retrieval treats them identically — the embedded text is what matters for similarity, and the payload fields documented here are stable across V1 (additions only, no removals or renames). If a future bump removes or renames a payload field, the read path must gate on `schema_version` to stay correct.
+- **Mixed-version reads.** During a backfill, `incidents` will hold a mix of `schema_version: 1` and `schema_version: N` points. Retrieval treats them identically — the embedded text is what matters for similarity, and the payload fields documented here are stable across V1 (additions only, no removals or renames). If a future bump removes or renames a payload field, the read path must gate on `schema_version` to stay correct.
 
 ---
 
