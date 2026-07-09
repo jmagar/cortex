@@ -3,6 +3,7 @@ set -euo pipefail
 REPO="${CORTEX_RMCP_REPO:-jmagar/cortex}"
 INSTALL_DIR="${INSTALL_DIR:-${HOME}/.local/bin}"
 VERSION="${CORTEX_RMCP_VERSION:-latest}"
+RELEASE_BASE_URL="${CORTEX_RMCP_RELEASE_BASE_URL:-}"
 BINARY_NAME="cortex"
 usage() { cat <<'USAGE'
 Install cortex from GitHub Releases.
@@ -20,7 +21,7 @@ target_asset() { local os arch; os="$(uname -s | tr '[:upper:]' '[:lower:]')"; a
 ' "${os}" "${arch}" >&2; exit 1 ;; esac; }
 need curl; need install; need mktemp; need tar
 asset="$(target_asset)"; tmpdir="$(mktemp -d)"; trap 'rm -rf "${tmpdir}"' EXIT
-if [[ "${VERSION}" == "latest" ]]; then url="https://github.com/${REPO}/releases/latest/download/${asset}"; else url="https://github.com/${REPO}/releases/download/${VERSION}/${asset}"; fi
+if [[ -n "${RELEASE_BASE_URL}" ]]; then url="${RELEASE_BASE_URL%/}/${VERSION}/${asset}"; elif [[ "${VERSION}" == "latest" ]]; then url="https://github.com/${REPO}/releases/latest/download/${asset}"; else url="https://github.com/${REPO}/releases/download/${VERSION}/${asset}"; fi
 mkdir -p "${INSTALL_DIR}"; if [[ ! -w "${INSTALL_DIR}" ]]; then printf 'error: install dir is not writable: %s
 ' "${INSTALL_DIR}" >&2; exit 1; fi
 printf 'Downloading %s
