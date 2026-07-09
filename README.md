@@ -13,6 +13,39 @@ triggers. Graph rebuilds use staging tables plus a short serialized swap and
 record explicit projection status, source watermarks, row counts, runtime
 metrics, and degraded failure state.
 
+## npm / npx
+
+Run the stdio MCP server or CLI without a manual binary install:
+
+```bash
+npx -y cortex-rmcp --help
+```
+
+MCP clients can use the same launcher:
+
+```json
+{
+  "mcpServers": {
+    "cortex": {
+      "command": "npx",
+      "args": ["-y", "cortex-rmcp", "mcp"]
+    }
+  }
+}
+```
+
+The npm package downloads the `cortex` binary from GitHub Releases during `postinstall`. Cortex keeps its repo and CLI name as `cortex`; the npm package is `cortex-rmcp` because Cortex is broader than only an MCP server.
+
+## Rust MCP naming pattern
+
+Most Rust MCP servers use:
+
+- Repo: `<service>-rmcp`
+- CLI alias: `r<service>`
+- npm package: `<service>-rmcp`
+
+Cortex is the exception: repo `cortex`, CLI `cortex`, npm package `cortex-rmcp`.
+
 ## Overview
 
 ```
@@ -35,7 +68,7 @@ MCP is an exposure surface, not the owner of log-intelligence business policy. S
 
 ## Tools
 
-One MCP tool, `cortex`, is exposed. Use the required `action` argument to run `search`, `filter`, `tail`, `errors`, `hosts`, `map`, `sessions`, `search_sessions`, `abuse`, `abuse_incidents`, `abuse_investigate`, `ai_correlate`, `topic_correlate`, `usage_blocks`, `project_context`, `list_ai_tools`, `list_ai_projects`, `correlate`, `stats`, `status`, `apps`, `source_ips`, `timeline`, `patterns`, `context`, `get`, `ingest_rate`, `silent_hosts`, `clock_skew`, `anomalies`, `compare`, `compose_status`, `compose_doctor`, `unaddressed_errors`, `ack_error`, `unack_error`, `notifications_recent`, `notifications_test`, `llm_invocations`, `similar_incidents`, `ask_history`, `incident_context`, `graph`, `skill_events`, `skill_incidents`, `skill_investigate`, `mcp_events`, `mcp_incidents`, `mcp_investigate`, `hook_events`, `hook_incidents`, `hook_investigate`, or `help`.
+One MCP tool, `cortex`, is exposed. Use the required `action` argument to run `search`, `filter`, `tail`, `errors`, `hosts`, `map`, `sessions`, `search_sessions`, `abuse`, `abuse_incidents`, `abuse_investigate`, `ai_correlate`, `topic_correlate`, `usage_blocks`, `project_context`, `list_ai_tools`, `list_ai_projects`, `correlate`, `stats`, `status`, `apps`, `source_ips`, `timeline`, `patterns`, `context`, `get`, `ingest_rate`, `silent_hosts`, `clock_skew`, `anomalies`, `compare`, `compose_status`, `compose_doctor`, `unaddressed_errors`, `ack_error`, `unack_error`, `notifications_recent`, `notifications_test`, `llm_invocations`, `similar_incidents`, `incident_context`, `graph`, `skill_events`, `skill_incidents`, `skill_investigate`, `mcp_events`, `mcp_incidents`, `mcp_investigate`, `hook_events`, `hook_incidents`, `hook_investigate`, or `help`.
 
 For the complete action-specific parameter reference, see [`docs/mcp/SCHEMA.md`](docs/mcp/SCHEMA.md). For correlation behavior and AI/non-AI inclusion rules, see [`docs/mcp/CORRELATION.md`](docs/mcp/CORRELATION.md).
 
@@ -58,7 +91,7 @@ For the complete action-specific parameter reference, see [`docs/mcp/SCHEMA.md`]
 | `project_context` | Summary for one AI project path |
 | `list_ai_tools` | Distinct AI tools with counts |
 | `list_ai_projects` | Distinct AI projects with counts |
-| `correlate` | Cross-host event correlation in a time window |
+| `correlate` | Cross-host event correlation in a time window; omit reference_time and pass query to derive the anchor from a matching AI session |
 | `stats` | Database statistics and storage health |
 | `status` | Lightweight runtime and DB health |
 | `apps` | Distinct application names with log and host counts |
@@ -81,7 +114,6 @@ For the complete action-specific parameter reference, see [`docs/mcp/SCHEMA.md`]
 | `notifications_test` | Send a test notification via Apprise |
 | `llm_invocations` | Recent LLM invocation audit records (concurrency/rate-limit/circuit-breaker denials included) |
 | `similar_incidents` | FTS5 cluster search over historical system logs |
-| `ask_history` | Search AI transcript history with nearby log context |
 | `incident_context` | Full context bundle for a known time window |
 | `graph` | Resolve graph entities, neighborhoods, and evidence-backed explanations |
 | `skill_events` | List extracted AI skill-invocation events |
@@ -544,6 +576,20 @@ SQLite DB and delegates every stable changed supported transcript file to the
 same scanner path used by `cortex sessions add --file FILE`; Gemini `session-*.json`
 chat files use the same checkpoint and duplicate-suppression path. Installing the watcher
 disables the older polling timer so both helpers do not scan the same files.
+
+**This writes to a local SQLite file.** It only reaches the fleet's shared cortex
+server if that server also runs on this same host. When the server runs elsewhere
+(the common case — the server typically runs on one dedicated host while Claude/Codex/
+Gemini run on dev workstations), enable AI-transcript forwarding on `cortex heartbeat
+agent` instead: `--ai-transcripts` / `CORTEX_AGENT_AI_TRANSCRIPTS=true`. This adds one
+more supervised stream (alongside `--docker`/`--journald`) that polls the same
+transcript roots every 15s and POSTs new lines to the server's `POST /v1/ai-transcripts`
+(bearer-authenticated, same token as heartbeats), using a local checkpoint file
+(`CORTEX_AGENT_AI_TRANSCRIPT_CHECKPOINT`, default `<cortex home>/ai-transcript-forward-checkpoint.json`)
+so it never resends already-forwarded lines. Gemini sessions aren't supported by the
+forwarder yet (whole-file JSON, not line-based like Claude/Codex) — only Claude and
+Codex transcripts forward today. The local watch service and the agent forwarder can
+run at the same time without conflict; they only read the transcript files, never write them.
 
 The optional polling fallback is still available:
 
@@ -1153,7 +1199,6 @@ GET  /api/compare?a_from=...&a_to=...&b_from=...&b_to=...
 GET  /api/apps?hostname=&from=&to=&limit=&offset=
 GET  /api/similar-incidents?query=...&window_minutes=30
 GET  /api/incident-context?from=...&to=...
-GET  /api/sessions/ask-history?query=...
 GET  /api/sessions/incidents?terms[]=foo&terms[]=bar
 GET  /api/sessions/investigate?correlation_window_minutes=30
 GET  /api/graph/entity?entity_type=host&key=tootie
