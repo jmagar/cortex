@@ -66,6 +66,7 @@ pub(crate) async fn run(mode: CliMode, command: CliCommand) -> Result<()> {
             StatsCommand::Summary(args) => dispatch::run_stats(&mode, args).await,
             StatsCommand::IngestRate(args) => dispatch::run_ingest_rate(&mode, args).await,
         },
+        CliCommand::Status(args) => dispatch::run_status(&mode, args).await,
         CliCommand::Ingest(command) => match command {
             IngestCommand::Shell(shell) => match shell {
                 ShellCommand::User(user) => match user {

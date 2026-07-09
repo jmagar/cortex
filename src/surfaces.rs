@@ -360,6 +360,7 @@ pub fn is_cli_mode_command(name: &str) -> bool {
             | "assess"
             | "analysis"
             | "state"
+            | "status"
             | "ingest"
             | "alerts"
             | "heartbeat"

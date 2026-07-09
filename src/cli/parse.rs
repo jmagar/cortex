@@ -1,7 +1,7 @@
 use anyhow::{Result, anyhow, bail};
 
 use super::args::StatsCommand;
-use super::parse_admin::{parse_compose, parse_db, parse_setup, parse_stats};
+use super::parse_admin::{parse_compose, parse_db, parse_setup, parse_stats, parse_status};
 use super::parse_logs::{
     parse_correlate, parse_errors, parse_filter, parse_hosts, parse_incident,
     parse_ingest_rate_args, parse_patterns, parse_search, parse_tail, parse_timeline,
@@ -23,6 +23,7 @@ pub(crate) const TOP_LEVEL_COMMANDS: &[&str] = &[
     "assess",
     "analysis",
     "state",
+    "status",
     "ingest",
     "alerts",
     "entity",
@@ -52,6 +53,7 @@ pub(crate) fn parse_command(args: Vec<String>) -> Result<CliCommand> {
         "assess" => parse_assess(rest),
         "analysis" => parse_analysis(rest),
         "state" => commands::state::parse_state(rest),
+        "status" => parse_status(rest),
         "ingest" => parse_ingest(rest),
         "alerts" => parse_alerts(rest),
         "heartbeat" => parse_heartbeat(rest),
