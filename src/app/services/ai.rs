@@ -506,7 +506,41 @@ impl CortexService {
         let window = req.window_minutes.unwrap_or(5).min(60);
         let severity_min = req.severity_min.unwrap_or_else(|| "warning".into());
         let severity_levels = severity_at_or_above(&severity_min)?;
-        let ref_dt = parse_required_timestamp(&req.reference_time, "reference_time")?;
+
+        let (ref_dt, response_reference_time, matched_session) = match req.reference_time {
+            Some(rt) => {
+                let dt = parse_required_timestamp(&rt, "reference_time")?;
+                (dt, rt, None)
+            }
+            None => {
+                let query = req.query.clone().ok_or_else(|| {
+                    ServiceError::InvalidInput("correlate requires reference_time or query".into())
+                })?;
+                let ai_params = db::SearchAiSessionsParams {
+                    query: query.clone(),
+                    ai_project: None,
+                    ai_tool: None,
+                    host: req.host.clone(),
+                    app: None,
+                    since: None,
+                    until: None,
+                    limit: Some(1),
+                };
+                let session_result = self
+                    .run_db("correlate_session_lookup", move |pool| {
+                        db::search_ai_sessions(pool, &ai_params)
+                    })
+                    .await?;
+                let top = session_result.sessions.into_iter().next().ok_or_else(|| {
+                    ServiceError::InvalidInput(format!(
+                        "no AI session found matching query {query:?} — provide reference_time explicitly"
+                    ))
+                })?;
+                let dt = parse_required_timestamp(&top.first_seen, "reference_time")?;
+                (dt, rfc3339_z(dt), Some(SearchedSessionEntry::from(top)))
+            }
+        };
+
         let delta = TimeDelta::try_minutes(i64::from(window))
             .ok_or_else(|| ServiceError::InvalidInput("duration overflow".into()))?;
         let from = rfc3339_z(ref_dt - delta);
@@ -546,7 +580,7 @@ impl CortexService {
         let total_events = hosts.iter().map(|h| h.event_count).sum();
 
         Ok(CorrelateEventsResponse {
-            reference_time: req.reference_time,
+            reference_time: response_reference_time,
             window_minutes: window,
             window_from: from,
             window_to: to,
@@ -555,6 +589,7 @@ impl CortexService {
             truncated,
             hosts_count: hosts.len(),
             hosts,
+            matched_session,
         })
     }
 }

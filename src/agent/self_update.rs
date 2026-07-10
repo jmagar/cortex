@@ -104,6 +104,7 @@ pub async fn maybe_update(
 
     let current = env!("CARGO_PKG_VERSION");
     let exe = std::env::current_exe().context("resolve current_exe")?;
+    ensure_binary_still_present(&exe)?;
     let dir = exe
         .parent()
         .ok_or_else(|| anyhow!("current_exe has no parent dir"))?
@@ -173,6 +174,23 @@ pub async fn maybe_update(
         "agent binary updated; re-executing"
     );
     reexec(&exe)
+}
+
+/// On Linux, `current_exe()` resolves through `/proc/self/exe`. If the file at
+/// that path was replaced out from under the running process (e.g. a
+/// concurrent rebuild rewrote the exact path this process was exec'd from),
+/// the kernel appends " (deleted)" to the resolved path once the original
+/// dentry is unlinked, and any filesystem op against it fails with ENOENT.
+/// Detect that up front and bail with a clear diagnosis instead of a cryptic
+/// ENOENT three steps later out of `backup_current_binary`.
+fn ensure_binary_still_present(exe: &Path) -> Result<()> {
+    if !exe.exists() {
+        bail!(
+            "current binary no longer exists at {exe:?} (likely replaced by something \
+             other than self-update, e.g. a concurrent rebuild); skipping this update cycle"
+        );
+    }
+    Ok(())
 }
 
 fn backup_current_binary(exe: &Path, dir: &Path, current: &str) -> Result<PathBuf> {

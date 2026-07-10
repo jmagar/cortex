@@ -85,9 +85,13 @@ fn mode_parse_rejects_unknown_commands() {
 }
 
 #[test]
-fn mode_parse_keeps_runtime_status_mcp_only() {
-    let err = Mode::parse(vec!["status".into()]).unwrap_err();
-    assert!(err.to_string().contains("unknown CLI command"));
+fn mode_parse_accepts_local_status_command() {
+    // `cortex status` is a real local-mode CLI command (see cli::parse_admin);
+    // only HTTP mode declines it in favor of the MCP status action.
+    assert!(matches!(
+        Mode::parse(vec!["status".into()]).unwrap(),
+        Mode::Cli(_)
+    ));
 }
 
 #[test]

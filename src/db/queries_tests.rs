@@ -2252,31 +2252,6 @@ fn make_app_entry(ts: &str, host: &str, severity: &str, app: &str, msg: &str) ->
     }
 }
 
-fn make_rag_ai_entry(ts: &str, msg: &str) -> LogBatchEntry {
-    LogBatchEntry {
-        timestamp: ts.to_string(),
-        hostname: "localhost".into(),
-        facility: Some("local0".into()),
-        severity: "info".into(),
-        app_name: Some("codex-transcript".into()),
-        process_id: None,
-        message: msg.to_string(),
-        raw: msg.to_string(),
-        source_ip: "transcript://codex".into(),
-        docker_checkpoint: None,
-        ai_tool: Some("codex".into()),
-        ai_project: Some("/tmp/project".into()),
-        ai_session_id: Some("sess-rag-1".into()),
-        ai_transcript_path: Some("/tmp/project/sess-rag-1.jsonl".into()),
-        metadata_json: None,
-        http_status: None,
-        auth_outcome: None,
-        dns_blocked: None,
-        event_action: None,
-        parse_error: None,
-    }
-}
-
 #[test]
 fn similar_incidents_clusters_returns_clusters_for_matching_logs() {
     let (pool, _dir) = test_pool();
@@ -2421,32 +2396,6 @@ fn incident_context_window_queries_force_timestamp_index() {
         plan.contains("idx_logs_timestamp"),
         "incident context window scan should be timestamp-index driven; got:\n{plan}"
     );
-}
-
-#[test]
-fn ask_history_sessions_returns_session_hits() {
-    let (pool, _dir) = test_pool();
-
-    let logs = vec![
-        make_rag_ai_entry("2024-03-01T10:00:00Z", "nginx ssl certificate error"),
-        make_rag_ai_entry(
-            "2024-03-01T10:01:00Z",
-            "fixed the certificate by renewing it",
-        ),
-    ];
-    insert_logs_batch(&pool, &logs).unwrap();
-
-    let params = AskHistoryParams {
-        query: "certificate".into(),
-        host: None,
-        app: None,
-        since: None,
-        until: None,
-        limit: Some(5),
-    };
-    let result = ask_history_sessions(&pool, &params).unwrap();
-    assert!(!result.sessions.is_empty(), "expected session hits");
-    assert_eq!(result.query, "certificate");
 }
 
 // ───────────────────────────────────────────────────────────────────────────

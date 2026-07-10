@@ -487,6 +487,10 @@ async fn serve_mcp() -> Result<()> {
     info!("Heartbeat receiver mounted at /v1/heartbeats");
     app = app.merge(runtime.agent_command_router());
     info!("Agent-command forward receiver mounted at /v1/agent-commands");
+    app = app.merge(runtime.ai_transcript_router());
+    info!("AI-transcript forward receiver mounted at /v1/ai-transcripts");
+    app = app.merge(runtime.shell_history_router());
+    info!("Shell-history forward receiver mounted at /v1/shell-history");
     app = app.merge(web_app::router());
     info!("Investigation workspace mounted under /app");
     if runtime.config.mcp.api_token.is_none() && !runtime.config.mcp.host.starts_with("127.") {

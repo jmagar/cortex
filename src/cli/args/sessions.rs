@@ -18,7 +18,6 @@ pub(crate) enum SessionsCommand {
     WatchStatus(super::OutputArgs),
     SmokeWatch(super::OutputArgs),
     SimilarIncidents(SessionsSimilarArgs),
-    AskHistory(SessionsAskHistoryArgs),
     IncidentContext(SessionsIncidentContextArgs),
     Incidents(SessionsIncidentsArgs),
     Investigate(SessionsInvestigateArgs),
@@ -366,17 +365,6 @@ pub(crate) struct SessionsSimilarArgs {
     pub since: Option<String>,
     pub until: Option<String>,
     pub window_minutes: Option<u32>,
-    pub limit: Option<u32>,
-    pub json: bool,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct SessionsAskHistoryArgs {
-    pub query: String,
-    pub host: Option<String>,
-    pub app: Option<String>,
-    pub since: Option<String>,
-    pub until: Option<String>,
     pub limit: Option<u32>,
     pub json: bool,
 }

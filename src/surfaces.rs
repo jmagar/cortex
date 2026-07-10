@@ -212,6 +212,7 @@ pub const SURFACE_SPECS: &[SurfaceSpec] = &[
     local_cli!("serve", Runtime, RetainedTopLevelOperational),
     local_cli!("mcp", Runtime, RetainedTopLevelOperational),
     local_cli!("doctor", Runtime, RetainedTopLevelOperational),
+    local_cli!("status", Runtime, RetainedTopLevelOperational),
     local_cli!("db", Db, RetainedTopLevelOperational),
     local_cli!("compose", Compose, RetainedTopLevelOperational),
     local_cli!("setup", Setup, RetainedTopLevelOperational),
@@ -306,7 +307,6 @@ pub const SURFACE_SPECS: &[SurfaceSpec] = &[
         RetainedProtocolCompatibility,
         Read
     ),
-    mcp!("ask_history", Sessions, Canonical, Read),
     mcp!(
         "incident_context",
         Analysis,

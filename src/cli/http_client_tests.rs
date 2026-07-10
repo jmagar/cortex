@@ -577,7 +577,7 @@ fn correlate_state_request_query_omits_none_options() {
     assert!(!qs.contains("limit"), "None option leaked: {qs}");
 }
 
-// ─── Round-trip coverage for RAG v1 wrappers (similar_incidents, ask_history,
+// ─── Round-trip coverage for RAG v1 wrappers (similar_incidents,
 //     incident_context) — bead 0p8r.6. Verifies HttpClient → /api/<path> wires
 //     the bearer header, hits the documented URL, and deserialises a typed
 //     response. ────────────────────────────────────────────────────────────────
@@ -618,39 +618,6 @@ async fn similar_incidents_round_trips_typed_response() {
     assert_eq!(resp.query, "disk full");
     assert_eq!(resp.total_clusters, 0);
     assert!(resp.clusters.is_empty());
-}
-
-#[tokio::test]
-async fn ask_history_round_trips_typed_response() {
-    use cortex::app::AskHistoryRequest;
-
-    let (server, client) = start_mock_with_client().await;
-    Mock::given(method("GET"))
-        .and(path("/api/sessions/ask-history"))
-        .and(header("authorization", "Bearer test-value"))
-        .and(query_param("query", "why did deploy fail"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "query": "why did deploy fail",
-            "total_candidates": 0,
-            "truncated": false,
-            "sessions": [],
-            "context_logs": [],
-        })))
-        .expect(1)
-        .mount(&server)
-        .await;
-
-    let req = AskHistoryRequest {
-        query: "why did deploy fail".into(),
-        ..Default::default()
-    };
-    let resp = client
-        .ask_history(&req)
-        .await
-        .expect("ask_history wrapper should succeed");
-    assert_eq!(resp.query, "why did deploy fail");
-    assert_eq!(resp.total_candidates, 0);
-    assert!(resp.sessions.is_empty());
 }
 
 #[tokio::test]

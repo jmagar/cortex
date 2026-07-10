@@ -37,7 +37,6 @@ const CURRENT_API_ROUTES: &[&str] = &[
     "/api/graph/around",
     "/api/graph/explain",
     "/api/graph/evidence",
-    "/api/sessions/ask-history",
     "/api/sessions/incidents",
     "/api/sessions/investigate",
     "/api/sessions/llm-invocations",

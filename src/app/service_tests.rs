@@ -1083,7 +1083,7 @@ async fn correlate_events_normalizes_window_groups_and_truncates() {
 
     let response = service
         .correlate_events(CorrelateEventsRequest {
-            reference_time: "2026-01-01T01:00:00+01:00".into(),
+            reference_time: Some("2026-01-01T01:00:00+01:00".into()),
             window_minutes: Some(2),
             severity_min: Some("warning".into()),
             host: None,
@@ -1099,6 +1099,81 @@ async fn correlate_events_normalizes_window_groups_and_truncates() {
     assert!(response.truncated);
     assert_eq!(response.total_events, 1);
     assert_eq!(response.hosts_count, 1);
+}
+
+#[tokio::test]
+async fn correlate_events_derives_reference_time_from_query_when_omitted() {
+    let (service, pool, _dir) = test_service();
+    insert_logs_batch(
+        &pool,
+        &[
+            ai_entry(
+                "2026-03-01T10:00:00Z",
+                "nginx ssl certificate error investigation",
+            ),
+            entry(
+                "2026-03-01T10:00:30Z",
+                "host-a",
+                "err",
+                "nginx: ssl certificate expired",
+                "10.0.0.1:514",
+            ),
+        ],
+    )
+    .unwrap();
+
+    let response = service
+        .correlate_events(CorrelateEventsRequest {
+            reference_time: None,
+            window_minutes: Some(5),
+            severity_min: None,
+            host: None,
+            source: None,
+            query: Some("certificate".into()),
+            limit: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(response.matched_session.is_some());
+    assert_eq!(response.reference_time, "2026-03-01T10:00:00.000Z");
+    assert!(response.total_events >= 1);
+}
+
+#[tokio::test]
+async fn correlate_events_errors_without_reference_time_or_query() {
+    let (service, _pool, _dir) = test_service();
+    let err = service
+        .correlate_events(CorrelateEventsRequest {
+            reference_time: None,
+            window_minutes: None,
+            severity_min: None,
+            host: None,
+            source: None,
+            query: None,
+            limit: None,
+        })
+        .await
+        .unwrap_err();
+    assert!(format!("{err}").contains("reference_time or query"));
+}
+
+#[tokio::test]
+async fn correlate_events_errors_when_no_ai_session_matches_query() {
+    let (service, _pool, _dir) = test_service();
+    let err = service
+        .correlate_events(CorrelateEventsRequest {
+            reference_time: None,
+            window_minutes: None,
+            severity_min: None,
+            host: None,
+            source: None,
+            query: Some("nonexistent_topic_xyz".into()),
+            limit: None,
+        })
+        .await
+        .unwrap_err();
+    assert!(format!("{err}").contains("no AI session found"));
 }
 
 #[tokio::test]

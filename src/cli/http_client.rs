@@ -66,26 +66,25 @@ use cortex::app::{
     AiIncidentResponse, AiInvestigateRequest, AiInvestigateResponse, AiParseErrorsRequest,
     AiPruneCheckpointsRequest, AiSkillIncidentRequest, AiSkillIncidentResponse,
     AiSkillInvestigateRequest, AiSkillInvestigateResponse, AnomaliesRequest, AnomaliesResponse,
-    AskHistoryRequest, AskHistoryResponse, ClockSkewRequest, ClockSkewResponse, CompareRequest,
-    CompareResponse, CorrelateEventsRequest, CorrelateEventsResponse, CorrelateStateRequest,
-    CorrelateStateResponse, DbBackupRequest, DbBackupResult, DbCheckpointRequest,
-    DbCheckpointResult, DbIntegrityJobStarted, DbIntegrityRequest, DbIntegrityResult,
-    DbMaintenanceStatus, DbStats, DbVacuumRequest, DbVacuumResult, FileTailRequest,
-    FileTailResponse, FilterLogsRequest, FleetStateRequest, FleetStateResponse, GetErrorsRequest,
-    GetErrorsResponse, GetLogRequest, GetLogResponse, GraphAroundRequest, GraphAroundResponse,
-    GraphEntityLookupRequest, GraphEntityLookupResponse, GraphEvidenceLookupRequest,
-    GraphEvidenceLookupResponse, GraphExplainRequest, GraphExplainResponse, HostStateRequest,
-    HostStateResponse, IncidentContextRequest, IncidentContextResponse, IngestRateRequest,
-    IngestRateResponse, ListAiProjectsRequest, ListAiProjectsResponse, ListAiToolsRequest,
-    ListAiToolsResponse, ListAppsRequest, ListAppsResponse, ListHostsResponse, ListSessionsRequest,
-    ListSessionsResponse, ListSkillEventsRequest, ListSkillEventsResponse, ListSourceIpsRequest,
-    ListSourceIpsResponse, MaintenanceJobStatus, PatternsRequest, PatternsResponse,
-    ProjectContextRequest, ProjectContextResponse, SearchLogsRequest, SearchLogsResponse,
-    SearchSessionsRequest, SearchSessionsResponse, SilentHostsRequest, SilentHostsResponse,
-    SimilarIncidentsRequest, SimilarIncidentsResponse, TailLogsRequest, TimelineRequest,
-    TimelineResponse, TopicCorrelateRequest, TopicCorrelateResponse, UnackErrorRequest,
-    UnackErrorResponse, UnaddressedErrorsRequest, UnaddressedErrorsResponse, UsageBlocksRequest,
-    UsageBlocksResponse,
+    ClockSkewRequest, ClockSkewResponse, CompareRequest, CompareResponse, CorrelateEventsRequest,
+    CorrelateEventsResponse, CorrelateStateRequest, CorrelateStateResponse, DbBackupRequest,
+    DbBackupResult, DbCheckpointRequest, DbCheckpointResult, DbIntegrityJobStarted,
+    DbIntegrityRequest, DbIntegrityResult, DbMaintenanceStatus, DbStats, DbVacuumRequest,
+    DbVacuumResult, FileTailRequest, FileTailResponse, FilterLogsRequest, FleetStateRequest,
+    FleetStateResponse, GetErrorsRequest, GetErrorsResponse, GetLogRequest, GetLogResponse,
+    GraphAroundRequest, GraphAroundResponse, GraphEntityLookupRequest, GraphEntityLookupResponse,
+    GraphEvidenceLookupRequest, GraphEvidenceLookupResponse, GraphExplainRequest,
+    GraphExplainResponse, HostStateRequest, HostStateResponse, IncidentContextRequest,
+    IncidentContextResponse, IngestRateRequest, IngestRateResponse, ListAiProjectsRequest,
+    ListAiProjectsResponse, ListAiToolsRequest, ListAiToolsResponse, ListAppsRequest,
+    ListAppsResponse, ListHostsResponse, ListSessionsRequest, ListSessionsResponse,
+    ListSkillEventsRequest, ListSkillEventsResponse, ListSourceIpsRequest, ListSourceIpsResponse,
+    MaintenanceJobStatus, PatternsRequest, PatternsResponse, ProjectContextRequest,
+    ProjectContextResponse, SearchLogsRequest, SearchLogsResponse, SearchSessionsRequest,
+    SearchSessionsResponse, SilentHostsRequest, SilentHostsResponse, SimilarIncidentsRequest,
+    SimilarIncidentsResponse, TailLogsRequest, TimelineRequest, TimelineResponse,
+    TopicCorrelateRequest, TopicCorrelateResponse, UnackErrorRequest, UnackErrorResponse,
+    UnaddressedErrorsRequest, UnaddressedErrorsResponse, UsageBlocksRequest, UsageBlocksResponse,
 };
 use cortex::scanner::{CheckpointEntry, ParseErrorEntry, PruneCheckpointsResult};
 
@@ -837,10 +836,6 @@ impl HttpClient {
         req: &SimilarIncidentsRequest,
     ) -> Result<SimilarIncidentsResponse> {
         self.get_json("/api/similar-incidents", Some(req)).await
-    }
-
-    pub async fn ask_history(&self, req: &AskHistoryRequest) -> Result<AskHistoryResponse> {
-        self.get_json("/api/sessions/ask-history", Some(req)).await
     }
 
     pub async fn incident_context(

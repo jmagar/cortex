@@ -1,6 +1,8 @@
+pub mod ai_transcript;
 pub mod docker;
 pub mod journald;
 pub mod self_update;
+pub mod shell_history;
 pub mod syslog_file;
 pub mod syslog_sender;
 
@@ -35,6 +37,30 @@ pub struct AgentStreamsConfig {
     /// target when not set explicitly.
     pub syslog_target: String,
     pub hostname: String,
+    /// Forward local AI transcript (Claude/Codex) changes to the central
+    /// server via `POST /v1/ai-transcripts`. Unlike the other streams this
+    /// does not go through `SyslogSender` — it POSTs directly to
+    /// `ai_transcript_target` (the same base URL/token as heartbeats).
+    pub ai_transcripts: bool,
+    pub ai_transcript_target: String,
+    pub ai_transcript_token: Option<String>,
+    pub ai_transcript_checkpoint_path: PathBuf,
+    /// Forward the local agent-command spool (see `cortex ingest shell agent
+    /// wrap`) to the central server via `POST /v1/agent-commands`, on the
+    /// same interval as AI-transcript forwarding. Reuses
+    /// `command_log::forward_agent_command_spool`, which was previously only
+    /// reachable via a manual `cortex shell agent index --server` call that
+    /// nothing scheduled.
+    pub agent_command_forward: bool,
+    pub agent_command_spool_path: PathBuf,
+    pub agent_command_target: String,
+    pub agent_command_token: Option<String>,
+    /// Forward local shell history (zsh/bash + atuin) to the central server
+    /// via `POST /v1/shell-history`.
+    pub shell_history_forward: bool,
+    pub shell_history_target: String,
+    pub shell_history_token: Option<String>,
+    pub shell_history_checkpoint_path: PathBuf,
 }
 
 impl AgentStreamsConfig {
@@ -62,6 +88,9 @@ pub async fn run_agent_streams(config: AgentStreamsConfig) -> Result<()> {
         && !config.journald
         && config.syslog_file.is_none()
         && config.file_tails.is_empty()
+        && !config.ai_transcripts
+        && !config.agent_command_forward
+        && !config.shell_history_forward
     {
         return Ok(());
     }
@@ -149,6 +178,81 @@ pub async fn run_agent_streams(config: AgentStreamsConfig) -> Result<()> {
                             error = %e,
                             "file forwarder exited; restarting"
                         );
+                        sleep(Duration::from_secs(RESTART_DELAY_SECS)).await;
+                    }
+                }
+            }
+        });
+    }
+
+    if config.ai_transcripts {
+        let forward_config = ai_transcript::AiTranscriptForwardConfig {
+            roots: crate::scanner::default_transcript_roots(),
+            target: config.ai_transcript_target.clone(),
+            token: config.ai_transcript_token.clone(),
+            hostname: config.hostname.clone(),
+            checkpoint_path: config.ai_transcript_checkpoint_path.clone(),
+            poll_interval: Duration::from_secs(15),
+        };
+        tasks.spawn(async move {
+            loop {
+                match ai_transcript::run(forward_config.clone()).await {
+                    Ok(()) => return,
+                    Err(e) => {
+                        tracing::warn!(error = %e, "ai transcript forwarder exited; restarting");
+                        sleep(Duration::from_secs(RESTART_DELAY_SECS)).await;
+                    }
+                }
+            }
+        });
+    }
+
+    if config.agent_command_forward {
+        let spool_path = config.agent_command_spool_path.clone();
+        let target = config.agent_command_target.clone();
+        let token = config.agent_command_token.clone();
+        tasks.spawn(async move {
+            loop {
+                match crate::command_log::run_agent_command_forward_loop(
+                    spool_path.clone(),
+                    target.clone(),
+                    token.clone(),
+                    Duration::from_secs(30),
+                )
+                .await
+                {
+                    Ok(()) => return,
+                    Err(e) => {
+                        tracing::warn!(error = %e, "agent command forward loop exited; restarting");
+                        sleep(Duration::from_secs(RESTART_DELAY_SECS)).await;
+                    }
+                }
+            }
+        });
+    }
+
+    if config.shell_history_forward {
+        let forward_config = shell_history::ShellHistoryForwardConfig {
+            zsh_history_path: std::env::var_os("HOME")
+                .map(PathBuf::from)
+                .map(|h| h.join(".zsh_history"))
+                .filter(|p| p.exists()),
+            atuin_db_path: std::env::var_os("HOME")
+                .map(PathBuf::from)
+                .map(|h| h.join(".local/share/atuin/history.db"))
+                .filter(|p| p.exists()),
+            target: config.shell_history_target.clone(),
+            token: config.shell_history_token.clone(),
+            hostname: config.hostname.clone(),
+            checkpoint_path: config.shell_history_checkpoint_path.clone(),
+            poll_interval: Duration::from_secs(20),
+        };
+        tasks.spawn(async move {
+            loop {
+                match shell_history::run(forward_config.clone()).await {
+                    Ok(()) => return,
+                    Err(e) => {
+                        tracing::warn!(error = %e, "shell history forwarder exited; restarting");
                         sleep(Duration::from_secs(RESTART_DELAY_SECS)).await;
                     }
                 }

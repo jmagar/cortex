@@ -580,6 +580,63 @@ async fn forward_agent_command_spool_posts_and_truncates_on_success() {
 }
 
 #[tokio::test]
+async fn run_agent_command_forward_loop_drains_spool_on_first_tick() {
+    let dir = tempfile::tempdir().unwrap();
+    let spool_path = dir.path().join("agent-command.jsonl");
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(&spool_path)
+        .unwrap();
+    writeln!(
+        file,
+        r#"{{"started_at":"2026-07-06T00:00:00Z","finished_at":"2026-07-06T00:00:01Z","duration_ms":1000,"exit_status":0,"command":"echo hi","cwd":null,"agent":"claude-code","command_surface":null,"hostname":"testhost","user":null,"pid":1234,"session_id":null,"schema_version":1,"content_scrubbed":true}}"#
+    )
+    .unwrap();
+    drop(file);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&spool_path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
+
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/agent-commands"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(
+            r#"{"scanned":0,"imported":1,"skipped":0,"skipped_duplicates":0,"errors":0}"#,
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let handle = tokio::spawn(run_agent_command_forward_loop(
+        spool_path.clone(),
+        server.uri(),
+        Some("secret".to_string()),
+        std::time::Duration::from_millis(10),
+    ));
+    // The loop never returns on its own; poll for the side effect (spool
+    // truncated by the first successful forward) instead of a fixed sleep,
+    // since a loaded CI box can make one 200ms window flaky.
+    let mut truncated = false;
+    for _ in 0..100 {
+        if std::fs::metadata(&spool_path).unwrap().len() == 0 {
+            truncated = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    handle.abort();
+
+    assert!(
+        truncated,
+        "spool must be truncated after the loop's first successful forward"
+    );
+}
+
+#[tokio::test]
 async fn forward_agent_command_spool_preserves_records_appended_during_slow_post() {
     // Engineering-review regression test: the exclusive spool lock must be
     // released before the network POST, not held across it — otherwise a
@@ -727,6 +784,58 @@ async fn forward_agent_command_spool_keeps_file_on_http_failure() {
     assert!(error.to_string().contains("503"), "got: {error}");
     let remaining = std::fs::metadata(&spool_path).unwrap();
     assert!(remaining.len() > 0, "spool must survive a failed forward");
+}
+
+#[tokio::test]
+async fn forward_agent_command_spool_drains_backlog_larger_than_one_chunk() {
+    // Regression: a spool that's accumulated more than one
+    // FORWARD_CHUNK_MAX_BYTES worth of backlog (e.g. the forwarder was never
+    // running) must drain across multiple internal chunks in one call
+    // instead of failing outright on an oversized single POST.
+    let dir = tempfile::tempdir().unwrap();
+    let spool_path = dir.path().join("agent-command.jsonl");
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(&spool_path)
+        .unwrap();
+    // Each record line is a little over 300 bytes; 5,000 of them exceeds
+    // FORWARD_CHUNK_MAX_BYTES (512 KiB), forcing at least 3 chunks.
+    for i in 0..5_000 {
+        writeln!(
+            file,
+            r#"{{"started_at":"2026-07-06T00:00:00Z","finished_at":"2026-07-06T00:00:01Z","duration_ms":1000,"exit_status":0,"command":"echo command number {i}","cwd":null,"agent":"claude-code","command_surface":null,"hostname":"testhost","user":null,"pid":1234,"session_id":null,"schema_version":1,"content_scrubbed":true}}"#
+        )
+        .unwrap();
+    }
+    drop(file);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&spool_path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
+
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/agent-commands"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(
+            r#"{"scanned":0,"imported":1,"skipped":0,"skipped_duplicates":0,"errors":0}"#,
+        ))
+        .mount(&server)
+        .await;
+
+    let result = forward_agent_command_spool(&spool_path, &server.uri(), None)
+        .await
+        .unwrap();
+
+    assert_eq!(result.scanned, 5_000);
+    let remaining = std::fs::metadata(&spool_path).unwrap();
+    assert_eq!(
+        remaining.len(),
+        0,
+        "the whole backlog must drain across chunks in one call"
+    );
 }
 
 #[test]

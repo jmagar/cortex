@@ -1,7 +1,7 @@
 use anyhow::Result;
 use cortex::app::{
-    AiIncidentResponse, AiInvestigateResponse, AskHistoryResponse, IncidentContextResponse,
-    LogEntry, SimilarIncidentsResponse,
+    AiIncidentResponse, AiInvestigateResponse, IncidentContextResponse, LogEntry,
+    SimilarIncidentsResponse,
 };
 use serde_json::{Value, json};
 
@@ -49,51 +49,6 @@ pub(crate) fn print_similar_incidents_response(
                     cyan(&sess.match_count.to_string())
                 );
             }
-        }
-    }
-    Ok(())
-}
-
-pub(crate) fn print_ask_history_response(response: &AskHistoryResponse, json: bool) -> Result<()> {
-    if json {
-        return print_json(response);
-    }
-    println!(
-        "{} session(s) for query {:?}{}",
-        cyan(&response.sessions.len().to_string()),
-        response.query,
-        if response.truncated {
-            " (truncated)"
-        } else {
-            ""
-        }
-    );
-    for session in &response.sessions {
-        println!(
-            "{:<10} {:<30} {:<20} {} hit(s)",
-            violet(&session.tool),
-            primary(&truncate(&session.project, 29)),
-            muted(&truncate(&session.session_id, 19)),
-            cyan(&session.match_count.to_string())
-        );
-        if let Some(snippet) = &session.best_snippet {
-            println!("  {}: {}", muted("snippet"), truncate(snippet, 100));
-        }
-    }
-    if !response.context_logs.is_empty() {
-        println!(
-            "\n{} ({} entries):",
-            muted("System log context"),
-            cyan(&response.context_logs.len().to_string())
-        );
-        for log in &response.context_logs {
-            println!(
-                "  [{}] {} {} {}",
-                severity(&log.severity),
-                muted(&local_ts(&log.timestamp)),
-                cyan(&log.hostname),
-                truncate(&log.message, 80)
-            );
         }
     }
     Ok(())

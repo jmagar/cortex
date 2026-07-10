@@ -123,7 +123,6 @@ async fn dispatch_cortex_action(
         H::NotificationsTest => admin::tool_notifications_test(state, args, auth).await,
         H::LlmInvocations => tool_llm_invocations(state, args).await,
         H::SimilarIncidents => context::tool_similar_incidents(state, args).await,
-        H::AskHistory => context::tool_ask_history(state, args).await,
         H::IncidentContext => context::tool_incident_context(state, args).await,
         H::Graph => context::tool_graph(state, args).await,
         H::SkillEvents => tool_skill_events(state, args).await,

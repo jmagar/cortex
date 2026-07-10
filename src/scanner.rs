@@ -22,7 +22,7 @@ use crate::scanner::skill_events::{extract_claude_skill_events, extract_codex_sk
 mod checkpoint;
 mod claude;
 mod codex;
-mod gemini;
+pub(crate) mod gemini;
 pub(crate) mod hook_events;
 pub(crate) mod mcp_events;
 pub(crate) mod skill_events;
@@ -216,7 +216,7 @@ pub struct TranscriptRootStatus {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SourceKind {
+pub(crate) enum SourceKind {
     ClaudeProject,
     CodexSession,
     GeminiSession,
@@ -1123,7 +1123,7 @@ fn looks_like_codex_record(line: &str) -> bool {
         .is_some()
 }
 
-fn detect_source_kind(path: &Path) -> SourceKind {
+pub(crate) fn detect_source_kind(path: &Path) -> SourceKind {
     let display = path.to_string_lossy();
     if display.contains(".codex/sessions") || display.contains(".codex/worktrees") {
         SourceKind::CodexSession
@@ -1146,7 +1146,7 @@ impl SourceKind {
         }
     }
 
-    fn tool_name(self) -> &'static str {
+    pub(crate) fn tool_name(self) -> &'static str {
         match self {
             Self::CodexSession => "codex",
             Self::GeminiSession => "gemini",
@@ -1155,7 +1155,7 @@ impl SourceKind {
     }
 }
 
-fn parse_line_for_source(
+pub(crate) fn parse_line_for_source(
     source_kind: SourceKind,
     line: &str,
     path: &Path,
@@ -1176,7 +1176,7 @@ fn parse_line_for_source(
     }
 }
 
-fn project_for_file(source_kind: SourceKind, path: &Path) -> Option<String> {
+pub(crate) fn project_for_file(source_kind: SourceKind, path: &Path) -> Option<String> {
     match source_kind {
         SourceKind::ClaudeProject => project_from_transcript_path(&path.to_string_lossy()),
         SourceKind::CodexSession => None,

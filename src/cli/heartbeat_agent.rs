@@ -44,6 +44,15 @@ impl HeartbeatAgentArgs {
         if let Some(target) = self.syslog_target {
             config.syslog_target = Some(target);
         }
+        if self.ai_transcripts {
+            config.ai_transcripts = true;
+        }
+        if self.agent_command_forward {
+            config.agent_command_forward = true;
+        }
+        if self.shell_history_forward {
+            config.shell_history_forward = true;
+        }
         Ok(config)
     }
 }

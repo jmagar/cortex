@@ -169,27 +169,6 @@ impl CortexService {
         Ok(result.into())
     }
 
-    pub async fn ask_history(&self, req: AskHistoryRequest) -> ServiceResult<AskHistoryResponse> {
-        let from = parse_optional_timestamp(req.since.as_deref(), "since")?;
-        let to = parse_optional_timestamp(req.until.as_deref(), "until")?;
-        let result = self
-            .run_db("ask_history", move |pool| {
-                db::ask_history_sessions(
-                    pool,
-                    &db::AskHistoryParams {
-                        query: req.query,
-                        host: req.host,
-                        app: req.app,
-                        since: from,
-                        until: to,
-                        limit: req.limit,
-                    },
-                )
-            })
-            .await?;
-        Ok(result.into())
-    }
-
     pub async fn incident_context(
         &self,
         req: IncidentContextRequest,

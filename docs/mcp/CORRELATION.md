@@ -7,11 +7,10 @@ same SQLite `logs` table, but they use different anchors and inclusion rules.
 
 | Action | Anchor | Related corpus | AI transcript rows included? | Main use |
 | --- | --- | --- | --- | --- |
-| `correlate` | Caller-provided `reference_time` | All log rows in the time window | Yes | Find events near a known timestamp |
+| `correlate` | Caller-provided `reference_time`, or one derived from an FTS5 hit in AI transcript sessions when `query` is given alone | All log rows in the time window | Yes | Find events near a known timestamp, or near a query-matched past AI session |
 | `ai_correlate` | AI transcript rows | Non-AI rows near each AI row | Anchors yes, related rows no | Link agent activity to infrastructure logs |
 | `abuse_investigate` | AI abuse incident anchors | Same-session transcript context plus nearby non-AI rows | Anchors/context yes, nearby rows no | Build deterministic abuse evidence bundles |
 | `similar_incidents` | FTS5 hits in non-AI logs | AI sessions overlapping each incident window | Incident clusters no, correlated sessions yes | Find historical log clusters and related sessions |
-| `ask_history` | FTS5 hits in AI transcript sessions | Non-AI rows from the top session window | Search results yes, context rows no | Find past AI work and surrounding system state |
 | `incident_context` | Caller-provided `from`/`to` window | Non-AI aggregates/error rows plus active AI sessions | Aggregates/errors no, sessions yes | Build a complete context bundle for a known window |
 | `filter` | Structured field predicates | Matching log rows | Depends on filters | Narrow logs for manual correlation |
 
@@ -37,6 +36,29 @@ move events outside the expected window.
 
 AI transcript rows are not excluded. If transcript imports are in the same
 window and pass filters, they can appear in the results.
+
+### Deriving `reference_time` from `query`
+
+`reference_time` is required unless `query` is given alone. When
+`reference_time` is omitted:
+
+1. `query` is matched by FTS5 against AI transcript sessions (the same
+   grouping used by `search_sessions`), scoped by `hostname` if given.
+2. The top-ranked session's `first_seen` becomes `reference_time`.
+3. The response includes that session as `matched_session`.
+4. If no AI session matches `query`, the action errors rather than silently
+   falling back to an empty window — the caller must supply `reference_time`
+   explicitly.
+
+`query` still separately filters the correlated log rows themselves (as it
+always has), independent of whether it was also used to derive the anchor.
+
+This replaces the older, separate `ask_history` action: `ask_history` did the
+same AI-session FTS5 lookup but then ran its own smaller, unconfigurable
+log-window query (fixed `LIMIT 20`, no severity filter, no host grouping)
+instead of the full `correlate` path. Folding it into `correlate` means a
+query-derived anchor now gets the same severity gating, host grouping, and
+`limit` up to `999` as a caller-supplied `reference_time` does.
 
 ## `ai_correlate`
 
@@ -127,22 +149,6 @@ Bounds:
 The incident clusters exclude AI transcript rows. The `correlated_sessions`
 field contains overlapping AI sessions only as context.
 
-## `ask_history`
-
-`ask_history` searches AI transcript sessions by FTS5, then returns non-AI logs
-from the top matched session's active time window.
-
-Behavior:
-
-- Required `query`
-- Optional filters: `hostname`, `app_name`, `from`, `to`
-- Default `limit`: `10`
-- Max `limit`: `50`
-- `context_logs` are non-AI rows between the top session's `first_seen` and `last_seen`
-- `context_logs` cap: `20`
-
-This action returns raw context bundles. It does not call an LLM or Axon for
-synthesis in the current implementation.
 
 ## `incident_context`
 

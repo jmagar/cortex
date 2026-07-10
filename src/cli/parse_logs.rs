@@ -385,7 +385,7 @@ pub(crate) fn parse_correlate(args: &[String]) -> Result<CliCommand> {
         match arg.as_str() {
             "--json" => parsed.json = true,
             "--reference-time" => {
-                parsed.reference_time = norm_time(flags.value("--reference-time")?)?
+                parsed.reference_time = Some(norm_time(flags.value("--reference-time")?)?)
             }
             "--window-minutes" => {
                 parsed.window_minutes = Some(parse_u32_flag(
@@ -399,7 +399,8 @@ pub(crate) fn parse_correlate(args: &[String]) -> Result<CliCommand> {
             "--query" => parsed.query = Some(flags.value("--query")?),
             "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
             _ if arg.starts_with("--reference-time=") => {
-                parsed.reference_time = norm_time(value_after_equals(arg, "--reference-time")?)?
+                parsed.reference_time =
+                    Some(norm_time(value_after_equals(arg, "--reference-time")?)?)
             }
             _ if arg.starts_with("--window-minutes=") => {
                 parsed.window_minutes = Some(parse_u32_flag(
@@ -426,24 +427,25 @@ pub(crate) fn parse_correlate(args: &[String]) -> Result<CliCommand> {
                 )?)
             }
             _ if arg.starts_with('-') => bail!("unknown correlate option: {arg}"),
-            _ if parsed.reference_time.is_empty() => {
+            _ if parsed.reference_time.is_none() => {
                 // correlate's sole positional is the reference *time*. A non-time
                 // value (a hostname, app, …) otherwise hits norm_time and yields
                 // a cryptic "unrecognized time value" — redirect to the command
                 // that actually correlates by entity.
-                parsed.reference_time = norm_time(arg.clone()).map_err(|_| {
+                parsed.reference_time = Some(norm_time(arg.clone()).map_err(|_| {
                     anyhow::anyhow!(
                         "correlate events' positional argument is a reference time (e.g. `1h`, `2026-06-01`, or an RFC3339 timestamp), but got `{arg}`. \
 To correlate everything related to a host, app, or topic, use `cortex correlate topic {arg}`; \
-to anchor correlate on a time and filter by host, pass `--reference-time <time> --host {arg}`."
+to anchor correlate on a time and filter by host, pass `--reference-time <time> --host {arg}`, \
+or omit --reference-time and pass --query \"<text>\" to derive it from a matching AI session."
                     )
-                })?;
+                })?);
             }
             _ => bail!("unexpected correlate argument: {arg}"),
         }
     }
-    if parsed.reference_time.is_empty() {
-        bail!("correlate requires --reference-time <RFC3339>");
+    if parsed.reference_time.is_none() && parsed.query.is_none() {
+        bail!("correlate requires --reference-time <RFC3339> or --query <text>");
     }
     Ok(CliCommand::Correlate(parsed))
 }

@@ -487,6 +487,14 @@ pub fn import_agent_command_spool(
 /// the POST and re-acquiring it only to consume what was actually forwarded
 /// (see [`consume_forwarded_spool_prefix`]) fixes that without losing
 /// records appended to the spool while the POST was in flight.
+/// Per-request cap on how much of the spool a single forward chunk reads,
+/// safely under the server's `AGENT_COMMAND_BODY_LIMIT_BYTES` (1 MiB) once
+/// JSON-serialized. A spool that's accumulated a large backlog (e.g. the
+/// forwarder was never running, or the host was offline for a while) is
+/// drained over several chunks/loop iterations instead of failing outright
+/// with `413 Payload Too Large` on one oversized POST.
+const FORWARD_CHUNK_MAX_BYTES: u64 = 512 * 1024;
+
 pub async fn forward_agent_command_spool(
     path: &Path,
     target: &str,
@@ -494,28 +502,30 @@ pub async fn forward_agent_command_spool(
 ) -> Result<CommandLogImportResult> {
     validate_spool_path_for_read(path)?;
 
-    let (parsed, original_len) = {
-        let mut file = open_spool_for_update(path)?;
-        lock_file_exclusive(&file, path)?;
-        file.seek(SeekFrom::Start(0))
-            .with_context(|| format!("seek agent command spool {}", path.display()))?;
-        let parsed = parse_agent_command_spool_lines(BufReader::new(&mut file));
-        let original_len = file
-            .metadata()
-            .with_context(|| format!("stat agent command spool {}", path.display()))?
-            .len();
-        (parsed, original_len)
-        // `file` drops here, releasing the exclusive lock before any network I/O.
-    };
+    let mut total = CommandLogImportResult::default();
+    loop {
+        let (parsed, chunk_bytes, reached_eof) = {
+            let mut file = open_spool_for_update(path)?;
+            lock_file_exclusive(&file, path)?;
+            file.seek(SeekFrom::Start(0))
+                .with_context(|| format!("seek agent command spool {}", path.display()))?;
+            read_spool_chunk(&mut file, FORWARD_CHUNK_MAX_BYTES)?
+            // `file` drops here, releasing the exclusive lock before any network I/O.
+        };
+        if chunk_bytes == 0 {
+            break;
+        }
+        total.scanned += parsed.scanned;
+        total.skipped += parsed.skipped;
+        total.errors += parsed.errors;
 
-    let mut result = CommandLogImportResult {
-        scanned: parsed.scanned,
-        skipped: parsed.skipped,
-        errors: parsed.errors,
-        ..Default::default()
-    };
+        if parsed.records.is_empty() {
+            // The chunk contained only malformed/skipped lines — still
+            // consume it so a persistently bad prefix doesn't wedge the loop.
+            consume_forwarded_spool_prefix(path, chunk_bytes)?;
+            continue;
+        }
 
-    if !parsed.records.is_empty() {
         let url = agent_command_forward_url(target)?;
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(30))
@@ -532,20 +542,112 @@ pub async fn forward_agent_command_spool(
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
+            // Don't consume this chunk — leave it in the spool to retry next
+            // time, same as any other mid-loop failure below.
             bail!("agent command forward POST returned {status}: {body}");
         }
         let remote: CommandLogImportResult = response
             .json()
             .await
             .context("agent command forward response was not valid JSON")?;
-        result.imported = remote.imported;
-        result.skipped_duplicates = remote.skipped_duplicates;
-        result.errors += remote.errors;
+        total.imported += remote.imported;
+        total.skipped_duplicates += remote.skipped_duplicates;
+        total.errors += remote.errors;
 
-        consume_forwarded_spool_prefix(path, original_len)?;
+        consume_forwarded_spool_prefix(path, chunk_bytes)?;
+
+        if reached_eof {
+            break;
+        }
     }
 
-    Ok(result)
+    Ok(total)
+}
+
+/// Read up to `max_bytes` from the start of `file`, snapped back to the last
+/// complete line so a chunk never splits a record mid-line, and parse those
+/// lines. Returns the parsed records, the exact byte length consumed (`0` if
+/// the spool is empty — the caller passes this to
+/// [`consume_forwarded_spool_prefix`] after a successful forward), and
+/// whether this read reached EOF (fewer than `max_bytes` were available,
+/// meaning the *unsnapped* read exhausted the file — the snapped/consumed
+/// length alone can't signal this, since snapping to the last newline makes
+/// a full chunk read slightly shorter than `max_bytes` too).
+fn read_spool_chunk(
+    file: &mut fs::File,
+    max_bytes: u64,
+) -> Result<(ParsedAgentCommandSpool, u64, bool)> {
+    let mut buf = Vec::with_capacity(max_bytes as usize);
+    file.take(max_bytes)
+        .read_to_end(&mut buf)
+        .with_context(|| "read agent command spool chunk".to_string())?;
+    let reached_eof = (buf.len() as u64) < max_bytes;
+    if buf.is_empty() {
+        return Ok((
+            ParsedAgentCommandSpool {
+                records: Vec::new(),
+                scanned: 0,
+                skipped: 0,
+                errors: 0,
+            },
+            0,
+            reached_eof,
+        ));
+    }
+    // Snap to the last full line: if the read hit EOF before filling the
+    // cap, the whole buffer is a complete set of lines (the spool is always
+    // newline-terminated by the appender). Otherwise, trim back to the last
+    // '\n' so a chunk boundary never bisects a record.
+    let consumed = if reached_eof {
+        buf.len()
+    } else {
+        match buf.iter().rposition(|&b| b == b'\n') {
+            Some(idx) => idx + 1,
+            // No newline anywhere in a full-size chunk: a single line
+            // exceeds the chunk cap. Fall back to consuming the whole
+            // buffer rather than looping forever on an unsplittable line.
+            None => buf.len(),
+        }
+    };
+    let parsed = parse_agent_command_spool_lines(BufReader::new(&buf[..consumed]));
+    Ok((parsed, consumed as u64, reached_eof))
+}
+
+/// Poll `spool_path` forever, forwarding new agent-command records to
+/// `target` every `interval` and logging what shipped. Runs as one more
+/// supervised stream inside `cortex agent`, alongside AI-transcript
+/// forwarding — the spool otherwise only drains via a manual
+/// `cortex shell agent index --server` invocation, which nothing was
+/// actually scheduling (see bead: agent-forwarded AI transcript ingestion).
+///
+/// Never returns except on error, matching the other agent streams'
+/// contract with `run_agent_streams`'s outer restart-on-error wrapper.
+pub async fn run_agent_command_forward_loop(
+    spool_path: PathBuf,
+    target: String,
+    token: Option<String>,
+    interval: std::time::Duration,
+) -> Result<()> {
+    loop {
+        match forward_agent_command_spool(&spool_path, &target, token.as_deref()).await {
+            Ok(result) if result.imported > 0 || result.errors > 0 => {
+                tracing::info!(
+                    imported = result.imported,
+                    skipped_duplicates = result.skipped_duplicates,
+                    errors = result.errors,
+                    "agent command spool forward: batch sent"
+                );
+            }
+            Ok(_) => {}
+            Err(error) => {
+                tracing::warn!(
+                    error = format!("{error:#}"),
+                    "agent command spool forward failed"
+                );
+            }
+        }
+        tokio::time::sleep(interval).await;
+    }
 }
 
 /// Removes the first `original_len` bytes (everything already forwarded)

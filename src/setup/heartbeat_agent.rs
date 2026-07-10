@@ -242,11 +242,22 @@ fn heartbeat_agent_unit(
     let read_write_dir = setup_path_value(host_id_path.parent().unwrap_or_else(|| Path::new("/")))?;
     let read_write_bin_dir =
         setup_path_value(cortex_bin.parent().unwrap_or_else(|| Path::new("/")))?;
-    let read_write_paths = if read_write_bin_dir == read_write_dir {
-        read_write_dir.clone()
-    } else {
-        format!("{read_write_dir} {read_write_bin_dir}")
-    };
+    // The agent-command-forward stream (--agent-command-forward) needs
+    // read-write access to the spool's directory too, which normally lives
+    // outside `~/.cortex`/`~/.local/bin` (default `~/.local/state/cortex`) —
+    // without this, `ProtectHome=read-only` blocks it from ever opening the
+    // spool for the truncate-after-forward step.
+    let mut read_write_paths_set = vec![read_write_dir.clone(), read_write_bin_dir.clone()];
+    if let Ok(spool_path) = super::default_agent_command_spool_path() {
+        if let Some(spool_dir) = spool_path.parent() {
+            if let Ok(spool_dir) = setup_path_value(spool_dir) {
+                if !read_write_paths_set.contains(&spool_dir) {
+                    read_write_paths_set.push(spool_dir);
+                }
+            }
+        }
+    }
+    let read_write_paths = read_write_paths_set.join(" ");
     let cortex_bin = setup_path_value(cortex_bin)?;
     let env_path = setup_path_value(env_path)?;
     let host_id_path = setup_path_value(host_id_path)?;

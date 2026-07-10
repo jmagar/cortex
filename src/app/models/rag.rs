@@ -1,7 +1,7 @@
 use super::*;
 
 // ---------------------------------------------------------------------------
-// RAG v1: similar_incidents, ask_history, incident_context
+// RAG v1: similar_incidents, incident_context
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -84,39 +84,6 @@ impl From<db::SimilarIncidentsResult> for SimilarIncidentsResponse {
             total_clusters: v.total_clusters,
             truncated: v.truncated,
             clusters: v.clusters.into_iter().map(Into::into).collect(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct AskHistoryRequest {
-    pub query: String,
-    pub host: Option<String>,
-    pub app: Option<String>,
-    pub since: Option<String>,
-    pub until: Option<String>,
-    /// Max sessions to return. Default 10, clamp 1..=50.
-    pub limit: Option<u32>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AskHistoryResponse {
-    pub query: String,
-    pub total_candidates: usize,
-    pub truncated: bool,
-    pub sessions: Vec<SearchedSessionEntry>,
-    pub context_logs: Vec<LogEntry>,
-}
-
-impl From<db::AskHistoryResult> for AskHistoryResponse {
-    fn from(v: db::AskHistoryResult) -> Self {
-        Self {
-            query: v.query,
-            total_candidates: v.total_candidates,
-            truncated: v.truncated,
-            sessions: v.sessions.into_iter().map(Into::into).collect(),
-            context_logs: v.context_logs.into_iter().map(Into::into).collect(),
         }
     }
 }

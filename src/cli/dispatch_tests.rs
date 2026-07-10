@@ -254,7 +254,7 @@ fn sessions_args_into_request_snapshot() {
 #[test]
 fn correlate_args_into_request_snapshot() {
     let args = CorrelateArgs {
-        reference_time: "2026-01-01T12:00:00Z".into(),
+        reference_time: Some("2026-01-01T12:00:00Z".into()),
         window_minutes: Some(15),
         severity_min: Some("warning".into()),
         host: Some("h1".into()),
@@ -266,7 +266,7 @@ fn correlate_args_into_request_snapshot() {
     let req = args.into_request();
     assert_eq!(
         format!("{req:?}"),
-        "CorrelateEventsRequest { reference_time: \"2026-01-01T12:00:00Z\", window_minutes: Some(15), severity_min: Some(\"warning\"), host: Some(\"h1\"), source: None, query: Some(\"oom\"), limit: Some(50) }"
+        "CorrelateEventsRequest { reference_time: Some(\"2026-01-01T12:00:00Z\"), window_minutes: Some(15), severity_min: Some(\"warning\"), host: Some(\"h1\"), source: None, query: Some(\"oom\"), limit: Some(50) }"
     );
 }
 
@@ -457,7 +457,7 @@ async fn run_correlate_http_sends_exactly_one_request() {
         .mount(&server)
         .await;
     let args = CorrelateArgs {
-        reference_time: "2026-01-01T12:00:00Z".into(),
+        reference_time: Some("2026-01-01T12:00:00Z".into()),
         json: true,
         ..Default::default()
     };

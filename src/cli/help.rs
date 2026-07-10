@@ -145,9 +145,10 @@ const CATALOG: &[CommandDoc] = &[
     },
     CommandDoc {
         name: "correlate",
-        summary: "Correlate events around a reference time",
+        summary: "Correlate events around a reference time, or a query-derived anchor",
         usage: &[
             "cortex correlate events --reference-time TIME [--window-minutes N] [--severity-min LEVEL] [--host HOST] [--source SOURCE] [--query FTS] [--limit N] [--json]",
+            "cortex correlate events --query FTS [--window-minutes N] [--severity-min LEVEL] [--host HOST] [--limit N] [--json]  # derives reference-time from the top matching AI session",
         ],
     },
     CommandDoc {
@@ -443,13 +444,6 @@ const NESTED_CATALOG: &[NestedCommandDoc] = &[
         summary: "Find incidents similar to a free-text query",
         usage: &[
             "cortex sessions similar QUERY [--host HOST] [--app APP] [--severity-min LEVEL] [--since TIME] [--until TIME] [--window-minutes N] [--limit N] [--json]",
-        ],
-    },
-    NestedCommandDoc {
-        path: "sessions ask-history",
-        summary: "Search historical AI sessions and nearby system logs",
-        usage: &[
-            "cortex sessions ask-history QUERY [--host HOST] [--app APP] [--since TIME] [--until TIME] [--limit N] [--json]",
         ],
     },
     NestedCommandDoc {
