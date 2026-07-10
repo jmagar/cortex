@@ -122,7 +122,8 @@ fn extract_message(value: &Value) -> Option<String> {
         content.to_string()
     } else if let Some(message) = value.get("message").and_then(Value::as_str) {
         message.to_string()
-    } else if let Some(items) = value.get("content").and_then(Value::as_array) {
+    } else {
+        let items = value.get("content").and_then(Value::as_array)?;
         items
             .iter()
             .filter_map(|item| {
@@ -132,8 +133,6 @@ fn extract_message(value: &Value) -> Option<String> {
             })
             .collect::<Vec<_>>()
             .join(" ")
-    } else {
-        return None;
     };
     (!text.is_empty()).then_some(text)
 }

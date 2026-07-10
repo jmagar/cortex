@@ -900,10 +900,14 @@ AI session content.
 ### `cortex correlate events`
 
 Find related events around a reference timestamp. Results are grouped by host.
+`--reference-time` or `--query` is required. If `--reference-time` is omitted,
+the anchor is derived from the top AI-transcript session matching `--query`
+(the matched session is included in the response as `matched_session`).
 
 ```bash
 cortex correlate events --reference-time 2026-01-01T12:00:00Z --window-minutes 10
 cortex correlate events 2026-01-01T12:00:00Z --severity-min err --query timeout --limit 50
+cortex correlate events --query "qbittorrent keeps dying"  # anchor derived from AI session search
 ```
 
 Flags:
@@ -911,12 +915,12 @@ Flags:
 | Flag | Description |
 | --- | --- |
 | positional reference time | RFC3339 center timestamp |
-| `--reference-time TIME` | RFC3339 center timestamp |
+| `--reference-time TIME` | RFC3339 center timestamp. Required unless `--query` is given. |
 | `--window-minutes N` | Minutes before and after the reference time |
 | `--severity-min LEVEL` | Minimum severity to include |
 | `--host HOST` | Exact claimed hostname filter |
 | `--source SOURCE` | Exact source identifier filter |
-| `--query FTS` | Optional FTS5 query |
+| `--query FTS` | FTS5 query filtering correlated logs; also used to derive `--reference-time` via AI-session search when it's omitted |
 | `--limit N` | Maximum total events |
 | `--json` | Print JSON response |
 
@@ -1227,7 +1231,6 @@ models.
 | `cortex sessions tools` | `cortex` with `action="list_ai_tools"` |
 | `cortex sessions projects` | `cortex` with `action="list_ai_projects"` |
 | `cortex sessions similar` | `cortex` with `action="similar_incidents"` |
-| `cortex sessions ask-history` | `cortex` with `action="ask_history"` |
 | `cortex sessions incident-context` | `cortex` with `action="incident_context"` |
 | `cortex sessions skills` | `cortex` with `action="skill_events"` |
 | `cortex sessions mcp-events` | `cortex` with `action="mcp_events"` |

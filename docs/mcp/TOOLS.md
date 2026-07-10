@@ -27,7 +27,7 @@ cortex exposes one MCP tool named `cortex`. The required
 | `project_context` | Summary for one AI project path |
 | `list_ai_tools` | Distinct AI tools with counts |
 | `list_ai_projects` | Distinct AI projects with counts |
-| `correlate` | Cross-host event correlation in a time window |
+| `correlate` | Cross-host event correlation in a time window; omit reference_time and pass query to derive the anchor from a matching AI session |
 | `stats` | Database statistics and storage health |
 | `status` | Lightweight runtime and DB health |
 | `apps` | Distinct application names with log and host counts |
@@ -51,7 +51,6 @@ cortex exposes one MCP tool named `cortex`. The required
 | `notifications_test` | Send a test notification via Apprise |
 | `llm_invocations` | Recent LLM invocation audit records (concurrency/rate-limit/circuit-breaker denials included) |
 | `similar_incidents` | FTS5 cluster search — find historical incidents similar to a query |
-| `ask_history` | Search AI transcript history for past work related to a topic |
 | `incident_context` | Full context bundle for a known time window — logs + AI sessions |
 | `graph` | Resolve graph entities, neighborhoods, evidence-backed explanations, and evidence proof rows |
 | `skill_events` | List extracted AI skill-invocation events |
@@ -260,7 +259,10 @@ Optional arguments: `tool`, `from`, `to`.
 
 Search for related events across multiple hosts within a time window.
 
-Required arguments: `action = "correlate"`, `reference_time`.
+Required arguments: `action = "correlate"`, and either `reference_time` or `query`. If
+`reference_time` is omitted, it's derived from the top AI-transcript session matching
+`query` (an FTS5 search over `search_sessions`-style session content); the matched
+session is returned as `matched_session` in the response.
 
 Optional arguments: `window_minutes`, `severity_min`, `hostname`, `source_ip`, `query`, `limit`.
 

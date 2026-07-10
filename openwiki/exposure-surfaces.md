@@ -30,7 +30,7 @@ cortex exposes its functionality through three surfaces that share a common serv
 
 ### Tool Model
 - **Single tool**: `cortex`
-- **57 actions**: Dispatched via required `action` parameter
+- **56 actions**: Dispatched via required `action` parameter
 - **Source of truth**: `src/mcp/actions.rs::ACTION_SPECS`
 
 **Example usage**:
@@ -65,7 +65,7 @@ cortex exposes its functionality through three surfaces that share a common serv
 - **Versioning**: URL-based (e.g., `/api/v1/...`) for future compatibility
 
 ### Routes
-63 routes across several categories:
+62 routes across several categories:
 - **Log queries**: `/api/logs/search`, `/api/logs/tail`, `/api/logs/filter`, `/api/logs/context`
 - **AI sessions**: `/api/sessions`, `/api/sessions/search`
 - **Incidents**: `/api/skill-incidents`, `/api/mcp-incidents`, `/api/hook-incidents`

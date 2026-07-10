@@ -220,6 +220,7 @@ fn human_correlate_and_ai_search_outputs_accept_contextual_payloads() {
                 event_count: 1,
                 events: vec![sample_log(5, "warning", "related")],
             }],
+            matched_session: None,
         },
         false,
     )

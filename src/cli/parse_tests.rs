@@ -120,6 +120,9 @@ fn parse_routes_heartbeat_agent_defaults() {
             docker_url: None,
             journald: false,
             syslog_target: None,
+            ai_transcripts: false,
+            agent_command_forward: false,
+            shell_history_forward: false,
         }))
     );
 }
@@ -163,6 +166,9 @@ fn parse_routes_heartbeat_agent_flags() {
             docker_url: None,
             journald: false,
             syslog_target: None,
+            ai_transcripts: false,
+            agent_command_forward: false,
+            shell_history_forward: false,
         }))
     );
 }

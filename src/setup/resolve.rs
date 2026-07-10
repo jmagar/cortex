@@ -56,6 +56,16 @@ pub fn cortex_home_dir() -> io::Result<PathBuf> {
     validate_absolute_home(home_candidate)
 }
 
+/// Default agent-command spool path (`~/.local/state/cortex/agent-command.jsonl`),
+/// matching what `cortex setup shell-agent install` wires the wrapper script
+/// to write to. Used as the default for `cortex heartbeat agent
+/// --agent-command-forward`'s spool source.
+pub fn default_agent_command_spool_path() -> io::Result<PathBuf> {
+    Ok(user_home_dir()?
+        .join(".local/state/cortex")
+        .join("agent-command.jsonl"))
+}
+
 pub(crate) fn user_home_dir() -> io::Result<PathBuf> {
     let home =
         std::env::var("HOME").map_err(|_| io::Error::new(ErrorKind::NotFound, "HOME is unset"))?;

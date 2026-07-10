@@ -18,7 +18,7 @@ fn parse_sessions_similar_collects_query_and_filters() {
 }
 
 #[test]
-fn parse_sessions_similar_and_ask_history_accept_all_filters() {
+fn parse_sessions_similar_accepts_all_filters() {
     let similar = parse_sessions_similar(&strings(&[
         "--host=host1",
         "--app=cortex",
@@ -36,27 +36,6 @@ fn parse_sessions_similar_and_ask_history_accept_all_filters() {
             assert_eq!(args.severity_min.as_deref(), Some("err"));
             assert_eq!(args.window_minutes, Some(45));
             assert_eq!(args.query, "disk");
-        }
-        other => panic!("unexpected command: {other:?}"),
-    }
-
-    let ask = parse_sessions_ask_history(&strings(&[
-        "--host=host1",
-        "--app=cortex",
-        "--since=2026-01-01T00:00:00Z",
-        "--until=2026-01-01T00:10:00Z",
-        "--limit=5",
-        "--json",
-        "why",
-        "failed",
-    ]))
-    .unwrap();
-    match ask {
-        crate::cli::CliCommand::Sessions(crate::cli::SessionsCommand::AskHistory(args)) => {
-            assert_eq!(args.query, "why failed");
-            assert_eq!(args.host.as_deref(), Some("host1"));
-            assert_eq!(args.limit, Some(5));
-            assert!(args.json);
         }
         other => panic!("unexpected command: {other:?}"),
     }
@@ -234,11 +213,6 @@ fn parse_sessions_more_reports_required_query_and_unexpected_argument_errors() {
     for (parser, args, expected) in [
         (
             parse_sessions_similar as fn(&[String]) -> anyhow::Result<crate::cli::CliCommand>,
-            vec!["--limit=1"],
-            "requires a query",
-        ),
-        (
-            parse_sessions_ask_history,
             vec!["--limit=1"],
             "requires a query",
         ),

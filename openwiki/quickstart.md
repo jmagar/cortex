@@ -28,7 +28,7 @@
 │           Unified Service Layer → Three Surfaces              │
 ├─────────────────────────────────────────────────────────────┤
 │  MCP Server          │  REST API        │  Direct CLI        │
-│  57 actions          │  63 routes       │  Full parity        │
+│  56 actions          │  62 routes       │  Full parity        │
 │  /mcp (RMCP HTTP)    │  /api/*          │  HTTP-routed        │
 │  OAuth/JWT or bearer │  bearer/JWT      │  or direct SQLite   │
 └─────────────────────────────────────────────────────────────┘

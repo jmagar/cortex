@@ -568,7 +568,7 @@ pub struct AiInvestigateResult {
 }
 
 // ---------------------------------------------------------------------------
-// RAG v1: similar_incidents, ask_history, incident_context
+// RAG v1: similar_incidents, incident_context
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Default)]
@@ -619,28 +619,6 @@ pub struct SimilarIncidentsResult {
     pub total_clusters: usize,
     pub truncated: bool,
     pub clusters: Vec<IncidentCluster>,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct AskHistoryParams {
-    pub query: String,
-    pub host: Option<String>,
-    pub app: Option<String>,
-    pub since: Option<String>,
-    pub until: Option<String>,
-    /// Max sessions to return. Default 10, clamp 1..=50.
-    pub limit: Option<u32>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AskHistoryResult {
-    pub query: String,
-    pub total_candidates: usize,
-    pub truncated: bool,
-    /// Sessions with transcript hits ranked by match count.
-    pub sessions: Vec<SearchedAiSessionEntry>,
-    /// System (non-AI) log entries from the top-ranked session's time window.
-    pub context_logs: Vec<LogEntry>,
 }
 
 #[derive(Debug, Clone, Default)]

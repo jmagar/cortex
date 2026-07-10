@@ -31,18 +31,17 @@ use crate::app::{
     AbuseSearchRequest, AckErrorRequest, AiCheckpointsRequest, AiCorrelateLimitPolicy,
     AiCorrelateRequest, AiHookIncidentRequest, AiHookInvestigateRequest, AiIncidentRequest,
     AiInvestigateRequest, AiLimitPolicy, AiParseErrorsRequest, AiPruneCheckpointsRequest,
-    AiSkillIncidentRequest, AiSkillInvestigateRequest, AnomaliesRequest, AskHistoryRequest,
-    ClockSkewRequest, CompareRequest, ContextRequest, CorrelateEventsRequest,
-    CorrelateStateRequest, CortexService, DbBackupRequest, DbCheckpointRequest, DbIntegrityRequest,
-    DbVacuumRequest, FileTailRequest, FilterLogsRequest, FleetStateRequest, GetErrorsRequest,
-    GetLogRequest, GraphAroundRequest, GraphEntityLookupRequest, GraphEvidenceLookupRequest,
-    GraphExplainRequest, HostStateRequest, IncidentContextRequest, IngestRateRequest,
-    ListAiProjectsRequest, ListAiToolsRequest, ListAppsRequest, ListHookEventsRequest,
-    ListSessionsRequest, ListSkillEventsRequest, ListSourceIpsRequest, LlmInvocationsRequest,
-    NotificationsRecentRequest, PatternsRequest, ProjectContextRequest, RequestActor,
-    SearchLogsRequest, SearchSessionsRequest, ServiceError, SilentHostsRequest,
-    SimilarIncidentsRequest, TailLogsRequest, TimelineRequest, TopicCorrelateRequest,
-    UnackErrorRequest, UnaddressedErrorsRequest, UsageBlocksRequest,
+    AiSkillIncidentRequest, AiSkillInvestigateRequest, AnomaliesRequest, ClockSkewRequest,
+    CompareRequest, ContextRequest, CorrelateEventsRequest, CorrelateStateRequest, CortexService,
+    DbBackupRequest, DbCheckpointRequest, DbIntegrityRequest, DbVacuumRequest, FileTailRequest,
+    FilterLogsRequest, FleetStateRequest, GetErrorsRequest, GetLogRequest, GraphAroundRequest,
+    GraphEntityLookupRequest, GraphEvidenceLookupRequest, GraphExplainRequest, HostStateRequest,
+    IncidentContextRequest, IngestRateRequest, ListAiProjectsRequest, ListAiToolsRequest,
+    ListAppsRequest, ListHookEventsRequest, ListSessionsRequest, ListSkillEventsRequest,
+    ListSourceIpsRequest, LlmInvocationsRequest, NotificationsRecentRequest, PatternsRequest,
+    ProjectContextRequest, RequestActor, SearchLogsRequest, SearchSessionsRequest, ServiceError,
+    SilentHostsRequest, SimilarIncidentsRequest, TailLogsRequest, TimelineRequest,
+    TopicCorrelateRequest, UnackErrorRequest, UnaddressedErrorsRequest, UsageBlocksRequest,
 };
 use crate::config::ApiConfig;
 use crate::mcp::{AuthPolicy, build_auth_layer};
@@ -263,7 +262,6 @@ pub fn router(state: ApiState) -> anyhow::Result<Router> {
         .route("/api/graph/around", get(graph_around))
         .route("/api/graph/explain", get(graph_explain))
         .route("/api/graph/evidence", get(graph_evidence))
-        .route("/api/sessions/ask-history", get(ai_ask_history))
         .route("/api/sessions/incidents", get(ai_incidents))
         .route("/api/sessions/investigate", get(ai_investigate))
         .route("/api/sessions/llm-invocations", get(ai_llm_invocations))
@@ -512,7 +510,7 @@ async fn hosts(State(state): State<ApiState>) -> impl IntoResponse {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct CorrelateQuery {
-    reference_time: String,
+    reference_time: Option<String>,
     window_minutes: Option<u32>,
     severity_min: Option<String>,
     host: Option<String>,
@@ -1100,36 +1098,6 @@ async fn graph_evidence(
     Query(q): Query<GraphEvidenceLookupRequest>,
 ) -> impl IntoResponse {
     respond(state.service.graph_evidence_lookup(q).await)
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct AskHistoryQuery {
-    query: String,
-    host: Option<String>,
-    app: Option<String>,
-    since: Option<String>,
-    until: Option<String>,
-    limit: Option<u32>,
-}
-
-async fn ai_ask_history(
-    State(state): State<ApiState>,
-    Query(q): Query<AskHistoryQuery>,
-) -> impl IntoResponse {
-    respond(
-        state
-            .service
-            .ask_history(AskHistoryRequest {
-                query: q.query,
-                host: q.host,
-                app: q.app,
-                since: q.since,
-                until: q.until,
-                limit: q.limit,
-            })
-            .await,
-    )
 }
 
 /// AI incidents — uses `QsQuery` because `terms: Vec<String>` cannot be

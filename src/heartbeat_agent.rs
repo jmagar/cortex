@@ -48,6 +48,19 @@ pub struct HeartbeatAgentConfig {
     pub file_tails: Vec<crate::agent::syslog_file::FileTailSource>,
     /// Override TCP syslog target (`host:port`).  Derived from `target` when absent.
     pub syslog_target: Option<String>,
+    /// Forward local AI transcript (Claude/Codex) changes to the central
+    /// server's `/v1/ai-transcripts` endpoint using `target`/`token`.
+    pub ai_transcripts: bool,
+    /// Local state file tracking per-file forwarded line counts.
+    pub ai_transcript_checkpoint_path: PathBuf,
+    /// Forward the local agent-command spool to the central server's
+    /// `/v1/agent-commands` endpoint, on a fixed interval.
+    pub agent_command_forward: bool,
+    pub agent_command_spool_path: PathBuf,
+    /// Forward local shell history (zsh/bash + atuin) to the central
+    /// server's `/v1/shell-history` endpoint, on a fixed interval.
+    pub shell_history_forward: bool,
+    pub shell_history_checkpoint_path: PathBuf,
 }
 
 impl HeartbeatAgentConfig {
@@ -78,6 +91,41 @@ impl HeartbeatAgentConfig {
             .map(|spec| crate::agent::syslog_file::parse_file_tails(&spec))
             .unwrap_or_default();
         let syslog_target = std::env::var("CORTEX_SYSLOG_TARGET").ok();
+        let ai_transcripts = std::env::var("CORTEX_AGENT_AI_TRANSCRIPTS")
+            .ok()
+            .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
+            .unwrap_or(false);
+        let ai_transcript_checkpoint_path = std::env::var("CORTEX_AGENT_AI_TRANSCRIPT_CHECKPOINT")
+            .ok()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                crate::setup::cortex_home_dir()
+                    .unwrap_or_else(|_| PathBuf::from("."))
+                    .join("ai-transcript-forward-checkpoint.json")
+            });
+        let agent_command_forward = std::env::var("CORTEX_AGENT_COMMAND_FORWARD")
+            .ok()
+            .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
+            .unwrap_or(false);
+        let agent_command_spool_path = std::env::var("CORTEX_AGENT_COMMAND_SPOOL")
+            .ok()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                crate::setup::default_agent_command_spool_path()
+                    .unwrap_or_else(|_| PathBuf::from("agent-command.jsonl"))
+            });
+        let shell_history_forward = std::env::var("CORTEX_AGENT_SHELL_HISTORY_FORWARD")
+            .ok()
+            .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
+            .unwrap_or(false);
+        let shell_history_checkpoint_path = std::env::var("CORTEX_AGENT_SHELL_HISTORY_CHECKPOINT")
+            .ok()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                crate::setup::cortex_home_dir()
+                    .unwrap_or_else(|_| PathBuf::from("."))
+                    .join("shell-history-forward-checkpoint.json")
+            });
         Self {
             target,
             token,
@@ -95,6 +143,12 @@ impl HeartbeatAgentConfig {
             syslog_file,
             file_tails,
             syslog_target,
+            ai_transcripts,
+            ai_transcript_checkpoint_path,
+            agent_command_forward,
+            agent_command_spool_path,
+            shell_history_forward,
+            shell_history_checkpoint_path,
         }
     }
 }
@@ -1213,11 +1267,14 @@ pub async fn run_agent(config: HeartbeatAgentConfig) -> Result<()> {
         .unwrap_or(true);
     let mut update_confirmed = false;
 
-    // Spawn Docker / journald / file-tail forwarding streams as a background task.
+    // Spawn Docker / journald / file-tail / AI-transcript forwarding streams as a background task.
     if config.docker
         || config.journald
         || config.syslog_file.is_some()
         || !config.file_tails.is_empty()
+        || config.ai_transcripts
+        || config.agent_command_forward
+        || config.shell_history_forward
     {
         let syslog_target = config
             .syslog_target
@@ -1237,6 +1294,27 @@ pub async fn run_agent(config: HeartbeatAgentConfig) -> Result<()> {
             file_tails: config.file_tails.clone(),
             syslog_target,
             hostname: hostname(),
+            ai_transcripts: config.ai_transcripts,
+            ai_transcript_target: config
+                .target
+                .clone()
+                .unwrap_or_else(|| DEFAULT_TARGET.to_string()),
+            ai_transcript_token: config.token.clone(),
+            ai_transcript_checkpoint_path: config.ai_transcript_checkpoint_path.clone(),
+            agent_command_forward: config.agent_command_forward,
+            agent_command_spool_path: config.agent_command_spool_path.clone(),
+            agent_command_target: config
+                .target
+                .clone()
+                .unwrap_or_else(|| DEFAULT_TARGET.to_string()),
+            agent_command_token: config.token.clone(),
+            shell_history_forward: config.shell_history_forward,
+            shell_history_target: config
+                .target
+                .clone()
+                .unwrap_or_else(|| DEFAULT_TARGET.to_string()),
+            shell_history_token: config.token.clone(),
+            shell_history_checkpoint_path: config.shell_history_checkpoint_path.clone(),
         };
         tokio::spawn(crate::agent::run_agent_streams(streams));
     }
@@ -1292,7 +1370,7 @@ pub async fn run_agent(config: HeartbeatAgentConfig) -> Result<()> {
                         .await
                         {
                             tracing::warn!(
-                                error = %error,
+                                error = format!("{error:#}"),
                                 "agent self-update failed; staying on current binary"
                             );
                         }

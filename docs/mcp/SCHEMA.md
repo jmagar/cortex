@@ -63,7 +63,6 @@ selects one of these 54 actions:
 | `unaddressed_errors` | `cortex:read` | moderate | Unacknowledged repeating error signatures |
 | `notifications_recent` | `cortex:read` | cheap | Recent notification firings |
 | `similar_incidents` | `cortex:read` | moderate | FTS5 historical incident clusters |
-| `ask_history` | `cortex:read` | moderate | AI transcript history with nearby log context |
 | `incident_context` | `cortex:read` | moderate | Window bundle: log aggregates, errors, AI sessions |
 | `graph` | `cortex:read` | moderate | Entity lookup and one-hop graph neighborhoods |
 | `skill_events` | `cortex:read` | cheap | List extracted AI skill-invocation events |
@@ -127,11 +126,11 @@ handler and service layers.
 
 | Argument | Used by |
 | --- | --- |
-| `query` | `search`, `search_sessions`, `correlate`, `similar_incidents`, `ask_history` |
-| `hostname` | `search`, `filter`, `tail`, `correlate`, `host_state`, `ai_correlate`, `apps`, `sessions`, `timeline`, `patterns`, `context`, `similar_incidents`, `ask_history`, `incident_context` |
+| `query` | `search`, `search_sessions`, `correlate`, `similar_incidents` |
+| `hostname` | `search`, `filter`, `tail`, `correlate`, `host_state`, `ai_correlate`, `apps`, `sessions`, `timeline`, `patterns`, `context`, `similar_incidents`, `incident_context` |
 | `host_id` | Authoritative heartbeat identity for `host_state` |
 | `host` | Optional host_id-or-hostname filter for `correlate_state` |
-| `reference_time` | Required window center for `correlate` and `correlate_state` |
+| `reference_time` | Required window center for `correlate_state`; for `correlate`, required unless `query` is given (then derived from an AI-session search) |
 | `source_ip` | `search`, `filter`, `tail`, `correlate`, `ai_correlate` |
 | `source_kind` | `filter` only; aliases Docker, file-tail, command-history, shell-history, transcript, and AI-tool rows |
 | `project` | `filter`, `sessions`, `search_sessions`, `abuse`, `ai_correlate`, `usage_blocks`, `project_context`, `list_ai_tools` |
@@ -141,7 +140,7 @@ handler and service layers.
 | `log_query` | Related non-AI log FTS5 query for `ai_correlate` |
 | `severity` | Exact severity filter for `search` and `filter` |
 | `severity_min` | Severity floor for `tail`, `correlate`, `ai_correlate`, `timeline`, `patterns`, `similar_incidents`, `incident_context` |
-| `app_name` | `search`, `filter`, `tail`, `ai_correlate`, `timeline`, `patterns`, `similar_incidents`, `ask_history`, `incident_context` |
+| `app_name` | `search`, `filter`, `tail`, `ai_correlate`, `timeline`, `patterns`, `similar_incidents`, `incident_context` |
 | `from`, `to` | Time range for search/session/AI/analytics actions; required for `incident_context` |
 | `limit`, `offset` | Action-specific bounds; `offset` is for `apps` and `source_ips` pagination |
 | `host_limit`, `per_host_limit`, `section_limit`, `include_sections` | Node and inventory-section bounds for `map`; `per_host_limit` is accepted for v1 compatibility and ignored by map v2 |
@@ -154,11 +153,10 @@ See [CORRELATION.md](CORRELATION.md) for the full behavior matrix.
 
 | Action | Key arguments |
 | --- | --- |
-| `correlate` | `reference_time`, `window_minutes`, `severity_min`, `hostname`, `source_ip`, `query`, `limit` |
+| `correlate` | `reference_time` (or `query` alone, deriving the anchor from an AI-session search), `window_minutes`, `severity_min`, `hostname`, `source_ip`, `query`, `limit` |
 | `ai_correlate` | `project`, `tool`, `session_id`, `ai_query`, `log_query`, `hostname`, `source_ip`, `app_name`, `from`, `to`, `window_minutes`, `severity_min`, `limit`, `events_per_anchor` |
 | `abuse_investigate` | `project`, `tool`, `from`, `to`, `limit`, `window_minutes`, `correlation_window_minutes`, `terms` |
 | `similar_incidents` | `query`, `hostname`, `app_name`, `severity_min`, `from`, `to`, `window_minutes`, `limit` |
-| `ask_history` | `query`, `hostname`, `app_name`, `from`, `to`, `limit` |
 | `incident_context` | `from`, `to`, `hostname`, `app_name`, `severity_min`, `limit`; `query` is accepted by the request shape but intentionally ignored in v1 |
 | `graph` | `mode=entity|around|explain|evidence`; entity/around/explain require exactly one target lookup strategy (`entity_id`, `entity_type` + `key`, or `alias_type` + `alias_key`); `around` accepts `depth=1` only; `explain` accepts `depth=1..3`; `evidence` requires `evidence_id`; optional `limit`, `evidence_sample_limit`, `payload_budget` |
 | `file_tails` | `op` is required and enumerated as `list`, `add`, `remove`, `enable`, `disable`, or `status`; add requires `id`, `path`, `tag`, and `hostname`; remove/enable/disable require `id`; optional `facility`, `severity`, `start_at_end` |

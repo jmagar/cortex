@@ -90,13 +90,13 @@ pub use models::{
     AiIncidentResult, AiInvestigateParams, AiInvestigateResult, AiProjectContext,
     AiProjectContextParams, AiProjectInventoryEntry, AiRelatedLogsForAnchor, AiRelatedLogsParams,
     AiRelatedWindow, AiSessionEntry, AiToolInventoryEntry, AiUsageBlock, AiUsageBlocksParams,
-    AiUsageBlocksResult, AppLogCount, AskHistoryParams, AskHistoryResult, CorrelatedSession,
-    DbStats, DockerCheckpoint, ErrorSummaryEntry, HostEntry, IncidentCluster,
-    IncidentContextParams, IncidentContextResult, IncidentEvidence, ListAiProjectsParams,
-    ListAiProjectsResult, ListAiSessionsParams, ListAiToolsParams, ListAiToolsResult,
-    LogBatchEntry, LogEntry, ResolvedTopicEntity, SearchAiSessionsParams, SearchAiSessionsResult,
-    SearchParams, SearchedAiSessionEntry, SessionGraphInputs, SeverityCount,
-    SimilarIncidentsParams, SimilarIncidentsResult, TopicGraphInputs,
+    AiUsageBlocksResult, AppLogCount, CorrelatedSession, DbStats, DockerCheckpoint,
+    ErrorSummaryEntry, HostEntry, IncidentCluster, IncidentContextParams, IncidentContextResult,
+    IncidentEvidence, ListAiProjectsParams, ListAiProjectsResult, ListAiSessionsParams,
+    ListAiToolsParams, ListAiToolsResult, LogBatchEntry, LogEntry, ResolvedTopicEntity,
+    SearchAiSessionsParams, SearchAiSessionsResult, SearchParams, SearchedAiSessionEntry,
+    SessionGraphInputs, SeverityCount, SimilarIncidentsParams, SimilarIncidentsResult,
+    TopicGraphInputs,
 };
 pub use models::{StorageBudgetState, StorageEnforcementOutcome, StorageMetrics, StorageRecovery};
 pub use pool::{
@@ -106,14 +106,14 @@ pub use pool::{
 };
 pub use queries::{
     AiSessionRollupStatus, RollupRefresh, SEVERITY_LEVELS, TimelineRollupStatus,
-    ai_session_rollup_status, ask_history_sessions, correlate_session_graph, get_error_summary,
-    get_stats, get_stats_with_options, incident_context_summary, investigate_ai_incidents,
-    list_ai_projects, list_ai_sessions, list_ai_sessions_live, list_ai_tools, list_hosts,
-    prune_timeline_rollup, refresh_ai_session_rollup, refresh_ai_session_rollup_if_stale,
-    refresh_timeline_rollup, search_ai_abuse, search_ai_anchors, search_ai_incidents,
-    search_ai_related_logs, search_ai_sessions, search_logs,
-    search_logs_from_graph_related_entities, severity_to_num, similar_incidents_clusters,
-    tail_logs, timeline_rollup_status, topic_correlate_inputs, validate_fts_query,
+    ai_session_rollup_status, correlate_session_graph, get_error_summary, get_stats,
+    get_stats_with_options, incident_context_summary, investigate_ai_incidents, list_ai_projects,
+    list_ai_sessions, list_ai_sessions_live, list_ai_tools, list_hosts, prune_timeline_rollup,
+    refresh_ai_session_rollup, refresh_ai_session_rollup_if_stale, refresh_timeline_rollup,
+    search_ai_abuse, search_ai_anchors, search_ai_incidents, search_ai_related_logs,
+    search_ai_sessions, search_logs, search_logs_from_graph_related_entities, severity_to_num,
+    similar_incidents_clusters, tail_logs, timeline_rollup_status, topic_correlate_inputs,
+    validate_fts_query,
 };
 pub(crate) use skill_events::insert_skill_events_in_tx;
 pub use skill_events::{

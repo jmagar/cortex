@@ -129,9 +129,6 @@ pub(crate) async fn run(mode: CliMode, command: CliCommand) -> Result<()> {
             super::SessionsCommand::SimilarIncidents(args) => {
                 dispatch::run_ai_similar_incidents(&mode, args).await
             }
-            super::SessionsCommand::AskHistory(args) => {
-                dispatch::run_ai_ask_history(&mode, args).await
-            }
             super::SessionsCommand::IncidentContext(args) => {
                 dispatch::run_ai_incident_context(&mode, args).await
             }

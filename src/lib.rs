@@ -4,6 +4,7 @@ pub mod agent;
 pub mod agent_command_ingest;
 pub mod agent_deploy;
 pub(crate) mod ai_project;
+pub mod ai_transcript_ingest;
 pub mod ai_watch;
 pub mod api;
 pub mod app;
@@ -34,6 +35,7 @@ pub mod receiver;
 pub mod runtime;
 pub mod scanner;
 pub mod setup;
+pub mod shell_history_ingest;
 pub mod surfaces;
 pub mod web_app;
 

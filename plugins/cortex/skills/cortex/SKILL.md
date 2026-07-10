@@ -33,7 +33,7 @@ A single MCP tool, `mcp__cortex__cortex`, dispatches on a required `action` argu
 | `project_context` | Summary for one AI project path |
 | `list_ai_tools` | Distinct AI tools with counts |
 | `list_ai_projects` | Distinct AI projects with counts |
-| `correlate` | Cross-host event correlation in a time window |
+| `correlate` | Cross-host event correlation in a time window; omit reference_time and pass query to derive the anchor from a matching AI session |
 | `stats` | Database statistics |
 | `status` | Lightweight runtime and DB health |
 | `apps` | Distinct app names with log and host counts |
@@ -57,7 +57,6 @@ A single MCP tool, `mcp__cortex__cortex`, dispatches on a required `action` argu
 | `notifications_test` | Send a test notification via Apprise |
 | `llm_invocations` | Recent LLM invocation audit records (concurrency/rate-limit/circuit-breaker denials included) |
 | `similar_incidents` | FTS5 cluster search over historical system logs matching a query |
-| `ask_history` | Search AI transcript history for sessions related to a topic |
 | `incident_context` | Full log context bundle for a known time window |
 | `graph` | Resolve graph entities and return bounded one-hop neighborhoods with evidence |
 | `skill_events` | List extracted AI skill-invocation events |

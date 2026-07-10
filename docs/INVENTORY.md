@@ -25,7 +25,7 @@ that registry by `src/mcp/schemas.rs::tool_definitions()`.
 | `map` | Cached homelab inventory plus graph-backed topology answers | no |
 | `host_state` | Latest bounded heartbeat state for one host | no |
 | `fleet_state` | Fleet-wide heartbeat snapshot with pressure flags and summary counts | no |
-| `correlate` | Cross-host event correlation within a time window around a reference timestamp | no |
+| `correlate` | Cross-host event correlation within a time window around a reference timestamp, or one derived from query via AI-session search | no |
 | `correlate_state` | Correlate logs with heartbeat window summaries around a reference time | no |
 | `stats` | Database statistics: total logs, hosts, time range, DB size, free disk, write-block status | no |
 | `status` | Lightweight runtime status: DB health, queue/backpressure state, listener/writer counters, OTLP counters | no |
@@ -56,7 +56,6 @@ that registry by `src/mcp/schemas.rs::tool_definitions()`.
 | `unaddressed_errors` | Repeating unacknowledged error signatures | no |
 | `notifications_recent` | Recent notification firings | no |
 | `similar_incidents` | FTS5 historical incident clusters with overlapping AI sessions | no |
-| `ask_history` | AI transcript history search with nearby non-AI log context | no |
 | `incident_context` | Window bundle of non-AI log aggregates/errors and active AI sessions | no |
 | `graph` | Resolve graph entities, neighborhoods, and evidence-backed explanations | no |
 | `skill_events` | List extracted AI skill-invocation events | no |
@@ -112,7 +111,6 @@ methods as the MCP actions.
 | `cortex sessions incidents` | `abuse_incidents` | Grouped abuse incident candidates |
 | `cortex sessions investigate` | `abuse_investigate` | Abuse incident evidence bundles |
 | `cortex sessions similar` | `similar_incidents` | Historical incident clusters |
-| `cortex sessions ask-history` | `ask_history` | AI transcript history search |
 | `cortex sessions incident-context` | `incident_context` | Full context bundle for a time window |
 | `cortex stats` | `stats` | Database and storage metrics |
 | `cortex stats ingest-rate` | `ingest_rate` | Recent ingest throughput and write-block state |

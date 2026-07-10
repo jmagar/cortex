@@ -1,8 +1,8 @@
 use serde_json::Value;
 
 use crate::app::{
-    AskHistoryRequest, GraphAroundRequest, GraphEntityLookupRequest, GraphEvidenceLookupRequest,
-    GraphExplainRequest, IncidentContextRequest, SimilarIncidentsRequest,
+    GraphAroundRequest, GraphEntityLookupRequest, GraphEvidenceLookupRequest, GraphExplainRequest,
+    IncidentContextRequest, SimilarIncidentsRequest,
 };
 
 use super::super::AppState;
@@ -14,16 +14,6 @@ pub(super) async fn tool_similar_incidents(state: &AppState, args: Value) -> any
     tracing::debug!(
         cluster_count = response.total_clusters,
         "similar_incidents completed"
-    );
-    Ok(serde_json::to_value(response)?)
-}
-
-pub(super) async fn tool_ask_history(state: &AppState, args: Value) -> anyhow::Result<Value> {
-    let req: AskHistoryRequest = action_payload(args, "ask_history")?;
-    let response = state.service.ask_history(req).await?;
-    tracing::debug!(
-        session_count = response.sessions.len(),
-        "ask_history completed"
     );
     Ok(serde_json::to_value(response)?)
 }

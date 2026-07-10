@@ -2451,19 +2451,6 @@ async fn incident_context_returns_200_with_token() {
 }
 
 #[tokio::test]
-async fn ai_ask_history_returns_200_with_token() {
-    let (state, _pool, _dir) = test_state(Some("secret".into()));
-    let app = test_router(state);
-    let (status, _value) = get_json(
-        app,
-        "/api/sessions/ask-history?query=ssh%20key%20rotation",
-        Some("secret"),
-    )
-    .await;
-    assert_eq!(status, axum::http::StatusCode::OK);
-}
-
-#[tokio::test]
 async fn ai_api_namespace_is_removed() {
     let (state, _pool, _dir) = test_state(Some("secret".into()));
     let app = test_router(state);

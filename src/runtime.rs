@@ -333,6 +333,26 @@ impl RuntimeCore {
         crate::agent_command_ingest::router(state)
     }
 
+    /// Build the forwarded AI-transcript ingest router.
+    pub fn ai_transcript_router(&self) -> axum::Router {
+        let state = crate::ai_transcript_ingest::AiTranscriptIngestState::new(
+            Arc::clone(&self.pool),
+            self.config.mcp.api_token.0.clone(),
+            self.auth_policy.clone(),
+        );
+        crate::ai_transcript_ingest::router(state)
+    }
+
+    /// Build the forwarded shell-history ingest router.
+    pub fn shell_history_router(&self) -> axum::Router {
+        let state = crate::shell_history_ingest::ShellHistoryIngestState::new(
+            Arc::clone(&self.pool),
+            self.config.mcp.api_token.0.clone(),
+            self.auth_policy.clone(),
+        );
+        crate::shell_history_ingest::router(state)
+    }
+
     pub fn mcp_state(&self) -> mcp::AppState {
         mcp::AppState {
             service: self.service(),

@@ -213,6 +213,9 @@ fn parse_heartbeat_agent(args: &[String]) -> Result<CliCommand> {
         docker_url: None,
         journald: false,
         syslog_target: None,
+        ai_transcripts: false,
+        agent_command_forward: false,
+        shell_history_forward: false,
     };
     let mut i = 0usize;
     while i < args.len() {
@@ -258,6 +261,9 @@ fn parse_heartbeat_agent(args: &[String]) -> Result<CliCommand> {
             "--json" => out.json = true,
             "--docker" => out.docker = true,
             "--journald" => out.journald = true,
+            "--ai-transcripts" => out.ai_transcripts = true,
+            "--agent-command-forward" => out.agent_command_forward = true,
+            "--shell-history-forward" => out.shell_history_forward = true,
             other => bail!(
                 "{}",
                 suggest::unknown_option(
@@ -275,6 +281,9 @@ fn parse_heartbeat_agent(args: &[String]) -> Result<CliCommand> {
                         "--docker-url",
                         "--journald",
                         "--syslog-target",
+                        "--ai-transcripts",
+                        "--agent-command-forward",
+                        "--shell-history-forward",
                         "--once",
                         "--emit",
                         "--json",

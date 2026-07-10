@@ -74,7 +74,6 @@ The live registry currently contains 51 actions (this snapshot may lag
 | `unaddressed_errors` | `cortex:read` | moderate | Unacknowledged repeating error signatures |
 | `notifications_recent` | `cortex:read` | cheap | Recent notification firings |
 | `similar_incidents` | `cortex:read` | moderate | FTS5 historical incident clusters |
-| `ask_history` | `cortex:read` | moderate | AI transcript history with nearby log context |
 | `incident_context` | `cortex:read` | moderate | Window bundle: log aggregates, errors, AI sessions |
 | `graph` | `cortex:read` | moderate | Entity lookup and one-hop graph neighborhoods |
 | `skill_events` | `cortex:read` | cheap | List extracted AI skill-invocation events |
@@ -120,7 +119,7 @@ AI-aware correlation path. Use:
 - `skill_investigate` for deterministic skill-usage-incident evidence bundles, skill-first.
 - `hook_investigate` for deterministic hook-usage-incident evidence bundles, hook-first.
 - `similar_incidents` for FTS5 historical incident clusters.
-- `ask_history` for AI transcript history with nearby log context.
+- `correlate` for a query-derived anchor (via AI-session search) when reference_time is omitted.
 - `incident_context` for a caller-provided time-window bundle.
 
 See `docs/mcp/CORRELATION.md` for inclusion rules, caps, defaults, and current

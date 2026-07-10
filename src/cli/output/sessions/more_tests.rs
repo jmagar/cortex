@@ -126,19 +126,6 @@ fn compact_ai_investigate_json_includes_transcript_when_requested() {
 
 #[test]
 fn human_ai_more_outputs_accept_representative_payloads() {
-    let searched = cortex::app::SearchedSessionEntry {
-        session_key: "key".to_string(),
-        project: "/home/jmagar/workspace/cortex".to_string(),
-        tool: "codex".to_string(),
-        session_id: "sess-1".to_string(),
-        hostname: "dookie".to_string(),
-        first_seen: "2026-06-13T12:00:00Z".to_string(),
-        last_seen: "2026-06-13T12:01:00Z".to_string(),
-        event_count: 4,
-        match_count: 2,
-        best_snippet: Some("panic near docker stream".to_string()),
-    };
-
     print_similar_incidents_response(
         &cortex::app::SimilarIncidentsResponse {
             query: "panic".to_string(),
@@ -160,18 +147,6 @@ fn human_ai_more_outputs_accept_representative_payloads() {
                     best_snippet: Some("panic".to_string()),
                 }],
             }],
-        },
-        false,
-    )
-    .unwrap();
-
-    print_ask_history_response(
-        &cortex::app::AskHistoryResponse {
-            query: "panic".to_string(),
-            total_candidates: 2,
-            truncated: true,
-            sessions: vec![searched.clone()],
-            context_logs: vec![log_entry(20, "context log")],
         },
         false,
     )

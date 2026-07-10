@@ -422,8 +422,8 @@ fn setup_path_value(path: &Path) -> io::Result<String> {
     Ok(raw)
 }
 
-pub use resolve::cortex_home_dir;
 pub(crate) use resolve::{
     EnvResult, current_uid_gid, resolve_ai_watch_db_path, resolve_cortex_binary, user_home_dir,
     write_executable_file, write_private_file,
 };
+pub use resolve::{cortex_home_dir, default_agent_command_spool_path};

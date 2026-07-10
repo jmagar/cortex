@@ -4,9 +4,9 @@ use anyhow::{Result, bail};
 use cortex::app::{
     AbuseSearchRequest, AiAssessRequest, AiCheckpointsRequest, AiCorrelateRequest,
     AiIncidentRequest, AiInvestigateRequest, AiParseErrorsRequest, AiPruneCheckpointsRequest,
-    AskHistoryRequest, HookAssessRequest, IncidentContextRequest, ListAiProjectsRequest,
-    ListAiToolsRequest, ListHookEventsRequest, McpAssessRequest, ProjectContextRequest,
-    SearchSessionsRequest, SimilarIncidentsRequest, SkillAssessRequest, UsageBlocksRequest,
+    HookAssessRequest, IncidentContextRequest, ListAiProjectsRequest, ListAiToolsRequest,
+    ListHookEventsRequest, McpAssessRequest, ProjectContextRequest, SearchSessionsRequest,
+    SimilarIncidentsRequest, SkillAssessRequest, UsageBlocksRequest,
 };
 use std::io::Write;
 
@@ -24,8 +24,8 @@ use super::output::sessions::mcp_incidents::{
 };
 use super::output::sessions::more::{
     AiInvestigatePrintOptions, print_ai_incidents_response,
-    print_ai_investigate_response_with_options, print_ask_history_response,
-    print_incident_context_response, print_similar_incidents_response,
+    print_ai_investigate_response_with_options, print_incident_context_response,
+    print_similar_incidents_response,
 };
 use super::output::sessions::skill_incidents::{
     print_ai_skill_incidents_response, print_ai_skill_investigate_response,
@@ -38,10 +38,10 @@ use super::output::sessions::{
 use super::sessions_watch::ai_smoke_watch;
 use super::{
     AssessAbuseArgs, AssessHooksArgs, AssessMcpArgs, AssessSkillArgs, CliMode, OutputArgs,
-    SessionsAbuseArgs, SessionsAddArgs, SessionsAskHistoryArgs, SessionsAssessArgs,
-    SessionsBlocksArgs, SessionsCheckpointsArgs, SessionsContextArgs, SessionsCorrelateArgs,
-    SessionsDoctorArgs, SessionsErrorsArgs, SessionsIncidentContextArgs, SessionsIncidentsArgs,
-    SessionsIndexArgs, SessionsInvestigateArgs, SessionsListArgs, SessionsLlmInvocationsArgs,
+    SessionsAbuseArgs, SessionsAddArgs, SessionsAssessArgs, SessionsBlocksArgs,
+    SessionsCheckpointsArgs, SessionsContextArgs, SessionsCorrelateArgs, SessionsDoctorArgs,
+    SessionsErrorsArgs, SessionsIncidentContextArgs, SessionsIncidentsArgs, SessionsIndexArgs,
+    SessionsInvestigateArgs, SessionsListArgs, SessionsLlmInvocationsArgs,
     SessionsMcpEventsBackfillArgs, SessionsMcpEventsListArgs, SessionsMcpIncidentsArgs,
     SessionsMcpInvestigateArgs, SessionsPruneCheckpointsArgs, SessionsSearchArgs,
     SessionsSimilarArgs, SessionsSkillIncidentsArgs, SessionsSkillInvestigateArgs,
@@ -175,19 +175,6 @@ impl SessionsSimilarArgs {
             since: self.since,
             until: self.until,
             window_minutes: self.window_minutes,
-            limit: self.limit,
-        }
-    }
-}
-
-impl SessionsAskHistoryArgs {
-    pub(crate) fn into_request(self) -> AskHistoryRequest {
-        AskHistoryRequest {
-            query: self.query,
-            host: self.host,
-            app: self.app,
-            since: self.since,
-            until: self.until,
             limit: self.limit,
         }
     }
@@ -585,16 +572,6 @@ pub(crate) async fn run_ai_similar_incidents(
         CliMode::Local(service) => service.similar_incidents(req).await?,
     };
     print_similar_incidents_response(&response, json)
-}
-
-pub(crate) async fn run_ai_ask_history(mode: &CliMode, args: SessionsAskHistoryArgs) -> Result<()> {
-    let json = args.json;
-    let req = args.into_request();
-    let response = match mode {
-        CliMode::Http(client) => http_or_cancel(client.ask_history(&req)).await?,
-        CliMode::Local(service) => service.ask_history(req).await?,
-    };
-    print_ask_history_response(&response, json)
 }
 
 pub(crate) async fn run_ai_incident_context(

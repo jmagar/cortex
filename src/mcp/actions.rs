@@ -96,7 +96,6 @@ pub(super) enum ActionHandler {
     NotificationsTest,
     LlmInvocations,
     SimilarIncidents,
-    AskHistory,
     IncidentContext,
     Graph,
     SkillEvents,
@@ -277,11 +276,14 @@ pub(super) const ACTION_SPECS: &[ActionSpec] = &[
     action_spec!(
         "correlate",
         Read,
-        "Correlate events across hosts/services",
+        "Correlate events across hosts/services; without reference_time, derives it from an AI-session search over query",
         Moderate,
         CorrelateEvents,
         flags: &[],
-        examples: &["cortex correlate events --reference-time 2026-06-16T04:00:00Z --window-minutes 15"]
+        examples: &[
+            "cortex correlate events --reference-time 2026-06-16T04:00:00Z --window-minutes 15",
+            "cortex correlate events --query \"qbittorrent keeps dying\""
+        ]
     ),
     action_spec!(
         "correlate_state",
@@ -507,13 +509,6 @@ pub(super) const ACTION_SPECS: &[ActionSpec] = &[
         "Find similar past incidents",
         Moderate,
         SimilarIncidents
-    ),
-    action_spec!(
-        "ask_history",
-        Read,
-        "Query AI transcript history",
-        Moderate,
-        AskHistory
     ),
     action_spec!(
         "incident_context",

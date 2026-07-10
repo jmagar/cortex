@@ -99,6 +99,32 @@ fn backup_current_binary_uses_unique_backup_paths() {
     );
 }
 
+#[test]
+fn ensure_binary_still_present_errors_with_clear_diagnosis_when_exe_vanished() {
+    // Regression: dookie's agent logged a bare, unhelpful ENOENT ("back up
+    // current binary to ...") for hours because a concurrent `cargo build
+    // --release` replaced the exact path the running agent was exec'd from
+    // (~/.local/bin/cortex was a dev-only symlink into the build output).
+    // current_exe() then resolves to "<path> (deleted)", which never exists.
+    let dir = tempfile::tempdir().unwrap();
+    let exe = dir.path().join("cortex (deleted)");
+
+    let err = ensure_binary_still_present(&exe).unwrap_err();
+    let message = format!("{err:#}");
+    assert!(
+        message.contains("no longer exists") && message.contains("concurrent rebuild"),
+        "expected a clear diagnosis, got: {message}"
+    );
+}
+
+#[test]
+fn ensure_binary_still_present_ok_when_exe_exists() {
+    let dir = tempfile::tempdir().unwrap();
+    let exe = dir.path().join("cortex");
+    std::fs::write(&exe, b"current").unwrap();
+    assert!(ensure_binary_still_present(&exe).is_ok());
+}
+
 #[cfg(unix)]
 #[test]
 fn validate_binary_accepts_matching_version_and_rejects_mismatch() {

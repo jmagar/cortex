@@ -34,6 +34,22 @@ async fn run_agent_streams_returns_immediately_when_all_sources_disabled() {
         file_tails: Vec::new(),
         syslog_target: "127.0.0.1:1514".to_string(),
         hostname: "test-host".to_string(),
+        ai_transcripts: false,
+        ai_transcript_target: "http://127.0.0.1:3100".to_string(),
+        ai_transcript_token: None,
+        ai_transcript_checkpoint_path: std::path::PathBuf::from(
+            "/tmp/ai-transcript-checkpoint.json",
+        ),
+        agent_command_forward: false,
+        agent_command_spool_path: std::path::PathBuf::from("/tmp/agent-command.jsonl"),
+        agent_command_target: "http://127.0.0.1:3100".to_string(),
+        agent_command_token: None,
+        shell_history_forward: false,
+        shell_history_target: "http://127.0.0.1:3100".to_string(),
+        shell_history_token: None,
+        shell_history_checkpoint_path: std::path::PathBuf::from(
+            "/tmp/shell-history-checkpoint.json",
+        ),
     };
 
     run_agent_streams(config).await.unwrap();

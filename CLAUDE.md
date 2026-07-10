@@ -66,7 +66,7 @@ Tests: unit tests live in sidecar files beside their source modules (e.g. `src/d
 
 ## MCP Tools
 
-One MCP tool: **`cortex`** — dispatches by `action` argument. 57 actions, generated from `ACTION_SPECS` in `src/mcp/actions.rs` (the single authoritative registry — regenerate this table from there).
+One MCP tool: **`cortex`** — dispatches by `action` argument. 56 actions, generated from `ACTION_SPECS` in `src/mcp/actions.rs` (the single authoritative registry — regenerate this table from there).
 
 Scope taxonomy: every action requires `cortex:read` except the five **admin** actions `ack_error`, `unack_error`, `file_tails`, `notifications_test`, and `llm_invocations`, which require `cortex:admin` (static bearer tokens get read-only unless `CORTEX_STATIC_TOKEN_ADMIN=true`); `help` is info-only (no scope gate).
 
@@ -80,7 +80,7 @@ Scope taxonomy: every action requires `cortex:read` except the five **admin** ac
 | `map` | Map homelab inventory and answer graph-backed topology questions |
 | `host_state` | Fetch latest bounded heartbeat state for a host |
 | `fleet_state` | Fleet-wide heartbeat snapshot with pressure flags |
-| `correlate` | Correlate events across hosts/services |
+| `correlate` | Correlate events across hosts/services; without reference_time, derives it from an AI-session search over query |
 | `correlate_state` | Correlate logs with heartbeat summaries around a reference time |
 | `stats` | Aggregate log statistics |
 | `status` | Server health and ingestion status |
@@ -111,7 +111,6 @@ Scope taxonomy: every action requires `cortex:read` except the five **admin** ac
 | `unaddressed_errors` | List unacknowledged error signatures |
 | `notifications_recent` | Recent notification firings |
 | `similar_incidents` | Find similar past incidents |
-| `ask_history` | Query AI transcript history |
 | `incident_context` | Full context for an incident |
 | `graph` | Resolve graph entities, neighborhoods, and evidence-backed explanations |
 | `skill_events` | List extracted AI skill-invocation events |
@@ -221,7 +220,7 @@ RUST_LOG=info
 | `docker-compose.yml` | Production deployment (ports 1514, 3100) |
 | `docs/SETUP.md` | Setup guide (clone, build, configure, deploy, verify); per-host forwarder configs (rsyslog, UniFi, ATT router, WSL) live in README "Syslog Forwarder Setup" |
 | `src/db/queries.rs` | All SQL queries and FTS5 search implementation |
-| `src/mcp/actions.rs` | `ACTION_SPECS` — authoritative registry of all 57 MCP actions and their scopes |
+| `src/mcp/actions.rs` | `ACTION_SPECS` — authoritative registry of all 56 MCP actions and their scopes |
 | `src/mcp/tools.rs` | Single `cortex` tool with action dispatch |
 | `config/mcporter.json` | mcporter config (HTTP transport to localhost:3100) |
 | `config/systemd/` | `cortex-backup.service` / `.timer` — daily WAL-safe backup units |

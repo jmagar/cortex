@@ -192,7 +192,7 @@ fn parse_correlate_accepts_reference_time_and_filters() {
         parsed,
         CliCommand::Correlate(CorrelateArgs {
             // `--reference-time` is normalized to RFC3339 (`+00:00`) at parse time.
-            reference_time: "2026-01-01T00:00:00+00:00".into(),
+            reference_time: Some("2026-01-01T00:00:00+00:00".into()),
             window_minutes: Some(15),
             severity_min: Some("warning".into()),
             query: Some("timeout".into()),

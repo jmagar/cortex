@@ -190,9 +190,24 @@ fn parse_search_tail_sessions_incident_and_correlate_cover_common_filters() {
     match correlate {
         crate::cli::CliCommand::Correlate(args) => {
             // The time value is normalized to RFC3339 at parse time.
-            assert_eq!(args.reference_time, "2026-01-01T00:00:00+00:00");
+            assert_eq!(
+                args.reference_time.as_deref(),
+                Some("2026-01-01T00:00:00+00:00")
+            );
             assert_eq!(args.window_minutes, Some(5));
             assert_eq!(args.query.as_deref(), Some("panic"));
+        }
+        other => panic!("unexpected command: {other:?}"),
+    }
+}
+
+#[test]
+fn parse_correlate_accepts_query_alone_without_reference_time() {
+    let correlate = parse_correlate(&strings(&["--query=qbittorrent keeps dying"])).unwrap();
+    match correlate {
+        crate::cli::CliCommand::Correlate(args) => {
+            assert_eq!(args.reference_time, None);
+            assert_eq!(args.query.as_deref(), Some("qbittorrent keeps dying"));
         }
         other => panic!("unexpected command: {other:?}"),
     }
@@ -216,7 +231,7 @@ fn parse_log_commands_report_help_and_unknown_argument_errors() {
         (parse_incident, vec!["--service=x"], "requires --around"),
         (
             parse_correlate,
-            vec!["--query=x"],
+            vec!["--window-minutes=5"],
             "requires --reference-time",
         ),
         (
@@ -461,7 +476,7 @@ fn timeline_patterns_incident_correlate_normalize_relative_time() {
         panic!("expected Correlate");
     };
     assert!(
-        args.reference_time.ends_with("+00:00"),
+        args.reference_time.as_deref().unwrap().ends_with("+00:00"),
         "correlate --reference-time= should normalize: {:?}",
         args.reference_time
     );
@@ -472,7 +487,7 @@ fn timeline_patterns_incident_correlate_normalize_relative_time() {
         panic!("expected Correlate");
     };
     assert!(
-        args.reference_time.ends_with("+00:00"),
+        args.reference_time.as_deref().unwrap().ends_with("+00:00"),
         "correlate positional time should normalize: {:?}",
         args.reference_time
     );

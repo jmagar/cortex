@@ -4,9 +4,9 @@ use super::super::super::parse_common::{
     FlagCursor, norm_time, parse_i64_flag, parse_u32_flag, value_after_equals,
 };
 use super::super::super::{
-    CliCommand, SessionsAskHistoryArgs, SessionsAssessArgs, SessionsCommand,
-    SessionsIncidentContextArgs, SessionsIncidentsArgs, SessionsInvestigateArgs,
-    SessionsLlmInvocationsArgs, SessionsOutputDetail, SessionsSimilarArgs,
+    CliCommand, SessionsAssessArgs, SessionsCommand, SessionsIncidentContextArgs,
+    SessionsIncidentsArgs, SessionsInvestigateArgs, SessionsLlmInvocationsArgs,
+    SessionsOutputDetail, SessionsSimilarArgs,
 };
 pub(crate) fn parse_sessions_similar(args: &[String]) -> Result<CliCommand> {
     let mut parsed = SessionsSimilarArgs::default();
@@ -63,45 +63,6 @@ pub(crate) fn parse_sessions_similar(args: &[String]) -> Result<CliCommand> {
     Ok(CliCommand::Sessions(SessionsCommand::SimilarIncidents(
         parsed,
     )))
-}
-
-pub(crate) fn parse_sessions_ask_history(args: &[String]) -> Result<CliCommand> {
-    let mut parsed = SessionsAskHistoryArgs::default();
-    let mut query_parts = Vec::new();
-    let mut flags = FlagCursor::new(args);
-    while let Some(arg) = flags.next() {
-        match arg.as_str() {
-            "--json" => parsed.json = true,
-            "--host" => parsed.host = Some(flags.value("--host")?),
-            "--app" => parsed.app = Some(flags.value("--app")?),
-            "--since" => parsed.since = Some(norm_time(flags.value("--since")?)?),
-            "--until" => parsed.until = Some(norm_time(flags.value("--until")?)?),
-            "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
-            _ if arg.starts_with("--host=") => {
-                parsed.host = Some(value_after_equals(arg, "--host")?)
-            }
-            _ if arg.starts_with("--app=") => parsed.app = Some(value_after_equals(arg, "--app")?),
-            _ if arg.starts_with("--since=") => {
-                parsed.since = Some(norm_time(value_after_equals(arg, "--since")?)?)
-            }
-            _ if arg.starts_with("--until=") => {
-                parsed.until = Some(norm_time(value_after_equals(arg, "--until")?)?)
-            }
-            _ if arg.starts_with("--limit=") => {
-                parsed.limit = Some(parse_u32_flag(
-                    "--limit",
-                    value_after_equals(arg, "--limit")?,
-                )?)
-            }
-            _ if arg.starts_with('-') => bail!("unknown sessions ask-history option: {arg}"),
-            _ => query_parts.push(arg),
-        }
-    }
-    parsed.query = query_parts.join(" ");
-    if parsed.query.is_empty() {
-        bail!("sessions ask-history requires a query");
-    }
-    Ok(CliCommand::Sessions(SessionsCommand::AskHistory(parsed)))
 }
 
 pub(crate) fn parse_sessions_incident_context(args: &[String]) -> Result<CliCommand> {

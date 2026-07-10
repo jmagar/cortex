@@ -70,8 +70,6 @@ pub use models::{
     AppLogCount,
     AppLogSummary,
     AppRelationshipSummary,
-    AskHistoryRequest,
-    AskHistoryResponse,
     AskInvestigationRequest,
     AskInvestigationResponse,
     ClockSkewRequest,

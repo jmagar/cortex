@@ -15,8 +15,8 @@ List AI transcript sessions grouped by project, tool, session, and host. Use for
 ### `search_sessions` — Full-text search with relevance ranking
 FTS5 search over AI transcript rows. Returns grouped session results ranked by relevance. Best for targeted searches when you know what you're looking for.
 
-### `ask_history` — Question-based history with system context
-Search AI transcript history for past work related to a topic. Returns AI session hits plus non-AI system logs from the top session's time window. Use for "what happened when I worked on X" or "how did we solve Y before".
+### `correlate` (query-only) — Question-based history with system context
+Pass `query` without `reference_time` to `correlate` to derive the anchor from the top matching AI-transcript session, then correlate nearby system logs around it (severity-gated, host-grouped, same as any other `correlate` call). The matched session comes back as `matched_session`. Use for "what happened when I worked on X" or "how did we solve Y before".
 
 ### `project_context` — Full project summary
 Complete context for one AI project path: tools, sessions, hosts, counts, and recent representative entries. Use for getting oriented on a project's activity.
@@ -66,7 +66,7 @@ mcp__cortex__cortex(action="search_sessions", query="nginx ssl", limit=10)
 
 ### Question-based history with system context
 ```
-mcp__cortex__cortex(action="ask_history", query="what causes qbittorrent to keep dying?")
+mcp__cortex__cortex(action="correlate", query="what causes qbittorrent to keep dying?")
 ```
 
 ### Get full project context
@@ -123,7 +123,7 @@ Many actions support optional filters:
 
 ## FTS5 Query Syntax
 
-`search_sessions` and `ask_history` use SQLite FTS5 with porter stemming:
+`search_sessions` and query-only `correlate` use SQLite FTS5 with porter stemming:
 
 - `AND`, `OR`, `NOT` are uppercase boolean operators
 - Quote phrases and hyphenated terms: `"smoke-test"`, `"nginx ssl"`
@@ -134,7 +134,7 @@ Many actions support optional filters:
 Start with **cheap** bounded calls, narrow scope with **moderate** actions, reserve **expensive** for specific questions:
 
 - **cheap**: `sessions`, `list_ai_projects`, `list_ai_tools`, `usage_blocks`
-- **moderate**: `search_sessions`, `ask_history`, `project_context`, `abuse_incidents`
+- **moderate**: `search_sessions`, `correlate`, `project_context`, `abuse_incidents`
 - **expensive**: `ai_correlate`, `skill_investigate`, `mcp_investigate`, `hook_investigate`, `abuse_investigate`
 
 ## When to Use Each Action
@@ -143,7 +143,7 @@ Start with **cheap** bounded calls, narrow scope with **moderate** actions, rese
 |-------------|-------------|-----|
 | "What did I work on recently?" | `sessions` | Browse overview |
 | "Find conversations about X" | `search_sessions` | Targeted FTS5 search |
-| "How did we solve X before?" | `ask_history` | Returns system context too |
+| "How did we solve X before?" | `correlate` (query-only) | Returns system context too |
 | "Tell me about project X" | `project_context` | Full project summary |
 | "What happened around that session?" | `ai_correlate` | Session + system events |
 | "When do I use tool X?" | `usage_blocks` | Activity patterns |
@@ -159,8 +159,8 @@ Start with **cheap** bounded calls, narrow scope with **moderate** actions, rese
 # Search for the implementation topic
 mcp__cortex__cortex(action="search_sessions", query="database migration", limit=10)
 
-# Or use ask_history for system context
-mcp__cortex__cortex(action="ask_history", query="how did we fix the CORS issue last time")
+# Or use query-only correlate for system context
+mcp__cortex__cortex(action="correlate", query="how did we fix the CORS issue last time")
 ```
 
 ### "This was already implemented" → Verify implementation history
@@ -175,7 +175,7 @@ mcp__cortex__cortex(action="project_context", project="/home/jmagar/workspace/co
 ### "Why did we do it this way?" → Decision archaeology
 ```
 # Search for discussions around the implementation
-mcp__cortex__cortex(action="ask_history", query="why did we choose Postgres over MongoDB")
+mcp__cortex__cortex(action="correlate", query="why did we choose Postgres over MongoDB")
 
 # Correlate with system events from that time
 mcp__cortex__cortex(action="ai_correlate", session_id="abc123", window_minutes=30)
@@ -187,13 +187,13 @@ mcp__cortex__cortex(action="ai_correlate", session_id="abc123", window_minutes=3
 mcp__cortex__cortex(action="search_sessions", query="rate limiting strategy", limit=10)
 
 # Or ask as a natural question
-mcp__cortex__cortex(action="ask_history", query="when did we last discuss error handling patterns")
+mcp__cortex__cortex(action="correlate", query="when did we last discuss error handling patterns")
 ```
 
 ### "What was the reasoning for..." → Context recovery
 ```
-# Ask history returns both AI conversation and system logs
-mcp__cortex__cortex(action="ask_history", query="what was the reasoning for removing the cache layer")
+# Query-only correlate returns both AI conversation and system logs
+mcp__cortex__cortex(action="correlate", query="what was the reasoning for removing the cache layer")
 ```
 
 ### "This seems familiar" → Pattern recognition
@@ -216,8 +216,8 @@ cortex sessions search "" --limit 30 --json
 # Search transcripts
 cortex sessions search "nginx ssl" --limit 10 --json
 
-# Ask history with system context
-cortex sessions ask "what causes qbittorrent to keep dying?"
+# Question-based history with system context (query-only correlate)
+cortex correlate events --query "what causes qbittorrent to keep dying?"
 
 # Project context
 cortex sessions context --project /home/jmagar/workspace/cortex --json

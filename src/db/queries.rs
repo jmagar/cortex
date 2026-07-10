@@ -3017,13 +3017,12 @@ pub(super) fn map_row_with_raw(
 }
 
 // ---------------------------------------------------------------------------
-// RAG v1: similar_incidents, ask_history, incident_context
+// RAG v1: similar_incidents, incident_context
 // ---------------------------------------------------------------------------
 
 use super::models::{
-    AppLogCount, AskHistoryParams, AskHistoryResult, CorrelatedSession, IncidentCluster,
-    IncidentContextParams, IncidentContextResult, SeverityCount, SimilarIncidentsParams,
-    SimilarIncidentsResult,
+    AppLogCount, CorrelatedSession, IncidentCluster, IncidentContextParams, IncidentContextResult,
+    SeverityCount, SimilarIncidentsParams, SimilarIncidentsResult,
 };
 
 /// Return incident clusters from FTS5 hits, grouped by hostname + app_name in
@@ -3321,85 +3320,6 @@ fn find_correlated_sessions_per_cluster(
         sessions.truncate(5);
     }
     Ok(map)
-}
-
-/// FTS5 search over AI transcript entries, returns sessions grouped by
-/// (project, tool, session_id), ranked by match count. Also returns system
-/// log context from the top session's time window.
-pub fn ask_history_sessions(pool: &DbPool, params: &AskHistoryParams) -> Result<AskHistoryResult> {
-    validate_fts_query(&params.query)?;
-
-    // Search AI transcript entries only using the existing grouping query.
-    // Pass through hostname/app_name so the session search is properly scoped.
-    let ai_params = SearchAiSessionsParams {
-        query: params.query.clone(),
-        ai_project: None,
-        ai_tool: None,
-        host: params.host.clone(),
-        app: params.app.clone(),
-        since: params.since.clone(),
-        until: params.until.clone(),
-        limit: Some(params.limit.unwrap_or(10).clamp(1, 50)),
-    };
-    let session_result = search_ai_sessions(pool, &ai_params)?;
-
-    // Collect context logs from the top session's time window.
-    let context_logs = if let Some(top) = session_result.sessions.first() {
-        let ctx_from = top.first_seen.clone();
-        let ctx_to = top.last_seen.clone();
-
-        let conn = pool.get()?;
-        let mut ctx_params = SqlParams::new(3);
-        ctx_params
-            .bindings
-            .push(rusqlite::types::Value::Text(ctx_from.clone()));
-        ctx_params
-            .bindings
-            .push(rusqlite::types::Value::Text(ctx_to.clone()));
-
-        let mut ctx_sql = String::from(
-            "SELECT id, timestamp, hostname, facility, severity,
-                    app_name, process_id, message, received_at, source_ip,
-                    ai_tool, ai_project, ai_session_id, ai_transcript_path, metadata_json
-             FROM logs
-             WHERE (ai_project IS NULL OR ai_project = '')
-               AND timestamp BETWEEN ?1 AND ?2",
-        );
-        if let Some(hostname) = &params.host {
-            let idx = ctx_params.push_text(hostname.clone());
-            ctx_sql.push_str(&format!(" AND hostname = ?{idx}"));
-        }
-        if let Some(app_name) = &params.app {
-            let idx = ctx_params.push_text(app_name.clone());
-            ctx_sql.push_str(&format!(" AND app_name = ?{idx}"));
-        }
-        ctx_sql.push_str(" ORDER BY timestamp DESC LIMIT 20");
-
-        let mut stmt = conn.prepare(&ctx_sql).map_err(|e| {
-            tracing::error!(error = %e, "ask_history context_logs prepare failed");
-            anyhow::anyhow!("ask_history context_logs query failed")
-        })?;
-        let rows = stmt
-            .query_map(
-                rusqlite::params_from_iter(ctx_params.bindings.iter()),
-                map_row,
-            )
-            .map_err(|e| {
-                tracing::error!(error = %e, "ask_history context_logs query failed");
-                anyhow::anyhow!("ask_history context_logs query failed")
-            })?;
-        rows.collect::<rusqlite::Result<Vec<_>>>()?
-    } else {
-        Vec::new()
-    };
-
-    Ok(AskHistoryResult {
-        query: params.query.clone(),
-        total_candidates: session_result.total_candidates,
-        truncated: session_result.truncated,
-        sessions: session_result.sessions,
-        context_logs,
-    })
 }
 
 /// Return aggregate log statistics + error logs + correlated AI sessions for a

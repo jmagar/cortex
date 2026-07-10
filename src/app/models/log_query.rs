@@ -393,11 +393,15 @@ pub struct CortexOverlaySummary {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CorrelateEventsRequest {
-    pub reference_time: String,
+    /// RFC3339 anchor time. Optional when `query` is given — the anchor is
+    /// then derived from the top AI-transcript session match for `query`.
+    pub reference_time: Option<String>,
     pub window_minutes: Option<u32>,
     pub severity_min: Option<String>,
     pub host: Option<String>,
     pub source: Option<String>,
+    /// FTS5 filter over the correlated logs. When `reference_time` is absent,
+    /// this is also used to locate the anchor time via an AI-session search.
     pub query: Option<String>,
     pub limit: Option<u32>,
 }
@@ -420,4 +424,8 @@ pub struct CorrelateEventsResponse {
     pub truncated: bool,
     pub hosts_count: usize,
     pub hosts: Vec<CorrelatedHost>,
+    /// Present when `reference_time` was derived from `query` via an
+    /// AI-transcript session search: the session that anchored the window.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub matched_session: Option<SearchedSessionEntry>,
 }

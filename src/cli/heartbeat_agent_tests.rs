@@ -16,6 +16,9 @@ fn base_args() -> HeartbeatAgentArgs {
         docker_url: None,
         journald: false,
         syslog_target: None,
+        ai_transcripts: false,
+        agent_command_forward: false,
+        shell_history_forward: false,
     }
 }
 
@@ -36,6 +39,9 @@ fn into_config_maps_explicit_cli_flags() {
         docker_url: Some("unix:///tmp/docker.sock".to_string()),
         journald: true,
         syslog_target: Some("127.0.0.1:1514".to_string()),
+        ai_transcripts: true,
+        agent_command_forward: true,
+        shell_history_forward: true,
     }
     .into_config()
     .unwrap();
@@ -54,6 +60,9 @@ fn into_config_maps_explicit_cli_flags() {
     assert_eq!(config.docker_url, "unix:///tmp/docker.sock");
     assert!(config.journald);
     assert_eq!(config.syslog_target.as_deref(), Some("127.0.0.1:1514"));
+    assert!(config.ai_transcripts);
+    assert!(config.agent_command_forward);
+    assert!(config.shell_history_forward);
 }
 
 #[test]

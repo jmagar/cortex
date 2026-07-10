@@ -1,9 +1,9 @@
 use anyhow::{Result, bail};
 
 use self::more::{
-    parse_sessions_ask_history, parse_sessions_assess, parse_sessions_incident_context,
-    parse_sessions_incidents, parse_sessions_investigate, parse_sessions_llm_invocations,
-    parse_sessions_mcp_assess, parse_sessions_similar, parse_sessions_skill_assess,
+    parse_sessions_assess, parse_sessions_incident_context, parse_sessions_incidents,
+    parse_sessions_investigate, parse_sessions_llm_invocations, parse_sessions_mcp_assess,
+    parse_sessions_similar, parse_sessions_skill_assess,
 };
 use self::ops::{
     parse_sessions_add, parse_sessions_checkpoints, parse_sessions_doctor, parse_sessions_errors,
@@ -47,7 +47,6 @@ const SESSIONS_SUBCOMMANDS: &[&str] = &[
     "watch-status",
     "smoke-watch",
     "similar",
-    "ask-history",
     "incident-context",
     "incidents",
     "investigate",
@@ -94,7 +93,6 @@ pub(crate) fn parse_sessions_command(args: &[String]) -> Result<CliCommand> {
             parse_output_args("sessions smoke-watch", rest)?,
         ))),
         "similar" => parse_sessions_similar(rest),
-        "ask-history" => parse_sessions_ask_history(rest),
         "incident-context" => parse_sessions_incident_context(rest),
         "incidents" => parse_sessions_incidents(rest),
         "investigate" => parse_sessions_investigate(rest),
