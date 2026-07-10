@@ -57,6 +57,7 @@ const SECTIONS: &[(&str, &[&str])] = &[
             "serve",
             "mcp",
             "doctor",
+            "status",
             "db",
             "compose",
             "setup",
@@ -259,6 +260,11 @@ const CATALOG: &[CommandDoc] = &[
             "cortex doctor [--json] [--fix] [--yes]",
             "cortex doctor binary [--json]",
         ],
+    },
+    CommandDoc {
+        name: "status",
+        summary: "Local-mode health snapshot (DB, maintenance, file-tails)",
+        usage: &["cortex status [--json]"],
     },
     CommandDoc {
         name: "db",
