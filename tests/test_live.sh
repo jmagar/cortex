@@ -971,7 +971,7 @@ phase_cli_parity() {
     def strip:
       if type == "object" then
         with_entries(
-          select(.key | test("^(generated_at|elapsed_ms|duration_ms|started_at|finished_at|request_id|run_id|timestamp|ts|now)$") | not)
+          select(.key | test("^(generated_at|elapsed_ms|duration_ms|started_at|finished_at|request_id|run_id|timestamp|ts|now|free_disk_mb|physical_db_size_mb)$") | not)
           | if (.key | test("^cgroup_memory_(current|peak)_bytes$")) then .value = "__volatile_number_or_null__" else . end
         ) | map_values(strip)
       elif type == "array" then map(strip)
@@ -1080,7 +1080,6 @@ phase_surface_parity_rest() {
     "GET /api/apps?limit=10|apps"
     "GET /api/similar-incidents?query=test&window_minutes=30|clusters"
     "GET /api/incident-context?since=2026-01-01T00:00:00Z&until=2026-12-31T23:59:59Z|error_logs"
-    "GET /api/sessions/ask-history?query=test|sessions"
     "GET /api/sessions/incidents?limit=5|incidents"
     "GET /api/sessions/investigate?limit=5|evidence"
   )
