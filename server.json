@@ -7,7 +7,7 @@
     "url": "https://github.com/jmagar/cortex",
     "source": "github"
   },
-  "version": "3.8.0",
+  "version": "3.9.0",
   "packages": [
     {
       "registryType": "oci",
