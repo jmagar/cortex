@@ -11,7 +11,7 @@
   "packages": [
     {
       "registryType": "oci",
-      "identifier": "ghcr.io/jmagar/cortex:v3.8.0",
+      "identifier": "ghcr.io/jmagar/cortex:v3.9.0",
       "transport": {
         "type": "stdio"
       },
