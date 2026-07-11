@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.8.0](https://github.com/jmagar/cortex/compare/v3.7.2...v3.8.0) (2026-07-11)
+
+
+### Added
+
+* add cortex npm launcher distribution ([a78b070](https://github.com/jmagar/cortex/commit/a78b07074ee3d6262b3c6aae19ddd3466a9cded2))
+* **cli:** add cortex status command ([d705740](https://github.com/jmagar/cortex/commit/d7057403eb911e379f78083085f8e5f1ceedb92f))
+* forward agent activity into cortex ([9633617](https://github.com/jmagar/cortex/commit/963361734b7ad8504d0923e0dbc98201ae5072f1))
+* set up release-please for versioning and changelog automation ([#125](https://github.com/jmagar/cortex/issues/125)) ([4614d0c](https://github.com/jmagar/cortex/commit/4614d0c039c1f0561b004c7679beba1356b03ff5))
+* **setup:** install cortex-backup systemd timer during setup repair ([afb068b](https://github.com/jmagar/cortex/commit/afb068bafb0e5a4692aa646f29148f4a9322f137))
+* **skills:** add cortex-session-search skill ([53cfc93](https://github.com/jmagar/cortex/commit/53cfc939446b3b33f4a27c1b08121c97781674c3))
+* **skills:** add hook/incident/topology skills, drop cortex- prefix from skill dirs ([#129](https://github.com/jmagar/cortex/issues/129)) ([3bb8d5e](https://github.com/jmagar/cortex/commit/3bb8d5efbafbff91fc966d6d3d1ecc2d146da048))
+
+
+### Fixed
+
+* **ci:** switch OpenWiki to local openai-compatible proxy ([fa01ba9](https://github.com/jmagar/cortex/commit/fa01ba9d7a1382bdaead58eccfaa314fc1292ef8))
+* **config:** auto-adjust recovery_db_size_mb when max_db_size_mb is raised ([dc6b34b](https://github.com/jmagar/cortex/commit/dc6b34bf9d37869c740afe238a17637af8d72ca2))
+
+
+### Changed
+
+* **skills:** enhance cortex-session-search triggers and examples ([da0219f](https://github.com/jmagar/cortex/commit/da0219fa05ea99d1adf16c80868bcad4207c1d5e))
+
 ## [Unreleased]
 
 ## [3.8.1] - 2026-07-09
