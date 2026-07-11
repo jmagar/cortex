@@ -1,6 +1,6 @@
 {
   "name": "cortex-rmcp",
-  "version": "3.8.1",
+  "version": "3.8.0",
   "description": "Node launcher for the cortex Rust MCP server, CLI, and homelab intelligence binary.",
   "license": "MIT",
   "homepage": "https://github.com/jmagar/cortex#readme",
