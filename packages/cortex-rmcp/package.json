@@ -1,7 +1,7 @@
 {
   "name": "cortex-rmcp",
   "version": "3.9.0",
-  "description": "Node launcher for the cortex Rust MCP server, CLI, and homelab intelligence binary.",
+  "description": "Node launcher for Cortex, a Rust MCP/HTTP log aggregation and AI transcript correlation platform.",
   "license": "MIT",
   "homepage": "https://github.com/jmagar/cortex#readme",
   "repository": {
@@ -32,9 +32,22 @@
   },
   "keywords": [
     "mcp",
-    "cortex",
-    "syslog",
+    "mcp-server",
+    "model-context-protocol",
+    "rust",
+    "self-hosted",
+    "claude-code",
+    "codex",
+    "gemini",
+    "homelab",
     "logs",
-    "homelab"
+    "observability",
+    "sqlite",
+    "syslog",
+    "otlp",
+    "docker",
+    "log-aggregation",
+    "ai",
+    "llm"
   ]
 }
