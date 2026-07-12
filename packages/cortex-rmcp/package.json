@@ -1,6 +1,6 @@
 {
   "name": "cortex-rmcp",
-  "version": "3.9.0",
+  "version": "3.9.1",
   "description": "Node launcher for Cortex, a Rust MCP/HTTP log aggregation and AI transcript correlation platform.",
   "license": "MIT",
   "homepage": "https://github.com/jmagar/cortex#readme",
@@ -49,5 +49,7 @@
     "log-aggregation",
     "ai",
     "llm"
-  ]
+  ],
+  "mcpName": "ai.dinglebear/cortex-rmcp",
+  "binaryVersion": "3.9.0"
 }
