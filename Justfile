@@ -245,7 +245,7 @@ sync-container:
       done < <(git ls-files -z -- Cargo.toml Cargo.lock .cargo src config.toml)
     fi
     if [ "$release_stale" -eq 1 ]; then
-      CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-16}" cargo build --profile "$profile" --locked --bin cortex
+      cargo build --profile "$profile" --locked --bin cortex
     else
       echo "release binary is current: $CORTEX_BIN"
     fi
