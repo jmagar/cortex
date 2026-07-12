@@ -13,6 +13,279 @@ triggers. Graph rebuilds use staging tables plus a short serialized swap and
 record explicit projection status, source watermarks, row counts, runtime
 metrics, and degraded failure state.
 
+## Contents
+
+- [Naming](#naming)
+- [Capabilities And Boundaries](#capabilities-and-boundaries)
+- [Install](#install)
+- [Quickstart](#quickstart)
+- [Client Configuration](#client-configuration)
+- [Runtime Surfaces](#runtime-surfaces)
+- [MCP Tool Reference](#mcp-tool-reference)
+- [CLI Reference](#cli-reference)
+- [Configuration](#configuration)
+- [Authentication](#authentication)
+- [Safety And Trust Model](#safety-and-trust-model)
+- [Architecture](#architecture)
+- [Distribution Contract](#distribution-contract)
+- [Development](#development)
+- [Verification](#verification)
+- [Deployment](#deployment)
+- [Troubleshooting](#troubleshooting)
+- [Documentation](#documentation)
+- [Related Servers](#related-servers)
+- [License](#license)
+
+## Naming
+
+Cortex keeps its repo and CLI name as `cortex`. The npm package is
+`cortex-rmcp`, because Cortex is broader than only an MCP server. The MCP
+registry name is `tv.tootie/cortex`, and the Docker image is
+`ghcr.io/jmagar/cortex:v<version>`.
+
+Most smaller Rust MCP servers in this workspace use the
+`<service>-rmcp` repo / `r<service>` binary / `<service>-rmcp` npm pattern.
+Cortex is the deliberate exception: repo `cortex`, CLI `cortex`, npm package
+`cortex-rmcp`.
+
+## Capabilities And Boundaries
+
+Cortex ingests syslog, OTLP, Docker, managed file-tail, inventory, heartbeat,
+and AI-session signals into SQLite, then exposes bounded investigation actions
+through MCP, REST, and CLI adapters backed by the same service layer.
+
+Primary capabilities:
+
+- UDP and TCP syslog receiver on port `1514`.
+- SQLite + FTS5 log storage with retention and storage-budget controls.
+- MCP action surface for search, filtering, timelines, errors, context,
+  inventory, graph, AI-session correlation, and incident evidence bundles.
+- REST and CLI adapters for operational workflows and local automation.
+- Optional MCP Apps query widget for MCP hosts that support UI resources.
+- Derived graph projection tables for topology and investigation workflows.
+
+**Not for:** replacing a SIEM, accepting arbitrary unaudited log mutations from
+agents, or exposing Docker/admin operations without a trusted deployment
+boundary. Cortex is a homelab log-intelligence service with bounded action
+surfaces and explicit admin gates.
+
+MCP callers never provide credentials, tokens, keys, or secrets as action
+arguments. Auth tokens, upstream notification secrets, file-tail roots, and API
+admin credentials live in server configuration or environment variables.
+
+## Install
+
+Use the npm launcher for local MCP clients and quick CLI access:
+
+```bash
+npx -y cortex-rmcp --help
+npx -y cortex-rmcp mcp
+```
+
+For a permanent command on `PATH`, install the launcher globally:
+
+```bash
+npm i -g cortex-rmcp
+cortex --version
+```
+
+The package downloads the matching GitHub Release binary during `postinstall`.
+For source builds:
+
+```bash
+cargo build --release
+```
+
+## Quickstart
+
+The first-screen 30-second path is a stdio MCP client pointed at the launcher:
+
+```json
+{
+  "mcpServers": {
+    "cortex": {
+      "command": "npx",
+      "args": ["-y", "cortex-rmcp", "mcp"]
+    }
+  }
+}
+```
+
+Then ask for a cheap read action first:
+
+```json
+{"action":"status"}
+```
+
+For an HTTP server with syslog listeners:
+
+```bash
+export CORTEX_API_TOKEN=change-me
+export CORTEX_TOKEN=change-me
+cortex serve mcp
+```
+
+## Client Configuration
+
+stdio launches a query-only MCP process that reads the configured Cortex
+database without starting network listeners:
+
+```json
+{
+  "mcpServers": {
+    "cortex": {
+      "command": "cortex",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+Streamable HTTP uses the persistent server on `/mcp`:
+
+```json
+{
+  "mcpServers": {
+    "cortex": {
+      "url": "http://127.0.0.1:3100/mcp",
+      "headers": {
+        "Authorization": "Bearer ${CORTEX_TOKEN}"
+      }
+    }
+  }
+}
+```
+
+The plain JSON REST API is mounted under `/api/*` on the same HTTP listener and
+uses `CORTEX_API_TOKEN`, not `CORTEX_TOKEN`.
+
+## Runtime Surfaces
+
+| Surface | Status | Purpose |
+|---|---:|---|
+| Syslog | Required for daemon ingest | UDP/TCP `1514` receiver for network logs |
+| MCP | Required | `cortex` action-dispatched tool over stdio or Streamable HTTP |
+| CLI | Required | Operator commands, local query workflows, setup, and ingest management |
+| REST | Required for daemon mode | JSON API under `/api/*` with separate bearer auth |
+| MCP Apps | Optional | Query widget resource for UI-capable MCP hosts |
+| Web dashboard | Not shipped | Cortex does not serve a standalone browser app |
+
+## MCP Tool Reference
+
+Cortex exposes one MCP tool named `cortex`. The required `action` argument
+selects the operation; per-action validation happens in the handler and service
+layers.
+
+Common first-pass actions are `status`, `errors`, `tail`, `search`, `timeline`,
+and `context`. Expensive or write/admin actions should only be used once a query
+is scoped.
+
+For the full action table and parameter reference, see
+[`docs/mcp/SCHEMA.md`](docs/mcp/SCHEMA.md). That document is curated from the
+runtime schema and protected by drift tests; the generated runtime schema and
+Rust `ACTION_SPECS` table are the source of truth when they disagree.
+
+## CLI Reference
+
+The CLI mirrors the same service layer used by MCP and REST:
+
+```bash
+cortex stats
+cortex status
+cortex search --query "error" --limit 20
+cortex ingest inventory refresh --json
+cortex ingest file-tail list
+cortex setup repair
+cortex serve mcp
+cortex mcp
+```
+
+Use `cortex --help` and subcommand help for the full command tree. The CLI is
+the preferred surface for local setup, repairs, and admin maintenance.
+
+## Safety And Trust Model
+
+Cortex separates read, admin, and transport trust boundaries:
+
+- MCP reads use `cortex:read`; admin mutations require `cortex:admin`.
+- HTTP MCP uses `CORTEX_TOKEN`.
+- REST uses `CORTEX_API_TOKEN`; REST admin mutations also require
+  `X-Cortex-Admin-Token: $CORTEX_API_ADMIN_TOKEN`.
+- Non-loopback MCP binds require bearer auth, OAuth, or an explicit trusted
+  gateway configuration.
+- File-tail management rejects sensitive mounts and requires allowlisted roots.
+- Inventory and graph actions return bounded, redacted evidence rather than raw
+  credential-bearing config bodies.
+
+Generated runtime schemas and curated docs should stay aligned, but operational
+policy belongs in the Rust service layer, not in MCP-only glue.
+
+## Architecture
+
+The daemon listens on UDP/TCP syslog, normalizes input, writes through a batched
+SQLite writer, and exposes MCP/REST/CLI adapters over the shared Cortex service
+model. Derived graph projection tables are rebuildable from raw logs,
+heartbeats, inventory, signatures, and session rows; they are not the source of
+truth.
+
+The detailed architecture diagram and ingest notes continue in
+[Overview](#overview), [Homelab Inventory](#homelab-inventory), and the ingest
+sections below.
+
+## Distribution Contract
+
+The source of truth for release identity is the version shared by `Cargo.toml`,
+the lockfile, release metadata, package launcher metadata, plugin/registry
+metadata, and container image tags.
+
+Distribution/version invariants:
+
+- `cortex-rmcp` npm package version must match the GitHub Release binary it
+  downloads.
+- `server.json` must point at the current `ghcr.io/jmagar/cortex:v<version>`
+  image.
+- Plugin manifests stay versionless where the marketplace derives identity from
+  the commit SHA.
+- Generated runtime MCP schemas come from Rust source, not hand-written docs.
+- Curated README/docs content should point to source-of-truth docs instead of
+  duplicating every action parameter.
+
+Generated artifacts include the live MCP schema returned by the server and the
+schema resource exposed through MCP. Curated artifacts include this README and
+the human references in `docs/`.
+
+## Deployment
+
+Deploy daemon mode when Cortex should receive syslog and serve HTTP MCP/REST:
+
+```bash
+CORTEX_RECEIVER_HOST=0.0.0.0 \
+CORTEX_RECEIVER_PORT=1514 \
+CORTEX_HOST=0.0.0.0 \
+CORTEX_PORT=3100 \
+CORTEX_API_TOKEN=change-me \
+CORTEX_TOKEN=change-me \
+cortex serve mcp
+```
+
+Container and multi-host deployment notes are in [Installation](#installation),
+[Multi-Host Deployment](#multi-host-deployment), and
+[HTTPS / Reverse Proxy](#https--reverse-proxy).
+
+## Troubleshooting
+
+- `401` or `403` from `/mcp`: check `CORTEX_TOKEN`, OAuth, and trusted gateway
+  settings.
+- `/api/*` fails while `/mcp` works: check `CORTEX_API_TOKEN`; REST has its own
+  bearer token.
+- no syslog rows arrive: verify UDP/TCP `1514`, sender forwarding rules, and
+  `CORTEX_RECEIVER_HOST`.
+- `map` reports missing cache: run `cortex ingest inventory refresh --json`.
+- file-tail add fails: confirm the path is under `CORTEX_FILE_TAIL_ALLOWED_ROOTS`
+  and not a symlink or sensitive mount.
+- expensive actions are slow: start with `status`, `errors`, `tail`, or scoped
+  `search`, then narrow before `patterns`, `anomalies`, or `compose_doctor`.
+
 ## npm / npx
 
 Run the stdio MCP server or CLI without a manual binary install:
@@ -1646,13 +1919,20 @@ The Docker image remains daemon-focused and exposes HTTP MCP via `cortex serve m
 
 ---
 
-## Related Files
+## Documentation
+
+This README is curated for first-run orientation. Source-of-truth docs and code
+are split by responsibility:
 
 | File | Description |
 |------|-------------|
 | `Cargo.toml` | Crate metadata and dependency surface |
 | `config.toml` | Default runtime configuration |
 | `.env.example` | Canonical environment variable reference |
+| `docs/CONFIG.md` | Full configuration and environment reference |
+| `docs/mcp/SCHEMA.md` | Curated action reference backed by runtime schema drift tests |
+| `docs/mcp/CORRELATION.md` | Correlation behavior and AI/non-AI inclusion rules |
+| `docs/mcp/MCPUI.md` | MCP Apps query widget wire contract |
 | `docs/SETUP.md` | Per-device syslog forwarder setup notes |
 | `CHANGELOG.md` | Release history |
 | `config/Dockerfile` | Container image definition |
@@ -1684,6 +1964,24 @@ The Docker image remains daemon-focused and exposes HTTP MCP via `cortex serve m
 | [synapse-mcp](https://github.com/jmagar/synapse-mcp) | infrastructure | Docker management (Flux) and SSH remote operations (Scout) across homelab hosts. |
 | [arcane-mcp](https://github.com/jmagar/arcane-mcp) | infrastructure | Manage Docker environments, containers, images, volumes, networks, and GitOps via Arcane. |
 | [plugin-lab](https://github.com/jmagar/plugin-lab) | dev-tools | Scaffold, review, align, and deploy homelab MCP plugins with agents and canonical templates. |
+
+## Related Servers
+
+- `unifi-rmcp / rustifi` - UniFi controller REST API bridge.
+- `tailscale-rmcp / rustscale` - Tailscale API bridge for devices, users, and tailnet operations.
+- `unraid-rmcp / unrust` - Unraid GraphQL bridge for NAS and server management.
+- `apprise-rmcp` - Apprise notification fan-out bridge for many delivery backends.
+- `gotify-rmcp` - Gotify push notification bridge for sends, messages, apps, and clients.
+- `arcane-rmcp` - Arcane Docker management bridge for containers and related resources.
+- `yarr-rmcp` - Media-stack bridge for Sonarr, Radarr, Prowlarr, Plex, and related services.
+- `ytdl-mcp` - Media download and metadata workflow server.
+- `synapse` - Local Synapse workflow server for scout and flux actions.
+- `axon` - RAG, crawl, scrape, extract, and semantic search project.
+- `lab` - Homelab control plane and Labby gateway project.
+- `lumen` - Local semantic code search MCP server.
+- `nugs` - Project/package management helper for local agent workflows.
+- `agentcast` - Agent transcript and activity publishing project.
+- `soma` - RMCP scaffold/runtime template for new provider-backed servers.
 
 ## License
 
