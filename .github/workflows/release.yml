@@ -188,6 +188,19 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cache="$(mktemp -d)"
-          trap 'rm -rf "$cache"' EXIT
-          npm_config_cache="$cache" npx -y "cortex-rmcp@${{ steps.npm-version.outputs.version }}" --version
+          version="${{ steps.npm-version.outputs.version }}"
+          package="cortex-rmcp@${version}"
+          for attempt in {1..18}; do
+            cache="$(mktemp -d)"
+            if npm view "$package" version >/dev/null 2>&1 && npm_config_cache="$cache" npx -y "$package" --version; then
+              rm -rf "$cache"
+              exit 0
+            fi
+            rm -rf "$cache"
+            if [[ "$attempt" == "18" ]]; then
+              npm view "$package" version
+              npm_config_cache="$(mktemp -d)" npx -y "$package" --version
+              exit 1
+            fi
+            sleep 10
+          done
