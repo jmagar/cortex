@@ -64,13 +64,16 @@ while [ "$i" -lt "${#args[@]}" ]; do
   i=$((i + 1))
 done
 
-if [ -n "${CARGO_BIN_ARTIFACT_WRAPPER_DELEGATE:-}" ]; then
-  delegate=("$CARGO_BIN_ARTIFACT_WRAPPER_DELEGATE" "$rustc")
-elif [ "${CARGO_BIN_ARTIFACT_WRAPPER_NO_SCCACHE:-0}" != "1" ] \
+delegate_override="${CARGO_BIN_ARTIFACT_WRAPPER_DELEGATE:-${CORTEX_RUSTC_WRAPPER_DELEGATE:-}}"
+no_sccache="${CARGO_BIN_ARTIFACT_WRAPPER_NO_SCCACHE:-${CORTEX_RUSTC_WRAPPER_NO_SCCACHE:-0}}"
+
+if [ -n "$delegate_override" ]; then
+  delegate=("$delegate_override" "$rustc")
+elif [ "$no_sccache" != "1" ] \
   && command -v sccache-wrapper >/dev/null 2>&1 \
   && sccache-wrapper "$rustc" -vV >/dev/null 2>&1; then
   delegate=(sccache-wrapper "$rustc")
-elif [ "${CARGO_BIN_ARTIFACT_WRAPPER_NO_SCCACHE:-0}" != "1" ] \
+elif [ "$no_sccache" != "1" ] \
   && command -v sccache >/dev/null 2>&1 \
   && sccache --version >/dev/null 2>&1; then
   delegate=(sccache "$rustc")
@@ -140,11 +143,14 @@ if [ "$crate_name" = "cortex" ] && [ "$profile" = "release" ]; then
   local_bin="${CORTEX_RUSTC_WRAPPER_LOCAL_BIN:-$HOME/.local/bin/cortex}"
   bin_parent="$(dirname "$local_bin")"
   mkdir -p "$bin_parent"
-  tmp_bin="$(mktemp "$bin_parent/.cortex-install.XXXXXX")"
-  if install -m 755 "$out" "$tmp_bin" && mv -f "$tmp_bin" "$local_bin"; then
-    :
+  if tmp_bin="$(mktemp "$bin_parent/.cortex-install.XXXXXX")"; then
+    if install -m 755 "$out" "$tmp_bin" && mv -f "$tmp_bin" "$local_bin"; then
+      :
+    else
+      rm -f "$tmp_bin"
+      echo "cargo-rustc-wrapper: warning: failed to install $out to $local_bin (build unaffected)" >&2
+    fi
   else
-    rm -f "$tmp_bin"
     echo "cargo-rustc-wrapper: warning: failed to install $out to $local_bin (build unaffected)" >&2
   fi
 fi
