@@ -65,11 +65,18 @@ automated deployment path is Docker Compose only.
 `cortex setup deploy remote <host>` writes/replaces `.env`, the managed Compose
 YAML, and `config/Dockerfile` under the selected remote home, then runs Docker
 Compose there. The default remote home is `~/.cortex`; pass `--home PATH` for
-hosts whose runtime lives elsewhere. Tootie's canonical update path is:
+hosts whose runtime lives elsewhere. The normal update workflow is:
 
 ```bash
-cortex setup deploy remote --home /mnt/cache/appdata/cortex tootie
+cortex update
+cortex update server --dry-run
+cortex update server
 ```
+
+`cortex setup deploy remote --home /mnt/cache/appdata/cortex tootie` remains the
+low-level primitive and a useful escape hatch. A successful low-level remote
+deploy records the server profile so later updates do not repeat host/home
+details.
 
 Use `--dry-run` first to verify SSH and Docker prerequisites. Non-dry-run remote
 deploy preserves existing remote env values from `<home>/.env` or the legacy

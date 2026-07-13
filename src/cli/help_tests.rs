@@ -31,6 +31,7 @@ const PARSER_TOKENS: &[&str] = &[
     "serve",
     "mcp",
     "doctor",
+    "update",
 ];
 
 #[test]

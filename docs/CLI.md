@@ -823,6 +823,34 @@ the debug Compose override, transcript-root permissions, disabled legacy index
 timer state, active/enabled watcher state, and container freshness via
 `scripts/check-runtime-current.sh --allow-local-image`.
 
+### `cortex update`
+
+Update an already-configured Cortex deployment.
+
+```bash
+cortex update
+cortex update server --dry-run
+cortex update server
+cortex update clients
+cortex update agents
+```
+
+`cortex update` defaults to `all`: it updates the configured server first, then
+updates configured host-agent clients. `clients` and `agents` are aliases; both
+refer to the host-local Cortex agents that forward logs, heartbeats, sessions,
+shell history, and command events into the server.
+
+Configure the update profile once:
+
+```bash
+cortex update config server --host tootie --home /mnt/cache/appdata/cortex
+cortex update config clients --hosts dookie,shart,squirts --target https://cortex.tootie.tv --docker
+```
+
+The profile lives at `~/.cortex/deployments.toml` by default. A successful
+`cortex setup deploy remote --home PATH HOST` also records the server profile,
+so a one-off low-level deploy can seed future `cortex update server` runs.
+
 ### `cortex setup deploy`
 
 Run the Compose-backed deployment workflow using operator-facing names.
