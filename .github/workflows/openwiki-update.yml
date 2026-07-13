@@ -21,7 +21,7 @@ jobs:
       - name: Set up OpenWiki
         uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d
         with:
-          install_args: node@22 npm:openwiki
+          install_args: node npm:openwiki
 
       - name: Connect Tailscale
         uses: tailscale/github-action@v4
