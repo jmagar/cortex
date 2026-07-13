@@ -24,8 +24,14 @@ version_files = [
   { kind = "cargo_package", path = "Cargo.toml", package = "cortex" },
   { kind = "cargo_lock_package", path = "Cargo.lock", package = "cortex" },
   { kind = "json_version", path = "server.json", json_pointer = "/version" },
+  { kind = "json_version", path = "server.json", json_pointer = "/packages/0/version" },
+  { kind = "json_version", path = "server.json", json_pointer = "/_meta/io.modelcontextprotocol.registry~1publisher-provided/buildInfo/version" },
+  { kind = "json_version", path = "packages/cortex-rmcp/package.json", json_pointer = "/version" },
+  { kind = "json_version", path = "packages/cortex-rmcp/package.json", json_pointer = "/binaryVersion" },
   # server.json pins the deploy image tag: ghcr.io/jmagar/cortex:vX.Y.Z
   { kind = "regex_version", path = "server.json", pattern = 'cortex:v(\d+\.\d+\.\d+)' },
+  { kind = "regex_version", path = "server.json", pattern = 'cortex-rmcp@(\d+\.\d+\.\d+)' },
+  { kind = "regex_version", path = "server.json", pattern = '"placeholder": "v(\d+\.\d+\.\d+)"' },
   { kind = "json_version", path = "mcpb/manifest.json", json_pointer = "/version" },
   # docker-compose.prod.yml default image tag: ${CORTEX_VERSION:-X.Y.Z}
   { kind = "regex_version", path = "docker-compose.prod.yml", pattern = 'CORTEX_VERSION:-(\d+\.\d+\.\d+)' },

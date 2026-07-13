@@ -71,6 +71,11 @@
           "path": "mcpb/manifest.json",
           "jsonpath": "$.version"
         },
+        {
+          "type": "json",
+          "path": "packages/cortex-rmcp/package.json",
+          "jsonpath": "$.binaryVersion"
+        },
         "packages/cortex-rmcp/package.json"
       ]
     }
