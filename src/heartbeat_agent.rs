@@ -22,6 +22,16 @@ pub const DEFAULT_COLLECTION_DEADLINE_MS: u64 = 5_000;
 pub const DEFAULT_RETRY_BUFFER_LIMIT: usize = 32;
 pub const DEFAULT_TARGET: &str = "http://127.0.0.1:3100";
 pub const DEFAULT_DOCKER_URL: &str = "unix:///var/run/docker.sock";
+pub const OPTIONAL_ENV_KEYS: &[&str] = &[
+    "CORTEX_AGENT_FILE_TAILS",
+    "CORTEX_AGENT_AI_TRANSCRIPTS",
+    "CORTEX_AGENT_AI_TRANSCRIPT_CHECKPOINT",
+    "CORTEX_AGENT_COMMAND_FORWARD",
+    "CORTEX_AGENT_COMMAND_SPOOL",
+    "CORTEX_AGENT_SHELL_HISTORY_FORWARD",
+    "CORTEX_AGENT_SHELL_HISTORY_CHECKPOINT",
+    "CORTEX_AGENT_AUTO_UPDATE",
+];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HeartbeatAgentConfig {

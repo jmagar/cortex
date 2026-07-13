@@ -61,6 +61,7 @@ const SECTIONS: &[(&str, &[&str])] = &[
             "db",
             "compose",
             "setup",
+            "update",
             "config",
             "completions",
         ],
@@ -305,6 +306,11 @@ const CATALOG: &[CommandDoc] = &[
             "cortex setup plugin-hook [--no-repair] [--json]",
             "cortex setup doctor [--json]",
         ],
+    },
+    CommandDoc {
+        name: "update",
+        summary: "Update the configured Cortex server and host-agent clients",
+        usage: &["cortex update [all|server|clients|agents] [--dry-run] [--json]"],
     },
     CommandDoc {
         name: "config",
@@ -554,6 +560,18 @@ const NESTED_CATALOG: &[NestedCommandDoc] = &[
             "cortex setup deploy local [--dry-run] [--json]",
             "cortex setup deploy remote [--home PATH] HOST [--dry-run] [--json]",
             "cortex setup deploy agent [--hosts h1,h2] [--target URL] [--heartbeat-token TOKEN] [--docker] [--journald] [--binary PATH]",
+        ],
+    },
+    NestedCommandDoc {
+        path: "update",
+        summary: "Update the configured server and host-agent clients",
+        usage: &[
+            "cortex update [all|server|clients|agents] [--dry-run] [--json]",
+            "cortex update server [--dry-run] [--json]",
+            "cortex update clients [--dry-run] [--json] [--binary PATH]",
+            "cortex update agents [--dry-run] [--json] [--binary PATH]",
+            "cortex update config server --host HOST --home PATH [--json]",
+            "cortex update config clients --hosts h1,h2 [--target URL] [--docker] [--journald] [--json]",
         ],
     },
     NestedCommandDoc {

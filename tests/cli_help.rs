@@ -39,6 +39,20 @@ fn per_command_help_shows_detailed_flags() {
 }
 
 #[test]
+fn update_help_shows_server_clients_and_config_commands() {
+    let output = Command::new(env!("CARGO_BIN_EXE_cortex"))
+        .args(["update", "--help"])
+        .output()
+        .expect("run cortex update --help");
+
+    assert!(output.status.success(), "update --help should exit 0");
+    let stdout = String::from_utf8(output.stdout).expect("valid UTF-8");
+    assert!(stdout.contains("cortex update [all|server|clients|agents]"));
+    assert!(stdout.contains("cortex update config server --host HOST --home PATH"));
+    assert!(stdout.contains("cortex update config clients --hosts h1,h2"));
+}
+
+#[test]
 fn sessions_cli_add_and_query_commands_emit_json() {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("cli-ai.db");

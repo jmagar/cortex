@@ -823,6 +823,42 @@ the debug Compose override, transcript-root permissions, disabled legacy index
 timer state, active/enabled watcher state, and container freshness via
 `scripts/check-runtime-current.sh --allow-local-image`.
 
+### `cortex update`
+
+Update an already-configured Cortex deployment. Configure the update profile
+once:
+
+```bash
+cortex update config server --host tootie --home /mnt/cache/appdata/cortex
+cortex update config clients --hosts dookie,shart,squirts --target https://cortex.tootie.tv --docker
+```
+
+The profile lives at `~/.cortex/deployments.toml` by default. A successful
+`cortex setup deploy remote --home PATH HOST` also records the server profile,
+so a one-off low-level deploy can seed future `cortex update server` runs.
+Re-running `cortex update config clients` replaces the host list and preserves
+any omitted saved `--target`, `--docker`, or `--journald` choices.
+
+After the profile exists, dry-run before live updates:
+
+```bash
+cortex update --dry-run
+cortex update
+cortex update server --dry-run
+cortex update clients --dry-run
+cortex update clients
+```
+
+`cortex update` defaults to `all`: it updates the configured server first, then
+updates configured host-agent clients. `clients` and `agents` are aliases; both
+refer to the host-local Cortex agents that forward logs, heartbeats, sessions,
+shell history, and command events into the server. Client dry-runs resolve the
+local binary and probe each configured host over SSH without deploying.
+Live client updates preserve the existing remote heartbeat-agent env before
+reinstalling. Because this is an update path for already configured agents, it
+fails if the remote agent token cannot be read/preserved; use
+`cortex setup deploy agent --heartbeat-token ...` to seed or repair a client.
+
 ### `cortex setup deploy`
 
 Run the Compose-backed deployment workflow using operator-facing names.

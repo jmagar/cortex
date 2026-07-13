@@ -113,9 +113,27 @@ fn remove_file_phase_treats_missing_file_as_success() {
 }
 
 #[test]
+#[serial]
 fn write_heartbeat_agent_env_writes_private_agent_defaults() {
     let dir = tempfile::tempdir().unwrap();
     let env_path = dir.path().join("nested/heartbeat-agent.env");
+    let _target = EnvGuard::remove("CORTEX_HEARTBEAT_TARGET");
+    let _token = EnvGuard::remove("CORTEX_HEARTBEAT_TOKEN");
+    let _setup_token = EnvGuard::remove("CORTEX_TOKEN");
+    let _docker = EnvGuard::remove("CORTEX_AGENT_DOCKER");
+    let _docker_url = EnvGuard::remove("CORTEX_AGENT_DOCKER_URL");
+    let _journald = EnvGuard::remove("CORTEX_AGENT_JOURNALD");
+    let _syslog_file = EnvGuard::remove("CORTEX_AGENT_SYSLOG_FILE");
+    let _syslog_target = EnvGuard::remove("CORTEX_SYSLOG_TARGET");
+    let _rust_log = EnvGuard::remove("RUST_LOG");
+    let _file_tails = EnvGuard::remove("CORTEX_AGENT_FILE_TAILS");
+    let _ai_transcripts = EnvGuard::remove("CORTEX_AGENT_AI_TRANSCRIPTS");
+    let _ai_checkpoint = EnvGuard::remove("CORTEX_AGENT_AI_TRANSCRIPT_CHECKPOINT");
+    let _command_forward = EnvGuard::remove("CORTEX_AGENT_COMMAND_FORWARD");
+    let _command_spool = EnvGuard::remove("CORTEX_AGENT_COMMAND_SPOOL");
+    let _shell_history = EnvGuard::remove("CORTEX_AGENT_SHELL_HISTORY_FORWARD");
+    let _shell_history_checkpoint = EnvGuard::remove("CORTEX_AGENT_SHELL_HISTORY_CHECKPOINT");
+    let _auto_update = EnvGuard::remove("CORTEX_AGENT_AUTO_UPDATE");
 
     let phase = write_heartbeat_agent_env(&env_path).unwrap();
     let raw = std::fs::read_to_string(&env_path).unwrap();
@@ -320,6 +338,11 @@ fn write_heartbeat_agent_env_reads_setup_env_fallbacks_and_optional_syslog() {
     let _token = EnvGuard::remove("CORTEX_HEARTBEAT_TOKEN");
     let _syslog_file = EnvGuard::set("CORTEX_AGENT_SYSLOG_FILE", "/var/log/syslog");
     let _syslog_target = EnvGuard::set("CORTEX_SYSLOG_TARGET", "127.0.0.1:1514");
+    let _file_tails = EnvGuard::set("CORTEX_AGENT_FILE_TAILS", "/var/log/app.log:app");
+    let _ai_transcripts = EnvGuard::set("CORTEX_AGENT_AI_TRANSCRIPTS", "true");
+    let _command_forward = EnvGuard::set("CORTEX_AGENT_COMMAND_FORWARD", "true");
+    let _shell_history = EnvGuard::set("CORTEX_AGENT_SHELL_HISTORY_FORWARD", "true");
+    let _auto_update = EnvGuard::set("CORTEX_AGENT_AUTO_UPDATE", "false");
 
     write_heartbeat_agent_env(&env_path).unwrap();
     let raw = std::fs::read_to_string(&env_path).unwrap();
@@ -328,4 +351,9 @@ fn write_heartbeat_agent_env_reads_setup_env_fallbacks_and_optional_syslog() {
     assert!(raw.contains("CORTEX_HEARTBEAT_TOKEN=from-setup-env\n"));
     assert!(raw.contains("CORTEX_AGENT_SYSLOG_FILE=/var/log/syslog\n"));
     assert!(raw.contains("CORTEX_SYSLOG_TARGET=127.0.0.1:1514\n"));
+    assert!(raw.contains("CORTEX_AGENT_FILE_TAILS=/var/log/app.log:app\n"));
+    assert!(raw.contains("CORTEX_AGENT_AI_TRANSCRIPTS=true\n"));
+    assert!(raw.contains("CORTEX_AGENT_COMMAND_FORWARD=true\n"));
+    assert!(raw.contains("CORTEX_AGENT_SHELL_HISTORY_FORWARD=true\n"));
+    assert!(raw.contains("CORTEX_AGENT_AUTO_UPDATE=false\n"));
 }
