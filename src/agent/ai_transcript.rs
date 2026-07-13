@@ -27,6 +27,7 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
+use crate::ai_project::normalize_local_ai_project_path;
 use crate::ai_transcript_ingest::{AiTranscriptIngestRequest, AiTranscriptRecord};
 use crate::scanner;
 
@@ -35,6 +36,7 @@ use crate::scanner;
 /// (2,000) and any fronting proxy's request-size limit. A backlog larger
 /// than this drains over several poll cycles instead of one oversized POST.
 const MAX_BATCH_RECORDS: usize = 500;
+const CODEX_PREFIX_METADATA_SCAN_LINES: usize = 200;
 
 #[derive(Debug, Clone)]
 pub struct AiTranscriptForwardConfig {
@@ -97,6 +99,9 @@ fn collect_files(root: &Path, out: &mut Vec<PathBuf>) {
         }
         return;
     }
+    if !scanner::should_descend_transcript_dir(root) {
+        return;
+    }
     let Ok(read_dir) = fs::read_dir(root) else {
         return;
     };
@@ -142,6 +147,48 @@ fn read_new_lines(
         line_no += 1;
     }
     Ok((out, line_no))
+}
+
+fn codex_fallback_session_id(path: &Path, source_kind: scanner::SourceKind) -> Option<String> {
+    (source_kind == scanner::SourceKind::CodexSession)
+        .then(|| {
+            path.file_stem()
+                .and_then(|stem| stem.to_str())
+                .map(ToString::to_string)
+        })
+        .flatten()
+}
+
+fn seed_codex_prefix_fallbacks(
+    path: &Path,
+    source_kind: scanner::SourceKind,
+    from_line: usize,
+    fallback_project: &mut Option<String>,
+    fallback_session_id: &mut Option<String>,
+) {
+    if source_kind != scanner::SourceKind::CodexSession
+        || from_line == 0
+        || (fallback_project.is_some() && fallback_session_id.is_some())
+    {
+        return;
+    }
+
+    let Ok(file) = fs::File::open(path) else {
+        return;
+    };
+    let reader = BufReader::new(file);
+    let scan_limit = from_line.min(CODEX_PREFIX_METADATA_SCAN_LINES);
+    for line in reader.lines().take(scan_limit).flatten() {
+        scanner::update_codex_fallbacks(
+            source_kind,
+            line.trim_end_matches(['\r', '\n']),
+            fallback_project,
+            fallback_session_id,
+        );
+        if fallback_project.is_some() && fallback_session_id.is_some() {
+            break;
+        }
+    }
 }
 
 async fn scan_and_forward(
@@ -229,6 +276,15 @@ async fn scan_and_forward(
         }
 
         let from_line = checkpoint.files.get(&key).copied().unwrap_or(0);
+        let mut fallback_project = scanner::project_for_file(source_kind, path);
+        let mut fallback_session_id = codex_fallback_session_id(path, source_kind);
+        seed_codex_prefix_fallbacks(
+            path,
+            source_kind,
+            from_line,
+            &mut fallback_project,
+            &mut fallback_session_id,
+        );
         let remaining_budget = MAX_BATCH_RECORDS - records.len();
         let (new_lines, total_lines) = match read_new_lines(path, from_line, remaining_budget) {
             Ok(result) => result,
@@ -240,16 +296,30 @@ async fn scan_and_forward(
         if new_lines.is_empty() {
             continue;
         }
-        let ai_project = scanner::project_for_file(source_kind, path);
         for (line_no, line) in &new_lines {
+            scanner::update_codex_fallbacks(
+                source_kind,
+                line,
+                &mut fallback_project,
+                &mut fallback_session_id,
+            );
             match scanner::parse_line_for_source(source_kind, line, path, *line_no) {
                 Ok(Some(parsed)) => {
+                    let ai_project = parsed
+                        .ai_project
+                        .as_deref()
+                        .or(fallback_project.as_deref())
+                        .map(normalize_local_ai_project_path);
+                    let ai_session_id = parsed
+                        .session_id
+                        .clone()
+                        .or_else(|| fallback_session_id.as_deref().map(ToString::to_string));
                     records.push(AiTranscriptRecord {
                         timestamp: parsed.timestamp,
                         hostname: config.hostname.clone(),
                         ai_tool: ai_tool.clone(),
-                        ai_project: ai_project.clone(),
-                        ai_session_id: parsed.session_id,
+                        ai_project,
+                        ai_session_id,
                         ai_transcript_path: key.clone(),
                         message: crate::receiver::enrichment::scrub_ai_message(
                             &parsed.message,
