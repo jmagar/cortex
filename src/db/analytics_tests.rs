@@ -2,8 +2,8 @@ use super::*;
 use crate::app::error_detection::normalize::normalize_template;
 use crate::config::StorageConfig;
 use crate::db::{
-    DbPool, LogBatchEntry, init_pool, insert_logs_batch, prune_timeline_rollup,
-    refresh_timeline_rollup, timeline_rollup_status,
+    DbPool, LogBatchEntry, ingest_source_kind_health, init_pool, insert_logs_batch,
+    prune_timeline_rollup, refresh_timeline_rollup, timeline_rollup_status,
 };
 
 fn test_pool() -> (DbPool, tempfile::TempDir) {
@@ -119,6 +119,67 @@ fn list_apps_returns_distinct_apps_with_counts() {
     .unwrap();
     assert_eq!(only_h2.apps.len(), 1);
     assert_eq!(only_h2.apps[0].app_name, "sshd");
+}
+
+#[test]
+fn ingest_source_kind_health_classifies_recent_sources() {
+    let (pool, _d) = test_pool();
+    let mut syslog = entry(
+        "2026-01-01T11:58:00Z",
+        "h1",
+        "info",
+        Some("rsyslogd"),
+        "syslog",
+    );
+    syslog.metadata_json = Some(r#"{"source_kind":"syslog-udp"}"#.to_string());
+
+    let mut otlp = entry("2026-01-01T11:30:00Z", "h1", "info", Some("otel"), "otlp");
+    otlp.metadata_json = Some(r#"{"source_kind":"otlp"}"#.to_string());
+
+    let docker = entry_with_source_ip(
+        "2026-01-01T10:30:00Z",
+        "h2",
+        "info",
+        Some("container"),
+        "docker",
+        "docker://h2/container/stdout",
+    );
+
+    let mut transcript = entry_with_source_ip(
+        "2026-01-01T11:59:00Z",
+        "h3",
+        "info",
+        Some("codex"),
+        "transcript",
+        "transcript://codex",
+    );
+    transcript.ai_transcript_path = Some("/tmp/session.jsonl".to_string());
+
+    insert_logs_batch(&pool, &[syslog, otlp, docker, transcript]).unwrap();
+    pool.get()
+        .unwrap()
+        .execute("UPDATE logs SET received_at = timestamp", [])
+        .unwrap();
+
+    let rows = ingest_source_kind_health(
+        &pool,
+        "2026-01-01T12:00:00Z",
+        "2026-01-01T11:45:00Z",
+        "2026-01-01T11:00:00Z",
+        "2025-12-31T12:00:00Z",
+    )
+    .unwrap();
+    let by_kind: std::collections::HashMap<_, _> = rows
+        .into_iter()
+        .map(|row| (row.source_kind.clone(), row))
+        .collect();
+
+    assert_eq!(by_kind["syslog-udp"].last_15m, 1);
+    assert_eq!(by_kind["otlp"].last_15m, 0);
+    assert_eq!(by_kind["otlp"].last_1h, 1);
+    assert_eq!(by_kind["docker-stream"].last_1h, 0);
+    assert_eq!(by_kind["docker-stream"].last_24h, 1);
+    assert_eq!(by_kind["transcript"].last_15m, 1);
 }
 
 #[test]

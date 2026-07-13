@@ -255,7 +255,7 @@ const CATALOG: &[CommandDoc] = &[
     },
     CommandDoc {
         name: "doctor",
-        summary: "Run all health checks (setup, compose, binary, AI)",
+        summary: "Run all health checks (setup, compose, binary, ingestion, heartbeats, AI)",
         usage: &[
             "cortex doctor [--json] [--fix] [--yes]",
             "cortex doctor binary [--json]",

@@ -213,6 +213,8 @@ fn json_error_count_ignores_expected_production_dev_wrapper_errors() {
             runtime_current: Some(true),
             runtime_current_error: None,
         },
+        ingestion: empty_ingestion_report(),
+        heartbeats: empty_heartbeat_report(),
         ai: serde_json::json!({}),
     };
 
@@ -238,10 +240,90 @@ fn json_error_count_includes_compose_binary_and_top_level_section_errors() {
             runtime_current: Some(false),
             runtime_current_error: Some("stale binary".into()),
         },
+        ingestion: DoctorIngestionReport {
+            methods: vec![DoctorIngestionMethod::new(
+                "syslog",
+                SetupStatus::Error,
+                "not published",
+                IngestionCounts::default(),
+            )],
+            error: None,
+        },
+        heartbeats: DoctorHeartbeatReport {
+            summary: None,
+            hosts: vec![DoctorHeartbeatHost {
+                host_id: "host-a".into(),
+                hostname: "host-a".into(),
+                status: SetupStatus::Error,
+                fleet_status: "late".into(),
+                last_heartbeat_at: "2026-01-01T00:00:00Z".into(),
+                pressure: Vec::new(),
+                partial: false,
+                clock_skew: false,
+            }],
+            error: None,
+        },
         ai: serde_json::json!({"error": "db unavailable"}),
     };
 
-    assert_eq!(report.error_count(), 5);
+    assert_eq!(report.error_count(), 7);
+}
+
+fn empty_ingestion_report() -> DoctorIngestionReport {
+    DoctorIngestionReport {
+        methods: Vec::new(),
+        error: None,
+    }
+}
+
+fn empty_heartbeat_report() -> DoctorHeartbeatReport {
+    DoctorHeartbeatReport {
+        summary: None,
+        hosts: Vec::new(),
+        error: None,
+    }
+}
+
+#[test]
+fn data_driven_ingestion_methods_distinguish_recent_stale_and_absent() {
+    let recent = data_driven_method(
+        "docker",
+        IngestionCounts {
+            last_seen: Some("2026-01-01T00:00:00Z".into()),
+            last_15m: 1,
+            last_1h: 1,
+            last_24h: 1,
+        },
+    );
+    assert!(matches!(recent.status, SetupStatus::Ok));
+
+    let stale = data_driven_method(
+        "docker",
+        IngestionCounts {
+            last_seen: Some("2026-01-01T00:00:00Z".into()),
+            last_15m: 0,
+            last_1h: 0,
+            last_24h: 4,
+        },
+    );
+    assert!(matches!(stale.status, SetupStatus::Warn));
+
+    let absent = data_driven_method("docker", IngestionCounts::default());
+    assert!(matches!(absent.status, SetupStatus::Skipped));
+}
+
+#[test]
+fn heartbeat_status_maps_late_to_error_and_pressure_to_warning() {
+    assert!(matches!(heartbeat_setup_status("ok"), SetupStatus::Ok));
+    assert!(matches!(heartbeat_setup_status("late"), SetupStatus::Error));
+    assert!(matches!(
+        heartbeat_setup_status("partial"),
+        SetupStatus::Warn
+    ));
+    assert!(matches!(
+        heartbeat_setup_status("pressure"),
+        SetupStatus::Warn
+    ));
 }
 
 #[test]

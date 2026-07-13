@@ -11,6 +11,7 @@ mod hook_events;
 mod hook_incident_evidence;
 mod hook_incidents;
 mod ingest;
+mod ingest_health;
 pub(crate) mod llm_invocations;
 mod maintenance;
 mod mcp_events;
@@ -64,6 +65,7 @@ pub use hook_incidents::{
 };
 pub use ingest::insert_logs_batch;
 pub(crate) use ingest::insert_logs_batch_in_tx;
+pub use ingest_health::{IngestSourceKindHealth, ingest_source_kind_health};
 pub use maintenance::{
     DiskSpaceProbe, MaintenanceJob, SystemDiskSpaceProbe, db_full_vacuum, db_incremental_vacuum,
     db_integrity_check, db_wal_checkpoint, enforce_storage_budget,
