@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.10.0](https://github.com/jmagar/cortex/compare/v3.9.0...v3.10.0) (2026-07-13)
+
+
+### Added
+
+* add ingestion health to doctor ([b9a4f5f](https://github.com/jmagar/cortex/commit/b9a4f5f04d0d0a4338ff50542d5bf8edd481cbb0))
+
+
+### Fixed
+
+* **ci:** declare mise-managed workflow tools ([bf7864b](https://github.com/jmagar/cortex/commit/bf7864be540d5ab2d5ad048aa760dfadf8c693f7))
+* **ci:** use prebuilt cargo tool installers ([4e42058](https://github.com/jmagar/cortex/commit/4e4205890191b34b23939ede8fba5b2c81571394))
+* harden cargo rustc wrapper test path ([0fe6be4](https://github.com/jmagar/cortex/commit/0fe6be45cb321c78b73561065af6da71196bfefe))
+* respect dynamic cargo job allocation ([2e10024](https://github.com/jmagar/cortex/commit/2e10024d513266aec2a960ac1f24a57b32763ed5))
+* route rust builds through sccache wrapper ([1fe67e3](https://github.com/jmagar/cortex/commit/1fe67e396d2293c057ac98ebbc99b63d03eaa9e1))
+
 ## [3.9.0](https://github.com/jmagar/cortex/compare/v3.8.0...v3.9.0) (2026-07-11)
 
 
