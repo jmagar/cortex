@@ -835,6 +835,7 @@ cortex setup deploy preflight --json
 cortex setup deploy local
 cortex setup deploy local --dry-run --json
 cortex setup deploy remote tootie --dry-run
+cortex setup deploy remote --home /mnt/cache/appdata/cortex tootie
 cortex setup deploy remote tootie --json
 ```
 
@@ -842,11 +843,16 @@ cortex setup deploy remote tootie --json
 `setup deploy local` repairs `~/.cortex/.env`, rewrites managed Compose assets,
 pulls the configured image, starts the stack, and checks `/health`.
 `setup deploy remote` uses SSH and Docker Compose on the target host. Non-dry-run
-remote deploy writes/replaces `~/.cortex/.env`, the managed Compose YAML,
-and `config/Dockerfile` on the target; set token/env values in the local
-environment before running it when you need to preserve specific values. It is
-CLI-only, requires an explicit host argument, and does not add REST or MCP
-deploy mutation surfaces.
+remote deploy writes/replaces `.env`, the managed Compose YAML, and
+`config/Dockerfile` under the selected remote home. The default remote home is
+`~/.cortex`; use `--home PATH` for hosts whose runtime is stored elsewhere, such
+as tootie's `/mnt/cache/appdata/cortex`. Non-dry-run remote deploy preserves
+existing remote env values from `<home>/.env` or legacy `<home>/compose/.env`
+but deliberately drops `CORTEX_VERSION` so the release-managed Compose template
+owns the image tag. After migrating a legacy compose-local env file, remote
+deploy archives it as `<home>/compose/.env.legacy`; `<home>/.env` is the
+canonical runtime env. It is CLI-only, requires an explicit host argument, and
+does not add REST or MCP deploy mutation surfaces.
 
 ### `cortex setup sessions-index-timer`
 
