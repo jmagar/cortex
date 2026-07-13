@@ -1,4 +1,33 @@
 use super::*;
+use serial_test::serial;
+
+struct EnvGuard {
+    name: &'static str,
+    previous: Option<std::ffi::OsString>,
+}
+
+impl EnvGuard {
+    fn set(name: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
+        let previous = std::env::var_os(name);
+        unsafe { std::env::set_var(name, value) };
+        Self { name, previous }
+    }
+
+    fn remove(name: &'static str) -> Self {
+        let previous = std::env::var_os(name);
+        unsafe { std::env::remove_var(name) };
+        Self { name, previous }
+    }
+}
+
+impl Drop for EnvGuard {
+    fn drop(&mut self) {
+        match &self.previous {
+            Some(value) => unsafe { std::env::set_var(self.name, value) },
+            None => unsafe { std::env::remove_var(self.name) },
+        }
+    }
+}
 
 #[test]
 fn update_profile_round_trips_server_and_clients() {
@@ -159,6 +188,32 @@ fn update_server_uses_saved_profile_without_repeating_home_arg() {
     );
     assert!(runner.server_calls[0].1.dry_run);
     assert_eq!(report.profile_path, path);
+}
+
+#[test]
+#[serial]
+fn update_with_explicit_profile_does_not_resolve_default_profile_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("deployments.toml");
+    configure_server_profile(Some(&path), "tootie", "/mnt/cache/appdata/cortex").unwrap();
+    let mut runner = FakeUpdateRunner::default();
+    let _home_guard = EnvGuard::set("HOME", "relative-home");
+    let _cortex_home_guard = EnvGuard::remove("CORTEX_HOME");
+
+    let report = run_update_with_runner(
+        UpdateScope::Server,
+        UpdateOptions {
+            dry_run: true,
+            profile_path: Some(path.clone()),
+            binary: None,
+        },
+        &mut runner,
+    )
+    .unwrap();
+
+    assert!(!report.has_errors);
+    assert_eq!(report.profile_path, path);
+    assert_eq!(runner.server_calls.len(), 1);
 }
 
 #[test]

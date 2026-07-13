@@ -191,10 +191,10 @@ fn run_update_with_runner(
     runner: &mut dyn UpdateRunner,
 ) -> io::Result<UpdateReport> {
     let started = Instant::now();
-    let profile_path = options
-        .profile_path
-        .clone()
-        .unwrap_or(default_profile_path()?);
+    let profile_path = match options.profile_path.clone() {
+        Some(path) => path,
+        None => default_profile_path()?,
+    };
     let profile = load_profile(&profile_path)?;
     let mut server = None;
     let mut clients = Vec::new();
