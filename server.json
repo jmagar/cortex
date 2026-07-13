@@ -107,7 +107,7 @@
       "distribution": {
         "npm": "cortex-rmcp@3.9.1",
         "nodePackage": "cortex-rmcp",
-        "ociImage": "ghcr.io/jmagar/cortex:v3.9.1"
+        "ociImage": "ghcr.io/jmagar/cortex:v3.10.0"
       },
       "buildInfo": {
         "version": "3.9.1",
