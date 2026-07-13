@@ -6,6 +6,7 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
+use serde::Serialize;
 
 const PROBE_TIMEOUT_SECS: u64 = 5;
 const REMOTE_BIN_TMP: &str = ".local/bin/cortex.new";
@@ -47,7 +48,7 @@ pub struct AgentDeployConfig {
     pub journald: Option<bool>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct DeployResult {
     pub host: String,
     pub ok: bool,

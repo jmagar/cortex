@@ -1,9 +1,14 @@
 use std::io::{self, ErrorKind};
 use std::path::{Component, Path, PathBuf};
+use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 
-use crate::setup::cortex_home_dir;
+use crate::agent_deploy::{
+    AgentDeployConfig, DeployResult, deploy_agent_to_host, find_local_binary,
+};
+use crate::deploy::{RemoteDeployOptions, RemoteDeployReport, run_remote_deploy};
+use crate::setup::{PhaseTimer, SetupPhase, SetupStatus, cortex_home_dir};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UpdateScope {
@@ -120,6 +125,190 @@ pub fn configure_clients_profile(
     };
     write_profile(&path, &profile)?;
     Ok(profile)
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct UpdateReport {
+    pub mode: &'static str,
+    pub profile_path: PathBuf,
+    pub server: Option<RemoteDeployReport>,
+    pub clients: Vec<DeployResult>,
+    pub skipped: Vec<SetupPhase>,
+    pub has_errors: bool,
+    pub elapsed_ms: u128,
+}
+
+trait UpdateRunner {
+    fn run_server(
+        &mut self,
+        host: &str,
+        options: RemoteDeployOptions,
+    ) -> io::Result<RemoteDeployReport>;
+
+    fn deploy_client(
+        &mut self,
+        host: &str,
+        binary: &Path,
+        config: &AgentDeployConfig,
+    ) -> DeployResult;
+
+    fn find_binary(&self) -> Option<PathBuf>;
+}
+
+struct RealUpdateRunner;
+
+impl UpdateRunner for RealUpdateRunner {
+    fn run_server(
+        &mut self,
+        host: &str,
+        options: RemoteDeployOptions,
+    ) -> io::Result<RemoteDeployReport> {
+        run_remote_deploy(host, options)
+    }
+
+    fn deploy_client(
+        &mut self,
+        host: &str,
+        binary: &Path,
+        config: &AgentDeployConfig,
+    ) -> DeployResult {
+        deploy_agent_to_host(host, binary, config)
+    }
+
+    fn find_binary(&self) -> Option<PathBuf> {
+        find_local_binary()
+    }
+}
+
+pub fn run_update(scope: UpdateScope, options: UpdateOptions) -> io::Result<UpdateReport> {
+    let mut runner = RealUpdateRunner;
+    run_update_with_runner(scope, options, &mut runner)
+}
+
+fn run_update_with_runner(
+    scope: UpdateScope,
+    options: UpdateOptions,
+    runner: &mut dyn UpdateRunner,
+) -> io::Result<UpdateReport> {
+    let started = Instant::now();
+    let profile_path = options
+        .profile_path
+        .clone()
+        .unwrap_or(default_profile_path()?);
+    let profile = load_profile(&profile_path)?;
+    let mut server = None;
+    let mut clients = Vec::new();
+    let mut skipped = Vec::new();
+
+    if matches!(scope, UpdateScope::All | UpdateScope::Server) {
+        let target = profile.server.as_ref().ok_or_else(|| {
+            io::Error::new(
+                ErrorKind::NotFound,
+                format!(
+                    "no server update profile at {}; run `cortex update config server --host HOST --home PATH`",
+                    profile_path.display()
+                ),
+            )
+        })?;
+        let report = runner.run_server(
+            &target.host,
+            RemoteDeployOptions {
+                dry_run: options.dry_run,
+                home: Some(target.home.clone()),
+            },
+        )?;
+        let failed = report.has_errors;
+        server = Some(report);
+        if failed && matches!(scope, UpdateScope::All) {
+            skipped.push(
+                PhaseTimer::start("clients")
+                    .finish(SetupStatus::Skipped, "skipped because server update failed"),
+            );
+            return Ok(build_report(
+                scope,
+                profile_path,
+                server,
+                clients,
+                skipped,
+                started,
+            ));
+        }
+    }
+
+    if matches!(scope, UpdateScope::All | UpdateScope::Clients) {
+        if profile.clients.hosts.is_empty() {
+            if matches!(scope, UpdateScope::Clients) {
+                return Err(io::Error::new(
+                    ErrorKind::NotFound,
+                    format!(
+                        "no client update profile at {}; run `cortex update config clients --hosts HOST1,HOST2`",
+                        profile_path.display()
+                    ),
+                ));
+            }
+            skipped.push(
+                PhaseTimer::start("clients")
+                    .finish(SetupStatus::Skipped, "no configured client hosts"),
+            );
+        } else if options.dry_run {
+            skipped.push(PhaseTimer::start("clients").finish(
+                SetupStatus::Skipped,
+                "dry-run does not deploy client agents",
+            ));
+        } else {
+            let binary = options
+                .binary
+                .clone()
+                .or_else(|| runner.find_binary())
+                .ok_or_else(|| io::Error::new(ErrorKind::NotFound, "cortex binary not found"))?;
+            let config = AgentDeployConfig {
+                target: profile.clients.target.clone(),
+                token: None,
+                docker: profile.clients.docker,
+                journald: profile.clients.journald,
+            };
+            for host in &profile.clients.hosts {
+                clients.push(runner.deploy_client(host, &binary, &config));
+            }
+        }
+    }
+
+    Ok(build_report(
+        scope,
+        profile_path,
+        server,
+        clients,
+        skipped,
+        started,
+    ))
+}
+
+fn build_report(
+    scope: UpdateScope,
+    profile_path: PathBuf,
+    server: Option<RemoteDeployReport>,
+    clients: Vec<DeployResult>,
+    skipped: Vec<SetupPhase>,
+    started: Instant,
+) -> UpdateReport {
+    let has_errors = server.as_ref().is_some_and(|report| report.has_errors)
+        || clients.iter().any(|result| !result.ok)
+        || skipped
+            .iter()
+            .any(|phase| matches!(phase.status, SetupStatus::Error));
+    UpdateReport {
+        mode: match scope {
+            UpdateScope::All => "all",
+            UpdateScope::Server => "server",
+            UpdateScope::Clients => "clients",
+        },
+        profile_path,
+        server,
+        clients,
+        skipped,
+        has_errors,
+        elapsed_ms: started.elapsed().as_millis(),
+    }
 }
 
 fn resolve_profile_path(path: Option<&Path>) -> io::Result<PathBuf> {
