@@ -5,7 +5,8 @@ use std::time::Instant;
 use serde::{Deserialize, Serialize};
 
 use crate::agent_deploy::{
-    AgentDeployConfig, DeployResult, deploy_agent_to_host, find_local_binary,
+    AgentDeployConfig, DeployResult, HostProbe, deploy_agent_to_host, find_local_binary,
+    probe_hosts,
 };
 use crate::deploy::{RemoteDeployOptions, RemoteDeployReport, run_remote_deploy};
 use crate::setup::{PhaseTimer, SetupPhase, SetupStatus, cortex_home_dir};
@@ -153,6 +154,8 @@ trait UpdateRunner {
     ) -> DeployResult;
 
     fn find_binary(&self) -> Option<PathBuf>;
+
+    fn probe_clients(&mut self, hosts: Vec<String>) -> Vec<HostProbe>;
 }
 
 struct RealUpdateRunner;
@@ -178,6 +181,10 @@ impl UpdateRunner for RealUpdateRunner {
     fn find_binary(&self) -> Option<PathBuf> {
         find_local_binary()
     }
+
+    fn probe_clients(&mut self, hosts: Vec<String>) -> Vec<HostProbe> {
+        probe_hosts(hosts)
+    }
 }
 
 pub fn run_update(scope: UpdateScope, options: UpdateOptions) -> io::Result<UpdateReport> {
@@ -195,7 +202,7 @@ fn run_update_with_runner(
         Some(path) => path,
         None => default_profile_path()?,
     };
-    let profile = load_profile(&profile_path)?;
+    let profile = validate_loaded_profile(load_profile(&profile_path)?)?;
     let mut server = None;
     let mut clients = Vec::new();
     let mut skipped = Vec::new();
@@ -251,16 +258,15 @@ fn run_update_with_runner(
                     .finish(SetupStatus::Skipped, "no configured client hosts"),
             );
         } else if options.dry_run {
+            let _binary = resolve_agent_binary(&options, runner)?;
+            let probes = runner.probe_clients(profile.clients.hosts.clone());
+            clients.extend(client_preflight_results(&profile.clients.hosts, probes));
             skipped.push(PhaseTimer::start("clients").finish(
                 SetupStatus::Skipped,
-                "dry-run does not deploy client agents",
+                "dry-run probed client agents without deploying",
             ));
         } else {
-            let binary = options
-                .binary
-                .clone()
-                .or_else(|| runner.find_binary())
-                .ok_or_else(|| io::Error::new(ErrorKind::NotFound, "cortex binary not found"))?;
+            let binary = resolve_agent_binary(&options, runner)?;
             let config = AgentDeployConfig {
                 target: profile.clients.target.clone(),
                 token: None,
@@ -281,6 +287,41 @@ fn run_update_with_runner(
         skipped,
         started,
     ))
+}
+
+fn resolve_agent_binary(options: &UpdateOptions, runner: &dyn UpdateRunner) -> io::Result<PathBuf> {
+    options
+        .binary
+        .clone()
+        .or_else(|| runner.find_binary())
+        .ok_or_else(|| io::Error::new(ErrorKind::NotFound, "cortex binary not found"))
+}
+
+fn client_preflight_results(hosts: &[String], probes: Vec<HostProbe>) -> Vec<DeployResult> {
+    let mut results = Vec::with_capacity(hosts.len());
+    for host in hosts {
+        match probes.iter().find(|probe| probe.host == *host) {
+            Some(probe) if probe.reachable => results.push(DeployResult {
+                host: host.clone(),
+                ok: true,
+                detail: probe.display_label(),
+                elapsed_ms: 0,
+            }),
+            Some(probe) => results.push(DeployResult {
+                host: host.clone(),
+                ok: false,
+                detail: probe.display_label(),
+                elapsed_ms: 0,
+            }),
+            None => results.push(DeployResult {
+                host: host.clone(),
+                ok: false,
+                detail: "dry-run probe timed out".to_string(),
+                elapsed_ms: 0,
+            }),
+        }
+    }
+    results
 }
 
 fn build_report(
@@ -309,6 +350,20 @@ fn build_report(
         has_errors,
         elapsed_ms: started.elapsed().as_millis(),
     }
+}
+
+fn validate_loaded_profile(mut profile: UpdateProfile) -> io::Result<UpdateProfile> {
+    if let Some(server) = &mut profile.server {
+        server.host = validate_host(&server.host)?;
+        server.home = validate_remote_home(&server.home)?;
+    }
+    profile.clients.hosts = profile
+        .clients
+        .hosts
+        .iter()
+        .map(|host| validate_host(host))
+        .collect::<io::Result<Vec<_>>>()?;
+    Ok(profile)
 }
 
 fn resolve_profile_path(path: Option<&Path>) -> io::Result<PathBuf> {

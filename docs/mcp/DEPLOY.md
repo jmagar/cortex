@@ -68,9 +68,9 @@ Compose there. The default remote home is `~/.cortex`; pass `--home PATH` for
 hosts whose runtime lives elsewhere. The normal update workflow is:
 
 ```bash
-cortex update
 cortex update server --dry-run
 cortex update server
+cortex update
 ```
 
 `cortex setup deploy remote --home /mnt/cache/appdata/cortex tootie` remains the

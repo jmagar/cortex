@@ -106,6 +106,8 @@ fn configure_server_profile_rejects_unsafe_values() {
 struct FakeUpdateRunner {
     server_calls: Vec<(String, RemoteDeployOptions)>,
     client_calls: Vec<String>,
+    probe_calls: Vec<Vec<String>>,
+    probes: Vec<crate::agent_deploy::HostProbe>,
     fail_server: bool,
     fail_client: Option<String>,
 }
@@ -158,6 +160,23 @@ impl UpdateRunner for FakeUpdateRunner {
 
     fn find_binary(&self) -> Option<PathBuf> {
         Some(PathBuf::from("/tmp/cortex"))
+    }
+
+    fn probe_clients(&mut self, hosts: Vec<String>) -> Vec<crate::agent_deploy::HostProbe> {
+        self.probe_calls.push(hosts.clone());
+        if self.probes.is_empty() {
+            hosts
+                .into_iter()
+                .map(|host| crate::agent_deploy::HostProbe {
+                    host,
+                    reachable: true,
+                    cortex_version: Some("3.9.1".to_string()),
+                    agent_active: Some(true),
+                })
+                .collect()
+        } else {
+            self.probes.clone()
+        }
     }
 }
 
@@ -244,6 +263,81 @@ fn update_clients_deploys_every_configured_client() {
     assert!(!report.has_errors);
     assert_eq!(runner.client_calls, vec!["dookie", "shart"]);
     assert_eq!(report.clients.len(), 2);
+}
+
+#[test]
+fn update_clients_dry_run_probes_clients_without_deploying() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("deployments.toml");
+    configure_clients_profile(
+        Some(&path),
+        vec!["dookie".to_string(), "shart".to_string()],
+        Some("https://cortex.tootie.tv".to_string()),
+        Some(true),
+        None,
+    )
+    .unwrap();
+    let mut runner = FakeUpdateRunner::default();
+
+    let report = run_update_with_runner(
+        UpdateScope::Clients,
+        UpdateOptions {
+            dry_run: true,
+            profile_path: Some(path),
+            binary: Some(PathBuf::from("/tmp/cortex")),
+        },
+        &mut runner,
+    )
+    .unwrap();
+
+    assert!(!report.has_errors);
+    assert_eq!(
+        runner.probe_calls,
+        vec![vec!["dookie".to_string(), "shart".to_string()]]
+    );
+    assert!(runner.client_calls.is_empty());
+    assert_eq!(report.clients.len(), 2);
+    assert!(
+        report
+            .skipped
+            .iter()
+            .any(|phase| phase.detail.contains("without deploying"))
+    );
+}
+
+#[test]
+fn update_clients_revalidates_loaded_profile_hosts() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("deployments.toml");
+    write_profile(
+        &path,
+        &UpdateProfile {
+            server: None,
+            clients: ClientsUpdateProfile {
+                hosts: vec!["-oProxyCommand=touch /tmp/pwned".to_string()],
+                target: None,
+                docker: None,
+                journald: None,
+            },
+        },
+    )
+    .unwrap();
+    let mut runner = FakeUpdateRunner::default();
+
+    let error = run_update_with_runner(
+        UpdateScope::Clients,
+        UpdateOptions {
+            dry_run: false,
+            profile_path: Some(path),
+            binary: Some(PathBuf::from("/tmp/cortex")),
+        },
+        &mut runner,
+    )
+    .unwrap_err();
+
+    assert!(error.to_string().contains("unsafe ssh host"));
+    assert!(runner.client_calls.is_empty());
+    assert!(runner.probe_calls.is_empty());
 }
 
 #[test]

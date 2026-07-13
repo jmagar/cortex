@@ -279,6 +279,14 @@ pub fn deploy_agent_to_host(
     config: &AgentDeployConfig,
 ) -> DeployResult {
     let started = Instant::now();
+    if let Err(error) = validate_ssh_host(host) {
+        return DeployResult {
+            host: host.to_string(),
+            ok: false,
+            detail: error.to_string(),
+            elapsed_ms: started.elapsed().as_millis(),
+        };
+    }
     match run_deploy(host, local_binary, config) {
         Ok(()) => DeployResult {
             host: host.to_string(),
@@ -296,6 +304,9 @@ pub fn deploy_agent_to_host(
 }
 
 fn is_unraid(host: &str) -> bool {
+    if validate_ssh_host(host).is_err() {
+        return false;
+    }
     let out = Command::new("ssh")
         .args([
             "-o",
@@ -304,6 +315,7 @@ fn is_unraid(host: &str) -> bool {
             "BatchMode=yes",
             "-o",
             "LogLevel=ERROR",
+            "--",
             host,
             "test -f /etc/unraid-version && echo yes || echo no",
         ])
@@ -312,6 +324,7 @@ fn is_unraid(host: &str) -> bool {
 }
 
 fn run_deploy(host: &str, local_binary: &Path, config: &AgentDeployConfig) -> io::Result<()> {
+    validate_ssh_host(host)?;
     if is_unraid(host) {
         return run_deploy_unraid(host, local_binary, config);
     }
@@ -325,29 +338,27 @@ fn run_deploy(host: &str, local_binary: &Path, config: &AgentDeployConfig) -> io
         "chmod +x ~/.local/bin/cortex.new && mv -f ~/.local/bin/cortex.new ~/.local/bin/cortex",
     )?;
 
-    let mut env_pairs: Vec<String> = Vec::new();
-    if let Some(t) = &config.target {
-        env_pairs.push(format!("CORTEX_HEARTBEAT_TARGET={}", shell_quote(t)));
-    }
-    if let Some(t) = &config.token {
-        env_pairs.push(format!("CORTEX_HEARTBEAT_TOKEN={}", shell_quote(t)));
-    }
-    if config.docker == Some(true) {
-        env_pairs.push("CORTEX_AGENT_DOCKER=true".to_string());
-    }
-    if config.journald == Some(true) {
-        env_pairs.push("CORTEX_AGENT_JOURNALD=true".to_string());
-    }
-    if let Some(syslog_target) = deploy_syslog_target(config.target.as_deref()) {
-        env_pairs.push(format!(
-            "CORTEX_SYSLOG_TARGET={}",
-            shell_quote(&syslog_target)
-        ));
-    }
+    let env_pairs = resolve_linux_agent_env(
+        &parse_env_file(
+            &ssh_capture(
+                host,
+                "cat ~/.cortex/heartbeat-agent.env 2>/dev/null || true",
+            )
+            .unwrap_or_default(),
+        ),
+        config,
+    );
     let prefix = if env_pairs.is_empty() {
         String::new()
     } else {
-        format!("{} ", env_pairs.join(" "))
+        format!(
+            "{} ",
+            env_pairs
+                .iter()
+                .map(|(key, value)| format!("{key}={}", shell_quote(value)))
+                .collect::<Vec<_>>()
+                .join(" ")
+        )
     };
     ssh_run(
         host,
@@ -482,6 +493,67 @@ fn parse_env_file(contents: &str) -> Vec<(String, String)> {
         .collect()
 }
 
+/// Resolve the host-local systemd agent env for a Linux (non-Unraid) deploy.
+/// Only keys that the Linux setup writer consumes are carried forward. A fresh
+/// no-flag deploy stays minimal, while upgrades preserve auth and forwarding
+/// knobs unless the operator supplied an explicit override.
+fn resolve_linux_agent_env(
+    persisted: &[(String, String)],
+    config: &AgentDeployConfig,
+) -> Vec<(String, String)> {
+    use std::collections::HashMap;
+    let prev: HashMap<&str, &str> = persisted
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.as_str()))
+        .collect();
+    let prev_get = |k: &str| prev.get(k).map(|s| s.to_string());
+
+    let mut out = Vec::new();
+    let target = config
+        .target
+        .clone()
+        .or_else(|| prev_get("CORTEX_HEARTBEAT_TARGET"));
+    if let Some(target) = &target {
+        out.push(("CORTEX_HEARTBEAT_TARGET".to_string(), target.clone()));
+    }
+    if let Some(token) = config
+        .token
+        .clone()
+        .or_else(|| prev_get("CORTEX_HEARTBEAT_TOKEN"))
+    {
+        out.push(("CORTEX_HEARTBEAT_TOKEN".to_string(), token));
+    }
+    if let Some(docker) = config
+        .docker
+        .map(|value| value.to_string())
+        .or_else(|| prev_get("CORTEX_AGENT_DOCKER"))
+    {
+        out.push(("CORTEX_AGENT_DOCKER".to_string(), docker));
+    }
+    if let Some(journald) = config
+        .journald
+        .map(|value| value.to_string())
+        .or_else(|| prev_get("CORTEX_AGENT_JOURNALD"))
+    {
+        out.push(("CORTEX_AGENT_JOURNALD".to_string(), journald));
+    }
+    if let Some(docker_url) = prev_get("CORTEX_AGENT_DOCKER_URL") {
+        out.push(("CORTEX_AGENT_DOCKER_URL".to_string(), docker_url));
+    }
+    if let Some(syslog_file) = prev_get("CORTEX_AGENT_SYSLOG_FILE") {
+        out.push(("CORTEX_AGENT_SYSLOG_FILE".to_string(), syslog_file));
+    }
+    let syslog_target = if config.target.is_some() {
+        deploy_syslog_target(target.as_deref())
+    } else {
+        prev_get("CORTEX_SYSLOG_TARGET").or_else(|| deploy_syslog_target(target.as_deref()))
+    };
+    if let Some(syslog_target) = syslog_target {
+        out.push(("CORTEX_SYSLOG_TARGET".to_string(), syslog_target));
+    }
+    out
+}
+
 /// Resolve the agent container env for a (re)deploy using precedence
 /// **flag > persisted > default** for each managed key, then carry every other
 /// key from the persisted env through unchanged (e.g. `CORTEX_AGENT_FILE_TAILS`).
@@ -614,6 +686,7 @@ fn preserved_custom_mount_flags(inspect_mounts: &str) -> Vec<String> {
 /// (e.g. inspecting a not-yet-existing container) should append `|| true` so the
 /// ssh invocation itself succeeds and returns empty output.
 fn ssh_capture(host: &str, cmd: &str) -> io::Result<String> {
+    validate_ssh_host(host)?;
     let out = Command::new("ssh")
         .args([
             "-o",
@@ -622,6 +695,7 @@ fn ssh_capture(host: &str, cmd: &str) -> io::Result<String> {
             "StrictHostKeyChecking=accept-new",
             "-o",
             "LogLevel=ERROR",
+            "--",
             host,
             cmd,
         ])
@@ -630,6 +704,7 @@ fn ssh_capture(host: &str, cmd: &str) -> io::Result<String> {
 }
 
 fn ssh_run(host: &str, cmd: &str) -> io::Result<()> {
+    validate_ssh_host(host)?;
     let status = Command::new("ssh")
         .args([
             "-o",
@@ -638,19 +713,22 @@ fn ssh_run(host: &str, cmd: &str) -> io::Result<()> {
             "StrictHostKeyChecking=accept-new",
             "-o",
             "LogLevel=ERROR",
+            "--",
             host,
             cmd,
         ])
         .status()?;
     if !status.success() {
         return Err(io::Error::other(format!(
-            "ssh {host}: '{cmd}' exited non-zero"
+            "ssh {host}: '{}' exited non-zero",
+            redact_secret_envs(cmd)
         )));
     }
     Ok(())
 }
 
 fn scp_file(local: &Path, host: &str, remote_path: &str) -> io::Result<()> {
+    validate_ssh_host(host)?;
     let dest = format!("{host}:{remote_path}");
     let status = Command::new("scp")
         .args([
@@ -658,6 +736,7 @@ fn scp_file(local: &Path, host: &str, remote_path: &str) -> io::Result<()> {
             "BatchMode=yes",
             "-o",
             "StrictHostKeyChecking=accept-new",
+            "--",
         ])
         .arg(local)
         .arg(&dest)
@@ -669,6 +748,55 @@ fn scp_file(local: &Path, host: &str, remote_path: &str) -> io::Result<()> {
         )));
     }
     Ok(())
+}
+
+fn validate_ssh_host(host: &str) -> io::Result<()> {
+    if crate::inventory::ssh::is_safe_ssh_host(host) {
+        Ok(())
+    } else {
+        Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("unsafe ssh host: {host}"),
+        ))
+    }
+}
+
+fn redact_secret_envs(input: &str) -> String {
+    const SECRET_KEYS: &[&str] = &["CORTEX_HEARTBEAT_TOKEN", "CORTEX_TOKEN", "CORTEX_API_TOKEN"];
+    let mut redacted = input.to_string();
+    for key in SECRET_KEYS {
+        redacted = redact_env_assignment(&redacted, key);
+    }
+    redacted
+}
+
+fn redact_env_assignment(input: &str, key: &str) -> String {
+    let needle = format!("{key}=");
+    let mut output = String::with_capacity(input.len());
+    let mut cursor = 0usize;
+    while let Some(relative) = input[cursor..].find(&needle) {
+        let start = cursor + relative;
+        output.push_str(&input[cursor..start]);
+        output.push_str(&needle);
+        output.push_str("<redacted>");
+        cursor = skip_shell_word(input, start + needle.len());
+    }
+    output.push_str(&input[cursor..]);
+    output
+}
+
+fn skip_shell_word(input: &str, start: usize) -> usize {
+    let mut quote: Option<char> = None;
+    for (relative, ch) in input[start..].char_indices() {
+        match quote {
+            Some(active) if ch == active => quote = None,
+            Some(_) => {}
+            None if ch == '\'' || ch == '"' => quote = Some(ch),
+            None if ch.is_ascii_whitespace() => return start + relative,
+            None => {}
+        }
+    }
+    input.len()
 }
 
 fn home_dir() -> Option<PathBuf> {

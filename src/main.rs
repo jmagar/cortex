@@ -1151,6 +1151,7 @@ fn parse_deploy_command(args: &[String]) -> Result<DeployCommand> {
 fn parse_update_command(args: &[String]) -> Result<UpdateCommand> {
     let mut json = false;
     let mut dry_run = false;
+    let mut saw_dry_run = false;
     let mut profile: Option<String> = None;
     let mut binary: Option<String> = None;
     let mut rest = Vec::new();
@@ -1158,7 +1159,10 @@ fn parse_update_command(args: &[String]) -> Result<UpdateCommand> {
     while i < args.len() {
         match args[i].as_str() {
             "--json" => json = true,
-            "--dry-run" => dry_run = true,
+            "--dry-run" => {
+                dry_run = true;
+                saw_dry_run = true;
+            }
             "--profile" => {
                 i += 1;
                 profile = Some(
@@ -1185,6 +1189,12 @@ fn parse_update_command(args: &[String]) -> Result<UpdateCommand> {
     }
 
     if rest.first().map(String::as_str) == Some("config") {
+        if saw_dry_run {
+            anyhow::bail!("--dry-run is only valid for `cortex update` run scopes");
+        }
+        if binary.is_some() {
+            anyhow::bail!("--binary is only valid for `cortex update clients|agents`");
+        }
         return parse_update_config_command(&rest[1..], json, profile);
     }
 
@@ -1196,6 +1206,9 @@ fn parse_update_command(args: &[String]) -> Result<UpdateCommand> {
         [other] => anyhow::bail!("unknown update scope: {other}"),
         _ => anyhow::bail!("update accepts at most one scope"),
     };
+    if scope == cortex::update::UpdateScope::Server && binary.is_some() {
+        anyhow::bail!("--binary is only valid for `cortex update all|clients|agents`");
+    }
     Ok(UpdateCommand {
         kind: UpdateCommandKind::Run {
             scope,

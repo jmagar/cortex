@@ -714,6 +714,56 @@ fn mode_parse_accepts_update_config_clients() {
 }
 
 #[test]
+fn mode_parse_rejects_update_config_run_only_flags() {
+    let dry_run = super::Mode::parse(vec![
+        "update".into(),
+        "config".into(),
+        "server".into(),
+        "--host".into(),
+        "tootie".into(),
+        "--home".into(),
+        "/mnt/cache/appdata/cortex".into(),
+        "--dry-run".into(),
+    ])
+    .unwrap_err();
+    assert!(
+        dry_run.to_string().contains("--dry-run is only valid"),
+        "got: {dry_run}"
+    );
+
+    let binary = super::Mode::parse(vec![
+        "update".into(),
+        "config".into(),
+        "clients".into(),
+        "--hosts".into(),
+        "dookie".into(),
+        "--binary".into(),
+        "/tmp/cortex".into(),
+    ])
+    .unwrap_err();
+    assert!(
+        binary.to_string().contains("--binary is only valid"),
+        "got: {binary}"
+    );
+}
+
+#[test]
+fn mode_parse_rejects_update_server_binary_flag() {
+    let err = super::Mode::parse(vec![
+        "update".into(),
+        "server".into(),
+        "--binary".into(),
+        "/tmp/cortex".into(),
+    ])
+    .unwrap_err();
+
+    assert!(
+        err.to_string().contains("--binary is only valid"),
+        "got: {err}"
+    );
+}
+
+#[test]
 fn mode_parse_setup_subcommands_default_to_check_and_parse_remove() {
     let cases = [
         (
