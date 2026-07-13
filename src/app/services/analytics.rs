@@ -293,6 +293,21 @@ impl CortexService {
         })
     }
 
+    pub async fn ingest_source_kind_health(
+        &self,
+    ) -> ServiceResult<Vec<db::IngestSourceKindHealth>> {
+        let now_dt = Utc::now();
+        let now = rfc3339_z(now_dt);
+        let cut_15m = rfc3339_z(now_dt - chrono::Duration::minutes(15));
+        let cut_1h = rfc3339_z(now_dt - chrono::Duration::hours(1));
+        let cut_24h = rfc3339_z(now_dt - chrono::Duration::hours(24));
+
+        self.run_db("ingest_source_kind_health", move |pool| {
+            db::ingest_source_kind_health(pool, &now, &cut_15m, &cut_1h, &cut_24h)
+        })
+        .await
+    }
+
     pub async fn silent_hosts(
         &self,
         req: SilentHostsRequest,

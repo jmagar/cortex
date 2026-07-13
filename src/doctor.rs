@@ -1,7 +1,9 @@
 use anyhow::Result;
 use serde::Serialize;
+use std::collections::HashMap;
 
 use crate::{
+    app::{FleetStateRequest, FleetStateSummary},
     compose::{
         self, CliDockerInspect, ComposeDefaults, ComposeService, ComposeTarget, DiagnosticSeverity,
         ProcessRunner,
@@ -104,11 +106,24 @@ impl DoctorPhase {
 struct DoctorSection {
     header: &'static str,
     phases: Vec<DoctorPhase>,
+    show_ok_details: bool,
 }
 
 impl DoctorSection {
     fn new(header: &'static str, phases: Vec<DoctorPhase>) -> Self {
-        Self { header, phases }
+        Self {
+            header,
+            phases,
+            show_ok_details: false,
+        }
+    }
+
+    fn verbose(header: &'static str, phases: Vec<DoctorPhase>) -> Self {
+        Self {
+            header,
+            phases,
+            show_ok_details: true,
+        }
     }
 
     fn error_count(&self) -> usize {
@@ -165,7 +180,9 @@ impl DoctorSection {
         };
         println!("{header_out} {counts_out}");
         for phase in &self.phases {
-            if matches!(phase.status, SetupStatus::Ok | SetupStatus::Skipped) {
+            if !self.show_ok_details
+                && matches!(phase.status, SetupStatus::Ok | SetupStatus::Skipped)
+            {
                 continue;
             }
             println!(
@@ -186,12 +203,17 @@ struct TextDoctorReport {
 
 impl TextDoctorReport {
     async fn collect(fix: bool, yes: bool) -> Self {
+        let heartbeat_report = collect_heartbeat_report().await;
+        let ingestion_report = collect_ingestion_report(&heartbeat_report).await;
+        let ai_section = collect_ai_section().await;
         Self {
             sections: vec![
                 collect_setup_section(fix, yes).await,
                 collect_compose_section(),
                 collect_binary_section(),
-                collect_ai_section().await,
+                ingestion_report.section(),
+                heartbeat_report.section(),
+                ai_section,
             ],
         }
     }
@@ -225,6 +247,8 @@ struct JsonDoctorReport {
     setup: serde_json::Value,
     compose: serde_json::Value,
     binary: BinaryDoctorReport,
+    ingestion: DoctorIngestionReport,
+    heartbeats: DoctorHeartbeatReport,
     ai: serde_json::Value,
 }
 
@@ -252,10 +276,15 @@ impl JsonDoctorReport {
             Err(e) => serde_json::json!({"error": e.to_string()}),
         };
 
+        let heartbeats = collect_heartbeat_report().await;
+        let ingestion = collect_ingestion_report(&heartbeats).await;
+
         Self {
             setup,
             compose,
             binary: BinaryDoctorReport::collect(),
+            ingestion,
+            heartbeats,
             ai,
         }
     }
@@ -308,11 +337,15 @@ impl JsonDoctorReport {
         // collect_ai_section).
         let top_level_errors = u64::from(self.setup.get("error").is_some())
             + u64::from(self.compose.get("error").is_some())
+            + u64::from(self.ingestion.error.is_some())
+            + u64::from(self.heartbeats.error.is_some())
             + u64::from(self.ai.get("error").is_some());
 
         setup_errors.saturating_sub(setup_dev_errors)
             + compose_errors
             + self.binary.runtime_error_count()
+            + self.ingestion.error_count()
+            + self.heartbeats.error_count()
             + top_level_errors
     }
 }
@@ -500,6 +533,370 @@ fn collect_binary_section() -> DoctorSection {
         "Binary",
         vec![DoctorPhase::new(status, "runtime_current", detail)],
     )
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct DoctorIngestionReport {
+    methods: Vec<DoctorIngestionMethod>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
+impl DoctorIngestionReport {
+    fn error_count(&self) -> u64 {
+        self.methods
+            .iter()
+            .filter(|method| matches!(method.status, SetupStatus::Error))
+            .count() as u64
+    }
+
+    fn section(&self) -> DoctorSection {
+        let phases = if let Some(error) = &self.error {
+            vec![DoctorPhase::new(
+                SetupStatus::Error,
+                "ingestion_health",
+                error.clone(),
+            )]
+        } else {
+            self.methods
+                .iter()
+                .map(|method| {
+                    DoctorPhase::new(method.status.clone(), method.name.clone(), method.detail())
+                })
+                .collect()
+        };
+        DoctorSection::verbose("Ingestion", phases)
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct DoctorIngestionMethod {
+    name: String,
+    status: SetupStatus,
+    detail: String,
+    last_seen: Option<String>,
+    last_15m: i64,
+    last_1h: i64,
+    last_24h: i64,
+}
+
+impl DoctorIngestionMethod {
+    fn new(
+        name: impl Into<String>,
+        status: SetupStatus,
+        detail: impl Into<String>,
+        counts: IngestionCounts,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            status,
+            detail: detail.into(),
+            last_seen: counts.last_seen,
+            last_15m: counts.last_15m,
+            last_1h: counts.last_1h,
+            last_24h: counts.last_24h,
+        }
+    }
+
+    fn detail(&self) -> String {
+        format!(
+            "{}; rows 15m={} 1h={} 24h={} last={}",
+            self.detail,
+            self.last_15m,
+            self.last_1h,
+            self.last_24h,
+            self.last_seen.as_deref().unwrap_or("-")
+        )
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct IngestionCounts {
+    last_seen: Option<String>,
+    last_15m: i64,
+    last_1h: i64,
+    last_24h: i64,
+}
+
+impl IngestionCounts {
+    fn add(&mut self, source: &crate::db::IngestSourceKindHealth) {
+        self.last_15m += source.last_15m;
+        self.last_1h += source.last_1h;
+        self.last_24h += source.last_24h;
+        if self
+            .last_seen
+            .as_deref()
+            .is_none_or(|seen| source.last_seen.as_str() > seen)
+        {
+            self.last_seen = Some(source.last_seen.clone());
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct DoctorHeartbeatReport {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    summary: Option<FleetStateSummary>,
+    hosts: Vec<DoctorHeartbeatHost>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
+impl DoctorHeartbeatReport {
+    fn error_count(&self) -> u64 {
+        self.hosts
+            .iter()
+            .filter(|host| matches!(host.status, SetupStatus::Error))
+            .count() as u64
+    }
+
+    fn section(&self) -> DoctorSection {
+        let phases = if let Some(error) = &self.error {
+            vec![DoctorPhase::new(
+                SetupStatus::Error,
+                "fleet_state",
+                error.clone(),
+            )]
+        } else if self.hosts.is_empty() {
+            vec![DoctorPhase::new(
+                SetupStatus::Warn,
+                "fleet_state",
+                "no heartbeat hosts found",
+            )]
+        } else {
+            self.hosts
+                .iter()
+                .map(|host| {
+                    DoctorPhase::new(host.status.clone(), host.hostname.clone(), host.detail())
+                })
+                .collect()
+        };
+        DoctorSection::verbose("Heartbeats", phases)
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct DoctorHeartbeatHost {
+    host_id: String,
+    hostname: String,
+    status: SetupStatus,
+    fleet_status: String,
+    last_heartbeat_at: String,
+    pressure: Vec<String>,
+    partial: bool,
+    clock_skew: bool,
+}
+
+impl DoctorHeartbeatHost {
+    fn detail(&self) -> String {
+        let pressure = if self.pressure.is_empty() {
+            "-".to_string()
+        } else {
+            self.pressure.join(",")
+        };
+        format!(
+            "status={} last={} partial={} clock_skew={} pressure={}",
+            self.fleet_status, self.last_heartbeat_at, self.partial, self.clock_skew, pressure
+        )
+    }
+}
+
+async fn collect_ingestion_report(
+    heartbeat_report: &DoctorHeartbeatReport,
+) -> DoctorIngestionReport {
+    let compose_svc =
+        ComposeService::new(CliDockerInspect, ProcessRunner, ComposeDefaults::default());
+    let compose_status = compose_svc.status(&ComposeTarget::default()).ok();
+    let source_rows = match RuntimeCore::load_query_only().await {
+        Ok(runtime) => runtime
+            .service()
+            .ingest_source_kind_health()
+            .await
+            .unwrap_or_default(),
+        Err(_) => Vec::new(),
+    };
+    let by_kind: HashMap<String, crate::db::IngestSourceKindHealth> = source_rows
+        .into_iter()
+        .map(|row| (row.source_kind.clone(), row))
+        .collect();
+
+    let mut methods = Vec::new();
+
+    let syslog_counts = counts_for(&by_kind, &["syslog-udp", "syslog-tcp"]);
+    let syslog_ok = compose_status.as_ref().is_some_and(|status| {
+        has_public_port(status, 1514, "udp") && has_public_port(status, 1514, "tcp")
+    });
+    methods.push(DoctorIngestionMethod::new(
+        "syslog",
+        if syslog_ok {
+            SetupStatus::Ok
+        } else {
+            SetupStatus::Error
+        },
+        if syslog_ok {
+            "UDP/TCP :1514 published"
+        } else {
+            "UDP/TCP :1514 is not published by the resolved cortex container"
+        },
+        syslog_counts,
+    ));
+
+    let otlp_counts = counts_for(&by_kind, &["otlp"]);
+    let http_ok = compose_status
+        .as_ref()
+        .is_some_and(|status| has_public_port(status, 3100, "tcp"));
+    methods.push(DoctorIngestionMethod::new(
+        "otlp",
+        if http_ok {
+            SetupStatus::Ok
+        } else {
+            SetupStatus::Error
+        },
+        if http_ok {
+            "HTTP :3100 published for /v1/logs"
+        } else {
+            "HTTP :3100 is not published by the resolved cortex container"
+        },
+        otlp_counts,
+    ));
+
+    methods.push(data_driven_method(
+        "docker",
+        counts_for(&by_kind, &["docker-stream", "docker-event"]),
+    ));
+    methods.push(data_driven_method(
+        "file-tail",
+        counts_for(&by_kind, &["file-tail"]),
+    ));
+    methods.push(data_driven_method(
+        "agent-command",
+        counts_for(&by_kind, &["agent-command"]),
+    ));
+    methods.push(data_driven_method(
+        "shell-history",
+        counts_for(&by_kind, &["shell-history"]),
+    ));
+
+    let transcript_counts = counts_for(&by_kind, &["transcript"]);
+    let mut transcript_status = SetupStatus::Warn;
+    let mut transcript_detail = "sessions watcher status unavailable".to_string();
+    if let Ok(runtime) = RuntimeCore::load_query_only().await {
+        match runtime.service().ai_watch_status().await {
+            Ok(status) => {
+                let active = status.active.as_deref() == Some("active");
+                let healthy = status.health.as_ref().is_some_and(|health| {
+                    health.recent_failure_count == 0 && !health.schema_drift_detected
+                });
+                transcript_status = if active && healthy {
+                    SetupStatus::Ok
+                } else if active {
+                    SetupStatus::Warn
+                } else {
+                    SetupStatus::Error
+                };
+                transcript_detail = format!(
+                    "watch active={} last_successful={}",
+                    active,
+                    status
+                        .health
+                        .as_ref()
+                        .and_then(|health| health.last_successful_ingest_at.as_deref())
+                        .unwrap_or("-")
+                );
+            }
+            Err(error) => {
+                transcript_status = SetupStatus::Warn;
+                transcript_detail = error.to_string();
+            }
+        }
+    }
+    methods.push(DoctorIngestionMethod::new(
+        "ai-transcripts",
+        transcript_status,
+        transcript_detail,
+        transcript_counts,
+    ));
+
+    let heartbeat_status = if heartbeat_report.error.is_some() {
+        SetupStatus::Error
+    } else if heartbeat_report.hosts.is_empty()
+        || heartbeat_report
+            .hosts
+            .iter()
+            .any(|host| matches!(host.status, SetupStatus::Error))
+    {
+        SetupStatus::Warn
+    } else {
+        SetupStatus::Ok
+    };
+    let heartbeat_detail = heartbeat_report
+        .summary
+        .as_ref()
+        .map(|summary| {
+            format!(
+                "fleet hosts={} ok={} late={} partial={} pressure={}",
+                summary.total, summary.ok, summary.late, summary.partial, summary.pressure
+            )
+        })
+        .unwrap_or_else(|| {
+            heartbeat_report
+                .error
+                .clone()
+                .unwrap_or_else(|| "no heartbeat hosts found".to_string())
+        });
+    methods.push(DoctorIngestionMethod::new(
+        "heartbeats",
+        heartbeat_status,
+        heartbeat_detail,
+        IngestionCounts::default(),
+    ));
+
+    DoctorIngestionReport {
+        methods,
+        error: None,
+    }
+}
+
+async fn collect_heartbeat_report() -> DoctorHeartbeatReport {
+    match RuntimeCore::load_query_only().await {
+        Ok(runtime) => match runtime
+            .service()
+            .fleet_state(FleetStateRequest {
+                include_ok: Some(true),
+                sort: Some("hostname".to_string()),
+            })
+            .await
+        {
+            Ok(fleet) => DoctorHeartbeatReport {
+                summary: Some(fleet.summary),
+                hosts: fleet
+                    .hosts
+                    .into_iter()
+                    .map(|host| DoctorHeartbeatHost {
+                        host_id: host.host_id,
+                        hostname: host.hostname,
+                        status: heartbeat_setup_status(&host.status),
+                        fleet_status: host.status,
+                        last_heartbeat_at: host.last_heartbeat_at,
+                        pressure: host.pressure,
+                        partial: host.partial,
+                        clock_skew: host.clock_skew,
+                    })
+                    .collect(),
+                error: None,
+            },
+            Err(error) => DoctorHeartbeatReport {
+                summary: None,
+                hosts: Vec::new(),
+                error: Some(error.to_string()),
+            },
+        },
+        Err(error) => DoctorHeartbeatReport {
+            summary: None,
+            hosts: Vec::new(),
+            error: Some(error.to_string()),
+        },
+    }
 }
 
 async fn collect_ai_section() -> DoctorSection {
@@ -767,6 +1164,45 @@ fn diag_status(sev: &DiagnosticSeverity) -> SetupStatus {
         DiagnosticSeverity::Error | DiagnosticSeverity::Unsafe => SetupStatus::Error,
         DiagnosticSeverity::Warning => SetupStatus::Warn,
         DiagnosticSeverity::Info => SetupStatus::Ok,
+    }
+}
+
+fn has_public_port(status: &compose::ComposeStatus, port: u16, protocol: &str) -> bool {
+    status.ports.iter().any(|published| {
+        published.public_port == Some(port) && published.protocol.eq_ignore_ascii_case(protocol)
+    })
+}
+
+fn counts_for(
+    by_kind: &HashMap<String, crate::db::IngestSourceKindHealth>,
+    kinds: &[&str],
+) -> IngestionCounts {
+    let mut counts = IngestionCounts::default();
+    for kind in kinds {
+        if let Some(source) = by_kind.get(*kind) {
+            counts.add(source);
+        }
+    }
+    counts
+}
+
+fn data_driven_method(name: &'static str, counts: IngestionCounts) -> DoctorIngestionMethod {
+    let (status, detail) = if counts.last_1h > 0 {
+        (SetupStatus::Ok, "recent accepted rows")
+    } else if counts.last_24h > 0 {
+        (SetupStatus::Warn, "no accepted rows in the last hour")
+    } else {
+        (SetupStatus::Skipped, "no accepted rows in the last 24h")
+    };
+    DoctorIngestionMethod::new(name, status, detail, counts)
+}
+
+fn heartbeat_setup_status(status: &str) -> SetupStatus {
+    match status {
+        "ok" => SetupStatus::Ok,
+        "late" => SetupStatus::Error,
+        "partial" | "pressure" => SetupStatus::Warn,
+        _ => SetupStatus::Warn,
     }
 }
 

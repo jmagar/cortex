@@ -106,6 +106,7 @@ pub use models::{
     FilterLogsRequest,
     FleetStateRequest,
     FleetStateResponse,
+    FleetStateSummary,
     GetErrorsRequest,
     GetErrorsResponse,
     GetLogRequest,
