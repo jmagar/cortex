@@ -3,7 +3,7 @@
   "name": "ai.dinglebear/cortex-rmcp",
   "title": "Cortex RMCP",
   "description": "Rust MCP server for homelab logs, syslog, Docker logs, FTS search, and AI transcript correlation.",
-  "version": "3.9.1",
+  "version": "3.10.0",
   "websiteUrl": "https://github.com/jmagar/cortex",
   "repository": {
     "url": "https://github.com/jmagar/cortex",
