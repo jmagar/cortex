@@ -574,6 +574,126 @@ fn parse_deploy_agent_reports_missing_option_values() {
 }
 
 #[test]
+fn mode_parse_accepts_update_defaults_to_all() {
+    let mode = super::Mode::parse(vec!["update".into()]).unwrap();
+
+    assert!(matches!(
+        mode,
+        super::Mode::Update(super::UpdateCommand {
+            kind: super::UpdateCommandKind::Run {
+                scope: cortex::update::UpdateScope::All,
+                dry_run: false,
+                profile: None,
+                binary: None,
+            },
+            json: false,
+        })
+    ));
+}
+
+#[test]
+fn mode_parse_accepts_update_server_dry_run_json_profile() {
+    let mode = super::Mode::parse(vec![
+        "update".into(),
+        "server".into(),
+        "--dry-run".into(),
+        "--json".into(),
+        "--profile".into(),
+        "/tmp/deployments.toml".into(),
+    ])
+    .unwrap();
+
+    assert!(matches!(
+        mode,
+        super::Mode::Update(super::UpdateCommand {
+            kind: super::UpdateCommandKind::Run {
+                scope: cortex::update::UpdateScope::Server,
+                dry_run: true,
+                profile: Some(ref profile),
+                binary: None,
+            },
+            json: true,
+        }) if profile == "/tmp/deployments.toml"
+    ));
+}
+
+#[test]
+fn mode_parse_accepts_update_clients_aliases() {
+    for scope_name in ["clients", "agents"] {
+        let mode = super::Mode::parse(vec!["update".into(), scope_name.into()]).unwrap();
+        assert!(matches!(
+            mode,
+            super::Mode::Update(super::UpdateCommand {
+                kind: super::UpdateCommandKind::Run {
+                    scope: cortex::update::UpdateScope::Clients,
+                    ..
+                },
+                ..
+            })
+        ));
+    }
+}
+
+#[test]
+fn mode_parse_accepts_update_config_server() {
+    let mode = super::Mode::parse(vec![
+        "update".into(),
+        "config".into(),
+        "server".into(),
+        "--host".into(),
+        "tootie".into(),
+        "--home".into(),
+        "/mnt/cache/appdata/cortex".into(),
+        "--profile".into(),
+        "/tmp/deployments.toml".into(),
+        "--json".into(),
+    ])
+    .unwrap();
+
+    assert!(matches!(
+        mode,
+        super::Mode::Update(super::UpdateCommand {
+            kind: super::UpdateCommandKind::ConfigServer {
+                ref host,
+                ref home,
+                profile: Some(ref profile),
+            },
+            json: true,
+        }) if host == "tootie" && home == "/mnt/cache/appdata/cortex" && profile == "/tmp/deployments.toml"
+    ));
+}
+
+#[test]
+fn mode_parse_accepts_update_config_clients() {
+    let mode = super::Mode::parse(vec![
+        "update".into(),
+        "config".into(),
+        "clients".into(),
+        "--hosts".into(),
+        "dookie,shart".into(),
+        "--target".into(),
+        "https://cortex.tootie.tv".into(),
+        "--docker".into(),
+    ])
+    .unwrap();
+
+    assert!(matches!(
+        mode,
+        super::Mode::Update(super::UpdateCommand {
+            kind: super::UpdateCommandKind::ConfigClients {
+                ref hosts,
+                target: Some(ref target),
+                docker: Some(true),
+                journald: None,
+                profile: None,
+            },
+            json: false,
+        }) if hosts == &vec!["dookie".to_string(), "shart".to_string()]
+             && target == "https://cortex.tootie.tv"
+    ));
+}
+
+#[test]
 fn mode_parse_setup_subcommands_default_to_check_and_parse_remove() {
     let cases = [
         (
