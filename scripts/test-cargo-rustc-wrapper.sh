@@ -7,6 +7,7 @@ trap 'rm -rf "$tmp"' EXIT
 
 export HOME="$tmp/home"
 export CORTEX_RUSTC_WRAPPER_LOCAL_BIN="$HOME/.local/bin/cortex"
+export CARGO_BIN_ARTIFACT_WRAPPER_NO_SCCACHE=1
 export CORTEX_RUSTC_WRAPPER_NO_SCCACHE=1
 mkdir -p "$HOME/.local/bin" "$tmp/target/debug/deps" "$tmp/target/release/deps"
 
