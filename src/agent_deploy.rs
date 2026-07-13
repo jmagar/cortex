@@ -42,6 +42,10 @@ impl HostProbe {
 pub struct AgentDeployConfig {
     pub target: Option<String>,
     pub token: Option<String>,
+    /// Require an effective heartbeat token after flag/persisted-env resolution.
+    /// `cortex update clients` sets this because it updates already configured
+    /// agents and must not silently strip auth when a remote env read fails.
+    pub require_token: bool,
     /// `None` = not specified on the CLI → preserve the host's existing value on
     /// an upgrade (rather than reset to the default).
     pub docker: Option<bool>,
@@ -329,6 +333,15 @@ fn run_deploy(host: &str, local_binary: &Path, config: &AgentDeployConfig) -> io
         return run_deploy_unraid(host, local_binary, config);
     }
 
+    let env_pairs = resolve_linux_agent_env(
+        &parse_env_file(&read_optional_remote_file(
+            host,
+            "$HOME/.cortex/heartbeat-agent.env",
+        )?),
+        config,
+    );
+    require_token_if_requested(&env_pairs, config)?;
+
     ssh_run(host, "mkdir -p ~/.local/bin")?;
     // scp to a temp path then mv atomically — avoids ETXTBSY if the binary is
     // currently running as a service on the remote host.
@@ -337,17 +350,6 @@ fn run_deploy(host: &str, local_binary: &Path, config: &AgentDeployConfig) -> io
         host,
         "chmod +x ~/.local/bin/cortex.new && mv -f ~/.local/bin/cortex.new ~/.local/bin/cortex",
     )?;
-
-    let env_pairs = resolve_linux_agent_env(
-        &parse_env_file(
-            &ssh_capture(
-                host,
-                "cat ~/.cortex/heartbeat-agent.env 2>/dev/null || true",
-            )
-            .unwrap_or_default(),
-        ),
-        config,
-    );
     let prefix = if env_pairs.is_empty() {
         String::new()
     } else {
@@ -393,28 +395,25 @@ fn run_deploy_unraid(
     // update between republishes, but the image is the source of truth).
     let image = format!("{CORTEX_IMAGE_REPO}:{}", env!("CARGO_PKG_VERSION"));
     ssh_run(host, &format!("mkdir -p {UNRAID_APPDATA}"))?;
-    ssh_run(host, &format!("docker pull {image}"))?;
 
     // Config-preserving upgrade: resolve the container env from the host's
     // persisted heartbeat-agent.env (flag > persisted > default per key, custom
     // keys like CORTEX_AGENT_FILE_TAILS carried through), and carry forward any
     // non-standard mounts (e.g. the host log dir a file-tail reads) from the
-    // running container. Both reads are best-effort (`|| true`): a first-time
-    // deploy has neither, and resolve_agent_env falls back to flag defaults.
+    // running container.
     let env_pairs = resolve_agent_env(
-        &parse_env_file(
-            &ssh_capture(host, &format!("cat {UNRAID_ENV} 2>/dev/null || true"))
-                .unwrap_or_default(),
-        ),
+        &parse_env_file(&read_optional_remote_file(host, UNRAID_ENV)?),
         config,
     );
-    let custom_mounts: String = preserved_custom_mount_flags(
-        &ssh_capture(
-            host,
-            &format!("docker inspect {UNRAID_CONTAINER} --format '{MOUNT_INSPECT_TMPL}' 2>/dev/null || true"),
-        )
-        .unwrap_or_default(),
-    )
+    require_token_if_requested(&env_pairs, config)?;
+    ssh_run(host, &format!("docker pull {image}"))?;
+
+    let custom_mounts: String = preserved_custom_mount_flags(&ssh_capture(
+        host,
+        &format!(
+            "docker inspect {UNRAID_CONTAINER} --format '{MOUNT_INSPECT_TMPL}' 2>/dev/null || true"
+        ),
+    )?)
     .concat();
 
     // Persist the resolved env (reference / manual restarts), then chmod 600. The
@@ -489,7 +488,7 @@ fn parse_env_file(contents: &str) -> Vec<(String, String)> {
         .filter(|line| !line.is_empty() && !line.starts_with('#'))
         .filter_map(|line| line.split_once('='))
         .map(|(k, v)| (k.trim().to_string(), v.to_string()))
-        .filter(|(k, _)| !k.is_empty())
+        .filter(|(k, _)| is_safe_env_key(k))
         .collect()
 }
 
@@ -543,6 +542,11 @@ fn resolve_linux_agent_env(
     if let Some(syslog_file) = prev_get("CORTEX_AGENT_SYSLOG_FILE") {
         out.push(("CORTEX_AGENT_SYSLOG_FILE".to_string(), syslog_file));
     }
+    for key in crate::heartbeat_agent::OPTIONAL_ENV_KEYS {
+        if let Some(value) = prev_get(key) {
+            out.push(((*key).to_string(), value));
+        }
+    }
     let syslog_target = if config.target.is_some() {
         deploy_syslog_target(target.as_deref())
     } else {
@@ -552,6 +556,24 @@ fn resolve_linux_agent_env(
         out.push(("CORTEX_SYSLOG_TARGET".to_string(), syslog_target));
     }
     out
+}
+
+fn require_token_if_requested(
+    env_pairs: &[(String, String)],
+    config: &AgentDeployConfig,
+) -> io::Result<()> {
+    if !config.require_token
+        || env_pairs
+            .iter()
+            .any(|(key, value)| key == "CORTEX_HEARTBEAT_TOKEN" && !value.trim().is_empty())
+    {
+        return Ok(());
+    }
+
+    Err(io::Error::new(
+        io::ErrorKind::InvalidData,
+        "client update requires existing CORTEX_HEARTBEAT_TOKEN on the remote agent; repair the client with `cortex setup deploy agent --heartbeat-token ...`",
+    ))
 }
 
 /// Resolve the agent container env for a (re)deploy using precedence
@@ -700,7 +722,20 @@ fn ssh_capture(host: &str, cmd: &str) -> io::Result<String> {
             cmd,
         ])
         .output()?;
+    if !out.status.success() {
+        return Err(io::Error::other(format!(
+            "ssh {host}: '{}' exited non-zero",
+            redact_secret_envs(cmd)
+        )));
+    }
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+fn read_optional_remote_file(host: &str, remote_path_expr: &str) -> io::Result<String> {
+    ssh_capture(
+        host,
+        &format!("if [ -e {remote_path_expr} ]; then cat {remote_path_expr}; fi"),
+    )
 }
 
 fn ssh_run(host: &str, cmd: &str) -> io::Result<()> {
@@ -762,12 +797,65 @@ fn validate_ssh_host(host: &str) -> io::Result<()> {
 }
 
 fn redact_secret_envs(input: &str) -> String {
-    const SECRET_KEYS: &[&str] = &["CORTEX_HEARTBEAT_TOKEN", "CORTEX_TOKEN", "CORTEX_API_TOKEN"];
+    let mut keys: BTreeSet<String> = ["CORTEX_HEARTBEAT_TOKEN", "CORTEX_TOKEN", "CORTEX_API_TOKEN"]
+        .into_iter()
+        .map(String::from)
+        .collect();
+    collect_secret_env_assignment_keys(input, &mut keys);
+
     let mut redacted = input.to_string();
-    for key in SECRET_KEYS {
-        redacted = redact_env_assignment(&redacted, key);
+    for key in keys {
+        redacted = redact_env_assignment(&redacted, &key);
     }
     redacted
+}
+
+fn collect_secret_env_assignment_keys(input: &str, out: &mut BTreeSet<String>) {
+    for (equals, ch) in input.char_indices() {
+        if ch != '=' {
+            continue;
+        }
+        let start = input[..equals]
+            .char_indices()
+            .rev()
+            .find_map(|(idx, ch)| (!is_env_key_char(ch)).then_some(idx + ch.len_utf8()))
+            .unwrap_or(0);
+        let key = &input[start..equals];
+        if is_safe_env_key(key)
+            && is_env_assignment_boundary(input, start)
+            && is_secret_env_key(key)
+        {
+            out.insert(key.to_string());
+        }
+    }
+}
+
+fn is_env_assignment_boundary(input: &str, start: usize) -> bool {
+    start == 0
+        || input[..start]
+            .chars()
+            .last()
+            .is_none_or(|ch| ch.is_ascii_whitespace() || ch == '\'' || ch == '"')
+}
+
+fn is_secret_env_key(key: &str) -> bool {
+    let upper = key.to_ascii_uppercase();
+    upper.contains("TOKEN")
+        || upper.contains("SECRET")
+        || upper.contains("PASSWORD")
+        || upper.contains("API_KEY")
+        || upper == "KEY"
+        || upper.ends_with("_KEY")
+}
+
+fn is_safe_env_key(key: &str) -> bool {
+    let mut chars = key.chars();
+    matches!(chars.next(), Some(first) if first == '_' || first.is_ascii_alphabetic())
+        && chars.all(is_env_key_char)
+}
+
+fn is_env_key_char(ch: char) -> bool {
+    ch == '_' || ch.is_ascii_alphanumeric()
 }
 
 fn redact_env_assignment(input: &str, key: &str) -> String {

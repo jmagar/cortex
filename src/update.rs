@@ -3,6 +3,7 @@ use std::path::{Component, Path, PathBuf};
 use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
+use url::Url;
 
 use crate::agent_deploy::{
     AgentDeployConfig, DeployResult, HostProbe, deploy_agent_to_host, find_local_binary,
@@ -118,11 +119,15 @@ pub fn configure_clients_profile(
         ));
     }
     let mut profile = load_profile(&path)?;
+    let target = match target {
+        Some(target) => Some(validate_client_target(&target)?),
+        None => profile.clients.target.clone(),
+    };
     profile.clients = ClientsUpdateProfile {
         hosts: validated,
         target,
-        docker,
-        journald,
+        docker: docker.or(profile.clients.docker),
+        journald: journald.or(profile.clients.journald),
     };
     write_profile(&path, &profile)?;
     Ok(profile)
@@ -156,6 +161,10 @@ trait UpdateRunner {
     fn find_binary(&self) -> Option<PathBuf>;
 
     fn probe_clients(&mut self, hosts: Vec<String>) -> Vec<HostProbe>;
+
+    fn validate_binary(&self, path: &Path) -> io::Result<()> {
+        validate_agent_binary(path)
+    }
 }
 
 struct RealUpdateRunner;
@@ -267,6 +276,7 @@ fn run_update_with_runner(
             let config = AgentDeployConfig {
                 target: profile.clients.target.clone(),
                 token: None,
+                require_token: true,
                 docker: profile.clients.docker,
                 journald: profile.clients.journald,
             };
@@ -287,11 +297,39 @@ fn run_update_with_runner(
 }
 
 fn resolve_agent_binary(options: &UpdateOptions, runner: &dyn UpdateRunner) -> io::Result<PathBuf> {
-    options
+    let binary = options
         .binary
         .clone()
         .or_else(|| runner.find_binary())
-        .ok_or_else(|| io::Error::new(ErrorKind::NotFound, "cortex binary not found"))
+        .ok_or_else(|| io::Error::new(ErrorKind::NotFound, "cortex binary not found"))?;
+    runner.validate_binary(&binary)?;
+    Ok(binary)
+}
+
+fn validate_agent_binary(path: &Path) -> io::Result<()> {
+    let metadata = std::fs::metadata(path).map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!("cortex binary {} is not usable: {error}", path.display()),
+        )
+    })?;
+    if !metadata.is_file() {
+        return Err(io::Error::new(
+            ErrorKind::InvalidInput,
+            format!("cortex binary {} is not a file", path.display()),
+        ));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if metadata.permissions().mode() & 0o111 == 0 {
+            return Err(io::Error::new(
+                ErrorKind::PermissionDenied,
+                format!("cortex binary {} is not executable", path.display()),
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn client_preflight_results(hosts: &[String], probes: Vec<HostProbe>) -> Vec<DeployResult> {
@@ -354,6 +392,9 @@ fn validate_loaded_profile(mut profile: UpdateProfile) -> io::Result<UpdateProfi
         .iter()
         .map(|host| validate_host(host))
         .collect::<io::Result<Vec<_>>>()?;
+    if let Some(target) = profile.clients.target.take() {
+        profile.clients.target = Some(validate_client_target(&target)?);
+    }
     Ok(profile)
 }
 
@@ -370,6 +411,23 @@ fn validate_host(host: &str) -> io::Result<String> {
         return Err(io::Error::new(
             ErrorKind::InvalidInput,
             format!("unsafe ssh host: {host}"),
+        ));
+    }
+    Ok(trimmed.to_string())
+}
+
+fn validate_client_target(target: &str) -> io::Result<String> {
+    let trimmed = target.trim();
+    let parsed = Url::parse(trimmed).map_err(|error| {
+        io::Error::new(
+            ErrorKind::InvalidInput,
+            format!("client target must be an http(s) URL: {error}"),
+        )
+    })?;
+    if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
+        return Err(io::Error::new(
+            ErrorKind::InvalidInput,
+            "client target must be an http(s) URL with a host",
         ));
     }
     Ok(trimmed.to_string())

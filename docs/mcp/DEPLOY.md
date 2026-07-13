@@ -79,6 +79,11 @@ deploy records the server profile so later updates do not repeat host/home
 details; otherwise configure it with
 `cortex update config server --host HOST --home PATH`.
 
+Client-agent updates preserve the existing remote heartbeat-agent env and fail
+if the saved token cannot be read or preserved. Use
+`cortex setup deploy agent --heartbeat-token ...` for first-time client
+bootstrap or token repair, then return to `cortex update clients`.
+
 Use `--dry-run` first to verify SSH and Docker prerequisites. Non-dry-run remote
 deploy preserves existing remote env values from `<home>/.env` or the legacy
 `<home>/compose/.env` path, but it intentionally drops `CORTEX_VERSION` so the

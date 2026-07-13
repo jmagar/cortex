@@ -335,6 +335,7 @@ fn run_deploy_agent(
     let config = AgentDeployConfig {
         target,
         token,
+        require_token: false,
         docker,
         journald,
     };
@@ -406,9 +407,10 @@ async fn run_update(command: UpdateCommand) -> Result<()> {
             journald,
             profile,
         } => {
+            let hosts_label = hosts.join(",");
             let profile = cortex::update::configure_clients_profile(
                 profile.as_deref().map(std::path::Path::new),
-                hosts.clone(),
+                hosts,
                 target,
                 docker,
                 journald,
@@ -417,7 +419,7 @@ async fn run_update(command: UpdateCommand) -> Result<()> {
                 println!("{}", serde_json::to_string_pretty(&profile)?);
             } else {
                 println!("cortex update config clients");
-                println!("hosts: {}", hosts.join(","));
+                println!("hosts: {hosts_label}");
             }
         }
     }
@@ -1127,7 +1129,6 @@ fn parse_deploy_command(args: &[String]) -> Result<DeployCommand> {
 fn parse_update_command(args: &[String]) -> Result<UpdateCommand> {
     let mut json = false;
     let mut dry_run = false;
-    let mut saw_dry_run = false;
     let mut profile: Option<String> = None;
     let mut binary: Option<String> = None;
     let mut rest = Vec::new();
@@ -1137,7 +1138,6 @@ fn parse_update_command(args: &[String]) -> Result<UpdateCommand> {
             "--json" => json = true,
             "--dry-run" => {
                 dry_run = true;
-                saw_dry_run = true;
             }
             "--profile" => {
                 i += 1;
@@ -1157,7 +1157,7 @@ fn parse_update_command(args: &[String]) -> Result<UpdateCommand> {
     }
 
     if rest.first().map(String::as_str) == Some("config") {
-        if saw_dry_run {
+        if dry_run {
             anyhow::bail!("--dry-run is only valid for `cortex update` run scopes");
         }
         if binary.is_some() {

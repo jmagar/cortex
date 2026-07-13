@@ -143,6 +143,49 @@ fn configure_server_profile_rejects_unsafe_values() {
     assert!(parent_home.to_string().contains("must not contain '..'"));
 }
 
+#[test]
+fn configure_clients_profile_merges_omitted_options() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = profile_path(&dir);
+    configure_clients_profile(
+        Some(&path),
+        vec!["dookie".to_string()],
+        Some("https://cortex.tootie.tv".to_string()),
+        Some(true),
+        Some(false),
+    )
+    .unwrap();
+
+    let updated =
+        configure_clients_profile(Some(&path), vec!["shart".to_string()], None, None, None)
+            .unwrap();
+
+    assert_eq!(updated.clients.hosts, vec!["shart"]);
+    assert_eq!(
+        updated.clients.target.as_deref(),
+        Some("https://cortex.tootie.tv")
+    );
+    assert_eq!(updated.clients.docker, Some(true));
+    assert_eq!(updated.clients.journald, Some(false));
+}
+
+#[test]
+fn configure_clients_profile_rejects_invalid_target() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = profile_path(&dir);
+
+    let error = configure_clients_profile(
+        Some(&path),
+        vec!["dookie".to_string()],
+        Some("not a url".to_string()),
+        None,
+        None,
+    )
+    .unwrap_err();
+
+    assert!(error.to_string().contains("client target"));
+}
+
 #[derive(Default)]
 struct FakeUpdateRunner {
     server_calls: Vec<(String, RemoteDeployOptions)>,
@@ -217,6 +260,31 @@ impl UpdateRunner for FakeUpdateRunner {
             self.probes.clone()
         }
     }
+
+    fn validate_binary(&self, _path: &Path) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+#[test]
+fn validate_agent_binary_rejects_missing_explicit_binary() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = profile_path(&dir);
+    configure_test_clients_profile(&path, client_hosts());
+    let mut runner = RealUpdateRunner;
+
+    let error = run_update_with_runner(
+        UpdateScope::Clients,
+        UpdateOptions {
+            dry_run: true,
+            profile_path: Some(path),
+            binary: Some(dir.path().join("missing-cortex")),
+        },
+        &mut runner,
+    )
+    .unwrap_err();
+
+    assert!(error.to_string().contains("is not usable"));
 }
 
 #[test]
@@ -286,6 +354,23 @@ fn update_clients_deploys_every_configured_client() {
 }
 
 #[test]
+fn update_clients_marks_report_error_when_a_client_deploy_fails() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = profile_path(&dir);
+    configure_test_clients_profile(&path, client_hosts());
+    let mut runner = FakeUpdateRunner {
+        fail_client: Some("shart".to_string()),
+        ..FakeUpdateRunner::default()
+    };
+
+    let report = run_test_update(UpdateScope::Clients, path, false, &mut runner).unwrap();
+
+    assert!(report.has_errors);
+    assert_eq!(runner.client_calls, client_hosts());
+    assert!(report.clients.iter().any(|result| !result.ok));
+}
+
+#[test]
 fn update_clients_dry_run_probes_clients_without_deploying() {
     let dir = tempfile::tempdir().unwrap();
     let path = profile_path(&dir);
@@ -305,6 +390,31 @@ fn update_clients_dry_run_probes_clients_without_deploying() {
             .iter()
             .any(|phase| phase.detail.contains("without deploying"))
     );
+}
+
+#[test]
+fn update_clients_dry_run_marks_missing_probe_as_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = profile_path(&dir);
+    let hosts = client_hosts();
+    configure_test_clients_profile(&path, hosts.clone());
+    let mut runner = FakeUpdateRunner {
+        probes: vec![crate::agent_deploy::HostProbe {
+            host: "dookie".to_string(),
+            reachable: true,
+            cortex_version: Some("3.9.1".to_string()),
+            agent_active: Some(true),
+        }],
+        ..FakeUpdateRunner::default()
+    };
+
+    let report = run_test_update(UpdateScope::Clients, path, true, &mut runner).unwrap();
+
+    assert!(report.has_errors);
+    assert_eq!(report.clients.len(), 2);
+    assert!(report.clients.iter().any(|result| {
+        result.host == "shart" && !result.ok && result.detail.contains("timed out")
+    }));
 }
 
 #[test]
@@ -334,6 +444,32 @@ fn update_clients_revalidates_loaded_profile_hosts() {
 }
 
 #[test]
+fn update_clients_revalidates_loaded_profile_target() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = profile_path(&dir);
+    write_profile(
+        &path,
+        &UpdateProfile {
+            server: None,
+            clients: ClientsUpdateProfile {
+                hosts: vec!["dookie".to_string()],
+                target: Some("notaurl".to_string()),
+                docker: None,
+                journald: None,
+            },
+        },
+    )
+    .unwrap();
+    let mut runner = FakeUpdateRunner::default();
+
+    let error = run_test_update(UpdateScope::Clients, path, false, &mut runner).unwrap_err();
+
+    assert!(error.to_string().contains("client target"));
+    assert!(runner.client_calls.is_empty());
+    assert!(runner.probe_calls.is_empty());
+}
+
+#[test]
 fn update_all_stops_before_clients_when_server_fails() {
     let dir = tempfile::tempdir().unwrap();
     let path = profile_path(&dir);
@@ -349,4 +485,19 @@ fn update_all_stops_before_clients_when_server_fails() {
     assert!(report.has_errors);
     assert!(runner.client_calls.is_empty());
     assert!(report.skipped.iter().any(|phase| phase.name == "clients"));
+}
+
+#[test]
+fn update_all_runs_server_then_clients_when_server_succeeds() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = profile_path(&dir);
+    configure_test_server_profile(&path);
+    configure_test_clients_profile(&path, client_hosts());
+    let mut runner = FakeUpdateRunner::default();
+
+    let report = run_test_update(UpdateScope::All, path, false, &mut runner).unwrap();
+
+    assert!(!report.has_errors);
+    assert_eq!(runner.server_calls.len(), 1);
+    assert_eq!(runner.client_calls, client_hosts());
 }

@@ -836,6 +836,8 @@ cortex update config clients --hosts dookie,shart,squirts --target https://corte
 The profile lives at `~/.cortex/deployments.toml` by default. A successful
 `cortex setup deploy remote --home PATH HOST` also records the server profile,
 so a one-off low-level deploy can seed future `cortex update server` runs.
+Re-running `cortex update config clients` replaces the host list and preserves
+any omitted saved `--target`, `--docker`, or `--journald` choices.
 
 After the profile exists, dry-run before live updates:
 
@@ -852,6 +854,10 @@ updates configured host-agent clients. `clients` and `agents` are aliases; both
 refer to the host-local Cortex agents that forward logs, heartbeats, sessions,
 shell history, and command events into the server. Client dry-runs resolve the
 local binary and probe each configured host over SSH without deploying.
+Live client updates preserve the existing remote heartbeat-agent env before
+reinstalling. Because this is an update path for already configured agents, it
+fails if the remote agent token cannot be read/preserved; use
+`cortex setup deploy agent --heartbeat-token ...` to seed or repair a client.
 
 ### `cortex setup deploy`
 

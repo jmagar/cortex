@@ -262,6 +262,7 @@ esac
         &AgentDeployConfig {
             target: Some("https://cortex.example.test:3100".to_string()),
             token: Some("heartbeat token".to_string()),
+            require_token: false,
             docker: Some(true),
             journald: Some(true),
         },
@@ -291,18 +292,23 @@ fn deploy_agent_to_linux_host_preserves_persisted_env_without_token_profile() {
         &dir.path().join("ssh"),
         r#"#!/bin/sh
 printf 'ssh %s\n' "$*" >> "$CORTEX_TEST_AGENT_DEPLOY_LOG"
-case "$*" in
-  *"/etc/unraid-version"*) printf 'no\n'; exit 0 ;;
-  *"cat ~/.cortex/heartbeat-agent.env"*)
-    printf 'CORTEX_HEARTBEAT_TARGET=https://old.example\n'
-    printf 'CORTEX_HEARTBEAT_TOKEN=preserved-token\n'
-    printf 'CORTEX_AGENT_DOCKER=true\n'
-    printf 'CORTEX_AGENT_JOURNALD=true\n'
-    printf 'CORTEX_SYSLOG_TARGET=old-syslog.example:1514\n'
-    exit 0
-    ;;
-  *) exit 0 ;;
-esac
+	case "$*" in
+	  *"/etc/unraid-version"*) printf 'no\n'; exit 0 ;;
+	  *"heartbeat-agent.env"*)
+	    printf 'CORTEX_HEARTBEAT_TARGET=https://old.example\n'
+	    printf 'CORTEX_HEARTBEAT_TOKEN=preserved-token\n'
+	    printf 'CORTEX_AGENT_DOCKER=true\n'
+	    printf 'CORTEX_AGENT_JOURNALD=true\n'
+	    printf 'CORTEX_SYSLOG_TARGET=old-syslog.example:1514\n'
+	    printf 'CORTEX_AGENT_FILE_TAILS=/var/log/app.log:app\n'
+	    printf 'CORTEX_AGENT_AI_TRANSCRIPTS=true\n'
+	    printf 'CORTEX_AGENT_COMMAND_FORWARD=true\n'
+	    printf 'CORTEX_AGENT_SHELL_HISTORY_FORWARD=true\n'
+	    printf 'CORTEX_AGENT_AUTO_UPDATE=false\n'
+	    exit 0
+	    ;;
+	  *) exit 0 ;;
+	esac
 "#,
     );
     write_logging_scp(dir.path());
@@ -318,6 +324,66 @@ esac
     assert!(log.contains("CORTEX_AGENT_DOCKER='true'"));
     assert!(log.contains("CORTEX_AGENT_JOURNALD='true'"));
     assert!(log.contains("CORTEX_SYSLOG_TARGET='old-syslog.example:1514'"));
+    assert!(log.contains("CORTEX_AGENT_FILE_TAILS='/var/log/app.log:app'"));
+    assert!(log.contains("CORTEX_AGENT_AI_TRANSCRIPTS='true'"));
+    assert!(log.contains("CORTEX_AGENT_COMMAND_FORWARD='true'"));
+    assert!(log.contains("CORTEX_AGENT_SHELL_HISTORY_FORWARD='true'"));
+    assert!(log.contains("CORTEX_AGENT_AUTO_UPDATE='false'"));
+}
+
+#[test]
+#[serial]
+fn deploy_agent_to_linux_host_fails_when_existing_env_read_fails() {
+    let dir = tempfile::tempdir().unwrap();
+    let local_binary = write_local_binary(dir.path());
+    write_executable(
+        &dir.path().join("ssh"),
+        r#"#!/bin/sh
+case "$*" in
+  *"/etc/unraid-version"*) printf 'no\n'; exit 0 ;;
+  *"heartbeat-agent.env"*) exit 13 ;;
+  *) exit 0 ;;
+esac
+"#,
+    );
+    write_successful_scp(dir.path());
+    let _path = prepend_path(dir.path());
+
+    let result = deploy_agent_to_host("linux-host", &local_binary, &AgentDeployConfig::default());
+
+    assert!(!result.ok);
+    assert!(result.detail.contains("heartbeat-agent.env"));
+    assert!(result.detail.contains("exited non-zero"));
+}
+
+#[test]
+#[serial]
+fn deploy_agent_requires_token_when_requested() {
+    let dir = tempfile::tempdir().unwrap();
+    let local_binary = write_local_binary(dir.path());
+    write_executable(
+        &dir.path().join("ssh"),
+        r#"#!/bin/sh
+case "$*" in
+  *"/etc/unraid-version"*) printf 'no\n'; exit 0 ;;
+  *) exit 0 ;;
+esac
+"#,
+    );
+    write_successful_scp(dir.path());
+    let _path = prepend_path(dir.path());
+
+    let result = deploy_agent_to_host(
+        "linux-host",
+        &local_binary,
+        &AgentDeployConfig {
+            require_token: true,
+            ..AgentDeployConfig::default()
+        },
+    );
+
+    assert!(!result.ok);
+    assert!(result.detail.contains("CORTEX_HEARTBEAT_TOKEN"));
 }
 
 #[test]
@@ -397,6 +463,7 @@ esac
         &AgentDeployConfig {
             target: Some("https://cortex.example.test".to_string()),
             token: Some("super secret token".to_string()),
+            require_token: false,
             docker: None,
             journald: None,
         },
@@ -405,6 +472,19 @@ esac
     assert!(!result.ok);
     assert!(!result.detail.contains("super secret token"));
     assert!(result.detail.contains("CORTEX_HEARTBEAT_TOKEN=<redacted>"));
+}
+
+#[test]
+fn redact_secret_envs_redacts_custom_secret_keys() {
+    let redacted =
+        redact_secret_envs("PLEX_TOKEN='plex secret' API_KEY=apikey OTHER_SECRET='secret value'");
+
+    assert!(!redacted.contains("plex secret"));
+    assert!(!redacted.contains("apikey"));
+    assert!(!redacted.contains("secret value"));
+    assert!(redacted.contains("PLEX_TOKEN=<redacted>"));
+    assert!(redacted.contains("API_KEY=<redacted>"));
+    assert!(redacted.contains("OTHER_SECRET=<redacted>"));
 }
 
 #[test]
@@ -433,6 +513,7 @@ esac
         &AgentDeployConfig {
             target: Some("https://cortex.example.test".to_string()),
             token: Some("secret".to_string()),
+            require_token: false,
             docker: Some(false),
             journald: Some(true),
         },
@@ -521,6 +602,7 @@ fn resolve_agent_env_flags_override_persisted() {
     let cfg = AgentDeployConfig {
         target: Some("https://new.example".into()),
         token: Some("new-token".into()),
+        require_token: false,
         docker: Some(false),
         journald: None,
     };
@@ -553,6 +635,14 @@ fn resolve_linux_agent_env_preserves_auth_and_flags_without_defaults() {
         ("CORTEX_AGENT_DOCKER".into(), "true".into()),
         ("CORTEX_AGENT_JOURNALD".into(), "true".into()),
         ("CORTEX_SYSLOG_TARGET".into(), "100.88.16.79:1514".into()),
+        (
+            "CORTEX_AGENT_FILE_TAILS".into(),
+            "/var/log/app.log:app".into(),
+        ),
+        ("CORTEX_AGENT_AI_TRANSCRIPTS".into(), "true".into()),
+        ("CORTEX_AGENT_COMMAND_FORWARD".into(), "true".into()),
+        ("CORTEX_AGENT_SHELL_HISTORY_FORWARD".into(), "true".into()),
+        ("CORTEX_AGENT_AUTO_UPDATE".into(), "false".into()),
     ];
     let env = resolve_linux_agent_env(&persisted, &AgentDeployConfig::default());
 
@@ -567,6 +657,17 @@ fn resolve_linux_agent_env_preserves_auth_and_flags_without_defaults() {
         env_get(&env, "CORTEX_SYSLOG_TARGET"),
         Some("100.88.16.79:1514")
     );
+    assert_eq!(
+        env_get(&env, "CORTEX_AGENT_FILE_TAILS"),
+        Some("/var/log/app.log:app")
+    );
+    assert_eq!(env_get(&env, "CORTEX_AGENT_AI_TRANSCRIPTS"), Some("true"));
+    assert_eq!(env_get(&env, "CORTEX_AGENT_COMMAND_FORWARD"), Some("true"));
+    assert_eq!(
+        env_get(&env, "CORTEX_AGENT_SHELL_HISTORY_FORWARD"),
+        Some("true")
+    );
+    assert_eq!(env_get(&env, "CORTEX_AGENT_AUTO_UPDATE"), Some("false"));
 }
 
 #[test]
@@ -576,7 +677,7 @@ fn resolve_linux_agent_env_stays_empty_for_first_flagless_deploy() {
 
 #[test]
 fn parse_env_file_splits_on_first_equals_and_skips_blanks_and_comments() {
-    let parsed = parse_env_file("A=1\n\n# comment\nB=x=y z\n");
+    let parsed = parse_env_file("A=1\n\n# comment\nB=x=y z\nBAD-KEY=nope\n9BAD=nope\n");
     assert_eq!(
         parsed,
         vec![
