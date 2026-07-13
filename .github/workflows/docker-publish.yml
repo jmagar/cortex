@@ -39,7 +39,9 @@ jobs:
         run: cargo clippy --all-targets --locked -- -D warnings
 
       - name: Install nextest
-        run: cargo install cargo-nextest --locked
+        uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d
+        with:
+          install_args: cargo:cargo-nextest
 
       - name: Run tests
         # nextest isolates env-mutating tests per-process (matches `just test`).

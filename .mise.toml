@@ -1,0 +1,4 @@
+[tools]
+# The npm launcher declares only node >=18, so local development should follow
+# the current LTS line rather than an arbitrary CI snapshot.
+node = "lts"
