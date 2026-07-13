@@ -825,24 +825,8 @@ timer state, active/enabled watcher state, and container freshness via
 
 ### `cortex update`
 
-Update an already-configured Cortex deployment.
-
-```bash
-cortex update server --dry-run
-cortex update server
-cortex update clients --dry-run
-cortex update clients
-cortex update agents
-cortex update
-```
-
-`cortex update` defaults to `all`: it updates the configured server first, then
-updates configured host-agent clients. `clients` and `agents` are aliases; both
-refer to the host-local Cortex agents that forward logs, heartbeats, sessions,
-shell history, and command events into the server. Client dry-runs resolve the
-local binary and probe each configured host over SSH without deploying.
-
-Configure the update profile once:
+Update an already-configured Cortex deployment. Configure the update profile
+once:
 
 ```bash
 cortex update config server --host tootie --home /mnt/cache/appdata/cortex
@@ -851,8 +835,23 @@ cortex update config clients --hosts dookie,shart,squirts --target https://corte
 
 The profile lives at `~/.cortex/deployments.toml` by default. A successful
 `cortex setup deploy remote --home PATH HOST` also records the server profile,
-so a one-off low-level deploy can seed future `cortex update server` runs. Run
-the dry-run form before the live update when operating a remote server.
+so a one-off low-level deploy can seed future `cortex update server` runs.
+
+After the profile exists, dry-run before live updates:
+
+```bash
+cortex update --dry-run
+cortex update
+cortex update server --dry-run
+cortex update clients --dry-run
+cortex update clients
+```
+
+`cortex update` defaults to `all`: it updates the configured server first, then
+updates configured host-agent clients. `clients` and `agents` are aliases; both
+refer to the host-local Cortex agents that forward logs, heartbeats, sessions,
+shell history, and command events into the server. Client dry-runs resolve the
+local binary and probe each configured host over SSH without deploying.
 
 ### `cortex setup deploy`
 

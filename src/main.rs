@@ -1070,11 +1070,7 @@ fn parse_deploy_command(args: &[String]) -> Result<DeployCommand> {
             "--dry-run" if matches!(subcommand.as_str(), "local" | "remote") => dry_run = true,
             "--home" if subcommand == "remote" => {
                 i += 1;
-                remote_home = Some(
-                    rest.get(i)
-                        .ok_or_else(|| anyhow::anyhow!("--home requires a value"))?
-                        .clone(),
-                );
+                remote_home = Some(required_arg(rest, i, "--home")?);
             }
             "--help" | "-h" => {
                 print_usage();
@@ -1082,39 +1078,19 @@ fn parse_deploy_command(args: &[String]) -> Result<DeployCommand> {
             }
             "--hosts" if subcommand == "agent" => {
                 i += 1;
-                let val = rest
-                    .get(i)
-                    .ok_or_else(|| anyhow::anyhow!("--hosts requires a value"))?;
-                agent_hosts = val
-                    .split(',')
-                    .map(str::trim)
-                    .filter(|host| !host.is_empty())
-                    .map(str::to_string)
-                    .collect();
+                agent_hosts = parse_host_list(&required_arg(rest, i, "--hosts")?);
             }
             "--target" if subcommand == "agent" => {
                 i += 1;
-                agent_target = Some(
-                    rest.get(i)
-                        .ok_or_else(|| anyhow::anyhow!("--target requires a value"))?
-                        .clone(),
-                );
+                agent_target = Some(required_arg(rest, i, "--target")?);
             }
             "--heartbeat-token" if subcommand == "agent" => {
                 i += 1;
-                agent_token = Some(
-                    rest.get(i)
-                        .ok_or_else(|| anyhow::anyhow!("--heartbeat-token requires a value"))?
-                        .clone(),
-                );
+                agent_token = Some(required_arg(rest, i, "--heartbeat-token")?);
             }
             "--binary" if subcommand == "agent" => {
                 i += 1;
-                agent_binary = Some(
-                    rest.get(i)
-                        .ok_or_else(|| anyhow::anyhow!("--binary requires a value"))?
-                        .clone(),
-                );
+                agent_binary = Some(required_arg(rest, i, "--binary")?);
             }
             "--docker" if subcommand == "agent" => agent_docker = Some(true),
             "--journald" if subcommand == "agent" => agent_journald = Some(true),
@@ -1165,19 +1141,11 @@ fn parse_update_command(args: &[String]) -> Result<UpdateCommand> {
             }
             "--profile" => {
                 i += 1;
-                profile = Some(
-                    args.get(i)
-                        .ok_or_else(|| anyhow::anyhow!("--profile requires a value"))?
-                        .clone(),
-                );
+                profile = Some(required_arg(args, i, "--profile")?);
             }
             "--binary" => {
                 i += 1;
-                binary = Some(
-                    args.get(i)
-                        .ok_or_else(|| anyhow::anyhow!("--binary requires a value"))?
-                        .clone(),
-                );
+                binary = Some(required_arg(args, i, "--binary")?);
             }
             "--help" | "-h" => {
                 print_usage();
@@ -1237,19 +1205,11 @@ fn parse_update_config_command(
                 match rest[i].as_str() {
                     "--host" => {
                         i += 1;
-                        host = Some(
-                            rest.get(i)
-                                .ok_or_else(|| anyhow::anyhow!("--host requires a value"))?
-                                .clone(),
-                        );
+                        host = Some(required_arg(rest, i, "--host")?);
                     }
                     "--home" => {
                         i += 1;
-                        home = Some(
-                            rest.get(i)
-                                .ok_or_else(|| anyhow::anyhow!("--home requires a value"))?
-                                .clone(),
-                        );
+                        home = Some(required_arg(rest, i, "--home")?);
                     }
                     other => anyhow::bail!("unknown update config server argument: {other}"),
                 }
@@ -1276,22 +1236,11 @@ fn parse_update_config_command(
                 match rest[i].as_str() {
                     "--hosts" => {
                         i += 1;
-                        hosts = rest
-                            .get(i)
-                            .ok_or_else(|| anyhow::anyhow!("--hosts requires a value"))?
-                            .split(',')
-                            .map(str::trim)
-                            .filter(|host| !host.is_empty())
-                            .map(str::to_string)
-                            .collect();
+                        hosts = parse_host_list(&required_arg(rest, i, "--hosts")?);
                     }
                     "--target" => {
                         i += 1;
-                        target = Some(
-                            rest.get(i)
-                                .ok_or_else(|| anyhow::anyhow!("--target requires a value"))?
-                                .clone(),
-                        );
+                        target = Some(required_arg(rest, i, "--target")?);
                     }
                     "--docker" => docker = Some(true),
                     "--journald" => journald = Some(true),
@@ -1312,6 +1261,21 @@ fn parse_update_config_command(
         }
         other => anyhow::bail!("unknown update config target: {other}"),
     }
+}
+
+fn required_arg(args: &[String], index: usize, flag: &str) -> Result<String> {
+    args.get(index)
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("{flag} requires a value"))
+}
+
+fn parse_host_list(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|host| !host.is_empty())
+        .map(str::to_string)
+        .collect()
 }
 
 /// Which path `ingest shell agent index` should take, given its own flags

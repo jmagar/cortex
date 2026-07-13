@@ -510,7 +510,7 @@ fn parse_deploy_remote_accepts_home_override() {
 }
 
 #[test]
-fn parse_deploy_remote_home_has_enough_data_to_save_update_profile() {
+fn parse_deploy_remote_home_defaults_to_live_profile_seed_shape() {
     let command = super::parse_deploy_command(&[
         "remote".into(),
         "--home".into(),

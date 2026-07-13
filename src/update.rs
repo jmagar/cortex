@@ -198,10 +198,7 @@ fn run_update_with_runner(
     runner: &mut dyn UpdateRunner,
 ) -> io::Result<UpdateReport> {
     let started = Instant::now();
-    let profile_path = match options.profile_path.clone() {
-        Some(path) => path,
-        None => default_profile_path()?,
-    };
+    let profile_path = resolve_profile_path(options.profile_path.as_deref())?;
     let profile = validate_loaded_profile(load_profile(&profile_path)?)?;
     let mut server = None;
     let mut clients = Vec::new();
@@ -301,15 +298,9 @@ fn client_preflight_results(hosts: &[String], probes: Vec<HostProbe>) -> Vec<Dep
     let mut results = Vec::with_capacity(hosts.len());
     for host in hosts {
         match probes.iter().find(|probe| probe.host == *host) {
-            Some(probe) if probe.reachable => results.push(DeployResult {
-                host: host.clone(),
-                ok: true,
-                detail: probe.display_label(),
-                elapsed_ms: 0,
-            }),
             Some(probe) => results.push(DeployResult {
                 host: host.clone(),
-                ok: false,
+                ok: probe.reachable,
                 detail: probe.display_label(),
                 elapsed_ms: 0,
             }),

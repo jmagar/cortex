@@ -1,6 +1,10 @@
 use super::*;
 use serial_test::serial;
 
+const SERVER_HOST: &str = "tootie";
+const SERVER_HOME: &str = "/mnt/cache/appdata/cortex";
+const CLIENT_HOSTS: &[&str] = &["dookie", "shart"];
+
 struct EnvGuard {
     name: &'static str,
     previous: Option<std::ffi::OsString>,
@@ -29,17 +33,60 @@ impl Drop for EnvGuard {
     }
 }
 
+fn profile_path(dir: &tempfile::TempDir) -> PathBuf {
+    dir.path().join("deployments.toml")
+}
+
+fn client_hosts() -> Vec<String> {
+    CLIENT_HOSTS
+        .iter()
+        .map(|host| (*host).to_string())
+        .collect()
+}
+
+fn configure_test_server_profile(path: &Path) {
+    configure_server_profile(Some(path), SERVER_HOST, SERVER_HOME).unwrap();
+}
+
+fn configure_test_clients_profile(path: &Path, hosts: Vec<String>) {
+    configure_clients_profile(
+        Some(path),
+        hosts,
+        Some("https://cortex.tootie.tv".to_string()),
+        Some(true),
+        None,
+    )
+    .unwrap();
+}
+
+fn run_test_update(
+    scope: UpdateScope,
+    path: PathBuf,
+    dry_run: bool,
+    runner: &mut dyn UpdateRunner,
+) -> io::Result<UpdateReport> {
+    run_update_with_runner(
+        scope,
+        UpdateOptions {
+            dry_run,
+            profile_path: Some(path),
+            binary: Some(PathBuf::from("/tmp/cortex")),
+        },
+        runner,
+    )
+}
+
 #[test]
 fn update_profile_round_trips_server_and_clients() {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("deployments.toml");
+    let path = profile_path(&dir);
     let profile = UpdateProfile {
         server: Some(ServerUpdateProfile {
-            host: "tootie".to_string(),
-            home: "/mnt/cache/appdata/cortex".to_string(),
+            host: SERVER_HOST.to_string(),
+            home: SERVER_HOME.to_string(),
         }),
         clients: ClientsUpdateProfile {
-            hosts: vec!["dookie".to_string(), "shart".to_string()],
+            hosts: client_hosts(),
             target: Some("https://cortex.tootie.tv".to_string()),
             docker: Some(true),
             journald: None,
@@ -55,7 +102,7 @@ fn update_profile_round_trips_server_and_clients() {
 #[test]
 fn configure_server_profile_validates_and_preserves_clients() {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("deployments.toml");
+    let path = profile_path(&dir);
     write_profile(
         &path,
         &UpdateProfile {
@@ -70,35 +117,29 @@ fn configure_server_profile_validates_and_preserves_clients() {
     )
     .unwrap();
 
-    let updated =
-        configure_server_profile(Some(&path), "tootie", "/mnt/cache/appdata/cortex").unwrap();
+    let updated = configure_server_profile(Some(&path), SERVER_HOST, SERVER_HOME).unwrap();
 
-    assert_eq!(updated.server.as_ref().unwrap().host, "tootie");
-    assert_eq!(
-        updated.server.as_ref().unwrap().home,
-        "/mnt/cache/appdata/cortex"
-    );
+    let server = updated.server.as_ref().unwrap();
+    assert_eq!(server.host, SERVER_HOST);
+    assert_eq!(server.home, SERVER_HOME);
     assert_eq!(updated.clients.hosts, vec!["dookie"]);
 }
 
 #[test]
 fn configure_server_profile_rejects_unsafe_values() {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("deployments.toml");
+    let path = profile_path(&dir);
 
-    let bad_host = configure_server_profile(
-        Some(&path),
-        "-oProxyCommand=touch /tmp/pwned",
-        "/mnt/cache/appdata/cortex",
-    )
-    .unwrap_err();
+    let bad_host =
+        configure_server_profile(Some(&path), "-oProxyCommand=touch /tmp/pwned", SERVER_HOME)
+            .unwrap_err();
     assert!(bad_host.to_string().contains("unsafe ssh host"));
 
-    let bad_home = configure_server_profile(Some(&path), "tootie", "relative/path").unwrap_err();
+    let bad_home = configure_server_profile(Some(&path), SERVER_HOST, "relative/path").unwrap_err();
     assert!(bad_home.to_string().contains("absolute path"));
 
     let parent_home =
-        configure_server_profile(Some(&path), "tootie", "/mnt/cache/../cortex").unwrap_err();
+        configure_server_profile(Some(&path), SERVER_HOST, "/mnt/cache/../cortex").unwrap_err();
     assert!(parent_home.to_string().contains("must not contain '..'"));
 }
 
@@ -118,18 +159,16 @@ impl UpdateRunner for FakeUpdateRunner {
         host: &str,
         options: RemoteDeployOptions,
     ) -> io::Result<RemoteDeployReport> {
-        self.server_calls.push((host.to_string(), options.clone()));
+        let home = options.home.clone().unwrap();
+        let dry_run = options.dry_run;
+        self.server_calls.push((host.to_string(), options));
         Ok(RemoteDeployReport {
-            mode: if options.dry_run {
-                "remote dry-run"
-            } else {
-                "remote"
-            },
+            mode: if dry_run { "remote dry-run" } else { "remote" },
             host: host.to_string(),
-            home: options.home.clone().unwrap(),
-            env_path: format!("{}/.env", options.home.clone().unwrap()),
-            compose_dir: format!("{}/compose", options.home.clone().unwrap()),
-            data_dir: format!("{}/data", options.home.clone().unwrap()),
+            env_path: format!("{home}/.env"),
+            compose_dir: format!("{home}/compose"),
+            data_dir: format!("{home}/data"),
+            home,
             health_url: "http://127.0.0.1:3100/health".to_string(),
             mcp_url: "http://127.0.0.1:3100/mcp".to_string(),
             phases: Vec::new(),
@@ -183,8 +222,8 @@ impl UpdateRunner for FakeUpdateRunner {
 #[test]
 fn update_server_uses_saved_profile_without_repeating_home_arg() {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("deployments.toml");
-    configure_server_profile(Some(&path), "tootie", "/mnt/cache/appdata/cortex").unwrap();
+    let path = profile_path(&dir);
+    configure_test_server_profile(&path);
     let mut runner = FakeUpdateRunner::default();
 
     let report = run_update_with_runner(
@@ -200,11 +239,8 @@ fn update_server_uses_saved_profile_without_repeating_home_arg() {
 
     assert!(!report.has_errors);
     assert_eq!(runner.server_calls.len(), 1);
-    assert_eq!(runner.server_calls[0].0, "tootie");
-    assert_eq!(
-        runner.server_calls[0].1.home.as_deref(),
-        Some("/mnt/cache/appdata/cortex")
-    );
+    assert_eq!(runner.server_calls[0].0, SERVER_HOST);
+    assert_eq!(runner.server_calls[0].1.home.as_deref(), Some(SERVER_HOME));
     assert!(runner.server_calls[0].1.dry_run);
     assert_eq!(report.profile_path, path);
 }
@@ -213,8 +249,8 @@ fn update_server_uses_saved_profile_without_repeating_home_arg() {
 #[serial]
 fn update_with_explicit_profile_does_not_resolve_default_profile_path() {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("deployments.toml");
-    configure_server_profile(Some(&path), "tootie", "/mnt/cache/appdata/cortex").unwrap();
+    let path = profile_path(&dir);
+    configure_test_server_profile(&path);
     let mut runner = FakeUpdateRunner::default();
     let _home_guard = EnvGuard::set("HOME", "relative-home");
     let _cortex_home_guard = EnvGuard::remove("CORTEX_HOME");
@@ -238,63 +274,29 @@ fn update_with_explicit_profile_does_not_resolve_default_profile_path() {
 #[test]
 fn update_clients_deploys_every_configured_client() {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("deployments.toml");
-    configure_clients_profile(
-        Some(&path),
-        vec!["dookie".to_string(), "shart".to_string()],
-        Some("https://cortex.tootie.tv".to_string()),
-        Some(true),
-        None,
-    )
-    .unwrap();
+    let path = profile_path(&dir);
+    configure_test_clients_profile(&path, client_hosts());
     let mut runner = FakeUpdateRunner::default();
 
-    let report = run_update_with_runner(
-        UpdateScope::Clients,
-        UpdateOptions {
-            dry_run: false,
-            profile_path: Some(path),
-            binary: Some(PathBuf::from("/tmp/cortex")),
-        },
-        &mut runner,
-    )
-    .unwrap();
+    let report = run_test_update(UpdateScope::Clients, path, false, &mut runner).unwrap();
 
     assert!(!report.has_errors);
-    assert_eq!(runner.client_calls, vec!["dookie", "shart"]);
+    assert_eq!(runner.client_calls, client_hosts());
     assert_eq!(report.clients.len(), 2);
 }
 
 #[test]
 fn update_clients_dry_run_probes_clients_without_deploying() {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("deployments.toml");
-    configure_clients_profile(
-        Some(&path),
-        vec!["dookie".to_string(), "shart".to_string()],
-        Some("https://cortex.tootie.tv".to_string()),
-        Some(true),
-        None,
-    )
-    .unwrap();
+    let path = profile_path(&dir);
+    let hosts = client_hosts();
+    configure_test_clients_profile(&path, hosts.clone());
     let mut runner = FakeUpdateRunner::default();
 
-    let report = run_update_with_runner(
-        UpdateScope::Clients,
-        UpdateOptions {
-            dry_run: true,
-            profile_path: Some(path),
-            binary: Some(PathBuf::from("/tmp/cortex")),
-        },
-        &mut runner,
-    )
-    .unwrap();
+    let report = run_test_update(UpdateScope::Clients, path, true, &mut runner).unwrap();
 
     assert!(!report.has_errors);
-    assert_eq!(
-        runner.probe_calls,
-        vec![vec!["dookie".to_string(), "shart".to_string()]]
-    );
+    assert_eq!(runner.probe_calls, vec![hosts]);
     assert!(runner.client_calls.is_empty());
     assert_eq!(report.clients.len(), 2);
     assert!(
@@ -308,7 +310,7 @@ fn update_clients_dry_run_probes_clients_without_deploying() {
 #[test]
 fn update_clients_revalidates_loaded_profile_hosts() {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("deployments.toml");
+    let path = profile_path(&dir);
     write_profile(
         &path,
         &UpdateProfile {
@@ -324,16 +326,7 @@ fn update_clients_revalidates_loaded_profile_hosts() {
     .unwrap();
     let mut runner = FakeUpdateRunner::default();
 
-    let error = run_update_with_runner(
-        UpdateScope::Clients,
-        UpdateOptions {
-            dry_run: false,
-            profile_path: Some(path),
-            binary: Some(PathBuf::from("/tmp/cortex")),
-        },
-        &mut runner,
-    )
-    .unwrap_err();
+    let error = run_test_update(UpdateScope::Clients, path, false, &mut runner).unwrap_err();
 
     assert!(error.to_string().contains("unsafe ssh host"));
     assert!(runner.client_calls.is_empty());
@@ -343,31 +336,15 @@ fn update_clients_revalidates_loaded_profile_hosts() {
 #[test]
 fn update_all_stops_before_clients_when_server_fails() {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("deployments.toml");
-    configure_server_profile(Some(&path), "tootie", "/mnt/cache/appdata/cortex").unwrap();
-    configure_clients_profile(
-        Some(&path),
-        vec!["dookie".to_string()],
-        Some("https://cortex.tootie.tv".to_string()),
-        None,
-        None,
-    )
-    .unwrap();
+    let path = profile_path(&dir);
+    configure_test_server_profile(&path);
+    configure_clients_profile(Some(&path), vec!["dookie".to_string()], None, None, None).unwrap();
     let mut runner = FakeUpdateRunner {
         fail_server: true,
         ..FakeUpdateRunner::default()
     };
 
-    let report = run_update_with_runner(
-        UpdateScope::All,
-        UpdateOptions {
-            dry_run: false,
-            profile_path: Some(path),
-            binary: Some(PathBuf::from("/tmp/cortex")),
-        },
-        &mut runner,
-    )
-    .unwrap();
+    let report = run_test_update(UpdateScope::All, path, false, &mut runner).unwrap();
 
     assert!(report.has_errors);
     assert!(runner.client_calls.is_empty());

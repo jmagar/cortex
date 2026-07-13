@@ -48,6 +48,26 @@ fn prepend_path(dir: &Path) -> EnvGuard {
     EnvGuard::set("PATH", new_path)
 }
 
+fn write_local_binary(dir: &Path) -> PathBuf {
+    let local_binary = dir.join("cortex");
+    std::fs::write(&local_binary, "binary").unwrap();
+    local_binary
+}
+
+fn write_successful_scp(dir: &Path) {
+    write_executable(&dir.join("scp"), "#!/bin/sh\nexit 0\n");
+}
+
+fn write_logging_scp(dir: &Path) {
+    write_executable(
+        &dir.join("scp"),
+        r#"#!/bin/sh
+printf 'scp %s\n' "$*" >> "$CORTEX_TEST_AGENT_DEPLOY_LOG"
+exit 0
+"#,
+    );
+}
+
 #[test]
 fn parse_ssh_config_skips_wildcards_and_github() {
     let config = "Host *\n  ServerAliveInterval 60\n\nHost dookie\n  HostName 100.88.16.79\n\nHost github.com\n  User git\n\nHost tootie squirts\n  User jmagar\n";
@@ -220,8 +240,7 @@ fn find_local_binary_prefers_installed_cortex_from_path() {
 fn deploy_agent_to_linux_host_runs_install_sequence_with_env_prefix() {
     let dir = tempfile::tempdir().unwrap();
     let log = dir.path().join("commands.log");
-    let local_binary = dir.path().join("cortex");
-    std::fs::write(&local_binary, "binary").unwrap();
+    let local_binary = write_local_binary(dir.path());
     write_executable(
         &dir.path().join("ssh"),
         r#"#!/bin/sh
@@ -232,13 +251,7 @@ case "$*" in
 esac
 "#,
     );
-    write_executable(
-        &dir.path().join("scp"),
-        r#"#!/bin/sh
-printf 'scp %s\n' "$*" >> "$CORTEX_TEST_AGENT_DEPLOY_LOG"
-exit 0
-"#,
-    );
+    write_logging_scp(dir.path());
     let _path = prepend_path(dir.path());
     let _log = EnvGuard::set("CORTEX_TEST_AGENT_DEPLOY_LOG", &log);
     let _syslog = EnvGuard::remove("CORTEX_SYSLOG_TARGET");
@@ -273,8 +286,7 @@ exit 0
 fn deploy_agent_to_linux_host_preserves_persisted_env_without_token_profile() {
     let dir = tempfile::tempdir().unwrap();
     let log = dir.path().join("commands.log");
-    let local_binary = dir.path().join("cortex");
-    std::fs::write(&local_binary, "binary").unwrap();
+    let local_binary = write_local_binary(dir.path());
     write_executable(
         &dir.path().join("ssh"),
         r#"#!/bin/sh
@@ -293,13 +305,7 @@ case "$*" in
 esac
 "#,
     );
-    write_executable(
-        &dir.path().join("scp"),
-        r#"#!/bin/sh
-printf 'scp %s\n' "$*" >> "$CORTEX_TEST_AGENT_DEPLOY_LOG"
-exit 0
-"#,
-    );
+    write_logging_scp(dir.path());
     let _path = prepend_path(dir.path());
     let _log = EnvGuard::set("CORTEX_TEST_AGENT_DEPLOY_LOG", &log);
 
@@ -319,8 +325,7 @@ exit 0
 fn deploy_agent_rejects_unsafe_host_before_ssh() {
     let dir = tempfile::tempdir().unwrap();
     let log = dir.path().join("commands.log");
-    let local_binary = dir.path().join("cortex");
-    std::fs::write(&local_binary, "binary").unwrap();
+    let local_binary = write_local_binary(dir.path());
     write_executable(
         &dir.path().join("ssh"),
         r#"#!/bin/sh
@@ -328,7 +333,7 @@ printf 'ssh %s\n' "$*" >> "$CORTEX_TEST_AGENT_DEPLOY_LOG"
 exit 0
 "#,
     );
-    write_executable(&dir.path().join("scp"), "#!/bin/sh\nexit 0\n");
+    write_successful_scp(dir.path());
     let _path = prepend_path(dir.path());
     let _log = EnvGuard::set("CORTEX_TEST_AGENT_DEPLOY_LOG", &log);
 
@@ -347,8 +352,7 @@ exit 0
 #[serial]
 fn deploy_agent_reports_first_remote_failure() {
     let dir = tempfile::tempdir().unwrap();
-    let local_binary = dir.path().join("cortex");
-    std::fs::write(&local_binary, "binary").unwrap();
+    let local_binary = write_local_binary(dir.path());
     write_executable(
         &dir.path().join("ssh"),
         r#"#!/bin/sh
@@ -359,7 +363,7 @@ case "$*" in
 esac
 "#,
     );
-    write_executable(&dir.path().join("scp"), "#!/bin/sh\nexit 0\n");
+    write_successful_scp(dir.path());
     let _path = prepend_path(dir.path());
 
     let result = deploy_agent_to_host("linux-host", &local_binary, &AgentDeployConfig::default());
@@ -373,8 +377,7 @@ esac
 #[serial]
 fn deploy_agent_redacts_secret_envs_from_failure_detail() {
     let dir = tempfile::tempdir().unwrap();
-    let local_binary = dir.path().join("cortex");
-    std::fs::write(&local_binary, "binary").unwrap();
+    let local_binary = write_local_binary(dir.path());
     write_executable(
         &dir.path().join("ssh"),
         r#"#!/bin/sh
@@ -385,7 +388,7 @@ case "$*" in
 esac
 "#,
     );
-    write_executable(&dir.path().join("scp"), "#!/bin/sh\nexit 0\n");
+    write_successful_scp(dir.path());
     let _path = prepend_path(dir.path());
 
     let result = deploy_agent_to_host(
@@ -409,8 +412,7 @@ esac
 fn deploy_agent_to_unraid_writes_persistent_env_and_docker_container() {
     let dir = tempfile::tempdir().unwrap();
     let log = dir.path().join("commands.log");
-    let local_binary = dir.path().join("cortex");
-    std::fs::write(&local_binary, "binary").unwrap();
+    let local_binary = write_local_binary(dir.path());
     write_executable(
         &dir.path().join("ssh"),
         r#"#!/bin/sh
@@ -421,13 +423,7 @@ case "$*" in
 esac
 "#,
     );
-    write_executable(
-        &dir.path().join("scp"),
-        r#"#!/bin/sh
-printf 'scp %s\n' "$*" >> "$CORTEX_TEST_AGENT_DEPLOY_LOG"
-exit 0
-"#,
-    );
+    write_logging_scp(dir.path());
     let _path = prepend_path(dir.path());
     let _log = EnvGuard::set("CORTEX_TEST_AGENT_DEPLOY_LOG", &log);
 

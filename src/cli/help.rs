@@ -568,8 +568,8 @@ const NESTED_CATALOG: &[NestedCommandDoc] = &[
         usage: &[
             "cortex update [all|server|clients|agents] [--dry-run] [--json]",
             "cortex update server [--dry-run] [--json]",
-            "cortex update clients [--json] [--binary PATH]",
-            "cortex update agents [--json] [--binary PATH]",
+            "cortex update clients [--dry-run] [--json] [--binary PATH]",
+            "cortex update agents [--dry-run] [--json] [--binary PATH]",
             "cortex update config server --host HOST --home PATH [--json]",
             "cortex update config clients --hosts h1,h2 [--target URL] [--docker] [--journald] [--json]",
         ],
