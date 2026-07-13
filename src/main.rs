@@ -248,6 +248,9 @@ async fn run_deploy(command: DeployCommand) -> Result<()> {
             if report.has_errors {
                 anyhow::bail!("cortex setup deploy remote {host} completed with failed phases");
             }
+            if !dry_run {
+                cortex::update::configure_server_profile(None, &host, &report.home)?;
+            }
             return Ok(());
         }
         DeployCommandKind::Agent {

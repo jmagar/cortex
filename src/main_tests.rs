@@ -510,6 +510,26 @@ fn parse_deploy_remote_accepts_home_override() {
 }
 
 #[test]
+fn parse_deploy_remote_home_has_enough_data_to_save_update_profile() {
+    let command = super::parse_deploy_command(&[
+        "remote".into(),
+        "--home".into(),
+        "/mnt/cache/appdata/cortex".into(),
+        "tootie".into(),
+    ])
+    .unwrap();
+
+    assert!(matches!(
+        command.kind,
+        super::DeployCommandKind::Remote {
+            ref host,
+            dry_run: false,
+            home: Some(ref home),
+        } if host == "tootie" && home == "/mnt/cache/appdata/cortex"
+    ));
+}
+
+#[test]
 fn parse_deploy_agent_trims_and_drops_empty_hosts() {
     let command = super::parse_deploy_command(&[
         "agent".into(),
