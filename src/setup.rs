@@ -25,7 +25,7 @@ pub use debug_wrapper::{run_debug_compose_setup, run_debug_wrapper_setup};
 pub use doctor::run_setup_doctor;
 pub use firstrun::run_setup;
 pub(crate) use firstrun::{
-    default_env_for_data_dir, dockerfile_asset, installed_compose_asset, render_env,
+    default_env_for_data_dir, dockerfile_asset, installed_compose_asset, parse_env, render_env,
 };
 pub use heartbeat_agent::run_heartbeat_agent_setup;
 pub use sessions_index::run_sessions_index_timer_setup;
@@ -42,7 +42,7 @@ pub(crate) use debug_wrapper::{
 #[cfg(test)]
 pub(crate) use firstrun::{
     cleanup_legacy_systemd, command_phase, ensure_env_file, ensure_network_phase, filesystem_phase,
-    health_phase, parse_env, run_compose_phase, write_compose_assets, write_env,
+    health_phase, run_compose_phase, write_compose_assets, write_env,
 };
 #[cfg(test)]
 pub(crate) use sessions_index::{ai_index_script, ai_index_service_unit, ai_index_timer_unit};

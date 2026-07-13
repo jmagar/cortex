@@ -249,6 +249,13 @@ pub fn is_supported_transcript_file(path: &Path) -> bool {
     supported_discovered_file(path)
 }
 
+pub(crate) fn should_descend_transcript_dir(path: &Path) -> bool {
+    !matches!(
+        path.file_name().and_then(|name| name.to_str()),
+        Some(".cache" | ".git" | "node_modules" | "target")
+    )
+}
+
 pub fn is_invalid_input_error(error: &anyhow::Error) -> bool {
     error.downcast_ref::<PathScanError>().is_some()
         || error
@@ -1042,6 +1049,9 @@ fn collect_supported_files(path: &Path, files: &mut Vec<PathBuf>, result: &mut I
         }
         return;
     }
+    if !should_descend_transcript_dir(path) {
+        return;
+    }
 
     let mut entries = Vec::new();
     let read_dir = match fs::read_dir(path) {
@@ -1187,7 +1197,7 @@ pub(crate) fn project_for_file(source_kind: SourceKind, path: &Path) -> Option<S
     }
 }
 
-fn update_codex_fallbacks(
+pub(crate) fn update_codex_fallbacks(
     source_kind: SourceKind,
     line: &str,
     fallback_project: &mut Option<String>,

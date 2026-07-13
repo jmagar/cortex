@@ -216,8 +216,15 @@ async fn run_deploy(command: DeployCommand) -> Result<()> {
             (cortex::setup::SetupMode::Check, "local dry-run")
         }
         DeployCommandKind::Local { dry_run: false } => (cortex::setup::SetupMode::Repair, "local"),
-        DeployCommandKind::Remote { host, dry_run } => {
-            let report = cortex::deploy::run_remote_deploy(&host, dry_run)?;
+        DeployCommandKind::Remote {
+            host,
+            dry_run,
+            home,
+        } => {
+            let report = cortex::deploy::run_remote_deploy(
+                &host,
+                cortex::deploy::RemoteDeployOptions { dry_run, home },
+            )?;
             if command.json {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             } else {
@@ -582,6 +589,7 @@ enum DeployCommandKind {
     Remote {
         host: String,
         dry_run: bool,
+        home: Option<String>,
     },
     Agent {
         /// Explicit host list; if empty, run interactive discovery.
@@ -910,6 +918,7 @@ fn parse_deploy_command(args: &[String]) -> Result<DeployCommand> {
     let mut json = false;
     let mut dry_run = false;
     let mut host: Option<String> = None;
+    let mut remote_home: Option<String> = None;
     // agent-specific
     let mut agent_hosts: Vec<String> = Vec::new();
     let mut agent_target: Option<String> = None;
@@ -923,6 +932,14 @@ fn parse_deploy_command(args: &[String]) -> Result<DeployCommand> {
         match rest[i].as_str() {
             "--json" => json = true,
             "--dry-run" if matches!(subcommand.as_str(), "local" | "remote") => dry_run = true,
+            "--home" if subcommand == "remote" => {
+                i += 1;
+                remote_home = Some(
+                    rest.get(i)
+                        .ok_or_else(|| anyhow::anyhow!("--home requires a value"))?
+                        .clone(),
+                );
+            }
             "--help" | "-h" => {
                 print_usage();
                 std::process::exit(0);
@@ -980,6 +997,7 @@ fn parse_deploy_command(args: &[String]) -> Result<DeployCommand> {
         "remote" => DeployCommandKind::Remote {
             host: host.ok_or_else(|| anyhow::anyhow!("deploy remote requires a host"))?,
             dry_run,
+            home: remote_home,
         },
         "agent" => DeployCommandKind::Agent {
             hosts: agent_hosts,

@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::{
     Arc,
@@ -12,6 +12,11 @@ use tokio::sync::mpsc;
 
 use crate::app::CortexService;
 use crate::scanner::{self, IndexResult};
+
+mod pending;
+mod target;
+use pending::{PendingFiles, PendingState};
+use target::WatchTarget;
 
 const WATCH_EVENT_BUFFER: usize = 1024;
 const MAX_WATCH_DIRS: usize = 8192;
@@ -27,138 +32,6 @@ pub struct WatchOptions {
     pub max_retries: u8,
     pub initial_scan: bool,
     pub json: bool,
-}
-
-#[derive(Debug, Clone)]
-enum WatchTarget {
-    Directory(PathBuf),
-    File { path: PathBuf, parent: PathBuf },
-}
-
-impl WatchTarget {
-    fn root(&self) -> &Path {
-        match self {
-            Self::Directory(path) => path,
-            Self::File { parent, .. } => parent,
-        }
-    }
-
-    fn allowed_file(&self) -> Option<&Path> {
-        match self {
-            Self::Directory(_) => None,
-            Self::File { path, .. } => Some(path),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-struct PendingFile {
-    last_seen: Instant,
-    retries: u8,
-    last_len: Option<u64>,
-    last_mtime: Option<SystemTime>,
-    stable_since: Option<Instant>,
-}
-
-#[derive(Debug, Default)]
-struct PendingFiles {
-    files: BTreeMap<PathBuf, PendingFile>,
-    coalesced_events: u64,
-}
-
-impl PendingFiles {
-    fn push(&mut self, path: PathBuf, now: Instant) -> bool {
-        if let Some(entry) = self.files.get_mut(&path) {
-            entry.last_seen = now;
-            self.coalesced_events += 1;
-            return true;
-        }
-        if self.files.len() >= MAX_PENDING_FILES {
-            return false;
-        }
-        self.files.insert(
-            path,
-            PendingFile {
-                last_seen: now,
-                retries: 0,
-                last_len: None,
-                last_mtime: None,
-                stable_since: None,
-            },
-        );
-        true
-    }
-
-    fn requeue(&mut self, path: PathBuf, now: Instant, max_retries: u8) -> bool {
-        let entry = self.files.entry(path).or_insert(PendingFile {
-            last_seen: now,
-            retries: 0,
-            last_len: None,
-            last_mtime: None,
-            stable_since: None,
-        });
-        if entry.retries >= max_retries {
-            return false;
-        }
-        entry.retries += 1;
-        entry.last_seen = now;
-        entry.stable_since = None;
-        true
-    }
-
-    fn debounced_paths(&self, now: Instant, debounce: Duration) -> Vec<PathBuf> {
-        self.files
-            .iter()
-            .filter(|(_, entry)| now.duration_since(entry.last_seen) >= debounce)
-            .map(|(path, _)| path.clone())
-            .collect()
-    }
-
-    fn remove(&mut self, path: &Path) {
-        self.files.remove(path);
-    }
-
-    fn clear(&mut self) {
-        self.files.clear();
-    }
-
-    fn stable(&mut self, path: &Path, now: Instant, settle: Duration) -> Result<PendingState> {
-        let Some(entry) = self.files.get_mut(path) else {
-            return Ok(PendingState::Terminal);
-        };
-        let metadata = match std::fs::symlink_metadata(path) {
-            Ok(metadata) if metadata.is_file() => metadata,
-            Ok(_) => return Ok(PendingState::Terminal),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                return Ok(PendingState::Terminal);
-            }
-            Err(error) => return Err(error.into()),
-        };
-        if metadata.file_type().is_symlink() {
-            return Ok(PendingState::Terminal);
-        }
-        let len = metadata.len();
-        let mtime = metadata.modified().ok();
-        if entry.last_len == Some(len) && entry.last_mtime == mtime {
-            let stable_since = *entry.stable_since.get_or_insert(now);
-            return Ok(if now.duration_since(stable_since) >= settle {
-                PendingState::Stable
-            } else {
-                PendingState::NotReady
-            });
-        }
-        entry.last_len = Some(len);
-        entry.last_mtime = mtime;
-        entry.stable_since = Some(now);
-        Ok(PendingState::NotReady)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PendingState {
-    NotReady,
-    Stable,
-    Terminal,
 }
 
 pub async fn run(service: CortexService, options: WatchOptions) -> Result<()> {
@@ -334,6 +207,9 @@ fn collect_watch_dirs_inner(path: &Path, dirs: &mut Vec<PathBuf>, is_root: bool)
     if !metadata.is_dir() {
         return Ok(());
     }
+    if !scanner::should_descend_transcript_dir(path) {
+        return Ok(());
+    }
 
     let read_dir = match std::fs::read_dir(path) {
         Ok(read_dir) => read_dir,
@@ -385,6 +261,7 @@ fn handle_event(
                 for path in event.paths {
                     if event.kind.is_create()
                         && path.is_dir()
+                        && scanner::should_descend_transcript_dir(&path)
                         && targets.iter().all(|target| target.allowed_file().is_none())
                     {
                         new_dirs.push(path);

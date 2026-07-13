@@ -117,6 +117,41 @@ fn collect_watch_dirs_includes_accessible_directories_without_file_recursion() {
 }
 
 #[test]
+fn collect_watch_dirs_skips_build_artifact_directories() {
+    let temp = tempfile::tempdir().unwrap();
+    let project = temp.path().join(".codex/worktrees/session-id/lab");
+    let target = project.join("target/debug/.fingerprint/package");
+    let node_modules = project.join("node_modules/package");
+    let cache = project.join(".cache/cargo/release/deps/rustc123");
+    std::fs::create_dir_all(&target).unwrap();
+    std::fs::create_dir_all(&node_modules).unwrap();
+    std::fs::create_dir_all(&cache).unwrap();
+    std::fs::write(project.join("rollout-session.jsonl"), "{}\n").unwrap();
+
+    let dirs = collect_watch_dirs(temp.path()).unwrap();
+
+    assert!(dirs.contains(&project));
+    assert!(!dirs.iter().any(|dir| dir.ends_with("target")));
+    assert!(
+        !dirs
+            .iter()
+            .any(|dir| dir.to_string_lossy().contains("/target/"))
+    );
+    assert!(!dirs.iter().any(|dir| dir.ends_with("node_modules")));
+    assert!(
+        !dirs
+            .iter()
+            .any(|dir| dir.to_string_lossy().contains("/node_modules/"))
+    );
+    assert!(!dirs.iter().any(|dir| dir.ends_with(".cache")));
+    assert!(
+        !dirs
+            .iter()
+            .any(|dir| dir.to_string_lossy().contains("/.cache/"))
+    );
+}
+
+#[test]
 fn collect_watch_dirs_skips_missing_root() {
     let temp = tempfile::tempdir().unwrap();
     let missing = temp.path().join("missing");

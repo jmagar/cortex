@@ -486,6 +486,30 @@ fn mode_parse_rejects_remote_deploy_with_multiple_hosts() {
 }
 
 #[test]
+fn parse_deploy_remote_accepts_home_override() {
+    let command = super::parse_deploy_command(&[
+        "remote".into(),
+        "--home".into(),
+        "/mnt/cache/appdata/cortex".into(),
+        "tootie".into(),
+        "--dry-run".into(),
+    ])
+    .unwrap();
+
+    let super::DeployCommandKind::Remote {
+        host,
+        dry_run,
+        home,
+    } = command.kind
+    else {
+        panic!("expected deploy remote");
+    };
+    assert_eq!(host, "tootie");
+    assert!(dry_run);
+    assert_eq!(home.as_deref(), Some("/mnt/cache/appdata/cortex"));
+}
+
+#[test]
 fn parse_deploy_agent_trims_and_drops_empty_hosts() {
     let command = super::parse_deploy_command(&[
         "agent".into(),
@@ -738,7 +762,8 @@ fn parse_deploy_command_covers_modes_and_rejects_contextual_flags() {
         remote.kind,
         super::DeployCommandKind::Remote {
             ref host,
-            dry_run: true
+            dry_run: true,
+            home: None
         } if host == "tootie"
     ));
 

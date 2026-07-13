@@ -208,6 +208,29 @@ fn validate_path_rejects_symlinks() {
 }
 
 #[test]
+fn collect_supported_files_skips_build_artifact_directories() {
+    let dir = tempfile::tempdir().unwrap();
+    let project = dir.path().join(".codex/worktrees/session-id/lab");
+    let target = project.join("target/debug/.fingerprint/package");
+    let node_modules = project.join("node_modules/package");
+    let cache = project.join(".cache/cargo/release/deps/rustc123");
+    std::fs::create_dir_all(&target).unwrap();
+    std::fs::create_dir_all(&node_modules).unwrap();
+    std::fs::create_dir_all(&cache).unwrap();
+    let transcript = project.join("rollout-session.jsonl");
+    std::fs::write(&transcript, "{}\n").unwrap();
+    std::fs::write(target.join("not-a-transcript.jsonl"), "{}\n").unwrap();
+    std::fs::write(node_modules.join("also-not-a-transcript.jsonl"), "{}\n").unwrap();
+    std::fs::write(cache.join("transient-not-a-transcript.jsonl"), "{}\n").unwrap();
+
+    let mut result = IndexResult::default();
+    let mut files = Vec::new();
+    collect_supported_files(dir.path(), &mut files, &mut result);
+
+    assert_eq!(files, vec![transcript]);
+}
+
+#[test]
 fn parse_errors_are_counted_without_panicking() {
     let (pool, dir) = test_pool();
     let file = dir.path().join("broken.jsonl");
