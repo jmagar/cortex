@@ -635,3 +635,107 @@ fn mixed_case_hostname_does_not_match_canonical_instance_key() {
     .unwrap();
     assert!(rows.is_empty(), "mixed-case hostname must miss (pinned)");
 }
+
+// -- syslog-mcp-csukc: resolve_topic_entities index-backed exact/prefix tier --
+
+#[test]
+fn glob_prefix_pattern_escapes_glob_metacharacters() {
+    // '*', '?' and '[' are GLOB metacharacters; they must be wrapped in a
+    // single-character bracket class so they match literally, not as
+    // wildcards, before the trailing '*' prefix wildcard is appended.
+    assert_eq!(super::glob_prefix_pattern("plex"), "plex*");
+    assert_eq!(super::glob_prefix_pattern("a*b"), "a[*]b*");
+    assert_eq!(super::glob_prefix_pattern("a?b"), "a[?]b*");
+    assert_eq!(super::glob_prefix_pattern("a[b"), "a[[]b*");
+    assert_eq!(super::glob_prefix_pattern("a*b?c[d"), "a[*]b[?]c[[]d*");
+}
+
+#[test]
+fn resolve_topic_entities_exact_and_prefix_use_indexed_tier() {
+    let (_dir, pool) = test_pool("resolve-topic-exact-prefix.db");
+    let conn = pool.get().unwrap();
+    insert_entity(&conn, graph::ENTITY_TYPE_HOST, "tootie");
+    insert_entity(&conn, graph::ENTITY_TYPE_APP, "plex");
+    insert_entity(&conn, graph::ENTITY_TYPE_APP, "plexmediaserver");
+
+    let resolved = super::resolve_topic_entities(&conn, &["plex".to_string()]).unwrap();
+    let exact = resolved
+        .iter()
+        .find(|e| e.canonical_key == "plex")
+        .expect("exact canonical_key match must resolve");
+    assert_eq!(exact.match_kind, "exact");
+    assert_eq!(exact.resolver_status, ResolverStatus::Resolved);
+
+    let prefix = resolved
+        .iter()
+        .find(|e| e.canonical_key == "plexmediaserver")
+        .expect("prefix canonical_key match must resolve");
+    assert_eq!(prefix.match_kind, "prefix");
+    assert_eq!(prefix.resolver_status, ResolverStatus::Ambiguous);
+}
+
+#[test]
+fn resolve_topic_entities_falls_back_to_label_substring_scan() {
+    let (_dir, pool) = test_pool("resolve-topic-label-fallback.db");
+    let conn = pool.get().unwrap();
+    // canonical_key has no relationship to the search term at all; only the
+    // human-readable display_label contains it as a mid-string substring.
+    // This must still be found by the (unavoidable) label scan tier.
+    conn.execute(
+        "INSERT INTO graph_entities
+            (entity_type, canonical_key, display_label, trust_level)
+         VALUES (?1, ?2, ?3, 'verified')",
+        rusqlite::params![
+            graph::ENTITY_TYPE_APP,
+            "backup-job-42",
+            "nightly backup-job-42 (plex library)"
+        ],
+    )
+    .unwrap();
+
+    let resolved = super::resolve_topic_entities(&conn, &["plex".to_string()]).unwrap();
+    let label = resolved
+        .iter()
+        .find(|e| e.canonical_key == "backup-job-42")
+        .expect("label substring match must still resolve via fallback scan");
+    assert_eq!(label.match_kind, "label");
+    assert_eq!(label.resolver_status, ResolverStatus::Ambiguous);
+}
+
+#[test]
+fn resolve_topic_entities_skips_label_scan_when_indexed_tier_fills_cap() {
+    let (_dir, pool) = test_pool("resolve-topic-cap-skips-label.db");
+    let conn = pool.get().unwrap();
+    // 25 canonical_key prefix matches (== PER_TERM_CAP) plus one entity that
+    // would only ever be found via the label substring scan. Once the
+    // indexed tier alone fills the per-term cap, the label tier must not
+    // contribute any additional candidates for this term.
+    for i in 0..25 {
+        conn.execute(
+            "INSERT INTO graph_entities
+                (entity_type, canonical_key, display_label, trust_level)
+             VALUES (?1, ?2, ?2, 'verified')",
+            rusqlite::params![graph::ENTITY_TYPE_APP, format!("svc-{i:02}")],
+        )
+        .unwrap();
+    }
+    conn.execute(
+        "INSERT INTO graph_entities
+            (entity_type, canonical_key, display_label, trust_level)
+         VALUES (?1, ?2, ?3, 'verified')",
+        rusqlite::params![
+            graph::ENTITY_TYPE_APP,
+            "unrelated-key",
+            "totally unrelated but mentions svc- in passing"
+        ],
+    )
+    .unwrap();
+
+    let resolved = super::resolve_topic_entities(&conn, &["svc-".to_string()]).unwrap();
+    assert_eq!(resolved.len(), 25, "per-term cap must still be honored");
+    assert!(
+        !resolved.iter().any(|e| e.canonical_key == "unrelated-key"),
+        "label-only candidate must not appear once the indexed tier fills the cap: {:?}",
+        resolved
+    );
+}

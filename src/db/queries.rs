@@ -1913,9 +1913,61 @@ pub fn correlate_session_graph(
     })
 }
 
+/// Escape a term for safe embedding in a SQLite `GLOB` prefix pattern, then
+/// append the trailing `*` wildcard. GLOB's own metacharacters (`*`, `?`,
+/// `[`) are wrapped in a single-character bracket class (e.g. `*` -> `[*]`)
+/// so they match literally instead of acting as wildcards.
+fn glob_prefix_pattern(term: &str) -> String {
+    let mut pattern = String::with_capacity(term.len() + 1);
+    for ch in term.chars() {
+        match ch {
+            '*' | '?' | '[' => {
+                pattern.push('[');
+                pattern.push(ch);
+                pattern.push(']');
+            }
+            _ => pattern.push(ch),
+        }
+    }
+    pattern.push('*');
+    pattern
+}
+
 /// Resolve topic terms to graph entities by exact / prefix / label / alias
 /// match. `terms` must already be lowercased. Strongest match wins per entity
 /// (exact > prefix > label > alias). Capped per term and overall.
+///
+/// Query-plan / complexity notes (syslog-mcp-csukc):
+/// - The exact (`canonical_key = term`) and prefix (`canonical_key` starts
+///   with `term`) tiers run as a single statement using `GLOB` rather than
+///   `LIKE ?1 || '%'` for the prefix condition. SQLite's LIKE-to-range-scan
+///   optimization only activates under `PRAGMA case_sensitive_like = ON`
+///   (a connection-wide setting we don't want to flip for one query), while
+///   `GLOB` gets the equivalent range-scan optimization unconditionally.
+///   `canonical_key` is always ASCII-lowercased at write time
+///   (`normalize_key` in `graph.rs`) and callers already lowercase `terms`,
+///   so GLOB's case sensitivity is a non-issue here. Both disjuncts hit
+///   `idx_graph_entities_canonical_key` via SQLite's `MULTI-INDEX OR` plan —
+///   confirmed via `EXPLAIN QUERY PLAN` — so this tier is an indexed lookup,
+///   not a table scan.
+/// - The label tier (`lower(display_label) LIKE '%term%'`) is a genuine
+///   substring match. SQLite cannot use *any* B-tree index for a
+///   leading-wildcard LIKE — that's a fundamental limitation of B-tree
+///   indexes, not a missing-index problem, and no index we could add here
+///   changes that. This tier is therefore an O(n) scan of `graph_entities`
+///   per term where it runs.
+/// - To bound the damage, the label tier's query only executes when the
+///   indexed tier didn't already fill `PER_TERM_CAP` matches for that term
+///   (its own `LIMIT` is `PER_TERM_CAP` minus however many indexed hits were
+///   found). A term that resolves cleanly via exact/prefix match on
+///   `canonical_key` skips the full scan entirely; only terms that are
+///   genuinely fuzzy, or typos with few/no key matches, still pay the O(n)
+///   cost — same worst case as before, no longer paid unconditionally by
+///   every term regardless of match quality.
+/// - This still degrades linearly with `graph_entities` row count in the
+///   fuzzy case. Removing that residual cost would require a trigram/FTS5
+///   index over `display_label`, which is a larger structural change than
+///   this hardening pass covers.
 fn resolve_topic_entities(
     conn: &rusqlite::Connection,
     terms: &[String],
@@ -1926,16 +1978,22 @@ fn resolve_topic_entities(
     let mut best: std::collections::HashMap<(String, String), u8> =
         std::collections::HashMap::new();
 
-    let mut direct = conn.prepare(
+    // Tier 0/1 (exact / prefix): index-backed, see doc comment above.
+    let mut key_stmt = conn.prepare(
         "SELECT entity_type, canonical_key,
-                CASE WHEN canonical_key = ?1 THEN 0
-                     WHEN canonical_key LIKE ?1 || '%' THEN 1
-                     ELSE 2 END AS pri
+                CASE WHEN canonical_key = ?1 THEN 0 ELSE 1 END AS pri
          FROM graph_entities
-         WHERE canonical_key = ?1
-            OR canonical_key LIKE ?1 || '%'
-            OR lower(display_label) LIKE '%' || ?1 || '%'
+         WHERE canonical_key = ?1 OR canonical_key GLOB ?2
          ORDER BY pri
+         LIMIT ?3",
+    )?;
+    // Tier 2 (label substring, fallback-only): unavoidable full scan, see
+    // doc comment above. Only invoked when the indexed tier above didn't
+    // already fill PER_TERM_CAP for the current term.
+    let mut label_stmt = conn.prepare(
+        "SELECT entity_type, canonical_key
+         FROM graph_entities
+         WHERE lower(display_label) LIKE '%' || ?1 || '%'
          LIMIT ?2",
     )?;
     let mut alias = conn.prepare(
@@ -1947,18 +2005,40 @@ fn resolve_topic_entities(
     )?;
 
     for term in terms {
-        let rows = direct.query_map(rusqlite::params![term, PER_TERM_CAP as i64], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, i64>(2)? as u8,
-            ))
-        })?;
+        let glob_pattern = glob_prefix_pattern(term);
+        let mut key_hits = 0usize;
+        let rows = key_stmt.query_map(
+            rusqlite::params![term, glob_pattern, PER_TERM_CAP as i64],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)? as u8,
+                ))
+            },
+        )?;
         for row in rows {
             let (entity_type, key, pri) = row?;
+            key_hits += 1;
             let slot = best.entry((entity_type, key)).or_insert(u8::MAX);
             *slot = (*slot).min(pri);
         }
+
+        // Only pay for the unindexable substring scan when the indexed tier
+        // left room under the per-term cap.
+        let label_limit = PER_TERM_CAP.saturating_sub(key_hits);
+        if label_limit > 0 {
+            let label_rows = label_stmt
+                .query_map(rusqlite::params![term, label_limit as i64], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })?;
+            for row in label_rows {
+                let (entity_type, key) = row?;
+                let slot = best.entry((entity_type, key)).or_insert(u8::MAX);
+                *slot = (*slot).min(2);
+            }
+        }
+
         let alias_rows = alias.query_map(rusqlite::params![term, PER_TERM_CAP as i64], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         })?;
