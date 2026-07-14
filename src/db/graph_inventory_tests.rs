@@ -635,6 +635,99 @@ fn project_inventory_scopes_compose_projects_and_networks_by_source_host() {
 }
 
 #[test]
+fn reprojection_prunes_stale_resolver_instance_of_edges_when_service_moves_hosts() {
+    let _guard = graph::GRAPH_TEST_LOCK.lock();
+    let dir = tempfile::tempdir().unwrap();
+    let pool = init_pool(&StorageConfig::for_test(
+        dir.path().join("inventory-reprojection-prune.db"),
+    ))
+    .unwrap();
+
+    let inventory_with_plex_on = |host: &str| {
+        let mut inventory =
+            HomelabInventory::empty("inv-test".to_string(), "2026-01-01T00:00:00Z".to_string());
+        inventory.nodes.push(InventoryNode {
+            id: format!("node:{host}"),
+            hostname: host.to_string(),
+            trust_level: TrustLevel::Observed,
+            provenance: provenance(&format!("ssh:{host}"), "source_inventory"),
+            roles: Vec::new(),
+            ips: Vec::new(),
+            os: None,
+            cpu: None,
+            memory: None,
+            listeners: Vec::new(),
+            storage: Vec::new(),
+            extras: Default::default(),
+        });
+        inventory.services.push(InventoryService {
+            id: format!("container:{host}:plex"),
+            name: "plex".to_string(),
+            kind: "container".to_string(),
+            trust_level: TrustLevel::Observed,
+            provenance: provenance(&format!("docker:{host}"), "app_inventory"),
+            host: Some(host.to_string()),
+            image: None,
+            status: Some("running".to_string()),
+            domains: Vec::new(),
+            ports: Vec::new(),
+            mounts: Vec::new(),
+            env_keys: Vec::new(),
+            labels: Default::default(),
+        });
+        inventory
+    };
+
+    project_inventory(&pool, &inventory_with_plex_on("tootie")).unwrap();
+    {
+        let conn = pool.get().unwrap();
+        assert_eq!(
+            relationship_count(&conn, "instance_of", "resolver_instance_of"),
+            1
+        );
+    }
+
+    // Plex moves to shart: re-projection must not leak the stale
+    // tootie/plex instance_of edge or leave orphan evidence behind.
+    project_inventory(&pool, &inventory_with_plex_on("shart")).unwrap();
+    let conn = pool.get().unwrap();
+    assert_eq!(
+        relationship_count(&conn, "instance_of", "resolver_instance_of"),
+        1
+    );
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*)
+               FROM graph_relationships r
+               JOIN graph_entities src ON src.id = r.src_entity_id
+              WHERE r.relationship_type = 'instance_of'
+                AND src.canonical_key = 'tootie/plex'"
+        ),
+        0
+    );
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*) FROM graph_entities
+              WHERE entity_type = 'service_instance' AND canonical_key = 'tootie/plex'"
+        ),
+        0
+    );
+    // No orphan evidence: every evidence row must reference a live edge.
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*) FROM graph_relationship_evidence e
+              WHERE NOT EXISTS (
+                  SELECT 1 FROM graph_relationships r WHERE r.id = e.relationship_id
+              )"
+        ),
+        0
+    );
+}
+
+#[test]
 fn inventory_projection_links_service_instance_to_host_storage_compose_and_route() {
     let _guard = graph::GRAPH_TEST_LOCK.lock();
     let dir = tempfile::tempdir().unwrap();

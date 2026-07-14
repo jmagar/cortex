@@ -14,6 +14,20 @@ pub(super) struct EntityRef {
 }
 
 pub(super) fn prune_previous_inventory_projection(conn: &Connection) -> Result<()> {
+    // Resolver-vocabulary edges (`instance_of` with reason
+    // `resolver_instance_of`) are shared with the log-driven projection, so
+    // they are pruned symmetrically with the evidence criteria: only rows
+    // backed by inventory-sourced evidence are inventory-owned. This must run
+    // before the evidence delete below, which removes the identifying rows.
+    conn.execute(
+        "DELETE FROM graph_relationships
+          WHERE reason_code = ?1
+            AND id IN (
+                SELECT relationship_id FROM graph_relationship_evidence
+                 WHERE source_kind IN ('source_inventory', 'app_inventory')
+            )",
+        [graph::REASON_RESOLVER_INSTANCE_OF],
+    )?;
     conn.execute(
         "DELETE FROM graph_relationship_evidence
           WHERE source_kind IN ('source_inventory', 'app_inventory')",
