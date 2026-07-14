@@ -40,6 +40,10 @@ pub fn service_instance_key(host: &str, service: &str) -> Option<String> {
 
 /// Split a canonical `host/service` key. Rejects empty components and any
 /// extra `/` segments (which would be a legacy slash-triplet shape).
+///
+/// This validates *shape*, not canonicality: components are not checked
+/// against the canonical character set, so do not use this as an input
+/// validator for untrusted keys.
 pub fn split_service_instance_key(key: &str) -> Option<(&str, &str)> {
     let (host, service) = key.split_once('/')?;
     if host.is_empty() || service.is_empty() || service.contains('/') {

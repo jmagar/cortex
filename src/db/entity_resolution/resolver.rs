@@ -73,7 +73,7 @@ pub struct ResolverDiagnostic {
 /// `ServiceInstance` observations yield both the instance and its logical
 /// service; `LogicalService` observations yield the logical service.
 /// `RawAppLabel` observations never produce decisions (no self-upgrade).
-/// Complexity is `O(observations)` — one pass, keyed aggregation.
+/// Single pass over the observations with keyed aggregation.
 pub fn resolve_observations(observations: &[ResolverObservation]) -> Vec<ResolvedEntityDecision> {
     let mut by_entity: BTreeMap<(&'static str, String), Vec<ResolverEvidence>> = BTreeMap::new();
     for obs in observations {
@@ -84,6 +84,8 @@ pub fn resolve_observations(observations: &[ResolverObservation]) -> Vec<Resolve
                         .entry((ENTITY_TYPE_LOGICAL_SERVICE, key))
                         .or_default()
                         .push(evidence(obs, "logical_service_observation"));
+                } else {
+                    skipped_missing_key(obs, "logical_service_key");
                 }
             }
             ObservationKind::ServiceInstance => {
@@ -92,12 +94,16 @@ pub fn resolve_observations(observations: &[ResolverObservation]) -> Vec<Resolve
                         .entry((ENTITY_TYPE_SERVICE_INSTANCE, key))
                         .or_default()
                         .push(evidence(obs, "service_instance_observation"));
+                } else {
+                    skipped_missing_key(obs, "service_instance_key");
                 }
                 if let Some(key) = obs.logical_service_key.clone() {
                     by_entity
                         .entry((ENTITY_TYPE_LOGICAL_SERVICE, key))
                         .or_default()
                         .push(evidence(obs, "service_instance_logical_service"));
+                } else {
+                    skipped_missing_key(obs, "logical_service_key");
                 }
             }
             // Raw app labels are weak claims: never a decision by themselves.
@@ -151,6 +157,25 @@ pub fn diagnose_lookup_input(input: &str) -> ResolverDiagnostic {
         evidence_sample: Vec::new(),
         total_evidence_count: 0,
     }
+}
+
+/// Adapters always populate the keys their observation kind requires; a miss
+/// here means an adapter bug, so it is loud in debug builds and traced (not
+/// silently dropped) in release builds.
+fn skipped_missing_key(obs: &ResolverObservation, missing: &'static str) {
+    debug_assert!(
+        false,
+        "{:?} observation missing required {missing} (observed_key={:?}, source={}:{})",
+        obs.kind, obs.observed_key, obs.source_kind, obs.source_id
+    );
+    tracing::debug!(
+        kind = ?obs.kind,
+        observed_key = %obs.observed_key,
+        source_kind = %obs.source_kind,
+        source_id = %obs.source_id,
+        missing,
+        "resolver skipped observation missing its required key"
+    );
 }
 
 fn evidence(obs: &ResolverObservation, rule_id: &'static str) -> ResolverEvidence {

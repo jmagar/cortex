@@ -141,6 +141,11 @@ fn safe_observation_display_redacts_sensitive_values() {
         safe_display_value("/home/jmagar/.cortex/token.txt"),
         "[redacted]"
     );
+    // Scheme-less credentials must also redact (`:` + `@`, no `://`).
+    assert_eq!(
+        safe_display_value("user:pass@example.test/path"),
+        "[redacted]"
+    );
     assert_eq!(safe_display_value("plex"), "plex");
 }
 
@@ -182,6 +187,37 @@ fn resolver_converges_duplicate_hosts_under_one_logical_service() {
     assert!(decisions.iter().any(|d| {
         d.entity_type == ENTITY_TYPE_SERVICE_INSTANCE && d.canonical_key == "shart/plex"
     }));
+}
+
+#[test]
+fn mixed_trust_evidence_pins_decision_trust_to_strongest() {
+    let verified = ResolverObservation {
+        kind: ObservationKind::LogicalService,
+        observed_key: "plex".to_string(),
+        display_label: "plex".to_string(),
+        host_key: None,
+        logical_service_key: Some("plex".to_string()),
+        service_instance_key: None,
+        source_kind: "app_inventory".to_string(),
+        source_id: "inventory:tootie".to_string(),
+        evidence_path: "inventory.services.name".to_string(),
+        observed_at: "2026-01-01T00:00:00Z".to_string(),
+        trust: ResolverTrust::Verified,
+        structured: true,
+    };
+    let inferred = ResolverObservation {
+        source_id: "inventory:guess".to_string(),
+        trust: ResolverTrust::Inferred,
+        ..verified.clone()
+    };
+    let decisions = resolve_observations(&[verified, inferred]);
+    let decision = decisions
+        .iter()
+        .find(|d| d.entity_type == ENTITY_TYPE_LOGICAL_SERVICE && d.canonical_key == "plex")
+        .expect("logical service decision");
+    // min() over the strongest-first Ord picks Verified: weak corroborating
+    // observations must not weaken independently verified identity.
+    assert_eq!(decision.trust, ResolverTrust::Verified);
 }
 
 #[test]

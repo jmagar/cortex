@@ -6,7 +6,9 @@
 //! resulting graph entities/relationships/evidence.
 
 /// Epistemic trust of an observation's source. Ordered strongest-first so
-/// `min()` over evidence yields the weakest supporting link.
+/// `min()` over evidence selects the strongest supporting evidence:
+/// independent corroboration cannot be weakened by additional weak
+/// observations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ResolverTrust {
     Verified,
@@ -75,7 +77,9 @@ pub struct AgentDockerIdentity {
 /// printable characters.
 pub fn safe_display_value(value: &str) -> String {
     let lower = value.to_ascii_lowercase();
-    let sensitive = lower.contains("://") && lower.contains('@')
+    // `:` + `@` catches scheme-less credentials (`user:pass@host`) as well
+    // as credentialed URLs; over-redaction is acceptable here.
+    let sensitive = lower.contains(':') && lower.contains('@')
         || lower.contains("token")
         || lower.contains("password")
         || lower.contains("secret")
