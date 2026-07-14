@@ -1410,6 +1410,174 @@ fn canonical_plex_proof_fixture_projects_only_resolver_identity() {
 }
 
 #[test]
+fn extract_log_row_parses_metadata_json_exactly_once_per_row() {
+    let _guard = GRAPH_TEST_LOCK.lock();
+    let dir = tempfile::tempdir().unwrap();
+    let pool = init_pool(&test_storage_config(dir.path().join("graph-parse-once.db"))).unwrap();
+
+    // Each of these rows previously drove metadata_json through TWO
+    // independent `parse_metadata` calls (extract_user_device_row parsed
+    // unconditionally for every row, plus one gated extractor re-parsed the
+    // same string): a docker:// row (extract_docker_log_row), an
+    // agent-command:// row with a cwd fallback in metadata
+    // (extract_agent_command_row), and a plain row carrying
+    // metadata_json.agent_docker (extract_agent_docker_row's resolver path).
+    let mut docker_row = make_entry("2026-01-01T00:00:00Z", "docker-host", Some("cortex"), "log");
+    docker_row.source_ip = "docker://dookie/abcdef/stdout".to_string();
+    docker_row.metadata_json = Some(
+        r#"{"docker_host":"dookie","container_id":"abcdef","container_name":"cortex"}"#.to_string(),
+    );
+
+    let mut agent_command_row = make_entry(
+        "2026-01-01T00:01:00Z",
+        "dookie",
+        Some("claude"),
+        "ran a command",
+    );
+    agent_command_row.source_ip = "agent-command://dookie/claude/sess-parse".to_string();
+    agent_command_row.ai_tool = Some("claude".to_string());
+    agent_command_row.ai_session_id = Some("sess-parse".to_string());
+    agent_command_row.metadata_json =
+        Some(r#"{"agent_command":{"cwd":"/home/jmagar/workspace/cortex"}}"#.to_string());
+
+    let mut agent_docker_row = make_entry(
+        "2026-01-01T00:02:00Z",
+        "tootie",
+        Some("plex/plex/plex"),
+        "Plex started",
+    );
+    agent_docker_row.metadata_json = Some(
+        r#"{"agent_docker":{"host":"tootie","container_id":"abcdef1234567890","container_name":"plex","stream":"stdout"}}"#
+            .to_string(),
+    );
+
+    // A malformed-JSON row: parse_metadata must still run exactly once for
+    // it (returning None), not fail partially in some extractors and
+    // succeed in others from independent re-parses.
+    let mut malformed_row = make_entry("2026-01-01T00:03:00Z", "docker-host", Some("x"), "log");
+    malformed_row.source_ip = "docker://dookie/badjson/stderr".to_string();
+    malformed_row.metadata_json = Some("{not-json".to_string());
+
+    insert_logs_batch(
+        &pool,
+        &[
+            docker_row,
+            agent_command_row,
+            agent_docker_row,
+            malformed_row,
+        ],
+    )
+    .unwrap();
+
+    PARSE_METADATA_CALLS.store(0, std::sync::atomic::Ordering::Relaxed);
+    refresh_graph_projection(&pool).unwrap();
+
+    assert_eq!(
+        PARSE_METADATA_CALLS.load(std::sync::atomic::Ordering::Relaxed),
+        4,
+        "metadata_json must be parsed exactly once per row (4 rows in), not once per extractor that reads it"
+    );
+
+    // Correctness is preserved despite parsing once and threading the
+    // result down: the docker row and the resolver-identity row both still
+    // project their entities, and the malformed row degrades cleanly.
+    let conn = pool.get().unwrap();
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*) FROM graph_entities WHERE entity_type = 'container'"
+        ),
+        2
+    );
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*) FROM graph_entities WHERE entity_type = 'logical_service' AND canonical_key = 'plex'"
+        ),
+        1
+    );
+}
+
+#[test]
+fn chunk_scoped_entity_memo_collapses_repeated_ensure_entity_upserts() {
+    let _guard = GRAPH_TEST_LOCK.lock();
+    let dir = tempfile::tempdir().unwrap();
+    let pool = init_pool(&test_storage_config(
+        dir.path().join("graph-entity-memo.db"),
+    ))
+    .unwrap();
+
+    // 50 rows all naming the same host/app/source_ip (make_entry's fixed
+    // source_ip), with strictly increasing timestamps, all well within one
+    // GRAPH_REBUILD_CHUNK_SIZE (10_000) chunk transaction.
+    const ROW_COUNT: usize = 50;
+    let entries: Vec<_> = (0..ROW_COUNT)
+        .map(|i| {
+            make_entry(
+                &format!("2026-01-01T00:{i:02}:00Z"),
+                "warden",
+                Some("sshd"),
+                "repeated event",
+            )
+        })
+        .collect();
+    insert_logs_batch(&pool, &entries).unwrap();
+
+    ENSURE_ENTITY_CALLS.store(0, std::sync::atomic::Ordering::Relaxed);
+    refresh_graph_projection(&pool).unwrap();
+
+    // Correctness: still exactly one entity per distinct (entity_type,
+    // canonical_key) — source_ip, host, app — no matter how many rows
+    // referenced them.
+    let conn = pool.get().unwrap();
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*) FROM graph_entities WHERE entity_type IN ('source_ip', 'host', 'app')"
+        ),
+        3
+    );
+    // Every row still contributes its own evidence (evidence_key includes
+    // the log row id), so nothing was silently dropped by memoizing the
+    // entity upsert.
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT SUM(evidence_count) FROM graph_relationship_evidence
+             WHERE reason_code = 'syslog_claimed_hostname'"
+        ),
+        ROW_COUNT as i64
+    );
+
+    // The memo collapsed the 3 distinct entities * 50 rows = 150 potential
+    // ensure_entity invocations down to exactly 3 real upserts (one per
+    // unique (entity_type, canonical_key) per chunk).
+    assert_eq!(
+        ENSURE_ENTITY_CALLS.load(std::sync::atomic::Ordering::Relaxed),
+        3,
+        "memo must collapse repeated (entity_type, canonical_key) upserts within a chunk"
+    );
+
+    // Documented tradeoff: because rows 2..50 never reach ensure_entity at
+    // all (the memo short-circuits them), the host entity's first/last_seen
+    // window reflects only the FIRST row processed for that key in this
+    // chunk, not the widened window across all 50 rows.
+    let (first_seen, last_seen): (String, String) = conn
+        .query_row(
+            "SELECT first_seen_at, last_seen_at FROM graph_entities
+             WHERE entity_type = 'host' AND canonical_key = 'warden'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(first_seen, "2026-01-01T00:00:00Z");
+    assert_eq!(
+        last_seen, "2026-01-01T00:00:00Z",
+        "memoized entity keeps the first upsert's last_seen_at within the chunk, per the documented tradeoff"
+    );
+}
+
+#[test]
 fn graph_walk_n_hops_enforces_entity_cap() {
     let _guard = GRAPH_TEST_LOCK.lock();
     let dir = tempfile::tempdir().unwrap();
