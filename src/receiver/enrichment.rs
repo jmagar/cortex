@@ -199,9 +199,9 @@ fn matches_app(entry: &LogBatchEntry, expected: &str) -> bool {
 /// `agent_docker_source_prefixes` is configured, extraction is further
 /// restricted to entries whose `source_ip` matches one of the prefixes.
 fn extract_agent_docker_metadata(entry: &mut LogBatchEntry, config: &EnrichmentConfig) {
-    if !entry.message.starts_with(AGENT_DOCKER_META_MARKER) {
+    let Some(payload_start) = entry.message.strip_prefix(AGENT_DOCKER_META_MARKER) else {
         return;
-    }
+    };
     if !config.agent_docker_source_prefixes.is_empty()
         && !config
             .agent_docker_source_prefixes
@@ -216,9 +216,6 @@ fn extract_agent_docker_metadata(entry: &mut LogBatchEntry, config: &EnrichmentC
         );
         return;
     }
-    let Some(payload_start) = entry.message.strip_prefix(AGENT_DOCKER_META_MARKER) else {
-        return;
-    };
     // The payload is a single JSON object; use the streaming deserializer to
     // find where it ends without guessing about braces inside strings.
     let mut stream = serde_json::Deserializer::from_str(payload_start).into_iter::<Value>();

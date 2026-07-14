@@ -1535,6 +1535,30 @@ fn log_window_filter_tail(
     (sql, bindings)
 }
 
+/// Run per-arm `UNION ALL` log queries, then merge the arms newest-first,
+/// drop duplicate ids, and bound to `limit`. Each arm carries its own
+/// `LIMIT` pushdown, so this reconciles them into one ordered, bounded
+/// result. Empty `arms` yields no rows.
+fn run_union_all_log_arms(
+    conn: &rusqlite::Connection,
+    arms: &[String],
+    bindings: &[rusqlite::types::Value],
+    limit: usize,
+) -> Result<Vec<LogEntry>> {
+    if arms.is_empty() {
+        return Ok(Vec::new());
+    }
+    let sql = arms.join(" UNION ALL ");
+    let mut stmt = conn.prepare(&sql)?;
+    let mut logs = stmt
+        .query_map(rusqlite::params_from_iter(bindings.iter()), map_row)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    logs.sort_by(|a, b| b.timestamp.cmp(&a.timestamp).then_with(|| b.id.cmp(&a.id)));
+    logs.dedup_by_key(|entry| entry.id);
+    logs.truncate(limit);
+    Ok(logs)
+}
+
 /// Controls which walked entities may contribute host-wide
 /// (`l.hostname IN (…)`) predicates to the graph log fan-out.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1747,17 +1771,7 @@ pub fn search_logs_for_service_instances(
         bindings.extend(tail_bindings.iter().cloned());
         bindings.push((limit as i64).into());
     }
-    if arms.is_empty() {
-        return Ok(Vec::new());
-    }
-    let sql = arms.join(" UNION ALL ");
-    let mut stmt = conn.prepare(&sql)?;
-    let mut entries = stmt
-        .query_map(rusqlite::params_from_iter(bindings.iter()), map_row)?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    entries.sort_by(|a, b| b.timestamp.cmp(&a.timestamp).then_with(|| b.id.cmp(&a.id)));
-    entries.dedup_by_key(|entry| entry.id);
-    entries.truncate(limit);
+    let entries = run_union_all_log_arms(&conn, &arms, &bindings, limit)?;
     Ok(entries
         .into_iter()
         .map(|entry| GraphRelatedLogEntry {
@@ -2289,15 +2303,7 @@ fn search_logs_by_hostnames(
         bindings.extend(tail_bindings.iter().cloned());
         bindings.push((limit as i64).into());
     }
-    let sql = arms.join(" UNION ALL ");
-    let mut stmt = conn.prepare(&sql)?;
-    let mut logs = stmt
-        .query_map(rusqlite::params_from_iter(bindings.iter()), map_row)?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    logs.sort_by(|a, b| b.timestamp.cmp(&a.timestamp).then_with(|| b.id.cmp(&a.id)));
-    logs.dedup_by_key(|entry| entry.id);
-    logs.truncate(limit);
-    Ok(logs)
+    run_union_all_log_arms(&conn, &arms, &bindings, limit)
 }
 
 const DEFAULT_AI_ABUSE_TERMS: &[&str] = &[
