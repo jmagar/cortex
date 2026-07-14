@@ -2118,6 +2118,10 @@ fn migration_41_cleans_legacy_service_rows_from_populated_db() {
     // Simulate a populated pre-41 DB: run all migrations, then re-insert the
     // old-shaped rows a v40 DB could contain and re-run the 41 cleanup SQL by
     // reverting the migration marker before a second init_pool pass.
+    //
+    // NOTE: this replay runs on a post-41 schema (the CHECK constraints
+    // already include the v41 vocabulary), not a byte-faithful v40 schema.
+    // The migration's INSERT…SELECT filters are what is under test.
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("migration-41-cutover.db");
     {
@@ -2173,4 +2177,145 @@ fn migration_41_cleans_legacy_service_rows_from_populated_db() {
         contract,
         crate::db::entity_resolution::vocab::GRAPH_PROJECTION_CONTRACT_V2
     );
+}
+
+#[test]
+fn migration_41_prunes_relationships_evidence_and_aliases_touching_legacy_entities() {
+    // Same replay technique as the cleanup test above (post-41 schema, see
+    // its NOTE): seed a legacy `service` entity wired to a surviving host
+    // via a relationship with evidence plus an alias, and an unrelated
+    // surviving app→host relationship with evidence. Migration 41 must
+    // prune everything touching the legacy entity and nothing else, leaving
+    // no evidence row pointing at a dead relationship id, and flip a ready
+    // projection to stale.
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("migration-41-prune.db");
+    {
+        let pool = init_pool(&StorageConfig::for_test(db_path.clone())).unwrap();
+        let conn = pool.get().unwrap();
+        let insert_entity = |entity_type: &str, key: &str| -> i64 {
+            conn.execute(
+                "INSERT INTO graph_entities
+                    (entity_type, canonical_key, display_label, source_kind,
+                     source_id, trust_level)
+                 VALUES (?1, ?2, ?2, 'log', 'fixture', 'inferred')",
+                rusqlite::params![entity_type, key],
+            )
+            .unwrap();
+            conn.last_insert_rowid()
+        };
+        let insert_rel = |key: &str, src: i64, dst: i64| -> i64 {
+            conn.execute(
+                "INSERT INTO graph_relationships
+                    (relationship_key, src_entity_id, dst_entity_id,
+                     relationship_type, reason_code, trust_level, confidence,
+                     evidence_count)
+                 VALUES (?1, ?2, ?3, 'runs_on', 'log_app_name', 'inferred',
+                         0.5, 1)",
+                rusqlite::params![key, src, dst],
+            )
+            .unwrap();
+            conn.last_insert_rowid()
+        };
+        let insert_evidence = |rel_id: i64, evidence_key: &str| {
+            conn.execute(
+                "INSERT INTO graph_relationship_evidence
+                    (relationship_id, evidence_key, source_kind, source_id,
+                     observed_at, reason_code, trust_level, evidence_count)
+                 VALUES (?1, ?2, 'log', 'fixture', '2026-01-01T00:00:00Z',
+                         'log_app_name', 'inferred', 1)",
+                rusqlite::params![rel_id, evidence_key],
+            )
+            .unwrap();
+        };
+
+        let legacy = insert_entity("service", "tootie:plex");
+        let host = insert_entity("host", "tootie");
+        let app = insert_entity("app", "kernel");
+        let legacy_rel = insert_rel("legacy:runs_on:host", legacy, host);
+        insert_evidence(legacy_rel, "legacy-evidence");
+        conn.execute(
+            "INSERT INTO graph_entity_aliases
+                (entity_id, alias_type, alias_key, alias_value, trust_level)
+             VALUES (?1, 'service_name', 'plex-legacy', 'plex-legacy',
+                     'inferred')",
+            [legacy],
+        )
+        .unwrap();
+        let surviving_rel = insert_rel("app:runs_on:host", app, host);
+        insert_evidence(surviving_rel, "surviving-evidence");
+
+        conn.execute(
+            "UPDATE graph_projection_meta SET projection_status = 'ready' WHERE id = 1",
+            [],
+        )
+        .unwrap();
+
+        conn.execute("DELETE FROM schema_migrations WHERE version = 41", [])
+            .unwrap();
+        conn.execute_batch("ALTER TABLE graph_projection_meta DROP COLUMN projection_contract;")
+            .unwrap();
+    }
+    let pool = init_pool(&StorageConfig::for_test(db_path)).unwrap();
+    let conn = pool.get().unwrap();
+    let count = |sql: &str| -> i64 { conn.query_row(sql, [], |row| row.get(0)).unwrap() };
+
+    // Legacy entity and everything touching it are gone.
+    assert_eq!(
+        count("SELECT COUNT(*) FROM graph_entities WHERE entity_type = 'service'"),
+        0
+    );
+    assert_eq!(
+        count(
+            "SELECT COUNT(*) FROM graph_relationships
+              WHERE relationship_key = 'legacy:runs_on:host'"
+        ),
+        0
+    );
+    assert_eq!(
+        count(
+            "SELECT COUNT(*) FROM graph_relationship_evidence
+              WHERE evidence_key = 'legacy-evidence'"
+        ),
+        0
+    );
+    assert_eq!(
+        count("SELECT COUNT(*) FROM graph_entity_aliases WHERE alias_key = 'plex-legacy'"),
+        0
+    );
+
+    // The unrelated app→host relationship and its evidence survive.
+    assert_eq!(
+        count(
+            "SELECT COUNT(*) FROM graph_relationships
+              WHERE relationship_key = 'app:runs_on:host'"
+        ),
+        1
+    );
+    assert_eq!(
+        count(
+            "SELECT COUNT(*) FROM graph_relationship_evidence
+              WHERE evidence_key = 'surviving-evidence'"
+        ),
+        1
+    );
+
+    // Referential integrity: no evidence row references a dead relationship.
+    assert_eq!(
+        count(
+            "SELECT COUNT(*) FROM graph_relationship_evidence e
+              WHERE e.relationship_id NOT IN (SELECT id FROM graph_relationships)"
+        ),
+        0
+    );
+
+    // A previously-ready projection is flipped to stale by the migration.
+    let status: String = conn
+        .query_row(
+            "SELECT projection_status FROM graph_projection_meta WHERE id = 1",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(status, "stale");
 }

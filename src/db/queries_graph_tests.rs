@@ -527,5 +527,111 @@ fn graph_walk_service_topic_traverses_proof_edges_and_caps_results() {
         !walked.contains(&"kernel".to_string()),
         "service-topic walk must not traverse broad log-identity edges: {walked:?}"
     );
-    assert!(entities.len() <= graph::GRAPH_SERVICE_TOPIC_ENTITY_CAP);
+    // Exact reach: seed + instance + host, and nothing else. (A `<= CAP`
+    // assertion would be vacuous on a 4-node fixture.)
+    assert_eq!(entities.len(), 3, "walk must reach exactly {walked:?}");
+}
+
+#[test]
+fn ambiguous_prefix_candidates_surface_without_log_fanout() {
+    let (_dir, pool) = test_pool("topic-ambiguous-prefix.db");
+    insert_logs_batch(
+        &pool,
+        &[syslog_row(
+            "2026-01-01T00:00:00Z",
+            "tootie",
+            "plexmediaserver",
+        )],
+    )
+    .unwrap();
+    {
+        let conn = pool.get().unwrap();
+        insert_entity(&conn, graph::ENTITY_TYPE_LOGICAL_SERVICE, "plexmediaserver");
+    }
+    // "plexmedia" prefix-matches logical_service:plexmediaserver: the
+    // candidate must surface as ambiguous but contribute ZERO log fan-out.
+    let inputs =
+        topic_correlate_inputs(&pool, &["plexmedia".to_string()], 2, None, None, None, 100)
+            .unwrap();
+    let entity = inputs
+        .resolved
+        .iter()
+        .find(|e| e.canonical_key == "plexmediaserver")
+        .expect("prefix candidate must surface");
+    assert_eq!(entity.match_kind, "prefix");
+    assert_eq!(entity.resolver_status, ResolverStatus::Ambiguous);
+    assert!(
+        inputs.logs.is_empty(),
+        "ambiguous candidates must contribute zero log fan-out"
+    );
+}
+
+#[test]
+fn service_instance_fanout_truncates_globally_newest_first_across_arms() {
+    let (_dir, pool) = test_pool("service-instance-union-truncation.db");
+    // Two instances on different hosts, limit + 2 rows each, sharing the
+    // same timestamp set so the merge exercises the tie-break.
+    let mut rows = Vec::new();
+    for i in 0..8 {
+        let ts = format!("2026-01-01T00:00:{i:02}Z");
+        rows.push(syslog_row(&ts, "tootie", "plex"));
+        rows.push(syslog_row(&ts, "shart", "plex"));
+    }
+    insert_logs_batch(&pool, &rows).unwrap();
+
+    let limit = 6;
+    let out = search_logs_for_service_instances(
+        &pool,
+        &["tootie/plex".to_string(), "shart/plex".to_string()],
+        None,
+        None,
+        None,
+        limit,
+    )
+    .unwrap();
+    // UNION ALL arms each fetch up to `limit`; the Rust merge must truncate
+    // to exactly `limit` rows globally.
+    assert_eq!(out.len(), limit);
+    // Global newest-first with the (timestamp DESC, id DESC) tie-break.
+    for pair in out.windows(2) {
+        let (a, b) = (&pair[0].entry, &pair[1].entry);
+        assert!(
+            a.timestamp > b.timestamp || (a.timestamp == b.timestamp && a.id > b.id),
+            "rows must be (timestamp DESC, id DESC): {}#{} then {}#{}",
+            a.timestamp,
+            a.id,
+            b.timestamp,
+            b.id
+        );
+    }
+    // The globally newest timestamp wins across both arms: both hosts'
+    // :07 rows lead the merged result.
+    assert!(out[0].entry.timestamp.ends_with(":07Z"));
+    assert!(out[1].entry.timestamp.ends_with(":07Z"));
+}
+
+#[test]
+fn mixed_case_hostname_does_not_match_canonical_instance_key() {
+    let (_dir, pool) = test_pool("service-instance-case-miss.db");
+    insert_logs_batch(
+        &pool,
+        &[syslog_row("2026-01-01T00:00:00Z", "Tootie", "plex")],
+    )
+    .unwrap();
+    // Pins the case-sensitivity limitation: canonical keys are lowercase
+    // and the log predicates compare with SQLite's default BINARY
+    // collation, so a mixed-case syslog hostname ("Tootie") never matches
+    // the canonical instance key ("tootie/plex"). Documented in
+    // docs/contracts/investigation-graph.md; hostname case normalization
+    // at ingest is tracked separately.
+    let rows = search_logs_for_service_instances(
+        &pool,
+        &["tootie/plex".to_string()],
+        None,
+        None,
+        None,
+        50,
+    )
+    .unwrap();
+    assert!(rows.is_empty(), "mixed-case hostname must miss (pinned)");
 }

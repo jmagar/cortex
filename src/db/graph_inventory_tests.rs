@@ -728,6 +728,89 @@ fn reprojection_prunes_stale_resolver_instance_of_edges_when_service_moves_hosts
 }
 
 #[test]
+fn double_projection_with_log_and_inventory_instance_of_leaves_no_orphans() {
+    let _guard = graph::GRAPH_TEST_LOCK.lock();
+    let dir = tempfile::tempdir().unwrap();
+    let pool = init_pool(&StorageConfig::for_test(
+        dir.path().join("inventory-log-instance-overlap.db"),
+    ))
+    .unwrap();
+
+    // Log-driven instance_of: agent-docker structured metadata row for
+    // (tootie/plex, plex), projected by the log extraction path.
+    let mut entry = log_entry("Plex started");
+    entry.hostname = "tootie".to_string();
+    entry.app_name = Some("plex".to_string());
+    entry.metadata_json = Some(
+        r#"{"source_kind":"agent-docker","agent_docker":{"host":"tootie","container_id":"abcdef1234567890","container_name":"plex","compose_project":"plex","compose_service":"plex","stream":"stdout"}}"#
+            .to_string(),
+    );
+    insert_logs_batch(&pool, &[entry]).unwrap();
+    graph::refresh_graph_projection(&pool).unwrap();
+
+    // Inventory-driven instance_of for the SAME (instance, logical) pair.
+    let mut inventory =
+        HomelabInventory::empty("inv-test".to_string(), "2026-01-01T00:00:00Z".to_string());
+    inventory.services.push(InventoryService {
+        id: "container:tootie:plex".to_string(),
+        name: "plex".to_string(),
+        kind: "container".to_string(),
+        trust_level: TrustLevel::Observed,
+        provenance: provenance("docker:tootie", "app_inventory"),
+        host: Some("tootie".to_string()),
+        image: None,
+        status: Some("running".to_string()),
+        domains: Vec::new(),
+        ports: Vec::new(),
+        mounts: Vec::new(),
+        env_keys: Vec::new(),
+        labels: Default::default(),
+    });
+    project_inventory(&pool, &inventory).unwrap();
+
+    let snapshot = |conn: &rusqlite::Connection| -> (i64, i64) {
+        (
+            count(
+                conn,
+                "SELECT COUNT(*) FROM graph_relationships
+                  WHERE relationship_type = 'instance_of'",
+            ),
+            count(conn, "SELECT COUNT(*) FROM graph_relationship_evidence"),
+        )
+    };
+    let (rels_first, evidence_first) = {
+        let conn = pool.get().unwrap();
+        snapshot(&conn)
+    };
+
+    // Double projection: re-project the same inventory. The log-driven and
+    // inventory-driven paths use distinct relationship_key shapes BY DESIGN,
+    // so we assert stability and zero orphans — NOT exactly-one edge.
+    project_inventory(&pool, &inventory).unwrap();
+    let conn = pool.get().unwrap();
+    let (rels_second, evidence_second) = snapshot(&conn);
+    assert_eq!(
+        rels_first, rels_second,
+        "instance_of rowcount must be stable"
+    );
+    assert_eq!(
+        evidence_first, evidence_second,
+        "evidence rowcount must be stable"
+    );
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*) FROM graph_relationship_evidence e
+              WHERE NOT EXISTS (
+                  SELECT 1 FROM graph_relationships r WHERE r.id = e.relationship_id
+              )"
+        ),
+        0,
+        "no evidence row may reference a dead relationship"
+    );
+}
+
+#[test]
 fn inventory_projection_links_service_instance_to_host_storage_compose_and_route() {
     let _guard = graph::GRAPH_TEST_LOCK.lock();
     let dir = tempfile::tempdir().unwrap();

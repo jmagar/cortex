@@ -560,6 +560,23 @@ fn agent_docker_meta_payload_cannot_overwrite_existing_metadata_keys() {
 }
 
 #[test]
+fn agent_docker_meta_overwrites_preexisting_source_kind_with_constant() {
+    let cfg = EnrichmentConfig::default();
+    let meta = r#"{"agent_docker":{"host":"tootie","container_id":"abc","container_name":"plex","stream":"stdout"}}"#;
+    let msg = format!("[cortex-agent-docker-meta:{meta}] hello");
+    let mut e = entry("plex", &msg, "10.0.0.1:1234", "info");
+    // Pins the documented exception: a pre-existing denormalised
+    // `source_kind` IS deliberately overwritten by the receiver constant
+    // (never by the payload) when the marker is extracted.
+    e.metadata_json = Some(r#"{"source_kind":"syslog-tcp"}"#.to_string());
+    let out = enrich_entry(e, &cfg);
+    assert_eq!(out.message, "hello");
+    let metadata: serde_json::Value =
+        serde_json::from_str(out.metadata_json.as_deref().unwrap()).unwrap();
+    assert_eq!(metadata["source_kind"], "agent-docker");
+}
+
+#[test]
 fn agent_docker_meta_backs_out_when_merged_metadata_would_truncate() {
     let cfg = EnrichmentConfig::default();
     let meta = r#"{"agent_docker":{"host":"tootie","container_id":"abc","container_name":"plex","stream":"stdout"}}"#;

@@ -63,6 +63,24 @@ fn legacy_shape_classifier_ignores_free_text_and_non_name_segments() {
 }
 
 #[test]
+fn key_grammar_edge_cases_pin_non_ascii_empty_and_long_inputs() {
+    // Non-ASCII-only input: every char maps to `-`, which trims to nothing.
+    assert_eq!(logical_service_key("日本語"), None);
+    // Mixed input: ASCII survives, non-ASCII maps to `-` and trims away.
+    assert_eq!(logical_service_key("café"), Some("caf".to_string()));
+    // Empty / whitespace-only input canonicalizes to nothing.
+    assert_eq!(logical_service_key(""), None);
+    assert_eq!(logical_service_key("   "), None);
+    // Pin current behavior for very long input: there is NO length bound in
+    // the key grammar — a >512-char name canonicalizes at full length.
+    let long = "a".repeat(600);
+    assert_eq!(
+        logical_service_key(&long).as_deref().map(str::len),
+        Some(600)
+    );
+}
+
+#[test]
 fn canonical_keys_preserve_dots_in_hostnames() {
     let cases: &[(&str, Option<&str>)] = &[
         ("tootie.lan", Some("tootie.lan")),

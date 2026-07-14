@@ -127,6 +127,13 @@ deleted by migration 41 and rejected on lookup surfaces with
 separate: `plex` answers "what is this service", `tootie/plex` answers
 "where does it run".
 
+Case sensitivity: canonical keys are lowercase, but the log fan-out
+predicates compare `logs.hostname` / `logs.app_name` with SQLite's default
+BINARY collation, so matching is case-sensitive. A mixed-case syslog
+hostname (`Tootie`) never matches the canonical instance key
+(`tootie/plex`) — syslog senders should emit lowercase hostnames. Hostname
+case normalization at ingest is tracked separately.
+
 `user` is a human/identity principal (operator name, authenticated username),
 keyed `{hostname}:{username}`. `device` is a client endpoint (DNS client IP,
 MAC) distinct from a server `host`, keyed by the client identifier. Both are
