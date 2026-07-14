@@ -108,6 +108,23 @@ async fn follow_container(
         .since(since.clamp(0, i32::MAX as i64) as i32)
         .build();
 
+    // The container identity is constant for the lifetime of this follow, so
+    // both stream-tagged metadata prefixes are rendered once instead of
+    // rebuilding the serde_json value per log line.
+    let meta_prefix = |stream: &str| {
+        let metadata = container_identity_metadata(
+            hostname,
+            &container.id,
+            &container.name,
+            stream,
+            container.image.as_deref(),
+            &container.labels,
+        );
+        format!("{AGENT_DOCKER_META_MARKER}{metadata}] ")
+    };
+    let stdout_prefix = meta_prefix("stdout");
+    let stderr_prefix = meta_prefix("stderr");
+
     let mut stream = docker.logs(&container.id, Some(opts));
     while let Some(output) = stream.next().await {
         let (is_stderr, bytes) = match output? {
@@ -126,19 +143,15 @@ async fn follow_container(
         } else {
             PRI_LOCAL0_INFO
         };
-        let stream = if is_stderr { "stderr" } else { "stdout" };
-        let metadata = container_identity_metadata(
-            hostname,
-            &container.id,
-            &container.name,
-            stream,
-            container.image.as_deref(),
-            &container.labels,
-        );
+        let prefix = if is_stderr {
+            &stderr_prefix
+        } else {
+            &stdout_prefix
+        };
         // The RFC 5424 APP-NAME is truncated/sanitised at 48 chars, so
         // canonical identity rides in the metadata prefix instead. The
         // receiver strips it into `metadata_json.agent_docker`.
-        let msg = format!("{AGENT_DOCKER_META_MARKER}{metadata}] {msg}");
+        let msg = format!("{prefix}{msg}");
         let ts = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
         let line = format_rfc5424(
             pri,

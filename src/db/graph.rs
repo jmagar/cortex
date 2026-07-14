@@ -1240,10 +1240,11 @@ fn project_graph_delta(
         chunk_count += 1;
         {
             let tx = conn.transaction()?;
+            let mut resolver_memo = ResolverEntityMemo::default();
             for row in &rows {
                 cursor = cursor.max(row.id);
                 delta_log_rows += 1;
-                extract_log_row(&tx, row)?;
+                extract_log_row(&tx, row, &mut resolver_memo)?;
             }
             tx.commit()?;
         }
@@ -1512,10 +1513,11 @@ fn refresh_graph_projection_inner(pool: &DbPool, started: Instant) -> Result<Gra
         chunk_count += 1;
         {
             let tx = conn.transaction()?;
+            let mut resolver_memo = ResolverEntityMemo::default();
             for row in &rows {
                 after_id = after_id.max(row.id);
                 source_row_count += 1;
-                extract_log_row(&tx, row)?;
+                extract_log_row(&tx, row, &mut resolver_memo)?;
             }
             tx.commit()?;
         }
@@ -1703,7 +1705,17 @@ fn fetch_log_graph_rows(
     Ok(rows)
 }
 
-fn extract_log_row(conn: &rusqlite::Connection, row: &LogGraphRow) -> Result<()> {
+/// Per-chunk memo over `ensure_entity` for resolver-projected identities:
+/// identical container identities collapse to one staging upsert per unique
+/// `(entity_type, canonical_key)` per chunk transaction. Scoped to the
+/// resolver projection path only.
+type ResolverEntityMemo = std::collections::HashMap<(&'static str, String), i64>;
+
+fn extract_log_row(
+    conn: &rusqlite::Connection,
+    row: &LogGraphRow,
+    resolver_memo: &mut ResolverEntityMemo,
+) -> Result<()> {
     let source_id = row.id.to_string();
     let source_entity = if let Some(key) = normalized(&row.source_ip) {
         Some(ensure_entity(
@@ -1843,7 +1855,7 @@ fn extract_log_row(conn: &rusqlite::Connection, row: &LogGraphRow) -> Result<()>
     extract_user_device_row(conn, row)?;
     extract_ai_log_row(conn, row)?;
     extract_docker_log_row(conn, row)?;
-    extract_agent_docker_row(conn, row)?;
+    extract_agent_docker_row(conn, row, resolver_memo)?;
     Ok(())
 }
 
@@ -1852,13 +1864,17 @@ fn extract_log_row(conn: &rusqlite::Connection, row: &LogGraphRow) -> Result<()>
 /// the supported Docker identity source for the `logical_service` /
 /// `service_instance` graph contract; central-pull `docker://` /
 /// `docker-event://` rows are not resolver proof and are skipped here.
-fn extract_agent_docker_row(conn: &rusqlite::Connection, row: &LogGraphRow) -> Result<()> {
+fn extract_agent_docker_row(
+    conn: &rusqlite::Connection,
+    row: &LogGraphRow,
+    resolver_memo: &mut ResolverEntityMemo,
+) -> Result<()> {
     let observations = agent_docker_observations_from_log_row(row);
     if observations.is_empty() {
         return Ok(());
     }
     let decisions = crate::db::entity_resolution::resolve_observations(&observations);
-    project_resolver_decisions(conn, row, &decisions)
+    project_resolver_decisions(conn, row, &decisions, resolver_memo)
 }
 
 /// Read `metadata_json.agent_docker` into resolver observations. Returns
@@ -1868,6 +1884,15 @@ fn agent_docker_observations_from_log_row(
     row: &LogGraphRow,
 ) -> Vec<crate::db::entity_resolution::ResolverObservation> {
     if row.source_ip.starts_with("docker://") || row.source_ip.starts_with("docker-event://") {
+        return Vec::new();
+    }
+    // Cheap prefilter: skip the full JSON parse for the overwhelming
+    // majority of rows that carry no agent Docker identity at all.
+    if !row
+        .metadata_json
+        .as_deref()
+        .is_some_and(|meta| meta.contains("\"agent_docker\""))
+    {
         return Vec::new();
     }
     let meta = parse_metadata(row.metadata_json.as_deref());
@@ -1912,22 +1937,31 @@ fn project_resolver_decisions(
     conn: &rusqlite::Connection,
     row: &LogGraphRow,
     decisions: &[crate::db::entity_resolution::ResolvedEntityDecision],
+    resolver_memo: &mut ResolverEntityMemo,
 ) -> Result<()> {
     let source_id = row.id.to_string();
     let mut logical_ids = std::collections::BTreeMap::new();
     let mut instance_ids = std::collections::BTreeMap::new();
     for decision in decisions {
-        let entity_id = ensure_entity(
-            conn,
-            decision.entity_type,
-            &decision.canonical_key,
-            &decision.display_label,
-            SOURCE_KIND_LOG,
-            &source_id,
-            trust_to_graph(decision.trust),
-            Some(&row.timestamp),
-            Some(&row.timestamp),
-        )?;
+        let memo_key = (decision.entity_type, decision.canonical_key.clone());
+        let entity_id = match resolver_memo.get(&memo_key) {
+            Some(id) => *id,
+            None => {
+                let id = ensure_entity(
+                    conn,
+                    decision.entity_type,
+                    &decision.canonical_key,
+                    &decision.display_label,
+                    SOURCE_KIND_LOG,
+                    &source_id,
+                    trust_to_graph(decision.trust),
+                    Some(&row.timestamp),
+                    Some(&row.timestamp),
+                )?;
+                resolver_memo.insert(memo_key, id);
+                id
+            }
+        };
         if decision.entity_type == ENTITY_TYPE_LOGICAL_SERVICE {
             logical_ids.insert(decision.canonical_key.clone(), entity_id);
         } else if decision.entity_type == ENTITY_TYPE_SERVICE_INSTANCE {
