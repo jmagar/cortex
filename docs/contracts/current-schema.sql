@@ -116,7 +116,7 @@ CREATE TABLE IF NOT EXISTS graph_entities (
     source_kind   TEXT NOT NULL DEFAULT '',
     source_id     TEXT NOT NULL DEFAULT '',
     trust_level   TEXT NOT NULL CHECK (trust_level IN (
-        'verified', 'claimed', 'inferred', 'correlated'
+        'verified', 'claimed', 'inferred', 'correlated', 'refuted'
     )),
     first_seen_at TEXT,
     last_seen_at  TEXT,
