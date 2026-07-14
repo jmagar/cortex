@@ -7,6 +7,7 @@ pub mod graph;
 pub(crate) mod graph_confidence;
 pub mod graph_findings;
 pub mod graph_inventory;
+pub mod graph_resolver_projection;
 mod heartbeat;
 mod hook_events;
 mod hook_incident_evidence;
@@ -22,6 +23,7 @@ mod models;
 pub(crate) mod notifications;
 mod pool;
 mod queries;
+mod queries_service_instances;
 mod skill_events;
 mod skill_incident_evidence;
 mod skill_incidents;
@@ -114,10 +116,11 @@ pub use queries::{
     list_ai_sessions, list_ai_sessions_live, list_ai_tools, list_hosts, prune_timeline_rollup,
     refresh_ai_session_rollup, refresh_ai_session_rollup_if_stale, refresh_timeline_rollup,
     search_ai_abuse, search_ai_anchors, search_ai_incidents, search_ai_related_logs,
-    search_ai_sessions, search_logs, search_logs_for_service_instances,
-    search_logs_from_graph_related_entities, severity_to_num, similar_incidents_clusters,
-    tail_logs, timeline_rollup_status, topic_correlate_inputs, validate_fts_query,
+    search_ai_sessions, search_logs, search_logs_from_graph_related_entities, severity_to_num,
+    similar_incidents_clusters, tail_logs, timeline_rollup_status, topic_correlate_inputs,
+    validate_fts_query,
 };
+pub use queries_service_instances::search_logs_for_service_instances;
 pub(crate) use skill_events::insert_skill_events_in_tx;
 pub use skill_events::{
     AiSkillEventEntry, AiSkillEventParams, ListSkillEventsResult, SkillEventInsert,

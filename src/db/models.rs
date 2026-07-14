@@ -257,7 +257,7 @@ pub struct TopicGraphInputs {
     pub discovered_hosts: Vec<String>,
     pub logs: Vec<GraphRelatedLogEntry>,
     /// `true` when the service-topic graph walk
-    /// ([`super::graph::graph_walk_service_topic`]) hit
+    /// ([`super::graph_resolver_projection::graph_walk_service_topic`]) hit
     /// `GRAPH_SERVICE_TOPIC_ENTITY_CAP` and the reached neighborhood was cut
     /// off rather than exhaustive.
     pub graph_walk_truncated: bool,

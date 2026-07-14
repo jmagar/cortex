@@ -15,6 +15,7 @@ use rusqlite::{OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use super::graph_resolver_projection;
 use super::pool::{DbPool, write_lock};
 
 const GRAPH_REBUILD_CHUNK_SIZE: i64 = 10_000;
@@ -425,19 +426,19 @@ pub struct GraphEvidenceLookupRows {
 }
 
 #[derive(Debug)]
-struct LogGraphRow {
-    id: i64,
-    timestamp: String,
-    hostname: String,
-    app_name: Option<String>,
-    source_ip: String,
-    ai_tool: Option<String>,
-    ai_project: Option<String>,
-    ai_session_id: Option<String>,
-    metadata_json: Option<String>,
+pub(crate) struct LogGraphRow {
+    pub(crate) id: i64,
+    pub(crate) timestamp: String,
+    pub(crate) hostname: String,
+    pub(crate) app_name: Option<String>,
+    pub(crate) source_ip: String,
+    pub(crate) ai_tool: Option<String>,
+    pub(crate) ai_project: Option<String>,
+    pub(crate) ai_session_id: Option<String>,
+    pub(crate) metadata_json: Option<String>,
     /// The log message — for agent-command and shell-history rows this is the
     /// (scrubbed) command surface, used to detect `git commit`/`git push`.
-    message: String,
+    pub(crate) message: String,
 }
 
 pub fn graph_projection_status(pool: &DbPool) -> Result<GraphProjectionStatus> {
@@ -717,116 +718,16 @@ pub struct GraphWalkEntity {
     pub canonical_key: String,
 }
 
-/// Bounded entity cap for service-topic walks (final result LIMIT).
-pub const GRAPH_SERVICE_TOPIC_ENTITY_CAP: usize = 250;
-/// Per-depth allowance folded into the aggregate CTE row budget of
-/// service-topic walks (`ENTITY_CAP + HOP_CAP * GRAPH_WALK_MAX_DEPTH`).
-/// SQLite's recursive CTE `LIMIT` is a single overall budget — there is no
-/// per-level cap.
-pub const GRAPH_SERVICE_TOPIC_HOP_CAP: usize = 50;
-
 /// Bounded entity cap for the general-purpose n-hop walk ([`graph_walk_n_hops`]):
 /// both the recursive CTE's row budget and the final result `LIMIT`. Mirrors
-/// [`GRAPH_SERVICE_TOPIC_ENTITY_CAP`]'s pattern but is set higher, because
-/// `graph_walk_n_hops` traverses every relationship type (it has no
-/// [`GRAPH_SERVICE_TOPIC_RELATIONSHIPS`]-style restriction), so it needs more
-/// headroom to still return a useful topology for its broader caller set
-/// (`search_logs_from_graph_related_entities`, generic `topic_correlate`
-/// seeds).
+/// [`crate::db::graph_resolver_projection::GRAPH_SERVICE_TOPIC_ENTITY_CAP`]'s
+/// pattern but is set higher, because `graph_walk_n_hops` traverses every
+/// relationship type (it has no
+/// [`crate::db::graph_resolver_projection::GRAPH_SERVICE_TOPIC_RELATIONSHIPS`]-style
+/// restriction), so it needs more headroom to still return a useful topology
+/// for its broader caller set (`search_logs_from_graph_related_entities`,
+/// generic `topic_correlate` seeds).
 pub const GRAPH_WALK_N_HOPS_ENTITY_CAP: usize = 500;
-
-/// Relationship types a service-topic walk may traverse: only the edges
-/// needed for the canonical service proof. Deliberately excludes the broad
-/// log-identity edges (`observed_as`, `emitted_by`) so a service topic never
-/// silently expands to all logs for the host running the service.
-pub const GRAPH_SERVICE_TOPIC_RELATIONSHIPS: &[&str] = &[
-    REL_INSTANCE_OF,
-    REL_RUNS_ON,
-    REL_DEFINES_SERVICE,
-    REL_ROUTES_TO,
-    REL_EXPOSES_DOMAIN,
-    REL_MOUNTS,
-    REL_HAS_ARTIFACT,
-    REL_MATCHES_SIGNATURE,
-    REL_WORKED_ON,
-];
-
-/// Bounded breadth-first walk for service-topic lookups: traverses only
-/// [`GRAPH_SERVICE_TOPIC_RELATIONSHIPS`], bounds the whole recursive
-/// expansion at an aggregate CTE row budget of
-/// `GRAPH_SERVICE_TOPIC_ENTITY_CAP + GRAPH_SERVICE_TOPIC_HOP_CAP *
-/// GRAPH_WALK_MAX_DEPTH` (a single overall `LIMIT`, not a per-level cap),
-/// and caps the final result at [`GRAPH_SERVICE_TOPIC_ENTITY_CAP`] entities.
-///
-/// Returns `(entities, truncated)`: `truncated` is `true` when the walk
-/// actually reached more than [`GRAPH_SERVICE_TOPIC_ENTITY_CAP`] distinct
-/// entities, so callers can tell a silently-capped neighborhood apart from an
-/// exhaustive one (mirrors [`graph_around_entity`]'s `truncated` signal,
-/// detected the same way: fetch one row past the cap and check whether it was
-/// there).
-pub fn graph_walk_service_topic(
-    conn: &rusqlite::Connection,
-    start_keys: &[String],
-    max_depth: u8,
-) -> Result<(Vec<GraphWalkEntity>, bool)> {
-    if start_keys.is_empty() {
-        return Ok((Vec::new(), false));
-    }
-    let depth = i64::from(max_depth.clamp(1, GRAPH_WALK_MAX_DEPTH));
-    let placeholders = vec!["?"; start_keys.len()].join(", ");
-    let rel_placeholders = vec!["?"; GRAPH_SERVICE_TOPIC_RELATIONSHIPS.len()].join(", ");
-    let sql = format!(
-        "WITH RECURSIVE graph_walk(entity_id, depth) AS (
-             SELECT id, 0 FROM graph_entities WHERE canonical_key IN ({placeholders})
-             UNION
-             SELECT CASE WHEN r.src_entity_id = gw.entity_id
-                         THEN r.dst_entity_id ELSE r.src_entity_id END,
-                    gw.depth + 1
-             FROM graph_relationships r
-             JOIN graph_walk gw
-               ON r.src_entity_id = gw.entity_id OR r.dst_entity_id = gw.entity_id
-             WHERE gw.depth < ?
-               AND r.trust_level != 'refuted'
-               AND r.relationship_type IN ({rel_placeholders})
-             LIMIT ?
-         )
-         SELECT DISTINCT e.entity_type, e.canonical_key
-         FROM graph_entities e
-         JOIN graph_walk gw ON e.id = gw.entity_id
-         LIMIT ?"
-    );
-
-    let mut bindings: Vec<rusqlite::types::Value> = start_keys
-        .iter()
-        .map(|k| rusqlite::types::Value::Text(k.clone()))
-        .collect();
-    bindings.push(rusqlite::types::Value::Integer(depth));
-    for rel in GRAPH_SERVICE_TOPIC_RELATIONSHIPS {
-        bindings.push(rusqlite::types::Value::Text((*rel).to_string()));
-    }
-    bindings.push(rusqlite::types::Value::Integer(
-        (GRAPH_SERVICE_TOPIC_ENTITY_CAP
-            + GRAPH_SERVICE_TOPIC_HOP_CAP * GRAPH_WALK_MAX_DEPTH as usize) as i64,
-    ));
-    // Fetch one row past the cap so we can detect truncation (see doc
-    // comment), then trim back down to the advertised cap below.
-    bindings.push(rusqlite::types::Value::Integer(
-        (GRAPH_SERVICE_TOPIC_ENTITY_CAP + 1) as i64,
-    ));
-
-    let mut stmt = conn.prepare(&sql)?;
-    let mut entities = stmt
-        .query_map(rusqlite::params_from_iter(bindings.iter()), |row| {
-            Ok(GraphWalkEntity {
-                entity_type: row.get(0)?,
-                canonical_key: row.get(1)?,
-            })
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    let truncated = entities.len() > GRAPH_SERVICE_TOPIC_ENTITY_CAP;
-    entities.truncate(GRAPH_SERVICE_TOPIC_ENTITY_CAP);
-    Ok((entities, truncated))
-}
 
 /// Walk the investigation graph outward from a set of seed entities (matched by
 /// `canonical_key`) and return every distinct entity reachable within
@@ -838,7 +739,8 @@ pub fn graph_walk_service_topic(
 /// `(dst_entity_id)` — both indexed — so each hop is index-served. `max_depth`
 /// is clamped to `[1, GRAPH_WALK_MAX_DEPTH]`; an empty seed set returns empty.
 ///
-/// Unlike [`graph_walk_service_topic`], this walk traverses every relationship
+/// Unlike [`crate::db::graph_resolver_projection::graph_walk_service_topic`],
+/// this walk traverses every relationship
 /// type, so a densely connected homelab graph can otherwise expand without
 /// bound. Both the recursive CTE and the final result are bounded at
 /// [`GRAPH_WALK_N_HOPS_ENTITY_CAP`] entities (a single overall `LIMIT`, not a
@@ -1111,87 +1013,6 @@ fn graph_evidence_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<GraphEvi
     })
 }
 
-/// Rows deleted per chunk by [`cleanup_legacy_service_topology`]. Mirrors the
-/// repo's chunked-deletion convention (`purge_old_logs` chunks, the storage
-/// enforcement `cleanup_chunk_size` default) so the write lock is released
-/// between chunks instead of held across one unbounded transaction.
-const LEGACY_TOPOLOGY_CLEANUP_CHUNK: i64 = 2_000;
-
-/// Subquery selecting the stale pre-resolver entity ids: every `service`
-/// entity (old `host:name` / `host:project:service` canonical keys) and
-/// nested `app` labels shaped like `plex/plex/plex`.
-const LEGACY_TOPOLOGY_ENTITY_IDS: &str = "SELECT id FROM graph_entities
-      WHERE entity_type = 'service'
-         OR (entity_type = 'app' AND canonical_key LIKE '%/%/%')";
-
-/// Remove stale pre-resolver service topology rows from the graph projection:
-/// every `service` entity (old `host:name` / `host:project:service` canonical
-/// keys) and nested `app` labels shaped like `plex/plex/plex`, plus their
-/// aliases, relationships, and evidence. The canonical replacement is the
-/// resolver-owned `logical_service` / `service_instance` projection; old keys
-/// are deleted, never migrated.
-///
-/// Deletes run in [`LEGACY_TOPOLOGY_CLEANUP_CHUNK`]-row chunks, committing
-/// and releasing [`write_lock`] between chunks so a large legacy projection
-/// never pins the writer. The phase order (evidence → relationships →
-/// aliases → entities) keeps every commit boundary referentially safe: a
-/// child row is always gone before its parent.
-pub fn cleanup_legacy_service_topology(conn: &mut rusqlite::Connection) -> Result<()> {
-    // Same `src IN (…) OR dst IN (…)` shape for evidence and relationships:
-    // an inner JOIN on both endpoints would skip relationships whose other
-    // endpoint dangles, orphaning their evidence.
-    let phases = [
-        format!(
-            "DELETE FROM graph_relationship_evidence
-              WHERE id IN (
-                  SELECT id FROM graph_relationship_evidence
-                   WHERE relationship_id IN (
-                       SELECT id FROM graph_relationships
-                        WHERE src_entity_id IN ({LEGACY_TOPOLOGY_ENTITY_IDS})
-                           OR dst_entity_id IN ({LEGACY_TOPOLOGY_ENTITY_IDS})
-                   )
-                   LIMIT ?1
-              )"
-        ),
-        format!(
-            "DELETE FROM graph_relationships
-              WHERE id IN (
-                  SELECT id FROM graph_relationships
-                   WHERE src_entity_id IN ({LEGACY_TOPOLOGY_ENTITY_IDS})
-                      OR dst_entity_id IN ({LEGACY_TOPOLOGY_ENTITY_IDS})
-                   LIMIT ?1
-              )"
-        ),
-        format!(
-            "DELETE FROM graph_entity_aliases
-              WHERE id IN (
-                  SELECT id FROM graph_entity_aliases
-                   WHERE entity_id IN ({LEGACY_TOPOLOGY_ENTITY_IDS})
-                   LIMIT ?1
-              )"
-        ),
-        format!(
-            "DELETE FROM graph_entities
-              WHERE id IN (SELECT id FROM ({LEGACY_TOPOLOGY_ENTITY_IDS}) LIMIT ?1)"
-        ),
-    ];
-    for sql in &phases {
-        loop {
-            let deleted = {
-                let _guard = write_lock();
-                let tx = conn.transaction()?;
-                let deleted = tx.execute(sql, [LEGACY_TOPOLOGY_CLEANUP_CHUNK])?;
-                tx.commit()?;
-                deleted
-            };
-            if (deleted as i64) < LEGACY_TOPOLOGY_CLEANUP_CHUNK {
-                break;
-            }
-        }
-    }
-    Ok(())
-}
-
 pub fn refresh_graph_projection(pool: &DbPool) -> Result<GraphRebuildOutcome> {
     let Some(_rebuild_guard) = GRAPH_REBUILD_LOCK.try_lock() else {
         return Ok(GraphRebuildOutcome::AlreadyRunning);
@@ -1245,7 +1066,7 @@ pub fn refresh_graph_projection_incremental(pool: &DbPool) -> Result<GraphRebuil
                 "legacy service topology detected in graph projection; \
                  cleaning and forcing a full rebuild"
             );
-            cleanup_legacy_service_topology(&mut conn)?;
+            graph_resolver_projection::cleanup_legacy_service_topology(&mut conn)?;
             drop(conn);
             return full_rebuild_locked(pool);
         }
@@ -1786,7 +1607,7 @@ fn fetch_log_graph_rows(
 /// reference the same entity. This mirrors the resolver-path memo's
 /// pre-existing tradeoff (syslog-mcp-g3fgk) — extended here to every
 /// extract_*_row projection instead of the resolver path alone.
-type EntityMemo = std::collections::HashMap<(&'static str, String), i64>;
+pub(crate) type EntityMemo = std::collections::HashMap<(&'static str, String), i64>;
 
 /// `metadata_json` is parsed exactly once per row (here, in the dispatcher)
 /// and threaded down as `Option<&Value>` to every `extract_*_row` function
@@ -1940,155 +1761,8 @@ fn extract_log_row(
     extract_user_device_row(conn, row, meta.as_ref(), memo)?;
     extract_ai_log_row(conn, row, memo)?;
     extract_docker_log_row(conn, row, meta.as_ref(), memo)?;
-    extract_agent_docker_row(conn, row, meta.as_ref(), memo)?;
+    graph_resolver_projection::extract_agent_docker_row(conn, row, meta.as_ref(), memo)?;
     Ok(())
-}
-
-/// Project canonical service identity from structured agent Docker metadata
-/// (`metadata_json.agent_docker`) through the deterministic resolver. This is
-/// the supported Docker identity source for the `logical_service` /
-/// `service_instance` graph contract; central-pull `docker://` /
-/// `docker-event://` rows are not resolver proof and are skipped here.
-fn extract_agent_docker_row(
-    conn: &rusqlite::Connection,
-    row: &LogGraphRow,
-    meta: Option<&Value>,
-    memo: &mut EntityMemo,
-) -> Result<()> {
-    let observations = agent_docker_observations_from_log_row(row, meta);
-    if observations.is_empty() {
-        return Ok(());
-    }
-    let decisions = crate::db::entity_resolution::resolve_observations(&observations);
-    project_resolver_decisions(conn, row, &decisions, memo)
-}
-
-/// Read `metadata_json.agent_docker` into resolver observations. Returns
-/// empty when the row has no structured agent identity or is a central-pull
-/// Docker row (`docker://` / `docker-event://`), which is not proof.
-///
-/// `meta` is the already-parsed `metadata_json` from the dispatcher
-/// (`extract_log_row`) — no re-parse here. The former "cheap prefilter" byte
-/// scan for `"agent_docker"` before parsing is gone because the parse now
-/// always happens exactly once upstream regardless of whether this function
-/// needs it.
-fn agent_docker_observations_from_log_row(
-    row: &LogGraphRow,
-    meta: Option<&Value>,
-) -> Vec<crate::db::entity_resolution::ResolverObservation> {
-    if row.source_ip.starts_with("docker://") || row.source_ip.starts_with("docker-event://") {
-        return Vec::new();
-    }
-    let Some(agent) = meta
-        .and_then(|value| value.get("agent_docker"))
-        .filter(|value| value.is_object())
-    else {
-        return Vec::new();
-    };
-    let text = |field: &str| {
-        agent
-            .get(field)
-            .and_then(Value::as_str)
-            .and_then(normalized_value)
-            .map(str::to_string)
-    };
-    let (Some(agent_host), Some(container_id), Some(container_name), Some(stream)) = (
-        text("host"),
-        text("container_id"),
-        text("container_name"),
-        text("stream"),
-    ) else {
-        return Vec::new();
-    };
-    let identity = crate::db::entity_resolution::AgentDockerIdentity {
-        agent_host,
-        container_id,
-        container_name,
-        compose_project: text("compose_project"),
-        compose_service: text("compose_service"),
-        image: text("image"),
-        stream,
-        observed_at: row.timestamp.clone(),
-    };
-    crate::db::entity_resolution::observations_from_agent_docker_identity(&identity)
-}
-
-/// Store resolver decisions as graph entities and link each
-/// `service_instance` to its `logical_service` with an `instance_of` edge.
-fn project_resolver_decisions(
-    conn: &rusqlite::Connection,
-    row: &LogGraphRow,
-    decisions: &[crate::db::entity_resolution::ResolvedEntityDecision],
-    memo: &mut EntityMemo,
-) -> Result<()> {
-    let source_id = row.id.to_string();
-    let mut logical_ids = std::collections::BTreeMap::new();
-    let mut instance_ids = std::collections::BTreeMap::new();
-    for decision in decisions {
-        let entity_id = ensure_entity_memoized(
-            conn,
-            memo,
-            decision.entity_type,
-            &decision.canonical_key,
-            &decision.display_label,
-            SOURCE_KIND_LOG,
-            &source_id,
-            trust_to_graph(decision.trust),
-            Some(&row.timestamp),
-            Some(&row.timestamp),
-        )?;
-        if decision.entity_type == ENTITY_TYPE_LOGICAL_SERVICE {
-            logical_ids.insert(decision.canonical_key.clone(), entity_id);
-        } else if decision.entity_type == ENTITY_TYPE_SERVICE_INSTANCE {
-            instance_ids.insert(decision.canonical_key.clone(), entity_id);
-        }
-    }
-    for (instance_key, instance_id) in instance_ids {
-        if let Some((_, service)) =
-            crate::db::entity_resolution::split_service_instance_key(&instance_key)
-        {
-            if let Some(logical_id) = logical_ids.get(service) {
-                ensure_relationship_with_evidence(
-                    conn,
-                    instance_id,
-                    *logical_id,
-                    REL_INSTANCE_OF,
-                    REASON_RESOLVER_INSTANCE_OF,
-                    TRUST_VERIFIED,
-                    1.0,
-                    EvidenceInput {
-                        evidence_key: evidence_bucket_key(
-                            "log",
-                            row.id,
-                            REASON_RESOLVER_INSTANCE_OF,
-                            &row.timestamp,
-                        ),
-                        source_kind: SOURCE_KIND_LOG,
-                        source_id: &source_id,
-                        source_log_id: Some(row.id),
-                        source_heartbeat_id: None,
-                        source_signature_hash: None,
-                        observed_at: &row.timestamp,
-                        reason_text: Some("resolver linked service instance to logical service"),
-                        confidence_delta: 1.0,
-                        trust_level: TRUST_VERIFIED,
-                        safe_excerpt: Some(&instance_key),
-                        metadata_path: Some("metadata_json.agent_docker"),
-                    },
-                )?;
-            }
-        }
-    }
-    Ok(())
-}
-
-/// Map resolver trust levels onto graph trust vocabulary.
-pub(crate) fn trust_to_graph(trust: crate::db::entity_resolution::ResolverTrust) -> &'static str {
-    match trust {
-        crate::db::entity_resolution::ResolverTrust::Verified => TRUST_VERIFIED,
-        crate::db::entity_resolution::ResolverTrust::Claimed => TRUST_CLAIMED,
-        crate::db::entity_resolution::ResolverTrust::Inferred => TRUST_INFERRED,
-    }
 }
 
 /// Project user/device identity topology from identity-bearing log rows:
@@ -3108,7 +2782,7 @@ pub(crate) static ENSURE_ENTITY_CALLS: std::sync::atomic::AtomicU64 =
 /// of re-running the upsert. See [`EntityMemo`] for the scope and the
 /// `last_seen_at` tradeoff this implies.
 #[allow(clippy::too_many_arguments)]
-fn ensure_entity_memoized(
+pub(crate) fn ensure_entity_memoized(
     conn: &rusqlite::Connection,
     memo: &mut EntityMemo,
     entity_type: &'static str,
@@ -3177,23 +2851,23 @@ fn insert_alias(
     Ok(())
 }
 
-struct EvidenceInput<'a> {
-    evidence_key: String,
-    source_kind: &'a str,
-    source_id: &'a str,
-    source_log_id: Option<i64>,
-    source_heartbeat_id: Option<i64>,
-    source_signature_hash: Option<&'a str>,
-    observed_at: &'a str,
-    reason_text: Option<&'a str>,
-    confidence_delta: f64,
-    trust_level: &'a str,
-    safe_excerpt: Option<&'a str>,
-    metadata_path: Option<&'a str>,
+pub(crate) struct EvidenceInput<'a> {
+    pub(crate) evidence_key: String,
+    pub(crate) source_kind: &'a str,
+    pub(crate) source_id: &'a str,
+    pub(crate) source_log_id: Option<i64>,
+    pub(crate) source_heartbeat_id: Option<i64>,
+    pub(crate) source_signature_hash: Option<&'a str>,
+    pub(crate) observed_at: &'a str,
+    pub(crate) reason_text: Option<&'a str>,
+    pub(crate) confidence_delta: f64,
+    pub(crate) trust_level: &'a str,
+    pub(crate) safe_excerpt: Option<&'a str>,
+    pub(crate) metadata_path: Option<&'a str>,
 }
 
 #[allow(clippy::too_many_arguments)]
-fn ensure_relationship_with_evidence(
+pub(crate) fn ensure_relationship_with_evidence(
     conn: &rusqlite::Connection,
     src_entity_id: i64,
     dst_entity_id: i64,
@@ -3452,7 +3126,7 @@ fn normalized(value: &str) -> Option<String> {
     normalized_value(value).map(normalize_key)
 }
 
-fn normalized_value(value: &str) -> Option<&str> {
+pub(crate) fn normalized_value(value: &str) -> Option<&str> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
         None
@@ -3465,7 +3139,12 @@ fn normalize_key(value: &str) -> String {
     value.trim().to_ascii_lowercase()
 }
 
-fn evidence_bucket_key(prefix: &str, source_id: i64, reason: &str, timestamp: &str) -> String {
+pub(crate) fn evidence_bucket_key(
+    prefix: &str,
+    source_id: i64,
+    reason: &str,
+    timestamp: &str,
+) -> String {
     let bucket = timestamp.get(0..13).unwrap_or(timestamp);
     format!("{prefix}:{reason}:{source_id}:{bucket}")
 }

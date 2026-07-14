@@ -8,6 +8,7 @@ use std::collections::{BTreeMap, btree_map::Entry};
 use anyhow::{Context, Result};
 
 use crate::db::graph;
+use crate::db::graph_resolver_projection::trust_to_graph;
 use crate::db::{DbPool, entity_resolution, write_lock};
 use crate::inventory::schema::HomelabInventory;
 
@@ -205,7 +206,7 @@ fn build_projection_plan(inventory: &HomelabInventory) -> InventoryProjectionPla
                     &service.name,
                     graph::SOURCE_KIND_APP_INVENTORY,
                     &service.id,
-                    graph::trust_to_graph(logical_decision.trust),
+                    trust_to_graph(logical_decision.trust),
                     &service.provenance.collected_at,
                 );
                 entry.insert(entity.clone());
@@ -231,7 +232,7 @@ fn build_projection_plan(inventory: &HomelabInventory) -> InventoryProjectionPla
             &instance_key,
             graph::SOURCE_KIND_APP_INVENTORY,
             &service.id,
-            graph::trust_to_graph(instance_decision.trust),
+            trust_to_graph(instance_decision.trust),
             &service.provenance.collected_at,
         );
         plan.relationship(
@@ -242,7 +243,7 @@ fn build_projection_plan(inventory: &HomelabInventory) -> InventoryProjectionPla
             graph::SOURCE_KIND_APP_INVENTORY,
             &service.id,
             &service.provenance.collected_at,
-            graph::trust_to_graph(instance_decision.trust),
+            trust_to_graph(instance_decision.trust),
             0.95,
             &format!("{} is an instance of {}", instance_key, logical_key),
         );
