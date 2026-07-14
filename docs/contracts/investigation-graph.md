@@ -646,10 +646,16 @@ cortex entity --alias-type TYPE --alias-key KEY [--limit N] [--json]
 Entity lookup MUST:
 
 - reject unknown entity types,
+- reject legacy nested service identity keys (`tootie:plex`,
+  `tootie:plex:plex`, `plex/plex/plex`) on service-identity lookups with
+  `rejected_legacy_shape` before any graph query runs,
 - return one exact entity when unambiguous,
 - return candidates for ambiguous alias matches,
 - include projection metadata,
-- respect bounded limits.
+- respect bounded limits,
+- redact identifiers (canonical keys, display labels, source ids,
+  relationship keys, alias keys) with the same secret/home-path redaction as
+  evidence excerpts.
 
 ### 9.2 Neighborhood Lookup
 

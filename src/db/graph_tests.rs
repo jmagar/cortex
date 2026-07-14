@@ -1226,3 +1226,113 @@ fn graph_projection_emits_service_instance_not_nested_service_key() {
         0
     );
 }
+
+#[test]
+fn canonical_plex_proof_fixture_projects_only_resolver_identity() {
+    let _guard = GRAPH_TEST_LOCK.lock();
+    let dir = tempfile::tempdir().unwrap();
+    let pool = init_pool(&test_storage_config(dir.path().join("plex-proof.db"))).unwrap();
+
+    let agent_docker_meta = |host: &str| {
+        format!(
+            r#"{{"source_kind":"agent-docker","agent_docker":{{"host":"{host}","container_id":"abcdef1234567890","container_name":"plex","compose_project":"plex","compose_service":"plex","stream":"stdout"}}}}"#
+        )
+    };
+    let mut tootie_plex = make_entry(
+        "2026-01-01T00:00:00Z",
+        "tootie",
+        Some("plex/plex/plex"),
+        "Plex started",
+    );
+    tootie_plex.metadata_json = Some(agent_docker_meta("tootie"));
+    let mut shart_plex = make_entry(
+        "2026-01-01T00:01:00Z",
+        "shart",
+        Some("plex/plex/plex"),
+        "Plex replica started",
+    );
+    shart_plex.metadata_json = Some(agent_docker_meta("shart"));
+    // Raw syslog labels that merely contain "plex": never logical services.
+    let complex = make_entry(
+        "2026-01-01T00:02:00Z",
+        "tootie",
+        Some("complex"),
+        "complex event",
+    );
+    let plex_backup = make_entry(
+        "2026-01-01T00:03:00Z",
+        "tootie",
+        Some("plex-backup"),
+        "backup ran",
+    );
+    // AI command row whose project path mentions plex.
+    let mut ai_row = make_entry(
+        "2026-01-01T00:04:00Z",
+        "dookie",
+        Some("claude"),
+        "edited compose file",
+    );
+    ai_row.source_ip = "agent-command://dookie/claude/sess-plex".to_string();
+    ai_row.ai_tool = Some("claude".to_string());
+    ai_row.ai_project = Some("/home/jmagar/workspace/plex-tools".to_string());
+    ai_row.ai_session_id = Some("sess-plex".to_string());
+
+    insert_logs_batch(
+        &pool,
+        &[tootie_plex, shart_plex, complex, plex_backup, ai_row],
+    )
+    .unwrap();
+    refresh_graph_projection(&pool).unwrap();
+
+    let conn = pool.get().unwrap();
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*) FROM graph_entities WHERE entity_type = 'logical_service' AND canonical_key = 'plex'"
+        ),
+        1
+    );
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*) FROM graph_entities WHERE entity_type = 'service_instance' AND canonical_key = 'tootie/plex'"
+        ),
+        1
+    );
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*) FROM graph_entities WHERE entity_type = 'service_instance' AND canonical_key = 'shart/plex'"
+        ),
+        1
+    );
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*) FROM graph_entities WHERE canonical_key IN ('tootie:plex', 'tootie:plex:plex', 'plex/plex/plex')"
+        ),
+        0
+    );
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*) FROM graph_entities WHERE canonical_key = 'complex' AND entity_type = 'logical_service'"
+        ),
+        0
+    );
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*) FROM graph_entities WHERE canonical_key = 'plex-backup' AND entity_type = 'logical_service'"
+        ),
+        0
+    );
+    // Both instances converge on ONE logical service via instance_of.
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*) FROM graph_relationships WHERE relationship_type = 'instance_of'"
+        ),
+        2
+    );
+}

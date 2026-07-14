@@ -399,3 +399,41 @@ When adding a new graph fact, update all of these in the same change:
 - Projection code and tests for the new entity/edge/evidence rule.
 - [`docs/contracts/investigation-graph.md`](../docs/contracts/investigation-graph.md).
 - This page.
+
+## Canonical Resolver Proof: Plex
+
+The canonical graph shape for Plex is:
+
+- `logical_service:plex`
+- `service_instance:tootie/plex`
+- `service_instance:tootie/plex instance_of logical_service:plex`
+- `service_instance:tootie/plex runs_on host:tootie`
+- `compose_project:tootie/plex defines_service service_instance:tootie/plex`
+- route/domain/storage/container/error/session evidence links to the service
+  instance when deterministic evidence exists
+
+`tootie:plex`, `tootie:plex:plex`, and `plex/plex/plex` are not supported
+service identity inputs. They are stale defect shapes: migration 41 deletes
+them from populated databases and every public lookup surface rejects them
+with `rejected_legacy_shape`.
+
+Read-only proof commands (safe against production):
+
+```bash
+scripts/validate-canonical-plex-graph.sh
+cortex entity logical_service plex
+cortex graph around logical_service:plex
+cortex graph around service_instance:tootie/plex
+cortex topic-correlate plex --limit 20
+```
+
+`scripts/validate-canonical-plex-graph.sh` prints `old_key_count` (must be 0
+after migration + rebuild), `new_key_count` (must be > 0 once resolver
+projection has seen structured evidence), and the canonical lookup query
+plan. It refuses any live rebuild: back up first (`cortex db backup`), run
+`cortex graph rebuild` off-peak, then re-run the read-only checks.
+
+Central Docker pull rows (`docker://`, `docker-event://`) are not proof for
+this milestone; the proof source is `metadata_json.agent_docker` from
+host-local agents (plus verified inventory). Raw log app labels such as
+`complex` or `plex-backup` never self-upgrade into `logical_service:plex`.
