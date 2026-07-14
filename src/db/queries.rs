@@ -1531,6 +1531,21 @@ fn log_window_filter_tail(
     (sql, bindings)
 }
 
+/// Controls which walked entities may contribute host-wide
+/// (`l.hostname IN (…)`) predicates to the graph log fan-out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HostFanoutScope {
+    /// Any reached `host`/`container` entity adds its hostname. Session
+    /// correlation uses this deliberately: following `ai_session → host`
+    /// edges to the host's logs is the point of the query.
+    WalkReached,
+    /// Only `host` entities that were seeds themselves (exact topic match on
+    /// the host) add hostnames. Hosts reached transitively from app/container
+    /// seeds never drive host-wide log inclusion — topic correlation's
+    /// no-silent-fan-out guarantee.
+    SeedHostsOnly,
+}
+
 /// Graph-anchored log fan-out: traverse the investigation graph outward from a
 /// set of seed entities, then return the logs emitted by every related entity
 /// within `[since, until]`.
@@ -1542,8 +1557,9 @@ fn log_window_filter_tail(
 /// log scan — 10-100× fewer rows than an FTS-first scan over a common term.
 ///
 /// Entity → log-column mapping:
-/// - `host` → `hostname`
-/// - `container` / `service` (`docker_host:…` keys) → leading `hostname`
+/// - `host` → `hostname` (subject to `host_fanout_scope`)
+/// - `container` (`docker_host:…` keys) → leading `hostname` (only under
+///   [`HostFanoutScope::WalkReached`])
 /// - `ai_project` → `ai_project`
 /// - `ai_session` (`project:tool:session` keys) → trailing `ai_session_id`
 ///
@@ -1558,6 +1574,7 @@ pub fn search_logs_from_graph_related_entities(
     until: Option<&str>,
     source_kinds: Option<&[SourceKind]>,
     limit: usize,
+    host_fanout_scope: HostFanoutScope,
 ) -> Result<Vec<LogEntry>> {
     if entity_canonical_keys.is_empty() {
         return Ok(Vec::new());
@@ -1570,6 +1587,8 @@ pub fn search_logs_from_graph_related_entities(
     if entities.is_empty() {
         return Ok(Vec::new());
     }
+    let seed_set: std::collections::HashSet<&str> =
+        entity_canonical_keys.iter().map(String::as_str).collect();
 
     // 2. Map related entities to indexed log-column filters.
     //
@@ -1582,8 +1601,16 @@ pub fn search_logs_from_graph_related_entities(
     let mut ai_sessions: Vec<String> = Vec::new();
     for entity in &entities {
         match entity.entity_type.as_str() {
-            super::graph::ENTITY_TYPE_HOST => hostnames.push(entity.canonical_key.clone()),
-            super::graph::ENTITY_TYPE_CONTAINER => {
+            super::graph::ENTITY_TYPE_HOST => {
+                if host_fanout_scope == HostFanoutScope::WalkReached
+                    || seed_set.contains(entity.canonical_key.as_str())
+                {
+                    hostnames.push(entity.canonical_key.clone());
+                }
+            }
+            super::graph::ENTITY_TYPE_CONTAINER
+                if host_fanout_scope == HostFanoutScope::WalkReached =>
+            {
                 // `docker_host:container_id` — the leading segment is the
                 // host the workload runs on.
                 if let Some(host) = entity.canonical_key.split(':').next() {
@@ -1835,6 +1862,7 @@ pub fn correlate_session_graph(
             Some(&end),
             None,
             limit,
+            HostFanoutScope::WalkReached,
         )?
     } else {
         // Fallback: the graph hasn't projected this session yet — return its own
@@ -2080,6 +2108,10 @@ pub fn topic_correlate_inputs(
         )?);
     }
     if !generic_seeds.is_empty() {
+        // SeedHostsOnly: a host reached transitively from an app/container
+        // seed (e.g. app:plex —emitted_by→ host:tootie) must never drive
+        // host-wide `l.hostname IN (…)` inclusion labelled `resolved`. Only
+        // hosts that were exact topic matches themselves fan out.
         logs.extend(
             search_logs_from_graph_related_entities(
                 pool,
@@ -2089,6 +2121,7 @@ pub fn topic_correlate_inputs(
                 until,
                 source_kinds,
                 limit,
+                HostFanoutScope::SeedHostsOnly,
             )?
             .into_iter()
             .map(|entry| GraphRelatedLogEntry {

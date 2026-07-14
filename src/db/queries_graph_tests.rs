@@ -207,9 +207,17 @@ fn search_logs_from_graph_fans_out_from_session_to_host_logs() {
 
     // Seed from the AI session entity; traversal reaches host:dookie.
     let session_key = "cortex:claude:sess-7".to_string();
-    let logs =
-        search_logs_from_graph_related_entities(&pool, &[session_key], 2, None, None, None, 100)
-            .unwrap();
+    let logs = search_logs_from_graph_related_entities(
+        &pool,
+        &[session_key],
+        2,
+        None,
+        None,
+        None,
+        100,
+        HostFanoutScope::WalkReached,
+    )
+    .unwrap();
 
     let hosts: std::collections::HashSet<&str> = logs.iter().map(|l| l.hostname.as_str()).collect();
     assert!(
@@ -255,6 +263,7 @@ fn search_logs_from_graph_respects_source_kind_filter() {
         None,
         Some(&[SourceKind::SyslogUdp]),
         100,
+        HostFanoutScope::WalkReached,
     )
     .unwrap();
     assert!(!logs.is_empty(), "syslog row should survive the filter");
@@ -276,9 +285,62 @@ fn search_logs_from_graph_empty_for_unknown_seed() {
         None,
         None,
         100,
+        HostFanoutScope::WalkReached,
     )
     .unwrap();
     assert!(logs.is_empty());
+}
+
+#[test]
+fn topic_correlate_app_seed_does_not_fan_out_to_whole_host() {
+    let (_dir, pool) = test_pool("topic-app-seed-no-host-fanout.db");
+    // Bare `plex` app label (no agent-docker metadata) plus an unrelated
+    // kernel row on the same host.
+    insert_logs_batch(
+        &pool,
+        &[
+            syslog_row("2026-01-01T00:00:00Z", "tootie", "plex"),
+            syslog_row("2026-01-01T00:01:00Z", "tootie", "kernel"),
+        ],
+    )
+    .unwrap();
+    // Graph: app:plex —emitted_by→ host:tootie (log-identity edge).
+    {
+        let conn = pool.get().unwrap();
+        let app = insert_entity(&conn, graph::ENTITY_TYPE_APP, "plex");
+        let host = insert_entity(&conn, graph::ENTITY_TYPE_HOST, "tootie");
+        insert_rel(&conn, app, host, graph::REL_EMITTED_BY);
+    }
+
+    let inputs =
+        topic_correlate_inputs(&pool, &["plex".to_string()], 2, None, None, None, 100).unwrap();
+    // The topic resolves to the raw app entity and the walk reaches
+    // host:tootie, but the transitively reached host must never drive
+    // host-wide log inclusion labelled `resolved`.
+    assert!(
+        inputs
+            .resolved
+            .iter()
+            .any(|entity| entity.entity_type == graph::ENTITY_TYPE_APP
+                && entity.canonical_key == "plex"),
+        "topic must resolve the raw app entity: {:?}",
+        inputs.resolved
+    );
+    assert!(
+        !inputs.logs.iter().any(|row| {
+            row.entry.app_name.as_deref() == Some("kernel") && row.resolver_status == "resolved"
+        }),
+        "unrelated kernel row on the host must not be included as resolved: {:?}",
+        inputs
+            .logs
+            .iter()
+            .map(|row| (
+                row.entry.app_name.clone(),
+                row.resolver_status.clone(),
+                row.fallback_kind.clone()
+            ))
+            .collect::<Vec<_>>()
+    );
 }
 
 #[test]
