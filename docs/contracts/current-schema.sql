@@ -126,6 +126,8 @@ CREATE TABLE IF NOT EXISTS graph_entities (
 );
 CREATE INDEX IF NOT EXISTS idx_graph_entities_type_key
     ON graph_entities(entity_type, canonical_key);
+CREATE INDEX IF NOT EXISTS idx_graph_entities_canonical_key
+    ON graph_entities(canonical_key);
 
 CREATE TABLE IF NOT EXISTS graph_entity_aliases (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,

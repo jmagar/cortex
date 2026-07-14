@@ -1073,17 +1073,23 @@ fn graph_evidence_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<GraphEvi
 pub fn cleanup_legacy_service_topology(conn: &mut rusqlite::Connection) -> Result<()> {
     let _guard = write_lock();
     let tx = conn.transaction()?;
+    // Same `src IN (…) OR dst IN (…)` shape as the relationship delete below:
+    // an inner JOIN on both endpoints would skip relationships whose other
+    // endpoint dangles, orphaning their evidence.
     tx.execute(
         "DELETE FROM graph_relationship_evidence
           WHERE relationship_id IN (
-              SELECT r.id
-                FROM graph_relationships r
-                JOIN graph_entities src ON src.id = r.src_entity_id
-                JOIN graph_entities dst ON dst.id = r.dst_entity_id
-               WHERE src.entity_type = 'service'
-                  OR dst.entity_type = 'service'
-                  OR (src.entity_type = 'app' AND src.canonical_key LIKE '%/%/%')
-                  OR (dst.entity_type = 'app' AND dst.canonical_key LIKE '%/%/%')
+              SELECT id FROM graph_relationships
+               WHERE src_entity_id IN (
+                     SELECT id FROM graph_entities
+                      WHERE entity_type = 'service'
+                         OR (entity_type = 'app' AND canonical_key LIKE '%/%/%')
+                 )
+                  OR dst_entity_id IN (
+                     SELECT id FROM graph_entities
+                      WHERE entity_type = 'service'
+                         OR (entity_type = 'app' AND canonical_key LIKE '%/%/%')
+                 )
           )",
         [],
     )?;
@@ -1154,6 +1160,30 @@ pub fn refresh_graph_projection_incremental(pool: &DbPool) -> Result<GraphRebuil
     let Some(_rebuild_guard) = GRAPH_REBUILD_LOCK.try_lock() else {
         return Ok(GraphRebuildOutcome::AlreadyRunning);
     };
+
+    // Contract-drift probe (downgrade → re-upgrade): a pre-resolver binary
+    // may have projected legacy `service` rows after migration 41 already
+    // ran (the CHECK constraint still allows the string for compat). Cheap
+    // EXISTS; when found, purge the legacy topology and force a full rebuild
+    // instead of merging deltas on top of a mixed-contract graph.
+    {
+        let mut conn = pool.get()?;
+        let legacy_rows: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM graph_entities WHERE entity_type = 'service')",
+            [],
+            |row| row.get(0),
+        )?;
+        if legacy_rows {
+            tracing::warn!(
+                contract = crate::db::entity_resolution::vocab::GRAPH_PROJECTION_CONTRACT_V2,
+                "legacy service topology detected in graph projection; \
+                 cleaning and forcing a full rebuild"
+            );
+            cleanup_legacy_service_topology(&mut conn)?;
+            drop(conn);
+            return full_rebuild_locked(pool);
+        }
+    }
 
     let status = graph_projection_status(pool)?;
     let after_log_id = if status.projection_status == "ready" && !status.is_degraded {

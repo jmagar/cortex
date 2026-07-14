@@ -2250,14 +2250,15 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
     // (entity_resolution_v2). Adds the `logical_service` / `service_instance`
     // entity types, the `instance_of` relationship type, and the three
     // resolver reason codes to the constrained graph tables (rebuild, strict
-    // superset, ids preserved — mirrors migrations 33/34/35/36). Then applies
-    // the hard-break cutover for old populated DBs: legacy `service` topology
-    // rows and nested `app` labels (`plex/plex/plex`) are deleted (never
-    // migrated), a `projection_contract` column records the active contract,
-    // and any previously-ready projection is marked stale so the next rebuild
-    // reprojects through the resolver.
+    // superset, ids preserved — mirrors migrations 33/34/35/36). The
+    // hard-break cutover for old populated DBs happens inside the copy
+    // itself: legacy `service` topology rows and nested `app` labels
+    // (`plex/plex/plex`) are excluded from the `INSERT … SELECT` (never
+    // migrated, no copy-then-delete), a `projection_contract` column records
+    // the active contract, and any previously-ready projection is marked
+    // stale so the next rebuild reprojects through the resolver.
     if !migration_applied(&conn, 41)? {
-        conn.execute_batch(
+        conn.execute_batch(&format!(
             "BEGIN IMMEDIATE;
 
              CREATE TABLE graph_entities_new (
@@ -2289,11 +2290,15 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
              SELECT id, entity_type, canonical_key, display_label, source_kind,
                     source_id, trust_level, first_seen_at, last_seen_at,
                     created_at, updated_at
-               FROM graph_entities;
+               FROM graph_entities
+              WHERE entity_type != 'service'
+                AND NOT (entity_type = 'app' AND canonical_key LIKE '%/%/%');
              DROP TABLE graph_entities;
              ALTER TABLE graph_entities_new RENAME TO graph_entities;
              CREATE INDEX idx_graph_entities_type_key
                  ON graph_entities(entity_type, canonical_key);
+             CREATE INDEX idx_graph_entities_canonical_key
+                 ON graph_entities(canonical_key);
 
              CREATE TABLE graph_relationships_new (
                  id                INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2341,7 +2346,9 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
                     relationship_type, reason_code, trust_level, confidence,
                     evidence_count, first_seen_at, last_seen_at, created_at,
                     updated_at
-               FROM graph_relationships;
+               FROM graph_relationships
+              WHERE src_entity_id IN (SELECT id FROM graph_entities)
+                AND dst_entity_id IN (SELECT id FROM graph_entities);
              DROP TABLE graph_relationships;
              ALTER TABLE graph_relationships_new RENAME TO graph_relationships;
              CREATE INDEX idx_graph_relationships_src_type_seen
@@ -2400,7 +2407,8 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
                     observed_at, reason_code, reason_text, confidence_delta,
                     trust_level, safe_excerpt, metadata_path, evidence_count,
                     created_at
-               FROM graph_relationship_evidence;
+               FROM graph_relationship_evidence
+              WHERE relationship_id IN (SELECT id FROM graph_relationships);
              DROP TABLE graph_relationship_evidence;
              ALTER TABLE graph_relationship_evidence_new RENAME TO graph_relationship_evidence;
              CREATE INDEX idx_graph_evidence_relationship_seen
@@ -2414,40 +2422,11 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
                  ON graph_relationship_evidence(source_heartbeat_id)
                  WHERE source_heartbeat_id IS NOT NULL;
 
-             DELETE FROM graph_relationship_evidence
-              WHERE relationship_id IN (
-                  SELECT r.id
-                    FROM graph_relationships r
-                    JOIN graph_entities src ON src.id = r.src_entity_id
-                    JOIN graph_entities dst ON dst.id = r.dst_entity_id
-                   WHERE src.entity_type = 'service'
-                      OR dst.entity_type = 'service'
-                      OR (src.entity_type = 'app' AND src.canonical_key LIKE '%/%/%')
-                      OR (dst.entity_type = 'app' AND dst.canonical_key LIKE '%/%/%')
-              );
-             DELETE FROM graph_relationships
-              WHERE src_entity_id IN (
-                  SELECT id FROM graph_entities
-                   WHERE entity_type = 'service'
-                      OR (entity_type = 'app' AND canonical_key LIKE '%/%/%')
-              )
-                 OR dst_entity_id IN (
-                  SELECT id FROM graph_entities
-                   WHERE entity_type = 'service'
-                      OR (entity_type = 'app' AND canonical_key LIKE '%/%/%')
-              );
              DELETE FROM graph_entity_aliases
-              WHERE entity_id IN (
-                  SELECT id FROM graph_entities
-                   WHERE entity_type = 'service'
-                      OR (entity_type = 'app' AND canonical_key LIKE '%/%/%')
-              );
-             DELETE FROM graph_entities
-              WHERE entity_type = 'service'
-                 OR (entity_type = 'app' AND canonical_key LIKE '%/%/%');
+              WHERE entity_id NOT IN (SELECT id FROM graph_entities);
 
              ALTER TABLE graph_projection_meta
-                 ADD COLUMN projection_contract TEXT NOT NULL DEFAULT 'entity_resolution_v2';
+                 ADD COLUMN projection_contract TEXT NOT NULL DEFAULT '{contract_v2}';
              UPDATE graph_projection_meta
                 SET projection_status = 'stale',
                     updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
@@ -2455,9 +2434,12 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
 
              INSERT OR IGNORE INTO schema_migrations (version) VALUES (41);
              COMMIT;",
-        )?;
+            contract_v2 = crate::db::entity_resolution::vocab::GRAPH_PROJECTION_CONTRACT_V2,
+        ))?;
         tracing::info!(
-            "Migration 41: canonical entity-resolution graph contract (entity_resolution_v2)"
+            contract_key = crate::db::entity_resolution::vocab::GRAPH_PROJECTION_CONTRACT_KEY,
+            contract = crate::db::entity_resolution::vocab::GRAPH_PROJECTION_CONTRACT_V2,
+            "Migration 41: canonical entity-resolution graph contract"
         );
     }
 

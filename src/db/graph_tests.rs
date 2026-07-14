@@ -532,6 +532,55 @@ fn incremental_projection_is_idempotent_without_new_logs() {
     assert_eq!(first.evidence_count, second.evidence_count);
 }
 
+/// Downgrade → re-upgrade drift: a legacy `service` row present in a ready
+/// projection must trigger cleanup + a full rebuild instead of an
+/// incremental merge on top of a mixed-contract graph.
+#[test]
+fn incremental_projection_purges_legacy_service_rows_and_forces_full_rebuild() {
+    let _guard = GRAPH_TEST_LOCK.lock();
+    let dir = tempfile::tempdir().unwrap();
+    let pool = init_pool(&test_storage_config(dir.path().join("graph-inc-drift.db"))).unwrap();
+    insert_logs_batch(
+        &pool,
+        &[make_entry(
+            "2026-01-01T00:00:00Z",
+            "host-a",
+            Some("sshd"),
+            "login a",
+        )],
+    )
+    .unwrap();
+    refresh_graph_projection(&pool).unwrap();
+
+    // Simulate a pre-resolver binary projecting legacy service topology into
+    // the ready projection (the CHECK constraint still allows 'service').
+    {
+        let conn = pool.get().unwrap();
+        conn.execute(
+            "INSERT INTO graph_entities
+                (entity_type, canonical_key, display_label, trust_level)
+             VALUES ('service', 'host-a:plex', 'host-a:plex', 'inferred')",
+            [],
+        )
+        .unwrap();
+    }
+
+    let outcome = refresh_graph_projection_incremental(&pool).unwrap();
+    assert!(matches!(outcome, GraphRebuildOutcome::Rebuilt(_)));
+    let conn = pool.get().unwrap();
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*) FROM graph_entities WHERE entity_type = 'service'"
+        ),
+        0,
+        "legacy service rows must be purged by the drift probe"
+    );
+    drop(conn);
+    let status = graph_projection_status(&pool).unwrap();
+    assert_eq!(status.projection_status, "ready");
+}
+
 /// Build a log entry shaped like `command_log::agent_record_to_entry` output:
 /// `agent-command://` source_ip, agent in ai_tool/app_name, raw cwd in
 /// ai_project, session id in ai_session_id.
