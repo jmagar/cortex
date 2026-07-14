@@ -478,6 +478,9 @@ impl CortexService {
                 Ok((Some(entity.into()), Vec::new()))
             }
             GraphTarget::CanonicalKey { entity_type, key } => {
+                if let Some(rejected) = legacy_service_identity_rejection(&entity_type, &key) {
+                    return Err(rejected);
+                }
                 validate_graph_entity_type(&entity_type)?;
                 let lookup_type = entity_type.clone();
                 let lookup_key = key.clone();

@@ -593,7 +593,7 @@ async fn map_action_graph_mode_requires_target_fields_before_snapshot_work() {
 
 #[tokio::test]
 #[serial_test::serial]
-async fn map_action_service_dependencies_mode_accepts_bare_service_with_host() {
+async fn map_action_service_dependencies_mode_rejects_legacy_service_keys() {
     let inventory_dir = tempfile::tempdir().unwrap();
     let _inventory_env = EnvVarGuard::set_path("CORTEX_INVENTORY_DIR", inventory_dir.path());
     let h = TestHarness::new();
@@ -602,33 +602,23 @@ async fn map_action_service_dependencies_mode_accepts_bare_service_with_host() {
         project_graph_fixture(&h.pool);
     }
 
-    let value = execute_tool(
+    // Legacy `host:service` identity is a hard-break rejection, never a
+    // lookup. (Bare host+service resolves through `service_instance` keys —
+    // see the resolver-backed map coverage.)
+    let err = execute_tool(
         &h.state,
         "cortex",
         json!({
             "action": "map",
             "mode": "service_dependencies",
-            "host": "squirts",
-            "service": "swag"
+            "service": "squirts:swag"
         }),
         None,
     )
     .await
-    .unwrap();
-
-    let answer = &value["graph_answer"];
-    assert_eq!(answer["mode"], "service_dependencies");
-    assert_eq!(answer["answer_status"], "ok");
-    assert_eq!(answer["target"]["entity_type"], "service");
-    assert_eq!(answer["target"]["key"], "squirts:swag");
-    assert!(
-        answer["rows"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|row| row["entity_type"] == "compose_project" && row["key"] == "squirts:edge"),
-        "service_dependencies should include compose project evidence: {answer}"
-    );
+    .unwrap_err()
+    .to_string();
+    assert!(err.contains("rejected_legacy_shape"), "{err}");
 }
 
 #[tokio::test]

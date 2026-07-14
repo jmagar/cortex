@@ -89,3 +89,66 @@ fn safe_observation_display_redacts_sensitive_values() {
     );
     assert_eq!(safe_display_value("plex"), "plex");
 }
+
+use super::resolver::*;
+
+#[test]
+fn resolver_converges_duplicate_hosts_under_one_logical_service() {
+    let tootie = ResolverObservation {
+        kind: ObservationKind::ServiceInstance,
+        observed_key: "tootie/plex".to_string(),
+        display_label: "tootie/plex".to_string(),
+        host_key: Some("tootie".to_string()),
+        logical_service_key: Some("plex".to_string()),
+        service_instance_key: Some("tootie/plex".to_string()),
+        source_kind: "app_inventory".to_string(),
+        source_id: "inventory:tootie".to_string(),
+        evidence_path: "inventory.services.plex".to_string(),
+        observed_at: "2026-01-01T00:00:00Z".to_string(),
+        trust: ResolverTrust::Verified,
+        structured: true,
+    };
+    let shart = ResolverObservation {
+        service_instance_key: Some("shart/plex".to_string()),
+        host_key: Some("shart".to_string()),
+        source_id: "inventory:shart".to_string(),
+        observed_key: "shart/plex".to_string(),
+        display_label: "shart/plex".to_string(),
+        ..tootie.clone()
+    };
+    let decisions = resolve_observations(&[tootie, shart]);
+    assert!(
+        decisions
+            .iter()
+            .any(|d| { d.entity_type == ENTITY_TYPE_LOGICAL_SERVICE && d.canonical_key == "plex" })
+    );
+    assert!(decisions.iter().any(|d| {
+        d.entity_type == ENTITY_TYPE_SERVICE_INSTANCE && d.canonical_key == "tootie/plex"
+    }));
+    assert!(decisions.iter().any(|d| {
+        d.entity_type == ENTITY_TYPE_SERVICE_INSTANCE && d.canonical_key == "shart/plex"
+    }));
+}
+
+#[test]
+fn resolver_rejects_old_key_shapes_before_lookup() {
+    for input in ["tootie:plex", "tootie:plex:plex", "plex/plex/plex"] {
+        let diagnostic = diagnose_lookup_input(input);
+        assert_eq!(diagnostic.status, ResolverStatus::RejectedLegacyShape);
+        assert_eq!(diagnostic.reason, "rejected_legacy_shape");
+        assert!(diagnostic.candidates.is_empty());
+    }
+}
+
+#[test]
+fn weak_raw_labels_do_not_upgrade_themselves() {
+    let observations =
+        observations_from_raw_app_label("complex", "tootie", "log", "99", "2026-01-01T00:00:00Z");
+    let decisions = resolve_observations(&observations);
+    assert!(!decisions.iter().any(|d| d.canonical_key == "plex"));
+    assert!(
+        !decisions
+            .iter()
+            .any(|d| d.entity_type == ENTITY_TYPE_LOGICAL_SERVICE)
+    );
+}

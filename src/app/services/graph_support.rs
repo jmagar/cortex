@@ -375,6 +375,34 @@ pub(super) fn graph_rebuild_stats_response(
     }
 }
 
+/// Reject legacy nested service identity keys (`tootie:plex`,
+/// `tootie:plex:plex`, `plex/plex/plex`) on service-identity lookups before
+/// any graph query runs. The check is scoped to service-identity entity
+/// types: other entity types (`ai_session`, `user`, `git_commit`, `storage`)
+/// legitimately use `:`-separated key grammars and must not be rejected.
+pub(super) fn legacy_service_identity_rejection(
+    entity_type: &str,
+    key: &str,
+) -> Option<ServiceError> {
+    let service_identity = matches!(
+        entity_type,
+        db::graph::ENTITY_TYPE_LOGICAL_SERVICE
+            | db::graph::ENTITY_TYPE_SERVICE_INSTANCE
+            | db::graph::ENTITY_TYPE_SERVICE
+            | db::graph::ENTITY_TYPE_APP
+    );
+    if !service_identity {
+        return None;
+    }
+    let diagnostic = db::entity_resolution::diagnose_lookup_input(key);
+    if diagnostic.status == db::entity_resolution::ResolverStatus::RejectedLegacyShape {
+        return Some(ServiceError::InvalidInput(format!(
+            "unsupported legacy graph service identity `{key}`: rejected_legacy_shape"
+        )));
+    }
+    None
+}
+
 pub(super) fn validate_graph_entity_type(entity_type: &str) -> ServiceResult<()> {
     if db::graph::is_known_entity_type(entity_type) {
         Ok(())

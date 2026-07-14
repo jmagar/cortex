@@ -11,10 +11,12 @@
 
 pub mod adapters;
 pub mod observation;
+pub mod resolver;
 pub mod vocab;
 
 pub use adapters::*;
 pub use observation::*;
+pub use resolver::*;
 pub use vocab::*;
 
 #[cfg(test)]
