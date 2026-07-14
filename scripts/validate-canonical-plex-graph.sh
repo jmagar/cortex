@@ -30,7 +30,7 @@ if [ ! -f "$db_path" ]; then
   exit 1
 fi
 
-old_count="$(sqlite3 "$db_path" "
+old_count="$(sqlite3 -readonly "$db_path" "
 SELECT COUNT(*)
   FROM graph_entities
  WHERE (entity_type = 'service' AND canonical_key IN ('tootie:plex', 'tootie:plex:plex'))
@@ -38,7 +38,7 @@ SELECT COUNT(*)
 ")"
 echo "old_key_count=$old_count"
 
-new_count="$(sqlite3 "$db_path" "
+new_count="$(sqlite3 -readonly "$db_path" "
 SELECT COUNT(*)
   FROM graph_entities
  WHERE (entity_type = 'logical_service' AND canonical_key = 'plex')
@@ -46,7 +46,7 @@ SELECT COUNT(*)
 ")"
 echo "new_key_count=$new_count"
 
-sqlite3 "$db_path" "
+sqlite3 -readonly "$db_path" "
 EXPLAIN QUERY PLAN
 SELECT id, entity_type, canonical_key
   FROM graph_entities
