@@ -518,7 +518,8 @@ fn graph_walk_service_topic_traverses_proof_edges_and_caps_results() {
     // Broad log-identity edge from the host: must NOT be traversed.
     insert_rel(&conn, app, host, "emitted_by");
 
-    let entities = graph::graph_walk_service_topic(&conn, &["plex".to_string()], 3).unwrap();
+    let (entities, truncated) =
+        graph::graph_walk_service_topic(&conn, &["plex".to_string()], 3).unwrap();
     let walked = keys(&entities);
     assert!(walked.contains(&"plex".to_string()));
     assert!(walked.contains(&"tootie/plex".to_string()));
@@ -530,6 +531,32 @@ fn graph_walk_service_topic_traverses_proof_edges_and_caps_results() {
     // Exact reach: seed + instance + host, and nothing else. (A `<= CAP`
     // assertion would be vacuous on a 4-node fixture.)
     assert_eq!(entities.len(), 3, "walk must reach exactly {walked:?}");
+    assert!(!truncated, "small fixture must not report truncation");
+}
+
+#[test]
+fn graph_walk_service_topic_reports_truncated_when_cap_hit() {
+    let (_dir, pool) = test_pool("service-topic-walk-cap.db");
+    let conn = pool.get().unwrap();
+    let seed = insert_entity(&conn, "logical_service", "plex");
+    // One more neighbor than GRAPH_SERVICE_TOPIC_ENTITY_CAP so the walk
+    // (seed + neighbors) exceeds the cap and must report truncation.
+    for i in 0..(graph::GRAPH_SERVICE_TOPIC_ENTITY_CAP + 1) {
+        let neighbor = insert_entity(&conn, "host", &format!("host-{i}"));
+        insert_rel(&conn, seed, neighbor, "runs_on");
+    }
+
+    let (entities, truncated) =
+        graph::graph_walk_service_topic(&conn, &["plex".to_string()], 1).unwrap();
+    assert_eq!(
+        entities.len(),
+        graph::GRAPH_SERVICE_TOPIC_ENTITY_CAP,
+        "result must be capped at GRAPH_SERVICE_TOPIC_ENTITY_CAP"
+    );
+    assert!(
+        truncated,
+        "walk reaching more than the cap must report truncated=true"
+    );
 }
 
 #[test]

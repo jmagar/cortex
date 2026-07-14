@@ -2170,12 +2170,12 @@ pub fn topic_correlate_inputs(
     service_seeds.extend(instance_keys.iter().cloned());
     service_seeds.sort();
     service_seeds.dedup();
+    let mut graph_walk_truncated = false;
     if !service_seeds.is_empty() {
-        walk_entities.extend(super::graph::graph_walk_service_topic(
-            &conn,
-            &service_seeds,
-            max_depth,
-        )?);
+        let (entities, truncated) =
+            super::graph::graph_walk_service_topic(&conn, &service_seeds, max_depth)?;
+        walk_entities.extend(entities);
+        graph_walk_truncated |= truncated;
     }
     if !generic_seeds.is_empty() {
         walk_entities.extend(super::graph::graph_walk_n_hops(
@@ -2305,6 +2305,7 @@ pub fn topic_correlate_inputs(
         expansion,
         discovered_hosts,
         logs,
+        graph_walk_truncated,
     })
 }
 

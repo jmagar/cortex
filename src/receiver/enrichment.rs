@@ -20,6 +20,7 @@
 
 use std::borrow::Cow;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{LazyLock, Mutex};
 use std::{
     fs,
@@ -186,6 +187,20 @@ fn matches_app(entry: &LogBatchEntry, expected: &str) -> bool {
     entry.app_name.as_deref() == Some(expected)
 }
 
+/// Process-lifetime count of marker-bearing entries whose `source_ip` failed
+/// the `agent_docker_source_prefixes` gate (see [`extract_agent_docker_metadata`]).
+/// A blocked gate is otherwise only visible at `debug` log level, which is
+/// off in production — this counter surfaces it via the `stats` MCP action
+/// (`agent_docker_gate_blocked_count`) so operators can tell a misconfigured
+/// prefix list from a quiet one.
+static AGENT_DOCKER_GATE_BLOCKED_COUNT: AtomicU64 = AtomicU64::new(0);
+
+/// Read the current value of [`AGENT_DOCKER_GATE_BLOCKED_COUNT`]. Cheap
+/// (relaxed atomic load); safe to call on every `stats` request.
+pub(crate) fn agent_docker_gate_blocked_count() -> u64 {
+    AGENT_DOCKER_GATE_BLOCKED_COUNT.load(Ordering::Relaxed)
+}
+
 /// Extract the agent Docker metadata prefix from `message` into
 /// `metadata_json` and strip the marker from `message`. Malformed payloads
 /// leave the entry untouched — the raw line is still stored and searchable.
@@ -207,6 +222,7 @@ fn extract_agent_docker_metadata(entry: &mut LogBatchEntry, config: &EnrichmentC
             .iter()
             .any(|prefix| source_ip_matches(entry, Some(prefix)))
     {
+        AGENT_DOCKER_GATE_BLOCKED_COUNT.fetch_add(1, Ordering::Relaxed);
         tracing::debug!(
             source_ip = %entry.source_ip,
             hostname = %entry.hostname,

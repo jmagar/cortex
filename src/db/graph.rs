@@ -757,13 +757,20 @@ pub const GRAPH_SERVICE_TOPIC_RELATIONSHIPS: &[&str] = &[
 /// `GRAPH_SERVICE_TOPIC_ENTITY_CAP + GRAPH_SERVICE_TOPIC_HOP_CAP *
 /// GRAPH_WALK_MAX_DEPTH` (a single overall `LIMIT`, not a per-level cap),
 /// and caps the final result at [`GRAPH_SERVICE_TOPIC_ENTITY_CAP`] entities.
+///
+/// Returns `(entities, truncated)`: `truncated` is `true` when the walk
+/// actually reached more than [`GRAPH_SERVICE_TOPIC_ENTITY_CAP`] distinct
+/// entities, so callers can tell a silently-capped neighborhood apart from an
+/// exhaustive one (mirrors [`graph_around_entity`]'s `truncated` signal,
+/// detected the same way: fetch one row past the cap and check whether it was
+/// there).
 pub fn graph_walk_service_topic(
     conn: &rusqlite::Connection,
     start_keys: &[String],
     max_depth: u8,
-) -> Result<Vec<GraphWalkEntity>> {
+) -> Result<(Vec<GraphWalkEntity>, bool)> {
     if start_keys.is_empty() {
-        return Ok(Vec::new());
+        return Ok((Vec::new(), false));
     }
     let depth = i64::from(max_depth.clamp(1, GRAPH_WALK_MAX_DEPTH));
     let placeholders = vec!["?"; start_keys.len()].join(", ");
@@ -801,12 +808,14 @@ pub fn graph_walk_service_topic(
         (GRAPH_SERVICE_TOPIC_ENTITY_CAP
             + GRAPH_SERVICE_TOPIC_HOP_CAP * GRAPH_WALK_MAX_DEPTH as usize) as i64,
     ));
+    // Fetch one row past the cap so we can detect truncation (see doc
+    // comment), then trim back down to the advertised cap below.
     bindings.push(rusqlite::types::Value::Integer(
-        GRAPH_SERVICE_TOPIC_ENTITY_CAP as i64,
+        (GRAPH_SERVICE_TOPIC_ENTITY_CAP + 1) as i64,
     ));
 
     let mut stmt = conn.prepare(&sql)?;
-    let entities = stmt
+    let mut entities = stmt
         .query_map(rusqlite::params_from_iter(bindings.iter()), |row| {
             Ok(GraphWalkEntity {
                 entity_type: row.get(0)?,
@@ -814,7 +823,9 @@ pub fn graph_walk_service_topic(
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    Ok(entities)
+    let truncated = entities.len() > GRAPH_SERVICE_TOPIC_ENTITY_CAP;
+    entities.truncate(GRAPH_SERVICE_TOPIC_ENTITY_CAP);
+    Ok((entities, truncated))
 }
 
 /// Walk the investigation graph outward from a set of seed entities (matched by

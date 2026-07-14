@@ -381,7 +381,13 @@ pub struct TopicCorrelateResponse {
     pub discovered_hosts: Vec<String>,
     pub timeline: Vec<TopicTimelineEntry>,
     pub heartbeat_summaries: Vec<db::HeartbeatWindowSummary>,
+    /// `true` when the fanned-out log timeline hit `limit` and was cut off.
     pub truncated: bool,
+    /// `true` when the service-topic graph walk hit its entity cap
+    /// (`GRAPH_SERVICE_TOPIC_ENTITY_CAP`) and the discovered service-instance
+    /// neighborhood was cut off rather than exhaustive. Independent of
+    /// `truncated`, which reflects the log timeline, not the graph walk.
+    pub graph_walk_truncated: bool,
 }
 
 /// One log row in a graph-anchored session correlation, annotated with how it

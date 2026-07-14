@@ -110,6 +110,7 @@ fn empty_topic_response(topic: String) -> TopicCorrelateResponse {
         timeline: Vec::new(),
         heartbeat_summaries: Vec::new(),
         truncated: false,
+        graph_walk_truncated: false,
     }
 }
 
@@ -138,6 +139,7 @@ fn build_topic_response(
     limit: usize,
 ) -> TopicCorrelateResponse {
     let truncated = inputs.logs.len() >= limit;
+    let graph_walk_truncated = inputs.graph_walk_truncated;
 
     let resolved_entities = inputs
         .resolved
@@ -199,6 +201,7 @@ fn build_topic_response(
         timeline,
         heartbeat_summaries,
         truncated,
+        graph_walk_truncated,
     }
 }
 

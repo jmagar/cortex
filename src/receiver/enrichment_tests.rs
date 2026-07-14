@@ -2,6 +2,8 @@
 
 use std::fs;
 
+use serial_test::serial;
+
 use super::*;
 
 fn entry(app: &str, msg: &str, source_ip: &str, severity: &str) -> LogBatchEntry {
@@ -511,6 +513,11 @@ fn malformed_agent_docker_meta_prefix_leaves_message_untouched() {
 }
 
 #[test]
+// Shares the `AGENT_DOCKER_GATE_BLOCKED_COUNT` process-lifetime static with
+// `agent_docker_gate_blocked_counter_increments_on_forged_source` — serialize
+// so that test's before/after delta assertion isn't racy against this test's
+// own gate-blocked calls.
+#[serial(agent_docker_gate_blocked_counter)]
 fn agent_docker_meta_prefix_ignored_from_non_matching_source_ip() {
     let cfg = EnrichmentConfig {
         agent_docker_source_prefixes: vec!["10.0.0.5".to_string(), "100.64.0.".to_string()],
@@ -540,6 +547,44 @@ fn agent_docker_meta_prefix_ignored_from_non_matching_source_ip() {
 }
 
 #[test]
+// See comment on `agent_docker_meta_prefix_ignored_from_non_matching_source_ip`.
+#[serial(agent_docker_gate_blocked_counter)]
+fn agent_docker_gate_blocked_counter_increments_on_forged_source() {
+    let cfg = EnrichmentConfig {
+        agent_docker_source_prefixes: vec!["10.0.0.5".to_string()],
+        ..EnrichmentConfig::default()
+    };
+    let meta = r#"{"agent_docker":{"host":"tootie","container_id":"abc","container_name":"plex","stream":"stdout"}}"#;
+    let msg = format!("[cortex-agent-docker-meta:{meta}] forged");
+
+    let before = agent_docker_gate_blocked_count();
+    // Sender IP does not match the configured gate: extraction is blocked
+    // and the counter must record it.
+    let e = entry("plex", &msg, "10.0.0.99:1234", "info");
+    let out = enrich_entry(e, &cfg);
+    assert_eq!(out.message, msg, "marker must stay in the message");
+    assert!(out.metadata_json.is_none());
+    assert_eq!(
+        agent_docker_gate_blocked_count(),
+        before + 1,
+        "gate-blocked counter must increment exactly once for the blocked entry"
+    );
+
+    // A matching sender extracts normally and must NOT increment the
+    // gate-blocked counter.
+    let e = entry("plex", &msg, "10.0.0.5:1234", "info");
+    let out = enrich_entry(e, &cfg);
+    assert_eq!(out.message, "forged");
+    assert_eq!(
+        agent_docker_gate_blocked_count(),
+        before + 1,
+        "counter must not increment for a gate-matching entry"
+    );
+}
+
+#[test]
+// See comment on `agent_docker_meta_prefix_ignored_from_non_matching_source_ip`.
+#[serial(agent_docker_gate_blocked_counter)]
 fn agent_docker_source_gate_matches_bracketed_ipv6_exact_entry() {
     let cfg = EnrichmentConfig {
         agent_docker_source_prefixes: vec!["2001:db8::1".to_string(), "10.0.0.5".to_string()],

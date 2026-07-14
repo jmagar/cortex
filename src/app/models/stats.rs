@@ -16,6 +16,13 @@ pub struct DbStats {
     /// `stats` path skips it. Serialized as `null` so clients can distinguish
     /// "not computed" from "zero phantom rows".
     pub phantom_fts_rows: Option<i64>,
+    /// Process-lifetime count of syslog entries carrying the
+    /// `[cortex-agent-docker-meta:...]` marker whose `source_ip` did not
+    /// match a configured `agent_docker_source_prefixes` entry, so the
+    /// marker's identity extraction was skipped (gate-blocked, not lost —
+    /// the raw marker stays in the stored message). Always present (starts
+    /// at 0), unlike `phantom_fts_rows` which is opt-in-computed.
+    pub agent_docker_gate_blocked_count: u64,
 }
 
 impl From<db::DbStats> for DbStats {
@@ -32,6 +39,8 @@ impl From<db::DbStats> for DbStats {
             min_free_disk_mb: value.min_free_disk_mb,
             write_blocked: value.write_blocked,
             phantom_fts_rows: value.phantom_fts_rows,
+            agent_docker_gate_blocked_count:
+                crate::receiver::enrichment::agent_docker_gate_blocked_count(),
         }
     }
 }
