@@ -93,12 +93,11 @@ Valid `projection_status` values:
 
 ### 4.1 Entity Types
 
-These entity type strings are valid:
+These entity type strings are valid on lookup surfaces:
 
 ```text
 host
 container
-service
 app
 source_ip
 ai_project
@@ -126,6 +125,14 @@ deleted by migration 41 and rejected on lookup surfaces with
 `rejected_legacy_shape`. Keep logical identity and deployment topology
 separate: `plex` answers "what is this service", `tootie/plex` answers
 "where does it run".
+
+The retired `service` entity type is **schema-tolerated but not
+lookup-supported**: the SQLite CHECK constraints still accept `service` rows
+for migration compatibility (a pre-resolver binary may write them during a
+downgrade window; the incremental refresh detects and purges them), but every
+public lookup surface rejects `service` as an entity type with
+`unsupported graph entity_type` — it is deliberately absent from the valid
+lookup list above.
 
 Case sensitivity: canonical keys are lowercase, but the log fan-out
 predicates compare `logs.hostname` / `logs.app_name` with SQLite's default
@@ -657,7 +664,9 @@ cortex entity --alias-type TYPE --alias-key KEY [--limit N] [--json]
 
 Entity lookup MUST:
 
-- reject unknown entity types,
+- reject unknown entity types with `unsupported graph entity_type`,
+  including the retired `service` type (schema-tolerated for migration
+  compatibility but not a valid lookup type — see §4.1),
 - reject legacy nested service identity keys (`tootie:plex`,
   `tootie:plex:plex`, `plex/plex/plex`) on service-identity lookups with
   `rejected_legacy_shape` before any graph query runs (alias lookups query

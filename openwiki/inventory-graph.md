@@ -408,7 +408,9 @@ The canonical graph shape for Plex is:
 - `service_instance:tootie/plex`
 - `service_instance:tootie/plex instance_of logical_service:plex`
 - `service_instance:tootie/plex runs_on host:tootie`
-- `compose_project:tootie/plex defines_service service_instance:tootie/plex`
+- `compose_project:tootie:plex defines_service service_instance:tootie/plex`
+  (compose-project canonical keys are colon-scoped `source-host:project-name`
+  via `scoped_inventory_key`; only `service_instance` uses the `/` separator)
 - route/domain/storage/container/error/session evidence links to the service
   instance when deterministic evidence exists
 
