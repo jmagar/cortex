@@ -31,6 +31,60 @@ fn old_nested_service_shapes_are_classified_not_normalized() {
     assert_eq!(classify_legacy_shape("tootie/plex"), None);
 }
 
+#[test]
+fn legacy_shape_classifier_ignores_free_text_and_non_name_segments() {
+    let cases: &[(&str, Option<LegacyShape>)] = &[
+        // Whitespace anywhere → free text, never a legacy key.
+        ("what is tootie:plex doing", None),
+        ("plex on tootie: status", None),
+        ("a/b/c d", None),
+        // Colon shapes where a segment lacks any ASCII alphabetic char.
+        ("10.0.0.5:443", None),
+        ("12:30", None),
+        ("tootie:8080", None),
+        (":plex", None),
+        ("tootie:", None),
+        // Absolute paths are not slash triplets.
+        ("/mnt/user/media", None),
+        ("/var/lib/docker", None),
+        // Plan-asserted legacy shapes must keep classifying.
+        ("tootie:plex", Some(LegacyShape::HostService)),
+        ("tootie:plex:plex", Some(LegacyShape::HostProjectService)),
+        ("plex/plex/plex", Some(LegacyShape::SlashTriplet)),
+        ("a/b/c", Some(LegacyShape::SlashTriplet)),
+    ];
+    for (input, expected) in cases {
+        assert_eq!(
+            classify_legacy_shape(input),
+            *expected,
+            "classify_legacy_shape({input:?})"
+        );
+    }
+}
+
+#[test]
+fn canonical_keys_preserve_dots_in_hostnames() {
+    let cases: &[(&str, Option<&str>)] = &[
+        ("tootie.lan", Some("tootie.lan")),
+        ("Tootie.LAN", Some("tootie.lan")),
+        (".plex.", Some("plex")),
+        ("-.plex.-", Some("plex")),
+        ("...", None),
+        ("plex media server", Some("plex-media-server")),
+    ];
+    for (input, expected) in cases {
+        assert_eq!(
+            logical_service_key(input).as_deref(),
+            *expected,
+            "logical_service_key({input:?})"
+        );
+    }
+    assert_eq!(
+        service_instance_key("tootie.lan", "plex"),
+        Some("tootie.lan/plex".to_string())
+    );
+}
+
 use super::adapters::*;
 use super::observation::*;
 

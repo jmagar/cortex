@@ -21,7 +21,9 @@ pub enum LegacyShape {
 }
 
 /// Canonical logical-service key: lowercased, trimmed, non-key characters
-/// mapped to `-`. Returns `None` when nothing canonical remains.
+/// mapped to `-`. Kept characters are ASCII alphanumerics plus `-`, `_`,
+/// and `.` (dots preserve raw hostnames like `tootie.lan`). Returns `None`
+/// when nothing canonical remains.
 pub fn logical_service_key(name: &str) -> Option<String> {
     canonical_component(name)
 }
@@ -47,18 +49,31 @@ pub fn split_service_instance_key(key: &str) -> Option<(&str, &str)> {
 }
 
 /// Classify legacy service identity shapes (`tootie:plex`,
-/// `tootie:plex:plex`, `plex/plex/plex`). Canonical inputs return `None`.
+/// `tootie:plex:plex`, `plex/plex/plex`). Canonical inputs return `None`, as
+/// do free-text inputs that merely contain colons or slashes without looking
+/// like legacy keys: anything with ASCII whitespace, colon shapes whose
+/// segments are not all name-like (`10.0.0.5:443`, `12:30`), and
+/// absolute paths (`/mnt/user/media`).
 pub fn classify_legacy_shape(value: &str) -> Option<LegacyShape> {
     let trimmed = value.trim();
-    let colon_count = trimmed.matches(':').count();
-    if colon_count == 1 {
-        return Some(LegacyShape::HostService);
+    if trimmed.chars().any(|ch| ch.is_ascii_whitespace()) {
+        return None;
     }
-    if colon_count >= 2 {
+    let colon_count = trimmed.matches(':').count();
+    if colon_count >= 1 {
+        let name_like_segments = trimmed
+            .split(':')
+            .all(|segment| segment.chars().any(|ch| ch.is_ascii_alphabetic()));
+        if !name_like_segments {
+            return None;
+        }
+        if colon_count == 1 {
+            return Some(LegacyShape::HostService);
+        }
         return Some(LegacyShape::HostProjectService);
     }
     let slash_count = trimmed.matches('/').count();
-    if slash_count >= 2 {
+    if slash_count >= 2 && !trimmed.starts_with('/') {
         return Some(LegacyShape::SlashTriplet);
     }
     None
@@ -70,14 +85,14 @@ fn canonical_component(value: &str) -> Option<String> {
         .to_ascii_lowercase()
         .chars()
         .map(|ch| {
-            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' || ch == '.' {
                 ch
             } else {
                 '-'
             }
         })
         .collect::<String>()
-        .trim_matches('-')
+        .trim_matches(['-', '.'])
         .to_string();
     (!out.is_empty()).then_some(out)
 }
