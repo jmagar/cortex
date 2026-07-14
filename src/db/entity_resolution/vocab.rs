@@ -104,6 +104,28 @@ pub fn classify_legacy_shape(value: &str) -> Option<LegacyShape> {
         }
         return Some(LegacyShape::HostProjectService);
     }
+    // NOTE(over-match tradeoff): this matches ANY 2+-slash, non-absolute-path
+    // string, not just the specific `{compose_project}/{compose_service}/
+    // {container_name}` shape the old `agent::docker::container_app_name`
+    // used to emit (that agent path now emits a flat, slash-free APP-NAME —
+    // see `agent::docker::container_app_name`'s doc comment). A legitimate
+    // 2+-slash app label from another source would still be misclassified
+    // as legacy and dropped from graph `app`-entity projection. Investigated
+    // as part of syslog-mcp-5k1zb: the only other app-label source in this
+    // codebase, OTLP ingest (`otlp::build_entries`), sets `app_name`
+    // exclusively from the resource-level `service.name` attribute — never
+    // from OTel instrumentation-scope names (e.g.
+    // `go.opentelemetry.io/collector/receiver`), which are stored only in
+    // `metadata_json.resource_attributes`/`log_attributes`, not `app_name`.
+    // So this risk is currently theoretical for OTLP. The legacy central-pull
+    // Docker ingest compat path (`docker_ingest::models::ContainerMeta::
+    // app_name`, disabled by default, kept for compatibility fixtures/explicit
+    // remote Docker Engine endpoints) still emits the real slash-triplet
+    // shape by design, so classifying it here is correct, not a false
+    // positive. If a future app-label source legitimately needs 2+ slashes,
+    // narrow this to the specific triplet shape (three non-empty,
+    // canonical-component-like segments) instead of widening the exemption
+    // list.
     let slash_count = trimmed.matches('/').count();
     if slash_count >= 2 && !trimmed.starts_with('/') {
         return Some(LegacyShape::SlashTriplet);

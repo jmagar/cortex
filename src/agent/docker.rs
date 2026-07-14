@@ -232,15 +232,27 @@ fn container_identity_metadata(
     })
 }
 
+/// Flat, non-slash syslog APP-NAME for a container's forwarded log lines.
+///
+/// Canonical service identity (compose project/service, container id/name,
+/// image) now rides in structured, resolver-verified
+/// `metadata_json.agent_docker` (see `container_identity_metadata`) rather
+/// than in this string. Formatting APP-NAME as a `{project}/{service}/{name}`
+/// slash-triplet is therefore both unnecessary and actively harmful: the
+/// canonical entity-resolution vocabulary
+/// (`db::entity_resolution::classify_legacy_shape`) classifies any 2+-slash
+/// app label as a legacy `SlashTriplet` shape and permanently excludes it
+/// from graph `app`-entity projection (see `db::graph`'s `extract_log_row`
+/// handling and the migration-41+ legacy-shape cleanup in `db::pool`), which
+/// would silently drop all graph app identity for these logs with no
+/// resolver replacement. Emitting a flat name keeps APP-NAME human-readable
+/// for raw-text search/display while canonical identity resolution happens
+/// exclusively through the metadata marker.
 fn container_app_name(name: &str, labels: &HashMap<String, String>) -> String {
-    match (
-        labels.get("com.docker.compose.project"),
-        labels.get("com.docker.compose.service"),
-    ) {
-        (Some(proj), Some(svc)) => format!("{proj}/{svc}/{name}"),
-        (_, Some(svc)) => format!("{svc}/{name}"),
-        _ => name.to_string(),
-    }
+    labels
+        .get("com.docker.compose.service")
+        .cloned()
+        .unwrap_or_else(|| name.to_string())
 }
 
 fn should_forward_container_logs(name: &str, labels: &HashMap<String, String>) -> bool {

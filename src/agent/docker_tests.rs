@@ -21,7 +21,11 @@ fn container_display_name_falls_back_to_short_id_when_names_missing() {
 }
 
 #[test]
-fn container_app_name_includes_compose_project_service_and_container_name() {
+fn container_app_name_is_flat_compose_service_when_present() {
+    // Compose project is intentionally ignored: canonical identity (project,
+    // service, container id/name, image) now rides in structured
+    // `metadata_json.agent_docker`, so APP-NAME only needs a short,
+    // human-readable, non-slash label.
     let labels = HashMap::from([
         (
             "com.docker.compose.project".to_string(),
@@ -33,24 +37,28 @@ fn container_app_name_includes_compose_project_service_and_container_name() {
         ),
     ]);
 
-    assert_eq!(
-        container_app_name("cortex-1", &labels),
-        "cortex/server/cortex-1"
-    );
+    assert_eq!(container_app_name("cortex-1", &labels), "server");
 }
 
 #[test]
-fn container_app_name_falls_back_to_service_or_container_name() {
-    let service_only = HashMap::from([(
-        "com.docker.compose.service".to_string(),
-        "server".to_string(),
-    )]);
-
-    assert_eq!(
-        container_app_name("cortex-1", &service_only),
-        "server/cortex-1"
-    );
+fn container_app_name_falls_back_to_container_name_without_service_label() {
     assert_eq!(container_app_name("cortex-1", &HashMap::new()), "cortex-1");
+}
+
+#[test]
+fn container_app_name_never_contains_a_slash() {
+    let labels = HashMap::from([
+        (
+            "com.docker.compose.project".to_string(),
+            "go.opentelemetry.io/collector".to_string(),
+        ),
+        (
+            "com.docker.compose.service".to_string(),
+            "receiver".to_string(),
+        ),
+    ]);
+    assert!(!container_app_name("cortex-1", &labels).contains('/'));
+    assert!(!container_app_name("cortex-1", &HashMap::new()).contains('/'));
 }
 
 #[test]
@@ -135,9 +143,15 @@ fn long_compose_app_name_still_has_structured_metadata() {
         ),
         (
             "com.docker.compose.service".to_string(),
-            "very-long-plex-service-name".to_string(),
+            "very-long-plex-service-name-that-exceeds-the-forty-eight-byte-app-name-limit"
+                .to_string(),
         ),
     ]);
+    // APP-NAME is flat (compose_service alone) but can still overflow the
+    // RFC 5424 48-byte APP-NAME limit on its own; `sanitise_field` (in
+    // `agent::syslog_sender`) replaces an overlong APP-NAME wholesale with
+    // the `cortex-agent` fallback at send time, but structured
+    // `metadata_json.agent_docker` is unaffected either way.
     let app_name = container_app_name("very-long-container-name-for-plex", &labels);
     assert!(app_name.len() > 48);
     let metadata = container_identity_metadata(
@@ -150,6 +164,6 @@ fn long_compose_app_name_still_has_structured_metadata() {
     );
     assert_eq!(
         metadata["agent_docker"]["compose_service"],
-        "very-long-plex-service-name"
+        "very-long-plex-service-name-that-exceeds-the-forty-eight-byte-app-name-limit"
     );
 }
