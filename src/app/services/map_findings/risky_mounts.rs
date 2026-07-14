@@ -97,7 +97,13 @@ fn service_mount_index(
         let Some(host) = service.host.as_deref() else {
             continue;
         };
-        let key = canonical_service_key(host, &service.name);
+        // Canonical `service_instance` key (`host/name`) matching the
+        // resolver's graph projection; services whose identity does not
+        // canonicalize are skipped rather than given a divergent key shape.
+        let Some(key) = crate::db::entity_resolution::service_instance_key(host, &service.name)
+        else {
+            continue;
+        };
         services.insert(
             key,
             service
@@ -175,7 +181,7 @@ fn mount_target_matches(row: &db::MountRelationshipFindingRow, mount: &MountRef)
     row.storage_label == mount.target
         || row
             .storage_key
-            .ends_with(&canonical_component(&mount.target))
+            .ends_with(&normalized_mount_target(&mount.target))
 }
 
 fn mount_confidence(confidence: f64, read_only: bool, graph_degraded: bool) -> f64 {
@@ -189,19 +195,10 @@ fn mount_confidence(confidence: f64, read_only: bool, graph_degraded: bool) -> f
     value.clamp(0.0, 1.0)
 }
 
-/// Canonical `service_instance` key (`host/name`) matching the resolver's
-/// graph projection; never the legacy `host:name` shape.
-fn canonical_service_key(host: &str, name: &str) -> String {
-    crate::db::entity_resolution::service_instance_key(host, name).unwrap_or_else(|| {
-        format!(
-            "{}/{}",
-            canonical_component(host),
-            canonical_component(name)
-        )
-    })
-}
-
-fn canonical_component(value: &str) -> String {
+/// Trim + lowercase a mount target for suffix matching against inventory
+/// storage keys (which store the raw lowercased target). This is NOT the
+/// vocab key grammar — mount targets keep their `/` path separators.
+fn normalized_mount_target(value: &str) -> String {
     value.trim().to_ascii_lowercase()
 }
 

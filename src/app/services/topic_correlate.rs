@@ -22,12 +22,8 @@ impl CortexService {
         // Hard break: legacy nested service identities (`tootie:plex`,
         // `tootie:plex:plex`, `plex/plex/plex`) are rejected before any
         // graph lookup runs.
-        let diagnostic = db::entity_resolution::diagnose_lookup_input(&req.topic);
-        if diagnostic.status == db::entity_resolution::ResolverStatus::RejectedLegacyShape {
-            return Err(ServiceError::InvalidInput(format!(
-                "unsupported legacy graph service identity `{}`: rejected_legacy_shape",
-                req.topic
-            )));
+        if let Some(rejected) = super::graph_support::reject_legacy_service_identity(&req.topic) {
+            return Err(rejected);
         }
 
         // Split the topic into lowercased, de-duplicated terms (OR semantics).

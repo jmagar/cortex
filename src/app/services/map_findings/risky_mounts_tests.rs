@@ -61,7 +61,13 @@ fn safe_mount_target_renders_sensitive_targets_safely() {
 }
 
 #[test]
-fn canonical_service_key_is_a_service_instance_key_not_legacy_host_colon_name() {
-    assert_eq!(canonical_service_key("Tootie", " Plex "), "tootie/plex");
-    assert!(!canonical_service_key("tootie", "plex").contains(':'));
+fn service_mount_index_uses_service_instance_keys_not_legacy_host_colon_name() {
+    let key = crate::db::entity_resolution::service_instance_key("Tootie", " Plex ").unwrap();
+    assert_eq!(key, "tootie/plex");
+    assert!(!key.contains(':'));
+    // Identity that does not canonicalize yields no divergent fallback key.
+    assert_eq!(
+        crate::db::entity_resolution::service_instance_key("tootie", "---"),
+        None
+    );
 }

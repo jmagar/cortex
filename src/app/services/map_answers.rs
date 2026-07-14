@@ -109,10 +109,8 @@ fn required_map_target(value: Option<&str>, field: &str, mode: &str) -> ServiceR
 /// `host:project:service` identities are rejected, never looked up.
 fn service_dependency_key(host: Option<&str>, service: Option<&str>) -> ServiceResult<String> {
     let service = required_map_target(service, "service", "service_dependencies")?;
-    if crate::db::entity_resolution::classify_legacy_shape(&service).is_some() {
-        return Err(ServiceError::InvalidInput(format!(
-            "unsupported legacy graph service identity `{service}`: rejected_legacy_shape"
-        )));
+    if let Some(rejected) = super::graph_support::reject_legacy_service_identity(&service) {
+        return Err(rejected);
     }
     if service.contains('/') {
         return Ok(service.to_string());
