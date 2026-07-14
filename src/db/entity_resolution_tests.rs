@@ -47,6 +47,12 @@ fn legacy_shape_classifier_ignores_free_text_and_non_name_segments() {
         // Absolute paths are not slash triplets.
         ("/mnt/user/media", None),
         ("/var/lib/docker", None),
+        // URLs/URIs are never legacy shapes: a colon segment containing `/`
+        // rejects in the colon branch and never falls through to the
+        // slash-triplet branch (`https://a.b/c` has two slashes).
+        ("http://example.com", None),
+        ("https://a.b/c", None),
+        ("agent-command://foo", None),
         // Plan-asserted legacy shapes must keep classifying.
         ("tootie:plex", Some(LegacyShape::HostService)),
         ("tootie:plex:plex", Some(LegacyShape::HostProjectService)),
@@ -125,6 +131,45 @@ fn agent_docker_identity_extracts_structured_service_instance() {
             && o.logical_service_key.as_deref() == Some("plex")
             && o.trust == ResolverTrust::Verified
             && o.structured
+    }));
+}
+
+#[test]
+fn agent_docker_evidence_path_follows_actual_service_name_source() {
+    let with_compose = AgentDockerIdentity {
+        agent_host: "tootie".to_string(),
+        container_id: "abcdef1234567890".to_string(),
+        container_name: "plex-container".to_string(),
+        compose_project: Some("plex".to_string()),
+        compose_service: Some("plex".to_string()),
+        image: None,
+        stream: "stdout".to_string(),
+        observed_at: "2026-01-01T00:00:00Z".to_string(),
+    };
+    let observations = observations_from_agent_docker_identity(&with_compose);
+    assert!(observations.iter().any(|o| {
+        o.kind == ObservationKind::LogicalService
+            && o.evidence_path == "agent_docker.compose_service"
+    }));
+    assert!(observations.iter().any(|o| {
+        o.kind == ObservationKind::ServiceInstance && o.evidence_path == "agent_docker.host_service"
+    }));
+
+    // No compose service label: the logical name fell back to the container
+    // name, and the evidence path must say so.
+    let without_compose = AgentDockerIdentity {
+        compose_project: None,
+        compose_service: None,
+        ..with_compose
+    };
+    let observations = observations_from_agent_docker_identity(&without_compose);
+    assert!(observations.iter().any(|o| {
+        o.kind == ObservationKind::LogicalService
+            && o.observed_key == "plex-container"
+            && o.evidence_path == "agent_docker.container_name"
+    }));
+    assert!(observations.iter().any(|o| {
+        o.kind == ObservationKind::ServiceInstance && o.evidence_path == "agent_docker.host_service"
     }));
 }
 

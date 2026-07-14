@@ -2,6 +2,7 @@
 //! app labels, verified inventory services) into bounded resolver
 //! observations. Adapters never touch the database.
 
+use crate::agent::docker::AGENT_DOCKER_SOURCE_KIND;
 use crate::inventory::schema::{InventoryService, TrustLevel};
 
 use super::observation::*;
@@ -16,10 +17,15 @@ pub fn observations_from_agent_docker_identity(
     let Some(host_key) = logical_service_key(&identity.agent_host) else {
         return Vec::new();
     };
-    let service_name = identity
-        .compose_service
-        .as_deref()
-        .unwrap_or(identity.container_name.as_str());
+    // Evidence-path attribution follows the actual source of the service
+    // name: the compose service label when present, else the container name.
+    let (service_name, service_evidence_path) = match identity.compose_service.as_deref() {
+        Some(compose_service) => (compose_service, "agent_docker.compose_service"),
+        None => (
+            identity.container_name.as_str(),
+            "agent_docker.container_name",
+        ),
+    };
     let Some(logical_key) = logical_service_key(service_name) else {
         return Vec::new();
     };
@@ -34,7 +40,7 @@ pub fn observations_from_agent_docker_identity(
             host_key: Some(host_key.clone()),
             logical_service_key: None,
             service_instance_key: None,
-            source_kind: "agent-docker".to_string(),
+            source_kind: AGENT_DOCKER_SOURCE_KIND.to_string(),
             source_id: identity.container_id.clone(),
             evidence_path: "agent_docker.host".to_string(),
             observed_at: identity.observed_at.clone(),
@@ -48,9 +54,9 @@ pub fn observations_from_agent_docker_identity(
             host_key: None,
             logical_service_key: Some(logical_key.clone()),
             service_instance_key: None,
-            source_kind: "agent-docker".to_string(),
+            source_kind: AGENT_DOCKER_SOURCE_KIND.to_string(),
             source_id: identity.container_id.clone(),
-            evidence_path: "agent_docker.compose_service".to_string(),
+            evidence_path: service_evidence_path.to_string(),
             observed_at: identity.observed_at.clone(),
             trust: ResolverTrust::Verified,
             structured: true,
@@ -62,9 +68,11 @@ pub fn observations_from_agent_docker_identity(
             host_key: Some(host_key),
             logical_service_key: Some(logical_key),
             service_instance_key: Some(instance_key),
-            source_kind: "agent-docker".to_string(),
+            source_kind: AGENT_DOCKER_SOURCE_KIND.to_string(),
             source_id: identity.container_id.clone(),
-            evidence_path: "agent_docker.compose_project_service".to_string(),
+            // The instance key is host + service name (compose service label
+            // or container-name fallback); `compose_project` is never read.
+            evidence_path: "agent_docker.host_service".to_string(),
             observed_at: identity.observed_at.clone(),
             trust: ResolverTrust::Verified,
             structured: true,

@@ -63,8 +63,9 @@ pub fn split_service_instance_key(key: &str) -> Option<(&str, &str)> {
 /// `tootie:plex:plex`, `plex/plex/plex`). Canonical inputs return `None`, as
 /// do free-text inputs that merely contain colons or slashes without looking
 /// like legacy keys: anything with ASCII whitespace, colon shapes whose
-/// segments are not all name-like (`10.0.0.5:443`, `12:30`), and
-/// absolute paths (`/mnt/user/media`).
+/// segments are not all name-like (`10.0.0.5:443`, `12:30`) or contain a
+/// slash (URLs like `http://example.com`, URIs like `agent-command://foo`),
+/// and absolute paths (`/mnt/user/media`).
 pub fn classify_legacy_shape(value: &str) -> Option<LegacyShape> {
     let trimmed = value.trim();
     if trimmed.chars().any(|ch| ch.is_ascii_whitespace()) {
@@ -72,9 +73,13 @@ pub fn classify_legacy_shape(value: &str) -> Option<LegacyShape> {
     }
     let colon_count = trimmed.matches(':').count();
     if colon_count >= 1 {
-        let name_like_segments = trimmed
-            .split(':')
-            .all(|segment| segment.chars().any(|ch| ch.is_ascii_alphabetic()));
+        // A colon segment containing `/` means the input is a URL/URI, not a
+        // legacy `host:service` key. Returning `None` here (instead of
+        // falling through) also keeps `://` strings out of the slash-triplet
+        // branch: `https://a.b/c` has two slashes but is never a legacy shape.
+        let name_like_segments = trimmed.split(':').all(|segment| {
+            !segment.contains('/') && segment.chars().any(|ch| ch.is_ascii_alphabetic())
+        });
         if !name_like_segments {
             return None;
         }
