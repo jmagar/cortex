@@ -22,6 +22,9 @@ pub struct DbStats {
     /// marker's identity extraction was skipped (gate-blocked, not lost —
     /// the raw marker stays in the stored message). Always present (starts
     /// at 0), unlike `phantom_fts_rows` which is opt-in-computed.
+    /// `#[serde(default)]` so a CLI client talking to a server predating
+    /// this field deserializes it as 0 rather than failing.
+    #[serde(default)]
     pub agent_docker_gate_blocked_count: u64,
 }
 
