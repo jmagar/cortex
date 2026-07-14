@@ -723,6 +723,91 @@ pub struct GraphWalkEntity {
 ///
 /// This is the reusable traversal primitive behind graph-anchored log fan-out
 /// (`search_logs_from_graph_related_entities`) and topic correlation.
+/// Bounded entity cap for service-topic walks.
+pub const GRAPH_SERVICE_TOPIC_ENTITY_CAP: usize = 250;
+/// Bounded per-level hop cap for service-topic walks.
+pub const GRAPH_SERVICE_TOPIC_HOP_CAP: usize = 50;
+
+/// Relationship types a service-topic walk may traverse: only the edges
+/// needed for the canonical service proof. Deliberately excludes the broad
+/// log-identity edges (`observed_as`, `emitted_by`) so a service topic never
+/// silently expands to all logs for the host running the service.
+pub const GRAPH_SERVICE_TOPIC_RELATIONSHIPS: &[&str] = &[
+    REL_INSTANCE_OF,
+    REL_RUNS_ON,
+    REL_DEFINES_SERVICE,
+    REL_ROUTES_TO,
+    REL_EXPOSES_DOMAIN,
+    REL_MOUNTS,
+    REL_HAS_ARTIFACT,
+    REL_MATCHES_SIGNATURE,
+    REL_WORKED_ON,
+];
+
+/// Bounded breadth-first walk for service-topic lookups: traverses only
+/// [`GRAPH_SERVICE_TOPIC_RELATIONSHIPS`], caps each expansion level at
+/// [`GRAPH_SERVICE_TOPIC_HOP_CAP`] rows and the total result at
+/// [`GRAPH_SERVICE_TOPIC_ENTITY_CAP`] entities.
+pub fn graph_walk_service_topic(
+    conn: &rusqlite::Connection,
+    start_keys: &[String],
+    max_depth: u8,
+) -> Result<Vec<GraphWalkEntity>> {
+    if start_keys.is_empty() {
+        return Ok(Vec::new());
+    }
+    let depth = i64::from(max_depth.clamp(1, GRAPH_WALK_MAX_DEPTH));
+    let placeholders = vec!["?"; start_keys.len()].join(", ");
+    let rel_placeholders = vec!["?"; GRAPH_SERVICE_TOPIC_RELATIONSHIPS.len()].join(", ");
+    let sql = format!(
+        "WITH RECURSIVE graph_walk(entity_id, depth) AS (
+             SELECT id, 0 FROM graph_entities WHERE canonical_key IN ({placeholders})
+             UNION
+             SELECT CASE WHEN r.src_entity_id = gw.entity_id
+                         THEN r.dst_entity_id ELSE r.src_entity_id END,
+                    gw.depth + 1
+             FROM graph_relationships r
+             JOIN graph_walk gw
+               ON r.src_entity_id = gw.entity_id OR r.dst_entity_id = gw.entity_id
+             WHERE gw.depth < ?
+               AND r.trust_level != 'refuted'
+               AND r.relationship_type IN ({rel_placeholders})
+             LIMIT ?
+         )
+         SELECT DISTINCT e.entity_type, e.canonical_key
+         FROM graph_entities e
+         JOIN graph_walk gw ON e.id = gw.entity_id
+         LIMIT ?"
+    );
+
+    let mut bindings: Vec<rusqlite::types::Value> = start_keys
+        .iter()
+        .map(|k| rusqlite::types::Value::Text(k.clone()))
+        .collect();
+    bindings.push(rusqlite::types::Value::Integer(depth));
+    for rel in GRAPH_SERVICE_TOPIC_RELATIONSHIPS {
+        bindings.push(rusqlite::types::Value::Text((*rel).to_string()));
+    }
+    bindings.push(rusqlite::types::Value::Integer(
+        (GRAPH_SERVICE_TOPIC_ENTITY_CAP
+            + GRAPH_SERVICE_TOPIC_HOP_CAP * GRAPH_WALK_MAX_DEPTH as usize) as i64,
+    ));
+    bindings.push(rusqlite::types::Value::Integer(
+        GRAPH_SERVICE_TOPIC_ENTITY_CAP as i64,
+    ));
+
+    let mut stmt = conn.prepare(&sql)?;
+    let entities = stmt
+        .query_map(rusqlite::params_from_iter(bindings.iter()), |row| {
+            Ok(GraphWalkEntity {
+                entity_type: row.get(0)?,
+                canonical_key: row.get(1)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(entities)
+}
+
 pub fn graph_walk_n_hops(
     conn: &rusqlite::Connection,
     start_keys: &[String],

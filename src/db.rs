@@ -94,12 +94,12 @@ pub use models::{
     AiProjectContextParams, AiProjectInventoryEntry, AiRelatedLogsForAnchor, AiRelatedLogsParams,
     AiRelatedWindow, AiSessionEntry, AiToolInventoryEntry, AiUsageBlock, AiUsageBlocksParams,
     AiUsageBlocksResult, AppLogCount, CorrelatedSession, DbStats, DockerCheckpoint,
-    ErrorSummaryEntry, HostEntry, IncidentCluster, IncidentContextParams, IncidentContextResult,
-    IncidentEvidence, ListAiProjectsParams, ListAiProjectsResult, ListAiSessionsParams,
-    ListAiToolsParams, ListAiToolsResult, LogBatchEntry, LogEntry, ResolvedTopicEntity,
-    SearchAiSessionsParams, SearchAiSessionsResult, SearchParams, SearchedAiSessionEntry,
-    SessionGraphInputs, SeverityCount, SimilarIncidentsParams, SimilarIncidentsResult,
-    TopicGraphInputs,
+    ErrorSummaryEntry, GraphRelatedLogEntry, HostEntry, IncidentCluster, IncidentContextParams,
+    IncidentContextResult, IncidentEvidence, ListAiProjectsParams, ListAiProjectsResult,
+    ListAiSessionsParams, ListAiToolsParams, ListAiToolsResult, LogBatchEntry, LogEntry,
+    ResolvedTopicEntity, SearchAiSessionsParams, SearchAiSessionsResult, SearchParams,
+    SearchedAiSessionEntry, SessionGraphInputs, SeverityCount, SimilarIncidentsParams,
+    SimilarIncidentsResult, TopicGraphInputs,
 };
 pub use models::{StorageBudgetState, StorageEnforcementOutcome, StorageMetrics, StorageRecovery};
 pub use pool::{
@@ -114,9 +114,9 @@ pub use queries::{
     list_ai_sessions, list_ai_sessions_live, list_ai_tools, list_hosts, prune_timeline_rollup,
     refresh_ai_session_rollup, refresh_ai_session_rollup_if_stale, refresh_timeline_rollup,
     search_ai_abuse, search_ai_anchors, search_ai_incidents, search_ai_related_logs,
-    search_ai_sessions, search_logs, search_logs_from_graph_related_entities, severity_to_num,
-    similar_incidents_clusters, tail_logs, timeline_rollup_status, topic_correlate_inputs,
-    validate_fts_query,
+    search_ai_sessions, search_logs, search_logs_for_service_instances,
+    search_logs_from_graph_related_entities, severity_to_num, similar_incidents_clusters,
+    tail_logs, timeline_rollup_status, topic_correlate_inputs, validate_fts_query,
 };
 pub(crate) use skill_events::insert_skill_events_in_tx;
 pub use skill_events::{

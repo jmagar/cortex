@@ -61,7 +61,7 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                 },
                 "topic": {
                     "type": "string",
-                    "description": "For action=topic_correlate, or action=correlate without reference_time: topic/entity string to resolve through the graph and correlate into a unified timeline."
+                    "description": "For action=topic_correlate, or action=correlate without reference_time: topic/entity string to resolve through the graph and correlate into a unified timeline. Service topics resolve to logical_service (`plex`) and its service_instance deployments (`tootie/plex`); legacy nested identities such as `tootie:plex` or `tootie:plex:plex` are rejected with rejected_legacy_shape."
                 },
                 "mode": {
                     "type": "string",
@@ -109,7 +109,7 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                 },
                 "service": {
                     "type": "string",
-                    "description": "For action=map mode=service_dependencies: target service canonical key (`host:name`) or bare service name when host is also provided."
+                    "description": "For action=map mode=service_dependencies: target service_instance key (`host/name`, e.g. `tootie/plex`) or bare service name when host is also provided. Legacy `host:name` keys are rejected with rejected_legacy_shape."
                 },
                 "include_ok": {
                     "type": "boolean",

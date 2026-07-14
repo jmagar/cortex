@@ -280,3 +280,96 @@ fn search_logs_from_graph_empty_for_unknown_seed() {
     .unwrap();
     assert!(logs.is_empty());
 }
+
+#[test]
+fn search_logs_for_service_instances_uses_service_predicates_not_host_fanout() {
+    let (_dir, pool) = test_pool("service-instance-predicates.db");
+    let mut plex = syslog_row("2026-01-01T00:01:00Z", "tootie", "plex/plex/plex");
+    plex.metadata_json = Some(
+        r#"{"source_kind":"agent-docker","agent_docker":{"host":"tootie","container_id":"abc","container_name":"plex","compose_service":"plex","stream":"stdout"}}"#
+            .to_string(),
+    );
+    let mut exact = syslog_row("2026-01-01T00:02:00Z", "tootie", "plex");
+    exact.metadata_json = None;
+    insert_logs_batch(
+        &pool,
+        &[
+            syslog_row("2026-01-01T00:00:00Z", "tootie", "kernel"),
+            plex,
+            exact,
+            syslog_row("2026-01-01T00:03:00Z", "shart", "plex"),
+        ],
+    )
+    .unwrap();
+
+    let rows = search_logs_for_service_instances(
+        &pool,
+        &["tootie/plex".to_string()],
+        None,
+        None,
+        None,
+        50,
+    )
+    .unwrap();
+    // Matches: exact app label, prefixed nested label, structured compose
+    // service — all scoped to the instance's host. The kernel row on the
+    // same host and the other host's plex row stay out.
+    assert_eq!(rows.len(), 2);
+    assert!(rows.iter().all(|row| row.entry.hostname == "tootie"));
+    assert!(
+        rows.iter()
+            .all(|row| row.entry.app_name.as_deref() != Some("kernel"))
+    );
+    assert!(
+        rows.iter()
+            .all(|row| row.inclusion_reason == "service_instance")
+    );
+    assert!(rows.iter().all(|row| row.resolver_status == "resolved"));
+    assert!(rows.iter().all(|row| row.fallback_kind.is_none()));
+}
+
+#[test]
+fn search_logs_for_service_instances_rejects_legacy_keys() {
+    let (_dir, pool) = test_pool("service-instance-legacy-keys.db");
+    insert_logs_batch(
+        &pool,
+        &[syslog_row("2026-01-01T00:00:00Z", "tootie", "plex")],
+    )
+    .unwrap();
+    // Legacy shapes never split into (host, service) and yield no predicate.
+    let rows = search_logs_for_service_instances(
+        &pool,
+        &["tootie:plex".to_string(), "plex/plex/plex".to_string()],
+        None,
+        None,
+        None,
+        50,
+    )
+    .unwrap();
+    assert!(rows.is_empty());
+}
+
+#[test]
+fn graph_walk_service_topic_traverses_proof_edges_and_caps_results() {
+    let (_dir, pool) = test_pool("service-topic-walk.db");
+    let conn = pool.get().unwrap();
+    let logical = insert_entity(&conn, "logical_service", "plex");
+    let instance = insert_entity(&conn, "service_instance", "tootie/plex");
+    let host = insert_entity(&conn, "host", "tootie");
+    let app = insert_entity(&conn, "app", "kernel");
+    insert_rel(&conn, instance, logical, "instance_of");
+    insert_rel(&conn, instance, host, "runs_on");
+    // Broad log-identity edge from the host: must NOT be traversed.
+    insert_rel(&conn, app, host, "emitted_by");
+
+    let entities = graph::graph_walk_service_topic(&conn, &["plex".to_string()], 3).unwrap();
+    let walked = keys(&entities);
+    assert!(walked.contains(&"plex".to_string()));
+    assert!(walked.contains(&"tootie/plex".to_string()));
+    assert!(walked.contains(&"tootie".to_string()));
+    assert!(
+        !walked.contains(&"kernel".to_string()),
+        "service-topic walk must not traverse broad log-identity edges: {walked:?}"
+    );
+    assert!(entities.len() <= graph::GRAPH_SERVICE_TOPIC_ENTITY_CAP);
+}

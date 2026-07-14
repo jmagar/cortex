@@ -19,6 +19,17 @@ impl CortexService {
         let since = parse_optional_timestamp(req.since.as_deref(), "since")?;
         let until = parse_optional_timestamp(req.until.as_deref(), "until")?;
 
+        // Hard break: legacy nested service identities (`tootie:plex`,
+        // `tootie:plex:plex`, `plex/plex/plex`) are rejected before any
+        // graph lookup runs.
+        let diagnostic = db::entity_resolution::diagnose_lookup_input(&req.topic);
+        if diagnostic.status == db::entity_resolution::ResolverStatus::RejectedLegacyShape {
+            return Err(ServiceError::InvalidInput(format!(
+                "unsupported legacy graph service identity `{}`: rejected_legacy_shape",
+                req.topic
+            )));
+        }
+
         // Split the topic into lowercased, de-duplicated terms (OR semantics).
         let mut terms: Vec<String> = req
             .topic
@@ -109,15 +120,15 @@ fn empty_topic_response(topic: String) -> TopicCorrelateResponse {
 /// Compute the heartbeat window: explicit `[since, until]` when both given,
 /// otherwise the min/max timestamp across the correlated logs.
 fn heartbeat_window(
-    logs: &[db::LogEntry],
+    logs: &[db::GraphRelatedLogEntry],
     since: Option<&str>,
     until: Option<&str>,
 ) -> Option<(String, String)> {
     if let (Some(from), Some(to)) = (since, until) {
         return Some((from.to_string(), to.to_string()));
     }
-    let min = logs.iter().map(|l| l.timestamp.as_str()).min()?;
-    let max = logs.iter().map(|l| l.timestamp.as_str()).max()?;
+    let min = logs.iter().map(|l| l.entry.timestamp.as_str()).min()?;
+    let max = logs.iter().map(|l| l.entry.timestamp.as_str()).max()?;
     Some((
         since.unwrap_or(min).to_string(),
         until.unwrap_or(max).to_string(),
@@ -139,6 +150,7 @@ fn build_topic_response(
             entity_type: r.entity_type,
             key: r.canonical_key,
             match_kind: r.match_kind.to_string(),
+            resolver_status: Some(r.resolver_status.to_string()),
         })
         .collect();
 
@@ -151,7 +163,8 @@ fn build_topic_response(
     let timeline = inputs
         .logs
         .into_iter()
-        .map(|entry| {
+        .map(|related| {
+            let entry = related.entry;
             let source_kind = row_source_kind(&entry);
             let entity_path = if entry.source_ip.starts_with("agent-command://") {
                 "agent_command".to_string()
@@ -168,6 +181,9 @@ fn build_topic_response(
                 app_name: entry.app_name,
                 message: entry.message,
                 session_id: entry.ai_session_id,
+                inclusion_reason: Some(related.inclusion_reason),
+                resolver_status: Some(related.resolver_status),
+                fallback_kind: related.fallback_kind,
             }
         })
         .collect();

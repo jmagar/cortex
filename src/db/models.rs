@@ -229,6 +229,19 @@ pub struct ResolvedTopicEntity {
     pub entity_type: String,
     pub canonical_key: String,
     pub match_kind: &'static str,
+    /// Resolver outcome: `resolved` for exact identity, `ambiguous` for weak
+    /// prefix/label candidates that never drive log fan-out.
+    pub resolver_status: &'static str,
+}
+
+/// One correlated log row annotated with why it was included and the
+/// resolver outcome for its inclusion path.
+#[derive(Debug, Clone)]
+pub struct GraphRelatedLogEntry {
+    pub entry: LogEntry,
+    pub inclusion_reason: String,
+    pub resolver_status: String,
+    pub fallback_kind: Option<String>,
 }
 
 /// DB-layer carrier for topic correlation: the entities the topic resolved to,
@@ -239,7 +252,7 @@ pub struct TopicGraphInputs {
     /// Entities reached by traversal that were not themselves resolved seeds.
     pub expansion: Vec<(String, String)>,
     pub discovered_hosts: Vec<String>,
-    pub logs: Vec<LogEntry>,
+    pub logs: Vec<GraphRelatedLogEntry>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

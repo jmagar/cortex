@@ -13,6 +13,7 @@ src/db/graph.rs
 src/db/graph_inventory.rs
 src/db/maintenance.rs
 src/db/pool.rs
+src/db/queries.rs
 src/doctor.rs
 src/heartbeat_agent.rs
 src/main.rs

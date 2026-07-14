@@ -12,7 +12,8 @@ use crate::cli::{parse_i64_flag, parse_u32_flag};
 const GRAPH_ENTITY_TYPES: &[&str] = &[
     "host",
     "container",
-    "service",
+    "logical_service",
+    "service_instance",
     "app",
     "source_ip",
     "ai_project",

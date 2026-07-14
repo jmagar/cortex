@@ -24,10 +24,10 @@ use super::models::{
     AbuseIncident, AiAbuseMatch, AiAbuseParams, AiAbuseResult, AiCorrelateParams, AiIncidentParams,
     AiIncidentResult, AiInvestigateParams, AiInvestigateResult, AiProjectInventoryEntry,
     AiRelatedLogsForAnchor, AiRelatedLogsParams, AiSessionEntry, AiToolInventoryEntry, DbStats,
-    ErrorSummaryEntry, HostEntry, IncidentEvidence, ListAiProjectsParams, ListAiProjectsResult,
-    ListAiSessionsParams, ListAiToolsParams, ListAiToolsResult, LogEntry, ResolvedTopicEntity,
-    SearchAiSessionsParams, SearchAiSessionsResult, SearchParams, SearchedAiSessionEntry,
-    SessionGraphInputs, TopicGraphInputs,
+    ErrorSummaryEntry, GraphRelatedLogEntry, HostEntry, IncidentEvidence, ListAiProjectsParams,
+    ListAiProjectsResult, ListAiSessionsParams, ListAiToolsParams, ListAiToolsResult, LogEntry,
+    ResolvedTopicEntity, SearchAiSessionsParams, SearchAiSessionsResult, SearchParams,
+    SearchedAiSessionEntry, SessionGraphInputs, TopicGraphInputs,
 };
 use super::pool::DbPool;
 
@@ -1528,15 +1528,20 @@ pub fn search_logs_from_graph_related_entities(
     }
 
     // 2. Map related entities to indexed log-column filters.
+    //
+    // Hard break (entity_resolution_v2): `service_instance` entities do NOT
+    // map to host-wide log filters here — service-scoped logs come from
+    // `search_logs_for_service_instances` predicates instead, so a service
+    // topic never silently expands to every log on its host.
     let mut hostnames: Vec<String> = Vec::new();
     let mut ai_projects: Vec<String> = Vec::new();
     let mut ai_sessions: Vec<String> = Vec::new();
     for entity in &entities {
         match entity.entity_type.as_str() {
             super::graph::ENTITY_TYPE_HOST => hostnames.push(entity.canonical_key.clone()),
-            super::graph::ENTITY_TYPE_CONTAINER | super::graph::ENTITY_TYPE_SERVICE => {
-                // `docker_host:container_id` / `docker_host:project:service` —
-                // the leading segment is the host the workload runs on.
+            super::graph::ENTITY_TYPE_CONTAINER => {
+                // `docker_host:container_id` — the leading segment is the
+                // host the workload runs on.
                 if let Some(host) = entity.canonical_key.split(':').next() {
                     if !host.is_empty() {
                         hostnames.push(host.to_string());
@@ -1618,6 +1623,84 @@ pub fn search_logs_from_graph_related_entities(
     Ok(logs)
 }
 
+/// Fetch logs that belong to specific service instances (`host/service`
+/// keys) using indexed service-scoped predicates: exact hostname AND
+/// (app label equals or is prefixed by the service name, or the structured
+/// agent-docker compose service matches). This is the canonical service log
+/// fan-out — it never expands to all logs on the host.
+pub fn search_logs_for_service_instances(
+    pool: &DbPool,
+    service_instance_keys: &[String],
+    since: Option<&str>,
+    until: Option<&str>,
+    source_kinds: Option<&[SourceKind]>,
+    limit: usize,
+) -> Result<Vec<GraphRelatedLogEntry>> {
+    if service_instance_keys.is_empty() {
+        return Ok(Vec::new());
+    }
+    let limit = limit.clamp(1, 1000);
+    let conn = pool.get()?;
+    let mut predicates = Vec::new();
+    let mut bindings: Vec<rusqlite::types::Value> = Vec::new();
+    for key in service_instance_keys {
+        let Some((host, service)) = super::entity_resolution::split_service_instance_key(key)
+        else {
+            continue;
+        };
+        predicates.push(
+            "(l.hostname = ? AND (l.app_name = ? OR l.app_name LIKE ? \
+             OR json_extract(l.metadata_json, '$.agent_docker.compose_service') = ?))"
+                .to_string(),
+        );
+        bindings.push(host.to_string().into());
+        bindings.push(service.to_string().into());
+        bindings.push(format!("{service}/%").into());
+        bindings.push(service.to_string().into());
+    }
+    if predicates.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut where_sql = format!("({})", predicates.join(" OR "));
+    if let Some(since) = since {
+        where_sql.push_str(" AND l.timestamp >= ?");
+        bindings.push(rusqlite::types::Value::Text(since.to_string()));
+    }
+    if let Some(until) = until {
+        where_sql.push_str(" AND l.timestamp <= ?");
+        bindings.push(rusqlite::types::Value::Text(until.to_string()));
+    }
+    if let Some(kinds) = source_kinds {
+        if !kinds.is_empty() {
+            let kind_strs: Vec<String> = kinds.iter().map(|k| k.as_str().to_string()).collect();
+            let ph = bind_in_list(&mut bindings, &kind_strs);
+            where_sql.push_str(&format!(
+                " AND json_extract(l.metadata_json, '$.source_kind') IN ({ph})"
+            ));
+        }
+    }
+    bindings.push((limit as i64).into());
+    let sql = format!(
+        "SELECT {FTS_SELECT_COLS}
+           FROM logs l
+          WHERE {where_sql}
+          ORDER BY l.timestamp DESC, l.id DESC
+          LIMIT ?"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(rusqlite::params_from_iter(bindings.iter()), map_row)?;
+    rows.map(|row| {
+        row.map(|entry| GraphRelatedLogEntry {
+            entry,
+            inclusion_reason: "service_instance".to_string(),
+            resolver_status: "resolved".to_string(),
+            fallback_kind: None,
+        })
+    })
+    .collect::<rusqlite::Result<Vec<_>>>()
+    .map_err(Into::into)
+}
+
 /// Graph-anchored, session-scoped correlation inputs for `ai_correlate`.
 ///
 /// Resolves the session's time bounds from its log rows, finds the `ai_session`
@@ -1685,11 +1768,18 @@ pub fn correlate_session_graph(
                 super::graph::ENTITY_TYPE_HOST => {
                     discovered_hosts.push(entity.canonical_key.clone())
                 }
-                super::graph::ENTITY_TYPE_CONTAINER | super::graph::ENTITY_TYPE_SERVICE => {
+                super::graph::ENTITY_TYPE_CONTAINER => {
                     if let Some(host) = entity.canonical_key.split(':').next() {
                         if !host.is_empty() {
                             discovered_hosts.push(host.to_string());
                         }
+                    }
+                }
+                super::graph::ENTITY_TYPE_SERVICE_INSTANCE => {
+                    if let Some((host, _)) =
+                        super::entity_resolution::split_service_instance_key(&entity.canonical_key)
+                    {
+                        discovered_hosts.push(host.to_string());
                     }
                 }
                 _ => {}
@@ -1805,6 +1895,12 @@ fn resolve_topic_entities(
                 2 => "label",
                 _ => "alias",
             },
+            // Weak prefix/label candidates surface for the caller but never
+            // drive log fan-out (deterministic resolution only).
+            resolver_status: match pri {
+                0 | 3 => "resolved",
+                _ => "ambiguous",
+            },
         })
         .collect();
     // Stable, deterministic ordering: strongest match first, then key.
@@ -1850,22 +1946,79 @@ pub fn topic_correlate_inputs(
         return Ok(TopicGraphInputs::default());
     }
 
-    let mut seeds: Vec<String> = resolved.iter().map(|r| r.canonical_key.clone()).collect();
-    seeds.sort();
-    seeds.dedup();
-    let seed_set: std::collections::HashSet<&str> = seeds.iter().map(String::as_str).collect();
+    // Partition seeds. Only `resolved` (exact/alias) identities drive log
+    // fan-out; weak prefix/label candidates stay visible as `ambiguous`.
+    // Service identity seeds resolve through service-instance predicates:
+    // an exact `logical_service` expands to its `instance_of` instances.
+    let mut instance_keys: Vec<String> = Vec::new();
+    let mut logical_keys: Vec<String> = Vec::new();
+    let mut generic_seeds: Vec<String> = Vec::new();
+    for entity in &resolved {
+        if entity.resolver_status != "resolved" {
+            continue;
+        }
+        match entity.entity_type.as_str() {
+            super::graph::ENTITY_TYPE_LOGICAL_SERVICE => {
+                logical_keys.push(entity.canonical_key.clone())
+            }
+            super::graph::ENTITY_TYPE_SERVICE_INSTANCE => {
+                instance_keys.push(entity.canonical_key.clone())
+            }
+            _ => generic_seeds.push(entity.canonical_key.clone()),
+        }
+    }
+    if !logical_keys.is_empty() {
+        instance_keys.extend(service_instances_of_logical_services(&conn, &logical_keys)?);
+    }
+    instance_keys.sort();
+    instance_keys.dedup();
+    generic_seeds.sort();
+    generic_seeds.dedup();
 
-    // Graph expansion + host discovery.
+    // Graph expansion + host discovery. Service seeds use the bounded
+    // service-topic walk (proof relationships only); generic seeds keep the
+    // general walk.
+    let mut walk_entities = Vec::new();
+    let mut service_seeds: Vec<String> = logical_keys.clone();
+    service_seeds.extend(instance_keys.iter().cloned());
+    service_seeds.sort();
+    service_seeds.dedup();
+    if !service_seeds.is_empty() {
+        walk_entities.extend(super::graph::graph_walk_service_topic(
+            &conn,
+            &service_seeds,
+            max_depth,
+        )?);
+    }
+    if !generic_seeds.is_empty() {
+        walk_entities.extend(super::graph::graph_walk_n_hops(
+            &conn,
+            &generic_seeds,
+            max_depth,
+        )?);
+    }
+    let seed_set: std::collections::HashSet<&str> = service_seeds
+        .iter()
+        .chain(generic_seeds.iter())
+        .map(String::as_str)
+        .collect();
     let mut expansion: Vec<(String, String)> = Vec::new();
     let mut discovered_hosts: Vec<String> = Vec::new();
-    for entity in super::graph::graph_walk_n_hops(&conn, &seeds, max_depth)? {
+    for entity in walk_entities {
         match entity.entity_type.as_str() {
             super::graph::ENTITY_TYPE_HOST => discovered_hosts.push(entity.canonical_key.clone()),
-            super::graph::ENTITY_TYPE_CONTAINER | super::graph::ENTITY_TYPE_SERVICE => {
+            super::graph::ENTITY_TYPE_CONTAINER => {
                 if let Some(host) = entity.canonical_key.split(':').next() {
                     if !host.is_empty() {
                         discovered_hosts.push(host.to_string());
                     }
+                }
+            }
+            super::graph::ENTITY_TYPE_SERVICE_INSTANCE => {
+                if let Some((host, _)) =
+                    super::entity_resolution::split_service_instance_key(&entity.canonical_key)
+                {
+                    discovered_hosts.push(host.to_string());
                 }
             }
             _ => {}
@@ -1880,15 +2033,74 @@ pub fn topic_correlate_inputs(
     expansion.dedup();
     drop(conn);
 
-    let logs = search_logs_from_graph_related_entities(
-        pool,
-        &seeds,
-        max_depth,
-        since,
-        until,
-        source_kinds,
-        limit,
-    )?;
+    // Log fan-out: service instances use service-scoped predicates; generic
+    // seeds use the graph-related fan-out. Never both for the same rows —
+    // results merge newest-first under the shared limit.
+    let mut logs: Vec<GraphRelatedLogEntry> = Vec::new();
+    if !instance_keys.is_empty() {
+        logs.extend(search_logs_for_service_instances(
+            pool,
+            &instance_keys,
+            since,
+            until,
+            source_kinds,
+            limit,
+        )?);
+    }
+    if !generic_seeds.is_empty() {
+        logs.extend(
+            search_logs_from_graph_related_entities(
+                pool,
+                &generic_seeds,
+                max_depth,
+                since,
+                until,
+                source_kinds,
+                limit,
+            )?
+            .into_iter()
+            .map(|entry| GraphRelatedLogEntry {
+                entry,
+                inclusion_reason: "graph_related".to_string(),
+                resolver_status: "resolved".to_string(),
+                fallback_kind: None,
+            }),
+        );
+    }
+
+    // Explicit degraded host-context fallback: a service topic whose
+    // instance predicates matched no rows falls back to the instances' host
+    // context, annotated (`explicit_degraded_host_context`) — never silent.
+    if logs.is_empty() && !instance_keys.is_empty() && generic_seeds.is_empty() {
+        let hosts: Vec<String> = instance_keys
+            .iter()
+            .filter_map(|key| {
+                super::entity_resolution::split_service_instance_key(key)
+                    .map(|(host, _)| host.to_string())
+            })
+            .collect();
+        if !hosts.is_empty() {
+            logs.extend(
+                search_logs_by_hostnames(pool, &hosts, since, until, source_kinds, limit)?
+                    .into_iter()
+                    .map(|entry| GraphRelatedLogEntry {
+                        entry,
+                        inclusion_reason: "host_context".to_string(),
+                        resolver_status: "degraded".to_string(),
+                        fallback_kind: Some("explicit_degraded_host_context".to_string()),
+                    }),
+            );
+        }
+    }
+
+    logs.sort_by(|a, b| {
+        b.entry
+            .timestamp
+            .cmp(&a.entry.timestamp)
+            .then_with(|| b.entry.id.cmp(&a.entry.id))
+    });
+    logs.dedup_by_key(|row| row.entry.id);
+    logs.truncate(limit);
 
     Ok(TopicGraphInputs {
         resolved,
@@ -1896,6 +2108,98 @@ pub fn topic_correlate_inputs(
         discovered_hosts,
         logs,
     })
+}
+
+/// Resolve the `service_instance` keys linked to the given logical services
+/// via non-refuted `instance_of` edges.
+fn service_instances_of_logical_services(
+    conn: &rusqlite::Connection,
+    logical_keys: &[String],
+) -> Result<Vec<String>> {
+    if logical_keys.is_empty() {
+        return Ok(Vec::new());
+    }
+    let placeholders = vec!["?"; logical_keys.len()].join(", ");
+    let sql = format!(
+        "SELECT inst.canonical_key
+           FROM graph_relationships r
+           JOIN graph_entities inst ON inst.id = r.src_entity_id
+           JOIN graph_entities logical ON logical.id = r.dst_entity_id
+          WHERE r.relationship_type = ?
+            AND r.trust_level != 'refuted'
+            AND inst.entity_type = ?
+            AND logical.entity_type = ?
+            AND logical.canonical_key IN ({placeholders})"
+    );
+    let mut bindings: Vec<rusqlite::types::Value> = vec![
+        super::graph::REL_INSTANCE_OF.to_string().into(),
+        super::graph::ENTITY_TYPE_SERVICE_INSTANCE
+            .to_string()
+            .into(),
+        super::graph::ENTITY_TYPE_LOGICAL_SERVICE.to_string().into(),
+    ];
+    bindings.extend(
+        logical_keys
+            .iter()
+            .map(|key| rusqlite::types::Value::Text(key.clone())),
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let keys = stmt
+        .query_map(rusqlite::params_from_iter(bindings.iter()), |row| {
+            row.get::<_, String>(0)
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(keys)
+}
+
+/// Fetch logs by exact hostname list (bounded), used only by the explicit
+/// degraded host-context fallback.
+fn search_logs_by_hostnames(
+    pool: &DbPool,
+    hostnames: &[String],
+    since: Option<&str>,
+    until: Option<&str>,
+    source_kinds: Option<&[SourceKind]>,
+    limit: usize,
+) -> Result<Vec<LogEntry>> {
+    if hostnames.is_empty() {
+        return Ok(Vec::new());
+    }
+    let limit = limit.clamp(1, 1000);
+    let conn = pool.get()?;
+    let mut bindings: Vec<rusqlite::types::Value> = Vec::new();
+    let ph = bind_in_list(&mut bindings, hostnames);
+    let mut where_sql = format!("l.hostname IN ({ph})");
+    if let Some(since) = since {
+        where_sql.push_str(" AND l.timestamp >= ?");
+        bindings.push(rusqlite::types::Value::Text(since.to_string()));
+    }
+    if let Some(until) = until {
+        where_sql.push_str(" AND l.timestamp <= ?");
+        bindings.push(rusqlite::types::Value::Text(until.to_string()));
+    }
+    if let Some(kinds) = source_kinds {
+        if !kinds.is_empty() {
+            let kind_strs: Vec<String> = kinds.iter().map(|k| k.as_str().to_string()).collect();
+            let ph = bind_in_list(&mut bindings, &kind_strs);
+            where_sql.push_str(&format!(
+                " AND json_extract(l.metadata_json, '$.source_kind') IN ({ph})"
+            ));
+        }
+    }
+    bindings.push((limit as i64).into());
+    let sql = format!(
+        "SELECT {FTS_SELECT_COLS}
+           FROM logs l
+          WHERE {where_sql}
+          ORDER BY l.timestamp DESC, l.id DESC
+          LIMIT ?"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let logs = stmt
+        .query_map(rusqlite::params_from_iter(bindings.iter()), map_row)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(logs)
 }
 
 const DEFAULT_AI_ABUSE_TERMS: &[&str] = &[
