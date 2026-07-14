@@ -864,7 +864,8 @@ async fn graph_around_rejects_depth_above_one_and_redacts_safe_evidence() {
         conn.execute(
             "UPDATE graph_relationship_evidence
              SET safe_excerpt = 'password=secret token=abc /home/jmagar/private',
-                 reason_text = 'secret token=abc'",
+                 reason_text = 'secret token=abc',
+                 source_id = '/home/jmagar/.cortex/token=abc'",
             [],
         )
         .unwrap();
@@ -945,6 +946,17 @@ async fn graph_around_rejects_depth_above_one_and_redacts_safe_evidence() {
         .join(" ");
     assert!(!reason_text.contains("secret"));
     assert!(!reason_text.contains("token=abc"));
+    // Evidence source ids pass through the same redaction as the sibling
+    // text fields — a secret-like source_id must never leak.
+    let source_ids = response
+        .evidence
+        .iter()
+        .map(|evidence| evidence.source_id.as_str())
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert!(source_ids.contains("[redacted]"), "{source_ids}");
+    assert!(!source_ids.contains("/home/jmagar"));
+    assert!(!source_ids.contains("token=abc"));
 }
 
 #[tokio::test]

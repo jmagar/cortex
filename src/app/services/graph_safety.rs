@@ -9,7 +9,7 @@ pub(super) fn graph_evidence_safe(
         id: row.id,
         relationship_id: row.relationship_id,
         source_kind: row.source_kind,
-        source_id: row.source_id,
+        source_id: redact_graph_text(row.source_id),
         source_log_id: row.source_log_id,
         source_heartbeat_id: row.source_heartbeat_id,
         source_signature_hash: row.source_signature_hash,
