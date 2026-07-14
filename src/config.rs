@@ -1295,19 +1295,20 @@ fn is_supported_setup_env_key(key: &str) -> bool {
 }
 
 /// Warn about `agent_docker_source_prefixes` entries that can never match a
-/// source. Valid shapes are a full dotted-quad IPv4 (`100.64.0.5`, exact-host
-/// match) or a dot-terminated partial quad (`100.64.0.`, subnet-prefix
-/// match). A partial quad without its trailing dot (`100.64.0`) is treated
-/// by the gate as an exact-host literal that matches nothing — the failure
-/// mode silently disables all agent-docker extraction. IPv6 sources are not
-/// matchable by this gate at all.
+/// source. Valid shapes are a full IP literal (`100.64.0.5` or
+/// `2001:db8::1`, exact-host match) or a dot-terminated partial IPv4 quad
+/// (`100.64.0.`, subnet-prefix match). A partial quad without its trailing
+/// dot (`100.64.0`) is treated by the gate as an exact-host literal that
+/// matches nothing — the failure mode silently disables all agent-docker
+/// extraction. IPv6 entries are exact-host only; there is no IPv6
+/// subnet-prefix form.
 fn warn_invalid_agent_docker_prefixes(prefixes: &[String]) {
     for prefix in prefixes {
         if !is_agent_docker_prefix_shape(prefix) {
             tracing::warn!(
                 prefix = %prefix,
-                "agent_docker_source_prefixes entry is neither a full IPv4 dotted quad \
-                 nor a dot-terminated partial quad; it will match no source_ip and \
+                "agent_docker_source_prefixes entry is neither a full IP literal \
+                 nor a dot-terminated partial IPv4 quad; it will match no source_ip and \
                  silently disables agent-docker extraction for the senders it was meant \
                  to cover (use a trailing dot, e.g. \"100.64.0.\", for a subnet prefix)"
             );
@@ -1315,10 +1316,14 @@ fn warn_invalid_agent_docker_prefixes(prefixes: &[String]) {
     }
 }
 
-/// `true` when `prefix` is a full IPv4 dotted quad or a dot-terminated
-/// partial quad (1–3 leading octets), i.e. a shape [`crate::receiver`]'s
-/// agent-docker source gate can actually match.
+/// `true` when `prefix` is a full IPv4 dotted quad, an IPv6 literal
+/// (exact-host match), or a dot-terminated partial IPv4 quad (1–3 leading
+/// octets), i.e. a shape [`crate::receiver`]'s agent-docker source gate can
+/// actually match.
 fn is_agent_docker_prefix_shape(prefix: &str) -> bool {
+    if prefix.parse::<std::net::Ipv6Addr>().is_ok() {
+        return true;
+    }
     let (body, partial) = match prefix.strip_suffix('.') {
         Some(body) => (body, true),
         None => (prefix, false),

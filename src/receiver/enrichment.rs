@@ -147,12 +147,11 @@ struct ClaudeSessionsIndexEntry {
     project_path: Option<String>,
 }
 
-use crate::agent::docker::AGENT_DOCKER_META_MARKER;
-
-/// Denormalised `metadata_json.source_kind` value written by the receiver
-/// when it extracts the agent Docker marker. Set from this constant, never
-/// from the (sender-controlled) marker payload.
-const AGENT_DOCKER_SOURCE_KIND: &str = "agent-docker";
+// `AGENT_DOCKER_SOURCE_KIND` is the denormalised `metadata_json.source_kind`
+// value written by the receiver when it extracts the agent Docker marker.
+// Set from the shared constant, never from the (sender-controlled) marker
+// payload.
+use crate::agent::docker::{AGENT_DOCKER_META_MARKER, AGENT_DOCKER_SOURCE_KIND};
 
 /// Apply enrichment to one entry. Pure function — never panics, never logs at
 /// `error`. Parse failures fall through, leaving the entry unchanged.
@@ -274,8 +273,15 @@ fn extract_agent_docker_metadata(entry: &mut LogBatchEntry, config: &EnrichmentC
 ///
 /// * **Subnet prefix** ending with `.` (e.g. `"10.0.0."`): match any IP
 ///   in the subnet — the byte after the prefix must be a digit (next octet).
-/// * **Exact host** without trailing dot (e.g. `"10.0.0.5"`): match only
-///   that IP — extract the IP portion of `"<ip>:<port>"` and require equality.
+/// * **Exact host** without trailing dot (e.g. `"10.0.0.5"`, `"2001:db8::1"`):
+///   match only that IP — compare parsed addresses when both sides parse
+///   (canonical-form insensitive), else compare the extracted IP string.
+///
+/// The source IP is parsed as a [`std::net::SocketAddr`] first, which handles
+/// `"<ipv4>:<port>"` and bracketed IPv6 `"[<ipv6>]:<port>"`; a bare IP
+/// without a port is parsed as [`std::net::IpAddr`]. Only if both parses fail
+/// does the legacy `split(':')` string handling apply (which would truncate a
+/// raw IPv6 literal — such values never reach it because they parse).
 ///
 /// `None` or empty prefix preserves the legacy "apply to all matching
 /// app_name" default.
@@ -283,10 +289,23 @@ fn source_ip_matches(entry: &LogBatchEntry, configured_prefix: Option<&str>) -> 
     let Some(prefix) = configured_prefix.filter(|p| !p.is_empty()) else {
         return true;
     };
-    let ip_only = entry.source_ip.split(':').next().unwrap_or("");
+    let source_ip = entry.source_ip.as_str();
+    let parsed_ip: Option<std::net::IpAddr> = source_ip
+        .parse::<std::net::SocketAddr>()
+        .map(|addr| addr.ip())
+        .or_else(|_| source_ip.parse::<std::net::IpAddr>())
+        .ok();
+    let ip_only = match &parsed_ip {
+        Some(ip) => ip.to_string(),
+        None => source_ip.split(':').next().unwrap_or("").to_string(),
+    };
     if prefix.ends_with('.') {
         // Subnet match: prefix is a partial dotted-quad like "10.0.0."
         ip_only.starts_with(prefix)
+    } else if let (Some(ip), Ok(prefix_ip)) = (parsed_ip, prefix.parse::<std::net::IpAddr>()) {
+        // Exact-host match on parsed addresses: canonical-form insensitive
+        // (e.g. `2001:0db8::1` matches `2001:db8::1`).
+        ip == prefix_ip
     } else {
         // Exact-host match: prefix is a full IP literal
         ip_only == prefix

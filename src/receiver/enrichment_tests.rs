@@ -540,6 +540,35 @@ fn agent_docker_meta_prefix_ignored_from_non_matching_source_ip() {
 }
 
 #[test]
+fn agent_docker_source_gate_matches_bracketed_ipv6_exact_entry() {
+    let cfg = EnrichmentConfig {
+        agent_docker_source_prefixes: vec!["2001:db8::1".to_string(), "10.0.0.5".to_string()],
+        ..EnrichmentConfig::default()
+    };
+    let meta = r#"{"agent_docker":{"host":"tootie","container_id":"abc","container_name":"plex","stream":"stdout"}}"#;
+    let msg = format!("[cortex-agent-docker-meta:{meta}] hello");
+    // Bracketed IPv6 source with a matching exact IPv6 entry extracts.
+    let out = enrich_entry(entry("plex", &msg, "[2001:db8::1]:514", "info"), &cfg);
+    assert_eq!(out.message, "hello");
+    // Non-canonical spelling of the same address still matches (parsed
+    // address comparison, not string comparison).
+    let out = enrich_entry(
+        entry("plex", &msg, "[2001:0db8:0000::0001]:514", "info"),
+        &cfg,
+    );
+    assert_eq!(out.message, "hello");
+    // A different IPv6 source does not match.
+    let out = enrich_entry(entry("plex", &msg, "[2001:db8::2]:514", "info"), &cfg);
+    assert_eq!(out.message, msg);
+    // IPv4 behavior is unchanged alongside the IPv6 entry: octet-boundary
+    // semantics still hold (10.0.0.50 must not pass exact-host 10.0.0.5).
+    let out = enrich_entry(entry("plex", &msg, "10.0.0.50:1234", "info"), &cfg);
+    assert_eq!(out.message, msg);
+    let out = enrich_entry(entry("plex", &msg, "10.0.0.5:1234", "info"), &cfg);
+    assert_eq!(out.message, "hello");
+}
+
+#[test]
 fn agent_docker_meta_payload_cannot_overwrite_existing_metadata_keys() {
     let cfg = EnrichmentConfig::default();
     // Payload tries to smuggle extra top-level keys and clobber parser-set

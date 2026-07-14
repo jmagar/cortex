@@ -20,6 +20,13 @@ const CONTAINER_POLL_SECS: u64 = 30;
 /// payload into `metadata_json`, and strips the marker from `message`.
 pub(crate) const AGENT_DOCKER_META_MARKER: &str = "[cortex-agent-docker-meta:";
 
+/// Denormalised `metadata_json.source_kind` value for agent-attested Docker
+/// identity. Single definition — the agent emits it in the marker payload
+/// and the receiver enrichment path re-sets it from this constant (never
+/// from the sender-controlled payload); the resolver adapters stamp it on
+/// observations.
+pub(crate) const AGENT_DOCKER_SOURCE_KIND: &str = "agent-docker";
+
 struct ContainerInfo {
     id: String,
     name: String,
@@ -212,7 +219,7 @@ fn container_identity_metadata(
     labels: &HashMap<String, String>,
 ) -> serde_json::Value {
     serde_json::json!({
-        "source_kind": "agent-docker",
+        "source_kind": AGENT_DOCKER_SOURCE_KIND,
         "agent_docker": {
             "host": host,
             "container_id": container_id,
