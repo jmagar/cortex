@@ -7,7 +7,7 @@ pub mod graph;
 pub(crate) mod graph_confidence;
 pub mod graph_findings;
 pub mod graph_inventory;
-pub mod graph_resolver_projection;
+mod graph_resolver_projection;
 mod heartbeat;
 mod hook_events;
 mod hook_incident_evidence;
