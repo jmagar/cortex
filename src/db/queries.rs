@@ -19,7 +19,10 @@ use rusqlite::{OptionalExtension, params};
 use crate::config::StorageConfig;
 use crate::enrich::parser::SourceKind;
 
-use super::entity_resolution::ResolverStatus;
+use super::entity_resolution::{
+    FALLBACK_EXPLICIT_DEGRADED_HOST_CONTEXT, INCLUSION_GRAPH_RELATED, INCLUSION_HOST_CONTEXT,
+    INCLUSION_SERVICE_INSTANCE, ResolverStatus,
+};
 use super::maintenance::{exceeds_trigger, get_storage_metrics};
 use super::models::{
     AbuseIncident, AiAbuseMatch, AiAbuseParams, AiAbuseResult, AiCorrelateParams, AiIncidentParams,
@@ -1754,8 +1757,8 @@ pub fn search_logs_for_service_instances(
         .into_iter()
         .map(|entry| GraphRelatedLogEntry {
             entry,
-            inclusion_reason: "service_instance".to_string(),
-            resolver_status: ResolverStatus::Resolved.as_str().to_string(),
+            inclusion_reason: INCLUSION_SERVICE_INSTANCE.to_string(),
+            resolver_status: ResolverStatus::Resolved,
             fallback_kind: None,
         })
         .collect())
@@ -1959,8 +1962,8 @@ fn resolve_topic_entities(
             // Weak prefix/label candidates surface for the caller but never
             // drive log fan-out (deterministic resolution only).
             resolver_status: match pri {
-                0 | 3 => ResolverStatus::Resolved.as_str(),
-                _ => ResolverStatus::Ambiguous.as_str(),
+                0 | 3 => ResolverStatus::Resolved,
+                _ => ResolverStatus::Ambiguous,
             },
         })
         .collect();
@@ -2015,7 +2018,7 @@ pub fn topic_correlate_inputs(
     let mut logical_keys: Vec<String> = Vec::new();
     let mut generic_seeds: Vec<String> = Vec::new();
     for entity in &resolved {
-        if entity.resolver_status != ResolverStatus::Resolved.as_str() {
+        if entity.resolver_status != ResolverStatus::Resolved {
             continue;
         }
         match entity.entity_type.as_str() {
@@ -2127,8 +2130,8 @@ pub fn topic_correlate_inputs(
             .into_iter()
             .map(|entry| GraphRelatedLogEntry {
                 entry,
-                inclusion_reason: "graph_related".to_string(),
-                resolver_status: ResolverStatus::Resolved.as_str().to_string(),
+                inclusion_reason: INCLUSION_GRAPH_RELATED.to_string(),
+                resolver_status: ResolverStatus::Resolved,
                 fallback_kind: None,
             }),
         );
@@ -2151,9 +2154,9 @@ pub fn topic_correlate_inputs(
                     .into_iter()
                     .map(|entry| GraphRelatedLogEntry {
                         entry,
-                        inclusion_reason: "host_context".to_string(),
-                        resolver_status: ResolverStatus::Degraded.as_str().to_string(),
-                        fallback_kind: Some("explicit_degraded_host_context".to_string()),
+                        inclusion_reason: INCLUSION_HOST_CONTEXT.to_string(),
+                        resolver_status: ResolverStatus::Degraded,
+                        fallback_kind: Some(FALLBACK_EXPLICIT_DEGRADED_HOST_CONTEXT.to_string()),
                     }),
             );
         }

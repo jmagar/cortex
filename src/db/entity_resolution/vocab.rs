@@ -10,6 +10,13 @@ pub const REASON_RESOLVER_RAW_APP_LABEL: &str = "resolver_raw_app_label";
 pub const GRAPH_PROJECTION_CONTRACT_KEY: &str = "graph_projection_contract";
 pub const GRAPH_PROJECTION_CONTRACT_V2: &str = "entity_resolution_v2";
 
+/// Inclusion reasons annotating why a correlated log row was pulled in, and
+/// the fallback kind marking the explicit degraded host-context path.
+pub const INCLUSION_SERVICE_INSTANCE: &str = "service_instance";
+pub const INCLUSION_GRAPH_RELATED: &str = "graph_related";
+pub const INCLUSION_HOST_CONTEXT: &str = "host_context";
+pub const FALLBACK_EXPLICIT_DEGRADED_HOST_CONTEXT: &str = "explicit_degraded_host_context";
+
 /// Legacy (pre entity-resolution) service identity shapes. These are
 /// classified so callers can reject them; they are never normalized into
 /// canonical keys.

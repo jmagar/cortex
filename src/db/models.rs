@@ -229,9 +229,11 @@ pub struct ResolvedTopicEntity {
     pub entity_type: String,
     pub canonical_key: String,
     pub match_kind: &'static str,
-    /// Resolver outcome: `resolved` for exact identity, `ambiguous` for weak
-    /// prefix/label candidates that never drive log fan-out.
-    pub resolver_status: &'static str,
+    /// Resolver outcome: `Resolved` for exact identity, `Ambiguous` for weak
+    /// prefix/label candidates that never drive log fan-out. Stringified via
+    /// [`super::entity_resolution::ResolverStatus::as_str`] only at the serde
+    /// boundary.
+    pub resolver_status: super::entity_resolution::ResolverStatus,
 }
 
 /// One correlated log row annotated with why it was included and the
@@ -240,7 +242,7 @@ pub struct ResolvedTopicEntity {
 pub struct GraphRelatedLogEntry {
     pub entry: LogEntry,
     pub inclusion_reason: String,
-    pub resolver_status: String,
+    pub resolver_status: super::entity_resolution::ResolverStatus,
     pub fallback_kind: Option<String>,
 }
 

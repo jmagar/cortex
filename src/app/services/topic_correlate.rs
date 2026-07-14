@@ -146,7 +146,7 @@ fn build_topic_response(
             entity_type: r.entity_type,
             key: r.canonical_key,
             match_kind: r.match_kind.to_string(),
-            resolver_status: Some(r.resolver_status.to_string()),
+            resolver_status: Some(r.resolver_status.as_str().to_string()),
         })
         .collect();
 
@@ -178,7 +178,7 @@ fn build_topic_response(
                 message: entry.message,
                 session_id: entry.ai_session_id,
                 inclusion_reason: Some(related.inclusion_reason),
-                resolver_status: Some(related.resolver_status),
+                resolver_status: Some(related.resolver_status.as_str().to_string()),
                 fallback_kind: related.fallback_kind,
             }
         })

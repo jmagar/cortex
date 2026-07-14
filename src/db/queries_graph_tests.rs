@@ -328,7 +328,8 @@ fn topic_correlate_app_seed_does_not_fan_out_to_whole_host() {
     );
     assert!(
         !inputs.logs.iter().any(|row| {
-            row.entry.app_name.as_deref() == Some("kernel") && row.resolver_status == "resolved"
+            row.entry.app_name.as_deref() == Some("kernel")
+                && row.resolver_status == ResolverStatus::Resolved
         }),
         "unrelated kernel row on the host must not be included as resolved: {:?}",
         inputs
@@ -336,7 +337,7 @@ fn topic_correlate_app_seed_does_not_fan_out_to_whole_host() {
             .iter()
             .map(|row| (
                 row.entry.app_name.clone(),
-                row.resolver_status.clone(),
+                row.resolver_status,
                 row.fallback_kind.clone()
             ))
             .collect::<Vec<_>>()
@@ -386,7 +387,10 @@ fn search_logs_for_service_instances_uses_service_predicates_not_host_fanout() {
         rows.iter()
             .all(|row| row.inclusion_reason == "service_instance")
     );
-    assert!(rows.iter().all(|row| row.resolver_status == "resolved"));
+    assert!(
+        rows.iter()
+            .all(|row| row.resolver_status == ResolverStatus::Resolved)
+    );
     assert!(rows.iter().all(|row| row.fallback_kind.is_none()));
 }
 
