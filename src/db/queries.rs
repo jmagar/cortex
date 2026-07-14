@@ -1725,6 +1725,10 @@ pub fn search_logs_for_service_instances(
     for key in service_instance_keys {
         let Some((host, service)) = super::entity_resolution::split_service_instance_key(key)
         else {
+            tracing::debug!(
+                key = %key,
+                "discarding non-canonical service_instance key in service log fan-out"
+            );
             continue;
         };
         arms.push(format!(
@@ -2005,7 +2009,7 @@ pub fn topic_correlate_inputs(
         return Ok(TopicGraphInputs::default());
     }
     let conn = pool.get()?;
-    let resolved = resolve_topic_entities(&conn, terms)?;
+    let mut resolved = resolve_topic_entities(&conn, terms)?;
     if resolved.is_empty() {
         return Ok(TopicGraphInputs::default());
     }
@@ -2032,7 +2036,28 @@ pub fn topic_correlate_inputs(
         }
     }
     if !logical_keys.is_empty() {
-        instance_keys.extend(service_instances_of_logical_services(&conn, &logical_keys)?);
+        let linked = service_instances_of_logical_services(&conn, &logical_keys)?;
+        // A resolved logical service with ZERO instance_of instances means
+        // the projection is stale or unbuilt (e.g. right after migration 41
+        // before `cortex graph rebuild`). Mark it degraded so the empty
+        // service timeline is explained rather than silent. Canonical
+        // instance keys are `host/<logical_key>` by the resolver grammar.
+        let covered: std::collections::HashSet<String> = linked
+            .iter()
+            .filter_map(|key| {
+                super::entity_resolution::split_service_instance_key(key)
+                    .map(|(_, service)| service.to_string())
+            })
+            .collect();
+        for entity in resolved.iter_mut() {
+            if entity.entity_type == super::graph::ENTITY_TYPE_LOGICAL_SERVICE
+                && entity.resolver_status == ResolverStatus::Resolved
+                && !covered.contains(entity.canonical_key.as_str())
+            {
+                entity.resolver_status = ResolverStatus::Degraded;
+            }
+        }
+        instance_keys.extend(linked);
     }
     instance_keys.sort();
     instance_keys.dedup();
@@ -2144,8 +2169,14 @@ pub fn topic_correlate_inputs(
         let hosts: Vec<String> = instance_keys
             .iter()
             .filter_map(|key| {
-                super::entity_resolution::split_service_instance_key(key)
-                    .map(|(host, _)| host.to_string())
+                let split = super::entity_resolution::split_service_instance_key(key);
+                if split.is_none() {
+                    tracing::debug!(
+                        key = %key,
+                        "discarding non-canonical service_instance key in host-context fallback"
+                    );
+                }
+                split.map(|(host, _)| host.to_string())
             })
             .collect();
         if !hosts.is_empty() {

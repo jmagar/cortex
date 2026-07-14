@@ -30,7 +30,20 @@ pub fn project_inventory(
     inventory: &HomelabInventory,
 ) -> Result<InventoryGraphStats> {
     let plan = build_projection_plan(inventory);
+    warn_skipped_services(&plan);
     apply_projection_plan(pool, &plan, || {})
+}
+
+/// One warning per inventory projection listing the services whose identity
+/// failed canonicalization and were therefore left out of the graph.
+fn warn_skipped_services(plan: &InventoryProjectionPlan) {
+    if !plan.skipped_service_ids.is_empty() {
+        tracing::warn!(
+            skipped = plan.skipped_service_ids.len(),
+            service_ids = ?plan.skipped_service_ids,
+            "inventory services skipped from graph projection: service name failed canonicalization"
+        );
+    }
 }
 
 #[cfg(test)]
@@ -40,6 +53,7 @@ fn project_inventory_with_apply_hook(
     before_apply: impl FnOnce(),
 ) -> Result<InventoryGraphStats> {
     let plan = build_projection_plan(inventory);
+    warn_skipped_services(&plan);
     apply_projection_plan(pool, &plan, before_apply)
 }
 
@@ -178,6 +192,7 @@ fn build_projection_plan(inventory: &HomelabInventory) -> InventoryProjectionPla
             .iter()
             .find(|d| d.entity_type == graph::ENTITY_TYPE_SERVICE_INSTANCE);
         let Some(logical_decision) = logical_decision else {
+            plan.skipped_service_ids.push(service.id.clone());
             continue;
         };
         let logical_key = logical_decision.canonical_key.clone();
@@ -565,6 +580,10 @@ struct InventoryProjectionPlan {
     entities: Vec<EntityPlan>,
     aliases: Vec<AliasPlan>,
     relationships: Vec<RelationshipPlan>,
+    /// Inventory service ids skipped because their names failed
+    /// canonicalization (no logical-service decision). Surfaced by the
+    /// caller so silently absent services are diagnosable.
+    skipped_service_ids: Vec<String>,
 }
 
 impl InventoryProjectionPlan {

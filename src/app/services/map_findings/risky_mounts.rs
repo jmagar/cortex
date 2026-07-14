@@ -93,6 +93,7 @@ fn service_mount_index(
     inventory: &HomelabInventory,
 ) -> BTreeMap<String, Vec<(&InventoryService, &MountRef)>> {
     let mut services = BTreeMap::new();
+    let mut skipped: Vec<&str> = Vec::new();
     for service in &inventory.services {
         let Some(host) = service.host.as_deref() else {
             continue;
@@ -102,6 +103,7 @@ fn service_mount_index(
         // canonicalize are skipped rather than given a divergent key shape.
         let Some(key) = crate::db::entity_resolution::service_instance_key(host, &service.name)
         else {
+            skipped.push(service.id.as_str());
             continue;
         };
         services.insert(
@@ -111,6 +113,15 @@ fn service_mount_index(
                 .iter()
                 .map(|mount| (service, mount))
                 .collect::<Vec<_>>(),
+        );
+    }
+    if !skipped.is_empty() {
+        // One warning per evaluation: these services get no risky-mount
+        // findings because their identity failed canonicalization.
+        tracing::warn!(
+            skipped = skipped.len(),
+            service_ids = ?skipped,
+            "services skipped from risky-mount index: identity failed canonicalization"
         );
     }
     services

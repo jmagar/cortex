@@ -292,6 +292,28 @@ fn search_logs_from_graph_empty_for_unknown_seed() {
 }
 
 #[test]
+fn topic_resolving_logical_service_with_no_instances_reports_degraded() {
+    let (_dir, pool) = test_pool("topic-zero-instance-degraded.db");
+    // Stale/unbuilt projection: the logical service entity exists but has no
+    // `instance_of` service instances (e.g. right after migration 41 before
+    // `cortex graph rebuild` runs). The resolved entity must surface as
+    // degraded so the empty service timeline is explained, never silent.
+    {
+        let conn = pool.get().unwrap();
+        insert_entity(&conn, graph::ENTITY_TYPE_LOGICAL_SERVICE, "plex");
+    }
+    let inputs =
+        topic_correlate_inputs(&pool, &["plex".to_string()], 2, None, None, None, 100).unwrap();
+    let entity = inputs
+        .resolved
+        .iter()
+        .find(|e| e.entity_type == graph::ENTITY_TYPE_LOGICAL_SERVICE && e.canonical_key == "plex")
+        .expect("logical service must resolve");
+    assert_eq!(entity.resolver_status, ResolverStatus::Degraded);
+    assert!(inputs.logs.is_empty(), "no instances → no service fan-out");
+}
+
+#[test]
 fn topic_correlate_app_seed_does_not_fan_out_to_whole_host() {
     let (_dir, pool) = test_pool("topic-app-seed-no-host-fanout.db");
     // Bare `plex` app label (no agent-docker metadata) plus an unrelated

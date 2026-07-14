@@ -208,6 +208,12 @@ fn extract_agent_docker_metadata(entry: &mut LogBatchEntry, config: &EnrichmentC
             .iter()
             .any(|prefix| source_ip_matches(entry, Some(prefix)))
     {
+        tracing::debug!(
+            source_ip = %entry.source_ip,
+            hostname = %entry.hostname,
+            "agent-docker marker present but source_ip matched no configured prefix; \
+             marker left in message, identity not extracted"
+        );
         return;
     }
     let Some(payload_start) = entry.message.strip_prefix(AGENT_DOCKER_META_MARKER) else {
@@ -232,6 +238,11 @@ fn extract_agent_docker_metadata(entry: &mut LogBatchEntry, config: &EnrichmentC
         return;
     };
 
+    // Ordering dependency: this extraction runs FIRST in `enrich_entry`, so
+    // any pre-existing `metadata_json` here was set by the receiver/parser.
+    // A non-object value (corrupt or non-JSON) is deliberately replaced with
+    // a fresh object — later enrichment stages must keep running after this
+    // one, not before, or their metadata would be discarded here.
     let mut merged = entry
         .metadata_json
         .as_deref()
@@ -249,8 +260,14 @@ fn extract_agent_docker_metadata(entry: &mut LogBatchEntry, config: &EnrichmentC
             Value::String(AGENT_DOCKER_SOURCE_KIND.to_string()),
         );
     }
+    // If the merged object would blow the metadata bound, truncation would
+    // drop the `agent_docker` identity we just extracted. Back out instead:
+    // the marker stays in the message, so identity is never silently lost.
+    let Some(bounded) = crate::ingest_metadata::try_bounded_metadata_json(merged) else {
+        return;
+    };
     entry.message = rest.to_string();
-    entry.metadata_json = Some(crate::ingest_metadata::bounded_metadata_json(merged));
+    entry.metadata_json = Some(bounded);
 }
 
 /// Match `entry.source_ip` against an operator-configured prefix at the

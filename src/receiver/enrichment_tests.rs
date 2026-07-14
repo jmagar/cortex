@@ -560,6 +560,31 @@ fn agent_docker_meta_payload_cannot_overwrite_existing_metadata_keys() {
 }
 
 #[test]
+fn agent_docker_meta_backs_out_when_merged_metadata_would_truncate() {
+    let cfg = EnrichmentConfig::default();
+    let meta = r#"{"agent_docker":{"host":"tootie","container_id":"abc","container_name":"plex","stream":"stdout"}}"#;
+    let msg = format!("[cortex-agent-docker-meta:{meta}] hello");
+    // Pre-existing metadata large enough that the merged object exceeds the
+    // 64 KiB bound even after sanitization. Truncating would drop the
+    // freshly extracted agent_docker identity, so extraction must back out
+    // and leave the entry untouched (marker stays in the message).
+    let big: String = (0..120)
+        .map(|i| format!("\"field_{i}\":\"{}\"", "x".repeat(600)))
+        .collect::<Vec<_>>()
+        .join(",");
+    let original_metadata = format!("{{{big}}}");
+    let mut e = entry("plex", &msg, "10.0.0.1:1234", "info");
+    e.metadata_json = Some(original_metadata.clone());
+    let out = enrich_entry(e, &cfg);
+    assert_eq!(out.message, msg, "marker must stay in the message");
+    assert_eq!(
+        out.metadata_json.as_deref(),
+        Some(original_metadata.as_str()),
+        "pre-existing metadata must be untouched"
+    );
+}
+
+#[test]
 fn agent_docker_meta_payload_cannot_replace_existing_agent_docker_object() {
     let cfg = EnrichmentConfig::default();
     let meta = r#"{"agent_docker":{"host":"evil","container_id":"abc","container_name":"forged","stream":"stdout"}}"#;

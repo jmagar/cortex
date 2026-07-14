@@ -1706,6 +1706,7 @@ Before upgrading a populated database:
 2. Schedule a short ingest maintenance window for large databases.
 3. Start the new version and monitor logs for `Migration N: starting ...` and `Migration N: ... created`.
 4. Keep the previous image or binary available until `/health` returns `ok` and `cortex stats` reports sane counts.
+5. **Upgrading across migration 41 (canonical entity resolution):** the inventory graph projection is marked stale and legacy `service` entities are pruned. Run `cortex graph rebuild` (or wait for the projection scheduler when `CORTEX_GRAPH_REFRESH_INTERVAL_SECS > 0`) before expecting `topic_correlate` service results — until the rebuild, a resolved logical service with no instances reports `resolver_status: degraded` with an empty service timeline.
 
 See [docs/RELEASE.md](docs/RELEASE.md) for the current release and deploy
 gate checklist.

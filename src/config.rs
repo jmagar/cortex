@@ -1077,6 +1077,7 @@ impl Config {
             "CORTEX_AGENT_DOCKER_SOURCE_PREFIXES",
             &mut config.enrichment.agent_docker_source_prefixes,
         );
+        warn_invalid_agent_docker_prefixes(&config.enrichment.agent_docker_source_prefixes);
         env_override_bool("CORTEX_SCRUB_PROMPTS", &mut config.enrichment.scrub_prompts)?;
         env_override_parse(
             "CORTEX_FTS_MERGE_PAGES",
@@ -1291,6 +1292,50 @@ fn is_supported_setup_env_key(key: &str) -> bool {
         || key.starts_with("CORTEX_")
         || key.starts_with("CORTEX_API_")
         || key.starts_with("CORTEX_DOCKER_")
+}
+
+/// Warn about `agent_docker_source_prefixes` entries that can never match a
+/// source. Valid shapes are a full dotted-quad IPv4 (`100.64.0.5`, exact-host
+/// match) or a dot-terminated partial quad (`100.64.0.`, subnet-prefix
+/// match). A partial quad without its trailing dot (`100.64.0`) is treated
+/// by the gate as an exact-host literal that matches nothing — the failure
+/// mode silently disables all agent-docker extraction. IPv6 sources are not
+/// matchable by this gate at all.
+fn warn_invalid_agent_docker_prefixes(prefixes: &[String]) {
+    for prefix in prefixes {
+        if !is_agent_docker_prefix_shape(prefix) {
+            tracing::warn!(
+                prefix = %prefix,
+                "agent_docker_source_prefixes entry is neither a full IPv4 dotted quad \
+                 nor a dot-terminated partial quad; it will match no source_ip and \
+                 silently disables agent-docker extraction for the senders it was meant \
+                 to cover (use a trailing dot, e.g. \"100.64.0.\", for a subnet prefix)"
+            );
+        }
+    }
+}
+
+/// `true` when `prefix` is a full IPv4 dotted quad or a dot-terminated
+/// partial quad (1–3 leading octets), i.e. a shape [`crate::receiver`]'s
+/// agent-docker source gate can actually match.
+fn is_agent_docker_prefix_shape(prefix: &str) -> bool {
+    let (body, partial) = match prefix.strip_suffix('.') {
+        Some(body) => (body, true),
+        None => (prefix, false),
+    };
+    let octets: Vec<&str> = body.split('.').collect();
+    let count_ok = if partial {
+        (1..=3).contains(&octets.len())
+    } else {
+        octets.len() == 4
+    };
+    count_ok
+        && octets.iter().all(|octet| {
+            !octet.is_empty()
+                && octet.len() <= 3
+                && octet.chars().all(|ch| ch.is_ascii_digit())
+                && octet.parse::<u8>().is_ok()
+        })
 }
 
 // --- Env var helpers ---

@@ -417,6 +417,13 @@ service identity inputs. They are stale defect shapes: migration 41 deletes
 them from populated databases and every public lookup surface rejects them
 with `rejected_legacy_shape`.
 
+Migration 41 also flips a previously-ready projection to `stale`. Run
+`cortex graph rebuild` (or wait for the in-server scheduler when
+`CORTEX_GRAPH_REFRESH_INTERVAL_SECS > 0`) before expecting
+`topic_correlate` service results to populate: until the rebuild, a topic
+that resolves to a logical service with no `instance_of` instances reports
+`resolver_status: degraded` with an empty service timeline.
+
 Read-only proof commands (safe against production):
 
 ```bash

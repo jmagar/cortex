@@ -330,6 +330,13 @@ identity). Mitigations in receiver enrichment
   exact IPs or `10.0.0.`-style subnet prefixes) to restrict extraction to
   the hosts that actually run the cortex agent. When unset, extraction is
   accepted from any sender for compatibility.
+- Each prefix entry must be either a **full dotted-quad IPv4**
+  (`100.64.0.5`, exact-host match) or a **dot-terminated partial quad**
+  (`100.64.0.`, subnet-prefix match). A partial quad without its trailing
+  dot (`100.64.0`) is treated as an exact-host literal that matches
+  nothing — the failure mode silently disables all agent-docker
+  extraction. Config load warns about entries with any other shape. IPv6
+  sources are not matchable by this gate at all.
 
 Canonical resolver proof must use `agent-docker` structured metadata.
 `docker://` and `docker-event://` central-pull rows are not proof for the
