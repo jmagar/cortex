@@ -196,3 +196,23 @@ pub struct DockerCheckpoint {
     pub timestamp: String,
 }
 ```
+
+## Agent Docker identity rows (`agent-docker`)
+
+Host-local cortex agents stream Docker container logs and forward them as
+RFC 5424 syslog TCP lines. The syslog APP-NAME is truncated/sanitised at 48
+characters, so canonical container identity rides in structured metadata,
+not the app label:
+
+```text
+Agent Docker identity source: agent-docker.
+Structured metadata path: metadata_json.agent_docker.
+Required fields: host, container_id, container_name, stream.
+Optional fields: compose_project, compose_service, image.
+```
+
+Receiver enrichment extracts the agent's `[cortex-agent-docker-meta:{json}]`
+message prefix into `metadata_json` and strips it from `message`; `raw`
+retains the original line. Canonical resolver proof must use `agent-docker`
+structured metadata. `docker://` and `docker-event://` central-pull rows are
+not proof for the resolver-backed graph contract.

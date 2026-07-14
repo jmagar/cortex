@@ -466,3 +466,46 @@ fn project_from_transcript_path_normalizes_decoded_claude_worktree_fallback() {
         Some("/home/jmagar/workspace/cortex")
     );
 }
+
+// ---- agent docker identity metadata extraction ----
+
+#[test]
+fn agent_docker_meta_prefix_is_extracted_into_metadata_json_and_stripped() {
+    let cfg = EnrichmentConfig::default();
+    let meta = r#"{"source_kind":"agent-docker","agent_docker":{"host":"tootie","container_id":"abcdef1234567890","container_name":"plex","compose_project":"plex","compose_service":"plex","image":"lscr.io/linuxserver/plex:latest","stream":"stdout"}}"#;
+    let msg = format!("[cortex-agent-docker-meta:{meta}] Plex library scan");
+    let e = entry("plex/plex/plex", &msg, "10.0.0.1:1234", "info");
+    let out = enrich_entry(e, &cfg);
+    assert_eq!(out.message, "Plex library scan");
+    let metadata: serde_json::Value =
+        serde_json::from_str(out.metadata_json.as_deref().unwrap()).unwrap();
+    assert_eq!(metadata["source_kind"], "agent-docker");
+    assert_eq!(metadata["agent_docker"]["host"], "tootie");
+    assert_eq!(metadata["agent_docker"]["compose_service"], "plex");
+    assert_eq!(metadata["agent_docker"]["stream"], "stdout");
+}
+
+#[test]
+fn agent_docker_meta_prefix_merges_with_existing_metadata() {
+    let cfg = EnrichmentConfig::default();
+    let meta = r#"{"source_kind":"agent-docker","agent_docker":{"host":"tootie","container_id":"abc","container_name":"plex","stream":"stdout"}}"#;
+    let msg = format!("[cortex-agent-docker-meta:{meta}] hello");
+    let mut e = entry("plex", &msg, "10.0.0.1:1234", "info");
+    e.metadata_json = Some(r#"{"source_type":"syslog","input_format":"syslog"}"#.to_string());
+    let out = enrich_entry(e, &cfg);
+    assert_eq!(out.message, "hello");
+    let metadata: serde_json::Value =
+        serde_json::from_str(out.metadata_json.as_deref().unwrap()).unwrap();
+    assert_eq!(metadata["source_type"], "syslog");
+    assert_eq!(metadata["source_kind"], "agent-docker");
+    assert_eq!(metadata["agent_docker"]["container_name"], "plex");
+}
+
+#[test]
+fn malformed_agent_docker_meta_prefix_leaves_message_untouched() {
+    let cfg = EnrichmentConfig::default();
+    let msg = "[cortex-agent-docker-meta:{not json] hello";
+    let e = entry("plex", msg, "10.0.0.1:1234", "info");
+    let out = enrich_entry(e, &cfg);
+    assert_eq!(out.message, msg);
+}

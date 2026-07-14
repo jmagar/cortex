@@ -28,6 +28,7 @@ use std::{
 
 use regex::Regex;
 use serde::Deserialize;
+use serde_json::Value;
 
 use crate::ai_project::normalize_ai_project_path;
 use crate::db::LogBatchEntry;
@@ -140,7 +141,14 @@ struct ClaudeSessionsIndexEntry {
 
 /// Apply enrichment to one entry. Pure function — never panics, never logs at
 /// `error`. Parse failures fall through, leaving the entry unchanged.
+/// Message prefix marker carrying structured agent Docker identity metadata.
+/// Emitted by the host-local agent (`src/agent/docker.rs`); extracted here
+/// into `metadata_json` and stripped from `message`. Keep in sync with
+/// `AGENT_DOCKER_META_MARKER` there.
+const AGENT_DOCKER_META_MARKER: &str = "[cortex-agent-docker-meta:";
+
 pub(crate) fn enrich_entry(mut entry: LogBatchEntry, config: &EnrichmentConfig) -> LogBatchEntry {
+    extract_agent_docker_metadata(&mut entry);
     enrich_ai_metadata(&mut entry);
 
     if matches_app(&entry, "authelia")
@@ -168,6 +176,44 @@ pub(crate) fn enrich_entry(mut entry: LogBatchEntry, config: &EnrichmentConfig) 
 
 fn matches_app(entry: &LogBatchEntry, expected: &str) -> bool {
     entry.app_name.as_deref() == Some(expected)
+}
+
+/// Extract the agent Docker metadata prefix from `message` into
+/// `metadata_json` (merging with any parser-provided metadata object) and
+/// strip the marker from `message`. Malformed payloads leave the entry
+/// untouched — the raw line is still stored and searchable.
+fn extract_agent_docker_metadata(entry: &mut LogBatchEntry) {
+    let Some(payload_start) = entry.message.strip_prefix(AGENT_DOCKER_META_MARKER) else {
+        return;
+    };
+    // The payload is a single JSON object; use the streaming deserializer to
+    // find where it ends without guessing about braces inside strings.
+    let mut stream = serde_json::Deserializer::from_str(payload_start).into_iter::<Value>();
+    let Some(Ok(metadata)) = stream.next() else {
+        return;
+    };
+    if !metadata.get("agent_docker").is_some_and(Value::is_object) {
+        return;
+    }
+    let consumed = stream.byte_offset();
+    let rest = &payload_start[consumed..];
+    let Some(rest) = rest.strip_prefix("] ").or_else(|| rest.strip_prefix(']')) else {
+        return;
+    };
+
+    let mut merged = entry
+        .metadata_json
+        .as_deref()
+        .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+        .filter(Value::is_object)
+        .unwrap_or_else(|| Value::Object(Default::default()));
+    if let (Value::Object(target), Value::Object(incoming)) = (&mut merged, metadata) {
+        for (key, value) in incoming {
+            target.insert(key, value);
+        }
+    }
+    entry.message = rest.to_string();
+    entry.metadata_json = Some(crate::ingest_metadata::bounded_metadata_json(merged));
 }
 
 /// Match `entry.source_ip` against an operator-configured prefix at the

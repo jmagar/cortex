@@ -100,3 +100,56 @@ fn connect_constructs_unix_socket_client_without_eager_network_io() {
 
     connect(&format!("unix://{}", socket.display())).unwrap();
 }
+
+#[test]
+fn container_identity_metadata_carries_compose_context() {
+    let labels = HashMap::from([
+        ("com.docker.compose.project".to_string(), "plex".to_string()),
+        ("com.docker.compose.service".to_string(), "plex".to_string()),
+        (
+            "com.docker.compose.config-hash".to_string(),
+            "abc".to_string(),
+        ),
+    ]);
+    let metadata = container_identity_metadata(
+        "tootie",
+        "abcdef1234567890",
+        "plex",
+        "stdout",
+        Some("lscr.io/linuxserver/plex:latest"),
+        &labels,
+    );
+    assert_eq!(metadata["source_kind"], "agent-docker");
+    assert_eq!(metadata["agent_docker"]["host"], "tootie");
+    assert_eq!(metadata["agent_docker"]["container_id"], "abcdef1234567890");
+    assert_eq!(metadata["agent_docker"]["compose_project"], "plex");
+    assert_eq!(metadata["agent_docker"]["compose_service"], "plex");
+}
+
+#[test]
+fn long_compose_app_name_still_has_structured_metadata() {
+    let labels = HashMap::from([
+        (
+            "com.docker.compose.project".to_string(),
+            "very-long-compose-project-name-for-plex-media-stack".to_string(),
+        ),
+        (
+            "com.docker.compose.service".to_string(),
+            "very-long-plex-service-name".to_string(),
+        ),
+    ]);
+    let app_name = container_app_name("very-long-container-name-for-plex", &labels);
+    assert!(app_name.len() > 48);
+    let metadata = container_identity_metadata(
+        "tootie",
+        "abcdef1234567890",
+        "very-long-container-name-for-plex",
+        "stderr",
+        None,
+        &labels,
+    );
+    assert_eq!(
+        metadata["agent_docker"]["compose_service"],
+        "very-long-plex-service-name"
+    );
+}

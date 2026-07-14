@@ -294,3 +294,26 @@ Cross-checked against:
   through `field_eq` like any other field.
 - incident-card.md: uses `source` (Epic-B source tag), not
   `source_kind`. Separation preserved.
+
+## Agent Docker identity source (`agent-docker`)
+
+Agent-forwarded Docker container lines arrive over syslog TCP, so their
+row-level `source_kind` (derived from `source_ip`) stays `syslog-tcp`. The
+Docker identity itself is carried by the host-local agent as structured
+metadata:
+
+```text
+Agent Docker identity source: agent-docker.
+Structured metadata path: metadata_json.agent_docker.
+Required fields: host, container_id, container_name, stream.
+Optional fields: compose_project, compose_service, image.
+```
+
+The agent emits the metadata as an internal message prefix
+(`[cortex-agent-docker-meta:{json}] `), which receiver enrichment extracts
+into `metadata_json` (setting the denormalised `metadata_json.source_kind`
+to `agent-docker`) and strips from `message`.
+
+Canonical resolver proof must use `agent-docker` structured metadata.
+`docker://` and `docker-event://` central-pull rows are not proof for the
+resolver-backed graph contract.

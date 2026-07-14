@@ -34,15 +34,26 @@ Two ingestion modes:
 - Runs on each Docker host as a systemd service
 - Streams container stdout/stderr from local Docker socket
 - Uses Docker Engine API over Unix socket
+- Attaches structured identity metadata per line: the agent prefixes each
+  forwarded message with `[cortex-agent-docker-meta:{json}]`, which receiver
+  enrichment extracts into `metadata_json.agent_docker` (required: `host`,
+  `container_id`, `container_name`, `stream`; optional: `compose_project`,
+  `compose_service`, `image`) and strips from `message`. This is the
+  supported Docker identity source for the resolver-backed graph
+  (`logical_service` / `service_instance`) — the 48-char syslog APP-NAME
+  fallback never loses canonical identity.
 - **Source**: `src/agent/`, `src/docker_ingest/`
 
 **Key files**:
-- `src/agent/docker_stream.rs`: Docker log stream client
-- `src/docker_ingent/file_tail.rs`: File-tail registry for non-Docker sources
+- `src/agent/docker.rs`: Docker log stream client + identity metadata
+- `src/docker_ingest/file_tail.rs`: File-tail registry for non-Docker sources
 
 #### Legacy Central Pull
 - Central cortex connects to remote Docker Engine HTTP endpoints
 - Reconnects with exponential backoff
+- Not resolver proof: `docker://` / `docker-event://` rows are a
+  compatibility path only; the canonical graph contract requires
+  `metadata_json.agent_docker` from host-local agents
 - **Source**: `src/docker_ingest/`
 
 **Key files**:

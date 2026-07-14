@@ -14,10 +14,18 @@ use super::syslog_sender::{PRI_LOCAL0_INFO, PRI_LOCAL0_WARN, SyslogSender, forma
 
 const CONTAINER_POLL_SECS: u64 = 30;
 
+/// Message prefix marker carrying structured agent Docker identity metadata.
+/// The receiver enrichment path (`src/receiver/enrichment.rs`) extracts the
+/// JSON payload into `metadata_json` and strips the marker from `message`.
+/// Keep in sync with `AGENT_DOCKER_META_MARKER` there.
+pub(crate) const AGENT_DOCKER_META_MARKER: &str = "[cortex-agent-docker-meta:";
+
 struct ContainerInfo {
     id: String,
     name: String,
     app_name: String,
+    image: Option<String>,
+    labels: HashMap<String, String>,
 }
 
 /// Stream Docker container logs from a local socket and forward as RFC 5424
@@ -118,6 +126,19 @@ async fn follow_container(
         } else {
             PRI_LOCAL0_INFO
         };
+        let stream = if is_stderr { "stderr" } else { "stdout" };
+        let metadata = container_identity_metadata(
+            hostname,
+            &container.id,
+            &container.name,
+            stream,
+            container.image.as_deref(),
+            &container.labels,
+        );
+        // The RFC 5424 APP-NAME is truncated/sanitised at 48 chars, so
+        // canonical identity rides in the metadata prefix instead. The
+        // receiver strips it into `metadata_json.agent_docker`.
+        let msg = format!("{AGENT_DOCKER_META_MARKER}{metadata}] {msg}");
         let ts = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
         let line = format_rfc5424(
             pri,
@@ -125,7 +146,7 @@ async fn follow_container(
             hostname,
             &container.app_name,
             &container.id[..12],
-            msg,
+            &msg,
         );
         sender.try_send(line);
     }
@@ -145,7 +166,13 @@ async fn list_containers(docker: &Docker) -> Result<Vec<ContainerInfo>> {
                 return None;
             }
             let app_name = container_app_name(&name, &labels);
-            Some(ContainerInfo { id, name, app_name })
+            Some(ContainerInfo {
+                id,
+                name,
+                app_name,
+                image: s.image,
+                labels,
+            })
         })
         .collect())
 }
@@ -155,6 +182,32 @@ fn container_display_name(id: &str, names: Option<Vec<String>>) -> String {
         .and_then(|ns| ns.into_iter().next())
         .map(|n| n.trim_start_matches('/').to_string())
         .unwrap_or_else(|| id.chars().take(12).collect())
+}
+
+/// Structured agent-attested Docker identity metadata for one log line.
+/// This is the canonical resolver proof shape: `metadata_json.agent_docker`
+/// with required host/container_id/container_name/stream and optional
+/// compose_project/compose_service/image.
+fn container_identity_metadata(
+    host: &str,
+    container_id: &str,
+    container_name: &str,
+    stream: &str,
+    image: Option<&str>,
+    labels: &HashMap<String, String>,
+) -> serde_json::Value {
+    serde_json::json!({
+        "source_kind": "agent-docker",
+        "agent_docker": {
+            "host": host,
+            "container_id": container_id,
+            "container_name": container_name,
+            "compose_project": labels.get("com.docker.compose.project"),
+            "compose_service": labels.get("com.docker.compose.service"),
+            "image": image,
+            "stream": stream,
+        }
+    })
 }
 
 fn container_app_name(name: &str, labels: &HashMap<String, String>) -> String {

@@ -152,3 +152,22 @@ fn weak_raw_labels_do_not_upgrade_themselves() {
             .any(|d| d.entity_type == ENTITY_TYPE_LOGICAL_SERVICE)
     );
 }
+
+#[test]
+fn structured_agent_docker_metadata_resolves_without_central_docker_uri() {
+    let identity = AgentDockerIdentity {
+        agent_host: "tootie".to_string(),
+        container_id: "abcdef1234567890".to_string(),
+        container_name: "plex".to_string(),
+        compose_project: Some("plex".to_string()),
+        compose_service: Some("plex".to_string()),
+        image: Some("lscr.io/linuxserver/plex:latest".to_string()),
+        stream: "stdout".to_string(),
+        observed_at: "2026-01-01T00:00:00Z".to_string(),
+    };
+    let observations = observations_from_agent_docker_identity(&identity);
+    let decisions = resolve_observations(&observations);
+    assert!(decisions.iter().any(|d| {
+        d.entity_type == ENTITY_TYPE_SERVICE_INSTANCE && d.canonical_key == "tootie/plex"
+    }));
+}
