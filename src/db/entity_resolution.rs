@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 //! Canonical entity resolution: key grammar, observations, and deterministic
 //! resolver decisions for the investigation graph.
 //!

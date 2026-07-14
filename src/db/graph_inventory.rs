@@ -165,12 +165,22 @@ fn build_projection_plan(inventory: &HomelabInventory) -> InventoryProjectionPla
     let mut logical_services: BTreeMap<String, PlannedEntityKey> = BTreeMap::new();
     for service in &inventory.services {
         // Canonical service identity (entity_resolution_v2): inventory
-        // services project as `logical_service` (`plex`) plus a host-scoped
-        // `service_instance` (`tootie/plex`). Legacy `service` entities
-        // (`host:name`) are never emitted.
-        let Some(logical_key) = entity_resolution::logical_service_key(&service.name) else {
+        // services flow through the shared resolver adapter, projecting as
+        // `logical_service` (`plex`) plus a host-scoped `service_instance`
+        // (`tootie/plex`). Legacy `service` entities (`host:name`) are never
+        // emitted.
+        let observations = entity_resolution::observations_from_inventory_service(service);
+        let decisions = entity_resolution::resolve_observations(&observations);
+        let logical_decision = decisions
+            .iter()
+            .find(|d| d.entity_type == graph::ENTITY_TYPE_LOGICAL_SERVICE);
+        let instance_decision = decisions
+            .iter()
+            .find(|d| d.entity_type == graph::ENTITY_TYPE_SERVICE_INSTANCE);
+        let Some(logical_decision) = logical_decision else {
             continue;
         };
+        let logical_key = logical_decision.canonical_key.clone();
         let logical_entity = match logical_services.entry(logical_key.clone()) {
             Entry::Occupied(entry) => entry.get().clone(),
             Entry::Vacant(entry) => {
@@ -180,7 +190,7 @@ fn build_projection_plan(inventory: &HomelabInventory) -> InventoryProjectionPla
                     &service.name,
                     graph::SOURCE_KIND_APP_INVENTORY,
                     &service.id,
-                    trust(&service.trust_level),
+                    graph::trust_to_graph(logical_decision.trust),
                     &service.provenance.collected_at,
                 );
                 entry.insert(entity.clone());
@@ -188,11 +198,7 @@ fn build_projection_plan(inventory: &HomelabInventory) -> InventoryProjectionPla
             }
         };
 
-        let instance_key = service
-            .host
-            .as_deref()
-            .and_then(|host| entity_resolution::service_instance_key(host, &service.name));
-        let Some(instance_key) = instance_key else {
+        let Some(instance_decision) = instance_decision else {
             // No host context: the logical service exists, but there is no
             // deployment topology to assert. Ambiguity stays visible instead
             // of being guessed into an `unknown/` instance.
@@ -203,13 +209,14 @@ fn build_projection_plan(inventory: &HomelabInventory) -> InventoryProjectionPla
             );
             continue;
         };
+        let instance_key = instance_decision.canonical_key.clone();
         let service_entity = plan.entity(
             graph::ENTITY_TYPE_SERVICE_INSTANCE,
             &instance_key,
             &instance_key,
             graph::SOURCE_KIND_APP_INVENTORY,
             &service.id,
-            trust(&service.trust_level),
+            graph::trust_to_graph(instance_decision.trust),
             &service.provenance.collected_at,
         );
         plan.relationship(
@@ -220,7 +227,7 @@ fn build_projection_plan(inventory: &HomelabInventory) -> InventoryProjectionPla
             graph::SOURCE_KIND_APP_INVENTORY,
             &service.id,
             &service.provenance.collected_at,
-            trust(&service.trust_level),
+            graph::trust_to_graph(instance_decision.trust),
             0.95,
             &format!("{} is an instance of {}", instance_key, logical_key),
         );

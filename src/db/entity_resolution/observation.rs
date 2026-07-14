@@ -15,6 +15,9 @@ pub enum ResolverTrust {
 }
 
 /// What kind of thing an observation describes.
+// Plan-locked vocabulary (2026-07-13 canonical-entity-resolution): several
+// kinds are reserved for future adapters and not constructed yet.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ObservationKind {
     Host,

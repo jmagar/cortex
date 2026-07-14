@@ -1974,7 +1974,7 @@ fn project_resolver_decisions(
 }
 
 /// Map resolver trust levels onto graph trust vocabulary.
-fn trust_to_graph(trust: crate::db::entity_resolution::ResolverTrust) -> &'static str {
+pub(crate) fn trust_to_graph(trust: crate::db::entity_resolution::ResolverTrust) -> &'static str {
     match trust {
         crate::db::entity_resolution::ResolverTrust::Verified => TRUST_VERIFIED,
         crate::db::entity_resolution::ResolverTrust::Claimed => TRUST_CLAIMED,

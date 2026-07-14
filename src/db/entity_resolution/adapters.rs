@@ -76,6 +76,9 @@ pub fn observations_from_agent_docker_identity(
 /// Raw labels never produce `LogicalService` / `ServiceInstance`
 /// observations on their own — they must be matched to structured evidence
 /// by the resolver, or they stay raw.
+// Test-only contract coverage: pins the plan-locked "raw labels never
+// self-upgrade" resolver rule (entity_resolution_tests.rs).
+#[allow(dead_code)]
 pub fn observations_from_raw_app_label(
     app_name: &str,
     host: &str,
@@ -101,69 +104,71 @@ pub fn observations_from_raw_app_label(
 }
 
 /// Convert a verified/observed inventory service into observations: the
-/// service instance, its logical service, its host, plus domain and mount
-/// (storage) context where the inventory row carries them.
+/// logical service always (when the name canonicalizes), plus the host,
+/// service instance, and domain/mount (storage) context when the inventory
+/// row carries a host. A hostless service still asserts logical identity —
+/// deployment topology is simply absent, never guessed into an `unknown/`
+/// instance.
 pub fn observations_from_inventory_service(service: &InventoryService) -> Vec<ResolverObservation> {
-    let Some(host) = service.host.as_deref() else {
-        return Vec::new();
-    };
-    let Some(host_key) = logical_service_key(host) else {
-        return Vec::new();
-    };
     let Some(logical_key) = logical_service_key(&service.name) else {
-        return Vec::new();
-    };
-    let Some(instance_key) = service_instance_key(&host_key, &logical_key) else {
         return Vec::new();
     };
     let trust = inventory_trust(&service.trust_level);
     let source_kind = "app_inventory".to_string();
     let source_id = service.id.clone();
     let observed_at = service.provenance.collected_at.clone();
-    let mut observations = vec![
-        ResolverObservation {
-            kind: ObservationKind::Host,
-            observed_key: host_key.clone(),
-            display_label: safe_display_value(host),
-            host_key: Some(host_key.clone()),
-            logical_service_key: None,
-            service_instance_key: None,
-            source_kind: source_kind.clone(),
-            source_id: source_id.clone(),
-            evidence_path: "inventory.services.host".to_string(),
-            observed_at: observed_at.clone(),
-            trust,
-            structured: true,
-        },
-        ResolverObservation {
-            kind: ObservationKind::LogicalService,
-            observed_key: logical_key.clone(),
-            display_label: safe_display_value(&service.name),
-            host_key: None,
-            logical_service_key: Some(logical_key.clone()),
-            service_instance_key: None,
-            source_kind: source_kind.clone(),
-            source_id: source_id.clone(),
-            evidence_path: "inventory.services.name".to_string(),
-            observed_at: observed_at.clone(),
-            trust,
-            structured: true,
-        },
-        ResolverObservation {
-            kind: ObservationKind::ServiceInstance,
-            observed_key: instance_key.clone(),
-            display_label: instance_key.clone(),
-            host_key: Some(host_key.clone()),
-            logical_service_key: Some(logical_key.clone()),
-            service_instance_key: Some(instance_key.clone()),
-            source_kind: source_kind.clone(),
-            source_id: source_id.clone(),
-            evidence_path: "inventory.services".to_string(),
-            observed_at: observed_at.clone(),
-            trust,
-            structured: true,
-        },
-    ];
+    let mut observations = vec![ResolverObservation {
+        kind: ObservationKind::LogicalService,
+        observed_key: logical_key.clone(),
+        display_label: safe_display_value(&service.name),
+        host_key: None,
+        logical_service_key: Some(logical_key.clone()),
+        service_instance_key: None,
+        source_kind: source_kind.clone(),
+        source_id: source_id.clone(),
+        evidence_path: "inventory.services.name".to_string(),
+        observed_at: observed_at.clone(),
+        trust,
+        structured: true,
+    }];
+
+    let host = service.host.as_deref();
+    let host_key = host.and_then(logical_service_key);
+    let instance_key = host_key
+        .as_deref()
+        .and_then(|host_key| service_instance_key(host_key, &logical_key));
+    let (Some(host), Some(host_key), Some(instance_key)) = (host, host_key, instance_key) else {
+        return observations;
+    };
+
+    observations.push(ResolverObservation {
+        kind: ObservationKind::Host,
+        observed_key: host_key.clone(),
+        display_label: safe_display_value(host),
+        host_key: Some(host_key.clone()),
+        logical_service_key: None,
+        service_instance_key: None,
+        source_kind: source_kind.clone(),
+        source_id: source_id.clone(),
+        evidence_path: "inventory.services.host".to_string(),
+        observed_at: observed_at.clone(),
+        trust,
+        structured: true,
+    });
+    observations.push(ResolverObservation {
+        kind: ObservationKind::ServiceInstance,
+        observed_key: instance_key.clone(),
+        display_label: instance_key.clone(),
+        host_key: Some(host_key.clone()),
+        logical_service_key: Some(logical_key.clone()),
+        service_instance_key: Some(instance_key.clone()),
+        source_kind: source_kind.clone(),
+        source_id: source_id.clone(),
+        evidence_path: "inventory.services".to_string(),
+        observed_at: observed_at.clone(),
+        trust,
+        structured: true,
+    });
     for domain in &service.domains {
         let domain_key = domain.trim().to_ascii_lowercase();
         if domain_key.is_empty() {

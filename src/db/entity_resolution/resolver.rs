@@ -13,8 +13,6 @@ use super::vocab::{ENTITY_TYPE_LOGICAL_SERVICE, ENTITY_TYPE_SERVICE_INSTANCE};
 
 /// Evidence rows kept per decision/diagnostic sample.
 pub const MAX_RESOLVER_EVIDENCE_SAMPLE: usize = 5;
-/// Candidate decisions surfaced per ambiguous diagnostic.
-pub const MAX_RESOLVER_CANDIDATES: usize = 25;
 
 /// Outcome class of a resolution or lookup.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -19,6 +19,7 @@ use rusqlite::{OptionalExtension, params};
 use crate::config::StorageConfig;
 use crate::enrich::parser::SourceKind;
 
+use super::entity_resolution::ResolverStatus;
 use super::maintenance::{exceeds_trigger, get_storage_metrics};
 use super::models::{
     AbuseIncident, AiAbuseMatch, AiAbuseParams, AiAbuseResult, AiCorrelateParams, AiIncidentParams,
@@ -1754,7 +1755,7 @@ pub fn search_logs_for_service_instances(
         .map(|entry| GraphRelatedLogEntry {
             entry,
             inclusion_reason: "service_instance".to_string(),
-            resolver_status: "resolved".to_string(),
+            resolver_status: ResolverStatus::Resolved.as_str().to_string(),
             fallback_kind: None,
         })
         .collect())
@@ -1958,8 +1959,8 @@ fn resolve_topic_entities(
             // Weak prefix/label candidates surface for the caller but never
             // drive log fan-out (deterministic resolution only).
             resolver_status: match pri {
-                0 | 3 => "resolved",
-                _ => "ambiguous",
+                0 | 3 => ResolverStatus::Resolved.as_str(),
+                _ => ResolverStatus::Ambiguous.as_str(),
             },
         })
         .collect();
@@ -2014,7 +2015,7 @@ pub fn topic_correlate_inputs(
     let mut logical_keys: Vec<String> = Vec::new();
     let mut generic_seeds: Vec<String> = Vec::new();
     for entity in &resolved {
-        if entity.resolver_status != "resolved" {
+        if entity.resolver_status != ResolverStatus::Resolved.as_str() {
             continue;
         }
         match entity.entity_type.as_str() {
@@ -2127,7 +2128,7 @@ pub fn topic_correlate_inputs(
             .map(|entry| GraphRelatedLogEntry {
                 entry,
                 inclusion_reason: "graph_related".to_string(),
-                resolver_status: "resolved".to_string(),
+                resolver_status: ResolverStatus::Resolved.as_str().to_string(),
                 fallback_kind: None,
             }),
         );
@@ -2151,7 +2152,7 @@ pub fn topic_correlate_inputs(
                     .map(|entry| GraphRelatedLogEntry {
                         entry,
                         inclusion_reason: "host_context".to_string(),
-                        resolver_status: "degraded".to_string(),
+                        resolver_status: ResolverStatus::Degraded.as_str().to_string(),
                         fallback_kind: Some("explicit_degraded_host_context".to_string()),
                     }),
             );
