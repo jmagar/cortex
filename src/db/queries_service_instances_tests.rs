@@ -321,6 +321,51 @@ fn resolve_topic_entities_falls_back_to_label_substring_scan() {
 }
 
 #[test]
+fn resolve_topic_entities_label_scan_escapes_like_wildcards() {
+    let (_dir, pool) = test_pool("resolve-topic-label-escape.db");
+    let conn = pool.get().unwrap();
+    // A topic term containing a literal '%' must not act as a LIKE wildcard
+    // in the label-substring fallback tier — it should only match labels
+    // that contain the literal character, not everything.
+    conn.execute(
+        "INSERT INTO graph_entities
+            (entity_type, canonical_key, display_label, trust_level)
+         VALUES (?1, ?2, ?3, 'verified')",
+        rusqlite::params![
+            graph::ENTITY_TYPE_APP,
+            "cpu-100pct-alert",
+            "cpu at 100% alert"
+        ],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO graph_entities
+            (entity_type, canonical_key, display_label, trust_level)
+         VALUES (?1, ?2, ?3, 'verified')",
+        rusqlite::params![
+            graph::ENTITY_TYPE_APP,
+            "unrelated-entity",
+            "totally unrelated"
+        ],
+    )
+    .unwrap();
+
+    let resolved = super::resolve_topic_entities(&conn, &["100%".to_string()]).unwrap();
+    assert!(
+        resolved
+            .iter()
+            .any(|e| e.canonical_key == "cpu-100pct-alert"),
+        "literal '100%' substring must still match a label containing it"
+    );
+    assert!(
+        !resolved
+            .iter()
+            .any(|e| e.canonical_key == "unrelated-entity"),
+        "unescaped '%' would wildcard-match everything; escaping must prevent that"
+    );
+}
+
+#[test]
 fn resolve_topic_entities_skips_label_scan_when_indexed_tier_fills_cap() {
     let (_dir, pool) = test_pool("resolve-topic-cap-skips-label.db");
     let conn = pool.get().unwrap();

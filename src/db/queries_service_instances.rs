@@ -303,7 +303,7 @@ pub(super) fn resolve_topic_entities(
     let mut label_stmt = conn.prepare(
         "SELECT entity_type, canonical_key
          FROM graph_entities
-         WHERE lower(display_label) LIKE '%' || ?1 || '%'
+         WHERE lower(display_label) LIKE '%' || ?1 || '%' ESCAPE '\\'
          LIMIT ?2",
     )?;
     let mut alias = conn.prepare(
@@ -338,8 +338,9 @@ pub(super) fn resolve_topic_entities(
         // left room under the per-term cap.
         let label_limit = PER_TERM_CAP.saturating_sub(key_hits);
         if label_limit > 0 {
+            let escaped_term = escape_like(term);
             let label_rows = label_stmt
-                .query_map(rusqlite::params![term, label_limit as i64], |row| {
+                .query_map(rusqlite::params![escaped_term, label_limit as i64], |row| {
                     Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
                 })?;
             for row in label_rows {
