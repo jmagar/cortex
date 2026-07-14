@@ -1598,6 +1598,10 @@ fn graph_walk_n_hops_enforces_entity_cap() {
     };
     let host = insert_entity(ENTITY_TYPE_HOST, "host-cap-seed");
     let extra_neighbours = GRAPH_WALK_N_HOPS_ENTITY_CAP + 50;
+    // Batch the fixture seed in one transaction — one autocommit per row
+    // makes this loop ~1000x slower and needlessly extends how long
+    // GRAPH_TEST_LOCK is held.
+    conn.execute_batch("BEGIN;").unwrap();
     for i in 0..extra_neighbours {
         let app_key = format!("app-cap-{i}");
         let app = insert_entity(ENTITY_TYPE_APP, &app_key);
@@ -1610,6 +1614,7 @@ fn graph_walk_n_hops_enforces_entity_cap() {
         )
         .unwrap();
     }
+    conn.execute_batch("COMMIT;").unwrap();
     drop(conn);
 
     let reached = graph_walk_n_hops(

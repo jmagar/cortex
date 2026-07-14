@@ -72,10 +72,14 @@ fn graph_walk_service_topic_reports_truncated_when_cap_hit() {
     let seed = insert_entity(&conn, "logical_service", "plex");
     // One more neighbor than GRAPH_SERVICE_TOPIC_ENTITY_CAP so the walk
     // (seed + neighbors) exceeds the cap and must report truncation.
+    // Batched in one transaction — one autocommit per row makes this ~1000x
+    // slower for no benefit in a test fixture.
+    conn.execute_batch("BEGIN;").unwrap();
     for i in 0..(GRAPH_SERVICE_TOPIC_ENTITY_CAP + 1) {
         let neighbor = insert_entity(&conn, "host", &format!("host-{i}"));
         insert_rel(&conn, seed, neighbor, "runs_on");
     }
+    conn.execute_batch("COMMIT;").unwrap();
 
     let (entities, truncated) = graph_walk_service_topic(&conn, &["plex".to_string()], 1).unwrap();
     assert_eq!(
