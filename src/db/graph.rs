@@ -1075,65 +1075,84 @@ fn graph_evidence_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<GraphEvi
     })
 }
 
+/// Rows deleted per chunk by [`cleanup_legacy_service_topology`]. Mirrors the
+/// repo's chunked-deletion convention (`purge_old_logs` chunks, the storage
+/// enforcement `cleanup_chunk_size` default) so the write lock is released
+/// between chunks instead of held across one unbounded transaction.
+const LEGACY_TOPOLOGY_CLEANUP_CHUNK: i64 = 2_000;
+
+/// Subquery selecting the stale pre-resolver entity ids: every `service`
+/// entity (old `host:name` / `host:project:service` canonical keys) and
+/// nested `app` labels shaped like `plex/plex/plex`.
+const LEGACY_TOPOLOGY_ENTITY_IDS: &str = "SELECT id FROM graph_entities
+      WHERE entity_type = 'service'
+         OR (entity_type = 'app' AND canonical_key LIKE '%/%/%')";
+
 /// Remove stale pre-resolver service topology rows from the graph projection:
 /// every `service` entity (old `host:name` / `host:project:service` canonical
 /// keys) and nested `app` labels shaped like `plex/plex/plex`, plus their
 /// aliases, relationships, and evidence. The canonical replacement is the
 /// resolver-owned `logical_service` / `service_instance` projection; old keys
 /// are deleted, never migrated.
+///
+/// Deletes run in [`LEGACY_TOPOLOGY_CLEANUP_CHUNK`]-row chunks, committing
+/// and releasing [`write_lock`] between chunks so a large legacy projection
+/// never pins the writer. The phase order (evidence → relationships →
+/// aliases → entities) keeps every commit boundary referentially safe: a
+/// child row is always gone before its parent.
 pub fn cleanup_legacy_service_topology(conn: &mut rusqlite::Connection) -> Result<()> {
-    let _guard = write_lock();
-    let tx = conn.transaction()?;
-    // Same `src IN (…) OR dst IN (…)` shape as the relationship delete below:
+    // Same `src IN (…) OR dst IN (…)` shape for evidence and relationships:
     // an inner JOIN on both endpoints would skip relationships whose other
     // endpoint dangles, orphaning their evidence.
-    tx.execute(
-        "DELETE FROM graph_relationship_evidence
-          WHERE relationship_id IN (
-              SELECT id FROM graph_relationships
-               WHERE src_entity_id IN (
-                     SELECT id FROM graph_entities
-                      WHERE entity_type = 'service'
-                         OR (entity_type = 'app' AND canonical_key LIKE '%/%/%')
-                 )
-                  OR dst_entity_id IN (
-                     SELECT id FROM graph_entities
-                      WHERE entity_type = 'service'
-                         OR (entity_type = 'app' AND canonical_key LIKE '%/%/%')
-                 )
-          )",
-        [],
-    )?;
-    tx.execute(
-        "DELETE FROM graph_relationships
-          WHERE src_entity_id IN (
-              SELECT id FROM graph_entities
-               WHERE entity_type = 'service'
-                  OR (entity_type = 'app' AND canonical_key LIKE '%/%/%')
-          )
-             OR dst_entity_id IN (
-              SELECT id FROM graph_entities
-               WHERE entity_type = 'service'
-                  OR (entity_type = 'app' AND canonical_key LIKE '%/%/%')
-          )",
-        [],
-    )?;
-    tx.execute(
-        "DELETE FROM graph_entity_aliases
-          WHERE entity_id IN (
-              SELECT id FROM graph_entities
-               WHERE entity_type = 'service'
-                  OR (entity_type = 'app' AND canonical_key LIKE '%/%/%')
-          )",
-        [],
-    )?;
-    tx.execute(
-        "DELETE FROM graph_entities
-          WHERE entity_type = 'service'
-             OR (entity_type = 'app' AND canonical_key LIKE '%/%/%')",
-        [],
-    )?;
-    tx.commit()?;
+    let phases = [
+        format!(
+            "DELETE FROM graph_relationship_evidence
+              WHERE id IN (
+                  SELECT id FROM graph_relationship_evidence
+                   WHERE relationship_id IN (
+                       SELECT id FROM graph_relationships
+                        WHERE src_entity_id IN ({LEGACY_TOPOLOGY_ENTITY_IDS})
+                           OR dst_entity_id IN ({LEGACY_TOPOLOGY_ENTITY_IDS})
+                   )
+                   LIMIT ?1
+              )"
+        ),
+        format!(
+            "DELETE FROM graph_relationships
+              WHERE id IN (
+                  SELECT id FROM graph_relationships
+                   WHERE src_entity_id IN ({LEGACY_TOPOLOGY_ENTITY_IDS})
+                      OR dst_entity_id IN ({LEGACY_TOPOLOGY_ENTITY_IDS})
+                   LIMIT ?1
+              )"
+        ),
+        format!(
+            "DELETE FROM graph_entity_aliases
+              WHERE id IN (
+                  SELECT id FROM graph_entity_aliases
+                   WHERE entity_id IN ({LEGACY_TOPOLOGY_ENTITY_IDS})
+                   LIMIT ?1
+              )"
+        ),
+        format!(
+            "DELETE FROM graph_entities
+              WHERE id IN (SELECT id FROM ({LEGACY_TOPOLOGY_ENTITY_IDS}) LIMIT ?1)"
+        ),
+    ];
+    for sql in &phases {
+        loop {
+            let deleted = {
+                let _guard = write_lock();
+                let tx = conn.transaction()?;
+                let deleted = tx.execute(sql, [LEGACY_TOPOLOGY_CLEANUP_CHUNK])?;
+                tx.commit()?;
+                deleted
+            };
+            if (deleted as i64) < LEGACY_TOPOLOGY_CLEANUP_CHUNK {
+                break;
+            }
+        }
+    }
     Ok(())
 }
 

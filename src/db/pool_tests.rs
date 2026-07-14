@@ -2100,17 +2100,82 @@ fn stale_service_topology_cleanup_removes_old_canonical_rows() {
         [],
     )
     .unwrap();
+    // Seed more legacy rows than one cleanup chunk (2000) so the chunked
+    // delete loop must iterate, plus dependent alias/relationship/evidence
+    // rows to exercise every phase, and one unrelated host that must survive.
+    {
+        let tx = conn.transaction().unwrap();
+        for i in 0..2_500 {
+            tx.execute(
+                "INSERT INTO graph_entities
+                    (entity_type, canonical_key, display_label, source_kind, source_id, trust_level)
+                 VALUES ('service', ?1, 'svc', 'log', 'fixture', 'inferred')",
+                [format!("host{i}:svc{i}")],
+            )
+            .unwrap();
+        }
+        tx.execute(
+            "INSERT INTO graph_entities
+                (entity_type, canonical_key, display_label, source_kind, source_id, trust_level)
+             VALUES ('host', 'tootie', 'tootie', 'log', 'fixture', 'verified')",
+            [],
+        )
+        .unwrap();
+        tx.execute_batch(
+            "INSERT INTO graph_entity_aliases
+                (entity_id, alias_type, alias_key, alias_value, source_kind, trust_level)
+             SELECT id, 'app_name', canonical_key, canonical_key, 'log', 'inferred'
+               FROM graph_entities WHERE entity_type = 'service';
+             INSERT INTO graph_relationships
+                (relationship_key, src_entity_id, dst_entity_id, relationship_type,
+                 reason_code, trust_level, confidence)
+             SELECT s.id || ':runs_on:' || h.id, s.id, h.id, 'runs_on',
+                    'docker_service_label', 'inferred', 0.5
+               FROM graph_entities s, graph_entities h
+              WHERE s.entity_type = 'service' AND h.canonical_key = 'tootie';
+             INSERT INTO graph_relationship_evidence
+                (relationship_id, evidence_key, source_kind, source_id,
+                 observed_at, reason_code, trust_level)
+             SELECT id, 'ev:' || id, 'log', 'fixture',
+                    '2026-01-01T00:00:00Z', 'docker_service_label', 'inferred'
+               FROM graph_relationships;",
+        )
+        .unwrap();
+        tx.commit().unwrap();
+    }
     crate::db::graph::cleanup_legacy_service_topology(&mut conn).unwrap();
     let count: i64 = conn
         .query_row(
             "SELECT COUNT(*) FROM graph_entities
-              WHERE (entity_type = 'service' AND canonical_key LIKE '%:%')
+              WHERE entity_type = 'service'
                  OR (entity_type = 'app' AND canonical_key = 'plex/plex/plex')",
             [],
             |row| row.get(0),
         )
         .unwrap();
     assert_eq!(count, 0);
+    // Dependent rows are fully gone across every chunked phase.
+    for table in [
+        "graph_entity_aliases",
+        "graph_relationships",
+        "graph_relationship_evidence",
+    ] {
+        let n: i64 = conn
+            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(n, 0, "{table} must be emptied by cleanup");
+    }
+    // The unrelated host entity survives the cleanup.
+    let hosts: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM graph_entities WHERE canonical_key = 'tootie'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(hosts, 1);
 }
 
 #[test]
