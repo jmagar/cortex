@@ -53,6 +53,7 @@ cortex setup deploy local           # operator-facing local deploy/reconcile
 cortex setup deploy local --dry-run # preflight without Docker mutation
 cortex setup deploy remote host-a --dry-run # SSH preflight for a remote Compose host
 cortex setup deploy remote host-a           # SSH deploy/reconcile on a remote host
+cortex setup deploy remote --home /mnt/cache/appdata/cortex tootie # tootie appdata runtime
 ```
 
 `cortex setup` also disables and removes stale user-level
@@ -61,12 +62,34 @@ automated deployment path is Docker Compose only.
 
 ### Remote CLI Deploy
 
-`cortex setup deploy remote <host>` writes/replaces `~/.cortex/.env`, the
-managed Compose YAML, and `config/Dockerfile` on the SSH target, then runs
-Docker Compose there. Use `--dry-run` first to verify SSH and Docker
-prerequisites. Set token/env values in the local environment before running the
-non-dry-run command when the target must keep specific generated secrets or
-configuration values.
+`cortex setup deploy remote <host>` writes/replaces `.env`, the managed Compose
+YAML, and `config/Dockerfile` under the selected remote home, then runs Docker
+Compose there. The default remote home is `~/.cortex`; pass `--home PATH` for
+hosts whose runtime lives elsewhere. After the server profile exists, the normal
+update workflow is:
+
+```bash
+cortex update --dry-run
+cortex update
+```
+
+`cortex setup deploy remote --home /mnt/cache/appdata/cortex tootie` remains the
+low-level primitive and a useful escape hatch. A successful low-level remote
+deploy records the server profile so later updates do not repeat host/home
+details; otherwise configure it with
+`cortex update config server --host HOST --home PATH`.
+
+Client-agent updates preserve the existing remote heartbeat-agent env and fail
+if the saved token cannot be read or preserved. Use
+`cortex setup deploy agent --heartbeat-token ...` for first-time client
+bootstrap or token repair, then return to `cortex update clients`.
+
+Use `--dry-run` first to verify SSH and Docker prerequisites. Non-dry-run remote
+deploy preserves existing remote env values from `<home>/.env` or the legacy
+`<home>/compose/.env` path, but it intentionally drops `CORTEX_VERSION` so the
+release-managed Compose template owns the image tag. After migration, the legacy
+compose-local env file is archived as `<home>/compose/.env.legacy`; `<home>/.env`
+is the canonical runtime env.
 
 Deploy mutations remain CLI-only. MCP exposes only redacted read-only Compose
 diagnostics.

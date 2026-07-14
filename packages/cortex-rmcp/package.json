@@ -1,6 +1,6 @@
 {
   "name": "cortex-rmcp",
-  "version": "3.9.1",
+  "version": "3.10.0",
   "description": "Node launcher for Cortex, a Rust MCP/HTTP log aggregation and AI transcript correlation platform.",
   "license": "MIT",
   "homepage": "https://github.com/jmagar/cortex#readme",
@@ -20,12 +20,16 @@
     "bin/",
     "lib/",
     "scripts/",
-    "README.md"
+    "README.md",
+    "LICENSE*",
+    "package.json"
   ],
   "scripts": {
+    "prepack": "node scripts/sync-readme.js",
     "postinstall": "node scripts/install.js",
     "test": "node --test",
-    "check": "node --check bin/cortex.js && node --check scripts/install.js && node --check lib/platform.js"
+    "check": "node --check bin/cortex.js && node --check scripts/install.js && node --check lib/platform.js && node --check scripts/sync-readme.js && node --check scripts/check-package.js && node scripts/check-package.js",
+    "prepublishOnly": "node scripts/check-package.js --release"
   },
   "engines": {
     "node": ">=18"
@@ -51,5 +55,9 @@
     "llm"
   ],
   "mcpName": "ai.dinglebear/cortex-rmcp",
-  "binaryVersion": "3.9.0"
+  "binaryVersion": "3.10.0",
+  "author": {
+    "name": "dinglebear.ai",
+    "url": "https://dinglebear.ai"
+  }
 }

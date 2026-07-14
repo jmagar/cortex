@@ -129,11 +129,16 @@ fn write_heartbeat_agent_env(env_path: &Path) -> io::Result<SetupPhase> {
     let docker_url = std::env::var("CORTEX_AGENT_DOCKER_URL")
         .ok()
         .unwrap_or_else(|| heartbeat_agent::DEFAULT_DOCKER_URL.to_string());
+    let rust_log = std::env::var("RUST_LOG")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "warn".to_string());
     let syslog_file = std::env::var("CORTEX_AGENT_SYSLOG_FILE").ok();
     let syslog_target = std::env::var("CORTEX_SYSLOG_TARGET").ok();
     let mut body = format!(
-        "CORTEX_HEARTBEAT_TARGET={}\nRUST_LOG=warn\nCORTEX_AGENT_DOCKER={}\nCORTEX_AGENT_DOCKER_URL={}\nCORTEX_AGENT_JOURNALD={}\n",
+        "CORTEX_HEARTBEAT_TARGET={}\nRUST_LOG={}\nCORTEX_AGENT_DOCKER={}\nCORTEX_AGENT_DOCKER_URL={}\nCORTEX_AGENT_JOURNALD={}\n",
         shell_safe_value(&target)?,
+        shell_safe_value(&rust_log)?,
         shell_safe_value(&docker)?,
         shell_safe_value(&docker_url)?,
         shell_safe_value(&journald)?,
@@ -155,6 +160,13 @@ fn write_heartbeat_agent_env(env_path: &Path) -> io::Result<SetupPhase> {
             "CORTEX_HEARTBEAT_TOKEN={}\n",
             shell_safe_value(&token)?
         ));
+    }
+    for key in heartbeat_agent::OPTIONAL_ENV_KEYS {
+        if let Ok(value) = std::env::var(key) {
+            if !value.trim().is_empty() {
+                body.push_str(&format!("{key}={}\n", shell_safe_value(&value)?));
+            }
+        }
     }
     write_private_file(env_path, &body)?;
     Ok(timer.finish(SetupStatus::Ok, format!("wrote {}", env_path.display())))

@@ -486,6 +486,50 @@ fn mode_parse_rejects_remote_deploy_with_multiple_hosts() {
 }
 
 #[test]
+fn parse_deploy_remote_accepts_home_override() {
+    let command = super::parse_deploy_command(&[
+        "remote".into(),
+        "--home".into(),
+        "/mnt/cache/appdata/cortex".into(),
+        "tootie".into(),
+        "--dry-run".into(),
+    ])
+    .unwrap();
+
+    let super::DeployCommandKind::Remote {
+        host,
+        dry_run,
+        home,
+    } = command.kind
+    else {
+        panic!("expected deploy remote");
+    };
+    assert_eq!(host, "tootie");
+    assert!(dry_run);
+    assert_eq!(home.as_deref(), Some("/mnt/cache/appdata/cortex"));
+}
+
+#[test]
+fn parse_deploy_remote_home_defaults_to_live_profile_seed_shape() {
+    let command = super::parse_deploy_command(&[
+        "remote".into(),
+        "--home".into(),
+        "/mnt/cache/appdata/cortex".into(),
+        "tootie".into(),
+    ])
+    .unwrap();
+
+    assert!(matches!(
+        command.kind,
+        super::DeployCommandKind::Remote {
+            ref host,
+            dry_run: false,
+            home: Some(ref home),
+        } if host == "tootie" && home == "/mnt/cache/appdata/cortex"
+    ));
+}
+
+#[test]
 fn parse_deploy_agent_trims_and_drops_empty_hosts() {
     let command = super::parse_deploy_command(&[
         "agent".into(),
@@ -547,6 +591,176 @@ fn parse_deploy_agent_reports_missing_option_values() {
             "expected missing-value error for {flag}, got: {err}"
         );
     }
+}
+
+#[test]
+fn mode_parse_accepts_update_defaults_to_all() {
+    let mode = super::Mode::parse(vec!["update".into()]).unwrap();
+
+    assert!(matches!(
+        mode,
+        super::Mode::Update(super::UpdateCommand {
+            kind: super::UpdateCommandKind::Run {
+                scope: cortex::update::UpdateScope::All,
+                dry_run: false,
+                profile: None,
+                binary: None,
+            },
+            json: false,
+        })
+    ));
+}
+
+#[test]
+fn mode_parse_accepts_update_server_dry_run_json_profile() {
+    let mode = super::Mode::parse(vec![
+        "update".into(),
+        "server".into(),
+        "--dry-run".into(),
+        "--json".into(),
+        "--profile".into(),
+        "/tmp/deployments.toml".into(),
+    ])
+    .unwrap();
+
+    assert!(matches!(
+        mode,
+        super::Mode::Update(super::UpdateCommand {
+            kind: super::UpdateCommandKind::Run {
+                scope: cortex::update::UpdateScope::Server,
+                dry_run: true,
+                profile: Some(ref profile),
+                binary: None,
+            },
+            json: true,
+        }) if profile == "/tmp/deployments.toml"
+    ));
+}
+
+#[test]
+fn mode_parse_accepts_update_clients_aliases() {
+    for scope_name in ["clients", "agents"] {
+        let mode = super::Mode::parse(vec!["update".into(), scope_name.into()]).unwrap();
+        assert!(matches!(
+            mode,
+            super::Mode::Update(super::UpdateCommand {
+                kind: super::UpdateCommandKind::Run {
+                    scope: cortex::update::UpdateScope::Clients,
+                    ..
+                },
+                ..
+            })
+        ));
+    }
+}
+
+#[test]
+fn mode_parse_accepts_update_config_server() {
+    let mode = super::Mode::parse(vec![
+        "update".into(),
+        "config".into(),
+        "server".into(),
+        "--host".into(),
+        "tootie".into(),
+        "--home".into(),
+        "/mnt/cache/appdata/cortex".into(),
+        "--profile".into(),
+        "/tmp/deployments.toml".into(),
+        "--json".into(),
+    ])
+    .unwrap();
+
+    assert!(matches!(
+        mode,
+        super::Mode::Update(super::UpdateCommand {
+            kind: super::UpdateCommandKind::ConfigServer {
+                ref host,
+                ref home,
+                profile: Some(ref profile),
+            },
+            json: true,
+        }) if host == "tootie" && home == "/mnt/cache/appdata/cortex" && profile == "/tmp/deployments.toml"
+    ));
+}
+
+#[test]
+fn mode_parse_accepts_update_config_clients() {
+    let mode = super::Mode::parse(vec![
+        "update".into(),
+        "config".into(),
+        "clients".into(),
+        "--hosts".into(),
+        "dookie,shart".into(),
+        "--target".into(),
+        "https://cortex.tootie.tv".into(),
+        "--docker".into(),
+    ])
+    .unwrap();
+
+    assert!(matches!(
+        mode,
+        super::Mode::Update(super::UpdateCommand {
+            kind: super::UpdateCommandKind::ConfigClients {
+                ref hosts,
+                target: Some(ref target),
+                docker: Some(true),
+                journald: None,
+                profile: None,
+            },
+            json: false,
+        }) if hosts == &vec!["dookie".to_string(), "shart".to_string()]
+             && target == "https://cortex.tootie.tv"
+    ));
+}
+
+#[test]
+fn mode_parse_rejects_update_config_run_only_flags() {
+    let dry_run = super::Mode::parse(vec![
+        "update".into(),
+        "config".into(),
+        "server".into(),
+        "--host".into(),
+        "tootie".into(),
+        "--home".into(),
+        "/mnt/cache/appdata/cortex".into(),
+        "--dry-run".into(),
+    ])
+    .unwrap_err();
+    assert!(
+        dry_run.to_string().contains("--dry-run is only valid"),
+        "got: {dry_run}"
+    );
+
+    let binary = super::Mode::parse(vec![
+        "update".into(),
+        "config".into(),
+        "clients".into(),
+        "--hosts".into(),
+        "dookie".into(),
+        "--binary".into(),
+        "/tmp/cortex".into(),
+    ])
+    .unwrap_err();
+    assert!(
+        binary.to_string().contains("--binary is only valid"),
+        "got: {binary}"
+    );
+}
+
+#[test]
+fn mode_parse_rejects_update_server_binary_flag() {
+    let err = super::Mode::parse(vec![
+        "update".into(),
+        "server".into(),
+        "--binary".into(),
+        "/tmp/cortex".into(),
+    ])
+    .unwrap_err();
+
+    assert!(
+        err.to_string().contains("--binary is only valid"),
+        "got: {err}"
+    );
 }
 
 #[test]
@@ -738,7 +952,8 @@ fn parse_deploy_command_covers_modes_and_rejects_contextual_flags() {
         remote.kind,
         super::DeployCommandKind::Remote {
             ref host,
-            dry_run: true
+            dry_run: true,
+            home: None
         } if host == "tootie"
     ));
 

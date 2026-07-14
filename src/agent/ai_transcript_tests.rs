@@ -21,6 +21,28 @@ fn collect_files_finds_supported_and_skips_unsupported() {
 }
 
 #[test]
+fn collect_files_skips_build_artifact_directories() {
+    let dir = tempfile::tempdir().unwrap();
+    let project = dir.path().join(".codex/worktrees/session-id/lab");
+    let target = project.join("target/debug/.fingerprint/package");
+    let node_modules = project.join("node_modules/package");
+    let cache = project.join(".cache/cargo/release/deps/rustc123");
+    fs::create_dir_all(&target).unwrap();
+    fs::create_dir_all(&node_modules).unwrap();
+    fs::create_dir_all(&cache).unwrap();
+    write_file(&project.join("rollout-session.jsonl"), "{}\n");
+    write_file(&target.join("not-a-transcript.jsonl"), "{}\n");
+    write_file(&node_modules.join("also-not-a-transcript.jsonl"), "{}\n");
+    write_file(&cache.join("transient-not-a-transcript.jsonl"), "{}\n");
+
+    let mut out = Vec::new();
+    collect_files(dir.path(), &mut out);
+
+    assert_eq!(out.len(), 1);
+    assert!(out[0].ends_with("rollout-session.jsonl"));
+}
+
+#[test]
 fn read_new_lines_returns_only_lines_past_checkpoint() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("session.jsonl");
@@ -128,6 +150,79 @@ async fn scan_and_forward_sends_new_lines_and_advances_checkpoint() {
         .await
         .unwrap();
     assert_eq!(sent_again, 0);
+}
+
+#[tokio::test]
+async fn scan_and_forward_preserves_codex_prefix_metadata_after_checkpoint() {
+    let dir = tempfile::tempdir().unwrap();
+    let codex_dir = dir.path().join(".codex/sessions/2026/07/12");
+    fs::create_dir_all(&codex_dir).unwrap();
+    let transcript_path = codex_dir.join("rollout-2026-07-12T22-31-12-codex-sess-1.jsonl");
+    write_file(
+        &transcript_path,
+        &format!(
+            "{}\n{}\n",
+            serde_json::json!({
+                "timestamp": "2026-07-09T00:00:00Z",
+                "type": "session_meta",
+                "payload": {
+                    "id": "codex-sess-1",
+                    "cwd": "/home/jmagar/workspace/cortex"
+                }
+            }),
+            serde_json::json!({
+                "timestamp": "2026-07-09T00:00:01Z",
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "content": "hello from codex"
+                }
+            })
+        ),
+    );
+
+    let server = wiremock::MockServer::start().await;
+    let received = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let received_clone = received.clone();
+    wiremock::Mock::given(wiremock::matchers::method("POST"))
+        .and(wiremock::matchers::path("/v1/ai-transcripts"))
+        .respond_with(move |req: &wiremock::Request| {
+            *received_clone.lock().unwrap() = Some(req.body.clone());
+            wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({"accepted": 1}))
+        })
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let config = AiTranscriptForwardConfig {
+        roots: vec![dir.path().to_path_buf()],
+        target: server.uri(),
+        token: None,
+        hostname: "test-host".to_string(),
+        checkpoint_path: dir.path().join("checkpoint.json"),
+        poll_interval: Duration::from_secs(15),
+    };
+    let client = reqwest::Client::new();
+    let mut checkpoint = Checkpoint::default();
+    checkpoint
+        .files
+        .insert(transcript_path.to_string_lossy().to_string(), 1);
+
+    let sent = scan_and_forward(&config, &client, &mut checkpoint)
+        .await
+        .unwrap();
+    assert_eq!(sent, 1);
+
+    let body = received.lock().unwrap().take().unwrap();
+    let request: AiTranscriptIngestRequest = serde_json::from_slice(&body).unwrap();
+    assert_eq!(request.records.len(), 1);
+    let record = &request.records[0];
+    assert_eq!(record.ai_tool, "codex");
+    assert_eq!(
+        record.ai_project.as_deref(),
+        Some("/home/jmagar/workspace/cortex")
+    );
+    assert_eq!(record.ai_session_id.as_deref(), Some("codex-sess-1"));
 }
 
 #[tokio::test]

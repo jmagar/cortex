@@ -48,6 +48,7 @@ async fn run() -> Result<()> {
         Mode::Cli(invocation) => run_cli(*invocation).await,
         Mode::Setup(command) => run_setup(command).await,
         Mode::Deploy(command) => run_deploy(command).await,
+        Mode::Update(command) => run_update(command).await,
         Mode::DoctorBinary(command) => doctor::run_binary_doctor(command.json).await,
         Mode::DoctorFull(command) => {
             doctor::run_full_doctor(command.json, command.fix, command.yes).await
@@ -216,8 +217,15 @@ async fn run_deploy(command: DeployCommand) -> Result<()> {
             (cortex::setup::SetupMode::Check, "local dry-run")
         }
         DeployCommandKind::Local { dry_run: false } => (cortex::setup::SetupMode::Repair, "local"),
-        DeployCommandKind::Remote { host, dry_run } => {
-            let report = cortex::deploy::run_remote_deploy(&host, dry_run)?;
+        DeployCommandKind::Remote {
+            host,
+            dry_run,
+            home,
+        } => {
+            let report = cortex::deploy::run_remote_deploy(
+                &host,
+                cortex::deploy::RemoteDeployOptions { dry_run, home },
+            )?;
             if command.json {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             } else {
@@ -239,6 +247,9 @@ async fn run_deploy(command: DeployCommand) -> Result<()> {
             }
             if report.has_errors {
                 anyhow::bail!("cortex setup deploy remote {host} completed with failed phases");
+            }
+            if !dry_run {
+                cortex::update::configure_server_profile(None, &host, &report.home)?;
             }
             return Ok(());
         }
@@ -324,6 +335,7 @@ fn run_deploy_agent(
     let config = AgentDeployConfig {
         target,
         token,
+        require_token: false,
         docker,
         journald,
     };
@@ -343,6 +355,104 @@ fn run_deploy_agent(
         anyhow::bail!("one or more agent deployments failed");
     }
     Ok(())
+}
+
+async fn run_update(command: UpdateCommand) -> Result<()> {
+    match command.kind {
+        UpdateCommandKind::Run {
+            scope,
+            dry_run,
+            profile,
+            binary,
+        } => {
+            let report = cortex::update::run_update(
+                scope,
+                cortex::update::UpdateOptions {
+                    dry_run,
+                    profile_path: profile.map(std::path::PathBuf::from),
+                    binary: binary.map(std::path::PathBuf::from),
+                },
+            )?;
+            if command.json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                print_update_report(&report);
+            }
+            if report.has_errors {
+                anyhow::bail!("cortex update {} completed with failed phases", report.mode);
+            }
+        }
+        UpdateCommandKind::ConfigServer {
+            host,
+            home,
+            profile,
+        } => {
+            let profile = cortex::update::configure_server_profile(
+                profile.as_deref().map(std::path::Path::new),
+                &host,
+                &home,
+            )?;
+            if command.json {
+                println!("{}", serde_json::to_string_pretty(&profile)?);
+            } else {
+                println!("cortex update config server");
+                println!("host: {host}");
+                println!("home: {home}");
+            }
+        }
+        UpdateCommandKind::ConfigClients {
+            hosts,
+            target,
+            docker,
+            journald,
+            profile,
+        } => {
+            let hosts_label = hosts.join(",");
+            let profile = cortex::update::configure_clients_profile(
+                profile.as_deref().map(std::path::Path::new),
+                hosts,
+                target,
+                docker,
+                journald,
+            )?;
+            if command.json {
+                println!("{}", serde_json::to_string_pretty(&profile)?);
+            } else {
+                println!("cortex update config clients");
+                println!("hosts: {hosts_label}");
+            }
+        }
+    }
+    Ok(())
+}
+
+fn print_update_report(report: &cortex::update::UpdateReport) {
+    println!("cortex update {}", report.mode);
+    println!("profile: {}", report.profile_path.display());
+    if let Some(server) = &report.server {
+        println!("server: {} {}", server.host, server.home);
+        for phase in &server.phases {
+            println!(
+                "server\t{:?}\t{}\t{}ms\t{}",
+                phase.status, phase.name, phase.elapsed_ms, phase.detail
+            );
+        }
+    }
+    for client in &report.clients {
+        println!(
+            "client\t{}\t{}\t{}ms\t{}",
+            if client.ok { "ok" } else { "error" },
+            client.host,
+            client.elapsed_ms,
+            client.detail
+        );
+    }
+    for phase in &report.skipped {
+        println!(
+            "skip\t{:?}\t{}\t{}ms\t{}",
+            phase.status, phase.name, phase.elapsed_ms, phase.detail
+        );
+    }
 }
 
 async fn run_setup(command: SetupCommand) -> Result<()> {
@@ -537,6 +647,7 @@ enum Mode {
     Cli(Box<CliInvocation>),
     Setup(SetupCommand),
     Deploy(DeployCommand),
+    Update(UpdateCommand),
     DoctorBinary(DoctorBinaryCommand),
     DoctorFull(DoctorFullCommand),
     Help,
@@ -574,6 +685,34 @@ struct DeployCommand {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+struct UpdateCommand {
+    kind: UpdateCommandKind,
+    json: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum UpdateCommandKind {
+    Run {
+        scope: cortex::update::UpdateScope,
+        dry_run: bool,
+        profile: Option<String>,
+        binary: Option<String>,
+    },
+    ConfigServer {
+        host: String,
+        home: String,
+        profile: Option<String>,
+    },
+    ConfigClients {
+        hosts: Vec<String>,
+        target: Option<String>,
+        docker: Option<bool>,
+        journald: Option<bool>,
+        profile: Option<String>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum DeployCommandKind {
     Preflight,
     Local {
@@ -582,6 +721,7 @@ enum DeployCommandKind {
     Remote {
         host: String,
         dry_run: bool,
+        home: Option<String>,
     },
     Agent {
         /// Explicit host list; if empty, run interactive discovery.
@@ -660,6 +800,11 @@ impl Mode {
                 Ok(Self::Deploy(parse_deploy_command(rest)?))
             }
             [command, rest @ ..]
+                if command == "update" && global == cli::GlobalFlags::default() =>
+            {
+                Ok(Self::Update(parse_update_command(rest)?))
+            }
+            [command, rest @ ..]
                 if command == "setup"
                     && rest.first().map(String::as_str) != Some("plugin-hook")
                     && global == cli::GlobalFlags::default() =>
@@ -714,6 +859,7 @@ impl Mode {
             Self::Cli(_) => "error",
             Self::Setup(_) => "warn",
             Self::Deploy(_) => "warn",
+            Self::Update(_) => "warn",
             Self::DoctorBinary(_) => "warn",
             Self::DoctorFull(_) => "warn",
             Self::Help => "info",
@@ -910,6 +1056,7 @@ fn parse_deploy_command(args: &[String]) -> Result<DeployCommand> {
     let mut json = false;
     let mut dry_run = false;
     let mut host: Option<String> = None;
+    let mut remote_home: Option<String> = None;
     // agent-specific
     let mut agent_hosts: Vec<String> = Vec::new();
     let mut agent_target: Option<String> = None;
@@ -923,45 +1070,29 @@ fn parse_deploy_command(args: &[String]) -> Result<DeployCommand> {
         match rest[i].as_str() {
             "--json" => json = true,
             "--dry-run" if matches!(subcommand.as_str(), "local" | "remote") => dry_run = true,
+            "--home" if subcommand == "remote" => {
+                i += 1;
+                remote_home = Some(required_arg(rest, i, "--home")?);
+            }
             "--help" | "-h" => {
                 print_usage();
                 std::process::exit(0);
             }
             "--hosts" if subcommand == "agent" => {
                 i += 1;
-                let val = rest
-                    .get(i)
-                    .ok_or_else(|| anyhow::anyhow!("--hosts requires a value"))?;
-                agent_hosts = val
-                    .split(',')
-                    .map(str::trim)
-                    .filter(|host| !host.is_empty())
-                    .map(str::to_string)
-                    .collect();
+                agent_hosts = parse_host_list(&required_arg(rest, i, "--hosts")?);
             }
             "--target" if subcommand == "agent" => {
                 i += 1;
-                agent_target = Some(
-                    rest.get(i)
-                        .ok_or_else(|| anyhow::anyhow!("--target requires a value"))?
-                        .clone(),
-                );
+                agent_target = Some(required_arg(rest, i, "--target")?);
             }
             "--heartbeat-token" if subcommand == "agent" => {
                 i += 1;
-                agent_token = Some(
-                    rest.get(i)
-                        .ok_or_else(|| anyhow::anyhow!("--heartbeat-token requires a value"))?
-                        .clone(),
-                );
+                agent_token = Some(required_arg(rest, i, "--heartbeat-token")?);
             }
             "--binary" if subcommand == "agent" => {
                 i += 1;
-                agent_binary = Some(
-                    rest.get(i)
-                        .ok_or_else(|| anyhow::anyhow!("--binary requires a value"))?
-                        .clone(),
-                );
+                agent_binary = Some(required_arg(rest, i, "--binary")?);
             }
             "--docker" if subcommand == "agent" => agent_docker = Some(true),
             "--journald" if subcommand == "agent" => agent_journald = Some(true),
@@ -980,6 +1111,7 @@ fn parse_deploy_command(args: &[String]) -> Result<DeployCommand> {
         "remote" => DeployCommandKind::Remote {
             host: host.ok_or_else(|| anyhow::anyhow!("deploy remote requires a host"))?,
             dry_run,
+            home: remote_home,
         },
         "agent" => DeployCommandKind::Agent {
             hosts: agent_hosts,
@@ -992,6 +1124,158 @@ fn parse_deploy_command(args: &[String]) -> Result<DeployCommand> {
         other => anyhow::bail!("unknown deploy subcommand: {other}"),
     };
     Ok(DeployCommand { kind, json })
+}
+
+fn parse_update_command(args: &[String]) -> Result<UpdateCommand> {
+    let mut json = false;
+    let mut dry_run = false;
+    let mut profile: Option<String> = None;
+    let mut binary: Option<String> = None;
+    let mut rest = Vec::new();
+    let mut i = 0usize;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--json" => json = true,
+            "--dry-run" => {
+                dry_run = true;
+            }
+            "--profile" => {
+                i += 1;
+                profile = Some(required_arg(args, i, "--profile")?);
+            }
+            "--binary" => {
+                i += 1;
+                binary = Some(required_arg(args, i, "--binary")?);
+            }
+            "--help" | "-h" => {
+                print_usage();
+                std::process::exit(0);
+            }
+            other => rest.push(other.to_string()),
+        }
+        i += 1;
+    }
+
+    if rest.first().map(String::as_str) == Some("config") {
+        if dry_run {
+            anyhow::bail!("--dry-run is only valid for `cortex update` run scopes");
+        }
+        if binary.is_some() {
+            anyhow::bail!("--binary is only valid for `cortex update clients|agents`");
+        }
+        return parse_update_config_command(&rest[1..], json, profile);
+    }
+
+    let scope = match rest.as_slice() {
+        [] => cortex::update::UpdateScope::All,
+        [scope] if scope == "all" => cortex::update::UpdateScope::All,
+        [scope] if scope == "server" => cortex::update::UpdateScope::Server,
+        [scope] if scope == "clients" || scope == "agents" => cortex::update::UpdateScope::Clients,
+        [other] => anyhow::bail!("unknown update scope: {other}"),
+        _ => anyhow::bail!("update accepts at most one scope"),
+    };
+    if scope == cortex::update::UpdateScope::Server && binary.is_some() {
+        anyhow::bail!("--binary is only valid for `cortex update all|clients|agents`");
+    }
+    Ok(UpdateCommand {
+        kind: UpdateCommandKind::Run {
+            scope,
+            dry_run,
+            profile,
+            binary,
+        },
+        json,
+    })
+}
+
+fn parse_update_config_command(
+    args: &[String],
+    json: bool,
+    profile: Option<String>,
+) -> Result<UpdateCommand> {
+    let (target, rest) = args
+        .split_first()
+        .ok_or_else(|| anyhow::anyhow!("update config requires server or clients"))?;
+    match target.as_str() {
+        "server" => {
+            let mut host = None;
+            let mut home = None;
+            let mut i = 0usize;
+            while i < rest.len() {
+                match rest[i].as_str() {
+                    "--host" => {
+                        i += 1;
+                        host = Some(required_arg(rest, i, "--host")?);
+                    }
+                    "--home" => {
+                        i += 1;
+                        home = Some(required_arg(rest, i, "--home")?);
+                    }
+                    other => anyhow::bail!("unknown update config server argument: {other}"),
+                }
+                i += 1;
+            }
+            Ok(UpdateCommand {
+                kind: UpdateCommandKind::ConfigServer {
+                    host: host
+                        .ok_or_else(|| anyhow::anyhow!("update config server requires --host"))?,
+                    home: home
+                        .ok_or_else(|| anyhow::anyhow!("update config server requires --home"))?,
+                    profile,
+                },
+                json,
+            })
+        }
+        "clients" | "agents" => {
+            let mut hosts = Vec::new();
+            let mut target = None;
+            let mut docker = None;
+            let mut journald = None;
+            let mut i = 0usize;
+            while i < rest.len() {
+                match rest[i].as_str() {
+                    "--hosts" => {
+                        i += 1;
+                        hosts = parse_host_list(&required_arg(rest, i, "--hosts")?);
+                    }
+                    "--target" => {
+                        i += 1;
+                        target = Some(required_arg(rest, i, "--target")?);
+                    }
+                    "--docker" => docker = Some(true),
+                    "--journald" => journald = Some(true),
+                    other => anyhow::bail!("unknown update config clients argument: {other}"),
+                }
+                i += 1;
+            }
+            Ok(UpdateCommand {
+                kind: UpdateCommandKind::ConfigClients {
+                    hosts,
+                    target,
+                    docker,
+                    journald,
+                    profile,
+                },
+                json,
+            })
+        }
+        other => anyhow::bail!("unknown update config target: {other}"),
+    }
+}
+
+fn required_arg(args: &[String], index: usize, flag: &str) -> Result<String> {
+    args.get(index)
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("{flag} requires a value"))
+}
+
+fn parse_host_list(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|host| !host.is_empty())
+        .map(str::to_string)
+        .collect()
 }
 
 /// Which path `ingest shell agent index` should take, given its own flags
