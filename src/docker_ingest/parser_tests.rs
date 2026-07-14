@@ -33,7 +33,7 @@ fn stdout_frame_maps_to_info_log_entry() {
     assert_eq!(entry.hostname, "edge-host-a");
     assert_eq!(entry.facility.as_deref(), Some("local0"));
     assert_eq!(entry.severity, "info");
-    assert_eq!(entry.app_name.as_deref(), Some("edge/nginx/nginx-1"));
+    assert_eq!(entry.app_name.as_deref(), Some("nginx"));
     assert_eq!(entry.process_id.as_deref(), Some("abcdef123456"));
     assert_eq!(entry.message, "started nginx");
     assert_eq!(entry.source_ip, "docker://edge-host-a/nginx-1/stdout");
@@ -150,7 +150,7 @@ fn docker_start_event_maps_to_notice_log_entry() {
     assert_eq!(entry.hostname, "edge-host-a");
     assert_eq!(entry.facility.as_deref(), Some("docker"));
     assert_eq!(entry.severity, "notice");
-    assert_eq!(entry.app_name.as_deref(), Some("edge/nginx/nginx-1"));
+    assert_eq!(entry.app_name.as_deref(), Some("nginx"));
     assert_eq!(entry.process_id.as_deref(), Some("abcdef123456"));
     assert_eq!(
         entry.message,

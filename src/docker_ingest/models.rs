@@ -27,15 +27,25 @@ impl ContainerMeta {
         })
     }
 
+    /// Flat, slash-free app name: `compose_service` when present, else the
+    /// container name. Canonical service identity is resolved separately
+    /// from structured agent-docker metadata (see `src/db/entity_resolution`)
+    /// — this label is a display/search string only, never parsed for
+    /// identity. A slash-triplet shape is deliberately avoided: the resolver
+    /// classifies multi-slash app labels as a legacy shape and excludes them
+    /// from graph projection (see `classify_legacy_shape` in
+    /// `src/db/entity_resolution/vocab.rs`).
     pub(super) fn app_name(&self) -> String {
-        match (&self.compose_project, &self.compose_service) {
-            (Some(project), Some(service)) => format!("{project}/{service}/{}", self.name),
-            (_, Some(service)) => format!("{service}/{}", self.name),
-            _ => self.name.clone(),
-        }
+        self.compose_service
+            .clone()
+            .unwrap_or_else(|| self.name.clone())
     }
 
     pub(super) fn short_id(&self) -> String {
         self.id.chars().take(12).collect()
     }
 }
+
+#[cfg(test)]
+#[path = "models_tests.rs"]
+mod tests;
