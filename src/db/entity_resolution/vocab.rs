@@ -120,9 +120,12 @@ pub fn classify_legacy_shape(value: &str) -> Option<LegacyShape> {
     // So this risk is currently theoretical for OTLP. The legacy central-pull
     // Docker ingest compat path (`docker_ingest::models::ContainerMeta::
     // app_name`, disabled by default, kept for compatibility fixtures/explicit
-    // remote Docker Engine endpoints) still emits the real slash-triplet
-    // shape by design, so classifying it here is correct, not a false
-    // positive. If a future app-label source legitimately needs 2+ slashes,
+    // remote Docker Engine endpoints) was also flattened to match the primary
+    // agent path (no longer emits a slash-triplet — see that function's doc
+    // comment). No currently-active source in this codebase emits a 2+-slash
+    // app label; the `SlashTriplet` classification below only matters for
+    // historical/already-stored rows and any future producer. If a future
+    // app-label source legitimately needs 2+ slashes,
     // narrow this to the specific triplet shape (three non-empty,
     // canonical-component-like segments) instead of widening the exemption
     // list.
