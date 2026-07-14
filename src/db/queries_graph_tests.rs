@@ -329,6 +329,74 @@ fn search_logs_for_service_instances_uses_service_predicates_not_host_fanout() {
 }
 
 #[test]
+fn search_logs_for_service_instances_escapes_like_wildcards() {
+    let (_dir, pool) = test_pool("service-instance-like-escape.db");
+    insert_logs_batch(
+        &pool,
+        &[
+            // `_` is a LIKE single-char wildcard; an unescaped pattern
+            // `my_app/%` would match this row.
+            syslog_row("2026-01-01T00:00:00Z", "tootie", "myxapp/x"),
+            syslog_row("2026-01-01T00:01:00Z", "tootie", "my_app/x"),
+        ],
+    )
+    .unwrap();
+    let rows = search_logs_for_service_instances(
+        &pool,
+        &["tootie/my_app".to_string()],
+        None,
+        None,
+        None,
+        50,
+    )
+    .unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].entry.app_name.as_deref(), Some("my_app/x"));
+}
+
+#[test]
+fn service_instance_fanout_arms_use_index_search_without_temp_btree() {
+    let (_dir, pool) = test_pool("service-instance-plan.db");
+    let conn = pool.get().unwrap();
+    // Two-arm UNION ALL replica of the search_logs_for_service_instances
+    // shape: every arm must be an index search (no `SCAN logs`) and no arm
+    // may sort through a temp b-tree — LIMIT pushdown streams each arm off
+    // idx_logs_host_time in timestamp order.
+    let arm = "SELECT * FROM (SELECT l.id
+          FROM logs l
+         WHERE l.hostname = ? AND (l.app_name = ? OR l.app_name LIKE ? ESCAPE '\\' \
+        OR json_extract(l.metadata_json, '$.agent_docker.compose_service') = ?)
+         ORDER BY l.timestamp DESC, l.id DESC
+         LIMIT ?)";
+    let sql = format!("EXPLAIN QUERY PLAN {arm} UNION ALL {arm}");
+    let plan: Vec<String> = conn
+        .prepare(&sql)
+        .unwrap()
+        .query_map(
+            rusqlite::params![
+                "tootie", "plex", "plex/%", "plex", 100, "shart", "plex", "plex/%", "plex", 100
+            ],
+            |row| row.get::<_, String>(3),
+        )
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap();
+    assert!(
+        plan.iter()
+            .any(|p| p.contains("USING INDEX idx_logs_host_time")),
+        "arms must search idx_logs_host_time: {plan:?}"
+    );
+    assert!(
+        !plan.iter().any(|p| p.starts_with("SCAN logs")),
+        "no arm may full-scan logs: {plan:?}"
+    );
+    assert!(
+        !plan.iter().any(|p| p.contains("TEMP B-TREE")),
+        "no temp b-tree sort allowed: {plan:?}"
+    );
+}
+
+#[test]
 fn search_logs_for_service_instances_rejects_legacy_keys() {
     let (_dir, pool) = test_pool("service-instance-legacy-keys.db");
     insert_logs_batch(

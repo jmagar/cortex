@@ -1487,6 +1487,50 @@ fn bind_in_list(bindings: &mut Vec<rusqlite::types::Value>, values: &[String]) -
     vec!["?"; bindings.len() - start].join(", ")
 }
 
+/// Escape SQL `LIKE` wildcards (`%`, `_`) and the escape character itself
+/// (`\`) so a literal value can be embedded in a pattern used with
+/// `LIKE ? ESCAPE '\'`.
+fn escape_like(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for ch in value.chars() {
+        if matches!(ch, '%' | '_' | '\\') {
+            out.push('\\');
+        }
+        out.push(ch);
+    }
+    out
+}
+
+/// Build the shared per-arm `since`/`until`/`source_kind` filter tail used by
+/// the UNION ALL fan-out queries. Returns the SQL fragment (leading ` AND …`)
+/// and the bindings it consumes, in order.
+fn log_window_filter_tail(
+    since: Option<&str>,
+    until: Option<&str>,
+    source_kinds: Option<&[SourceKind]>,
+) -> (String, Vec<rusqlite::types::Value>) {
+    let mut sql = String::new();
+    let mut bindings: Vec<rusqlite::types::Value> = Vec::new();
+    if let Some(since) = since {
+        sql.push_str(" AND l.timestamp >= ?");
+        bindings.push(rusqlite::types::Value::Text(since.to_string()));
+    }
+    if let Some(until) = until {
+        sql.push_str(" AND l.timestamp <= ?");
+        bindings.push(rusqlite::types::Value::Text(until.to_string()));
+    }
+    if let Some(kinds) = source_kinds {
+        if !kinds.is_empty() {
+            let kind_strs: Vec<String> = kinds.iter().map(|k| k.as_str().to_string()).collect();
+            let ph = bind_in_list(&mut bindings, &kind_strs);
+            sql.push_str(&format!(
+                " AND json_extract(l.metadata_json, '$.source_kind') IN ({ph})"
+            ));
+        }
+    }
+    (sql, bindings)
+}
+
 /// Graph-anchored log fan-out: traverse the investigation graph outward from a
 /// set of seed entities, then return the logs emitted by every related entity
 /// within `[since, until]`.
@@ -1641,64 +1685,52 @@ pub fn search_logs_for_service_instances(
     }
     let limit = limit.clamp(1, 1000);
     let conn = pool.get()?;
-    let mut predicates = Vec::new();
+    let (tail_sql, tail_bindings) = log_window_filter_tail(since, until, source_kinds);
+    // Per-key UNION ALL arms, each with its own LIMIT pushdown so every arm
+    // is an index search on `idx_logs_host_time` (hostname = ?, timestamp
+    // descending) with no full-set temp b-tree. Rows merge in Rust below.
+    let mut arms: Vec<String> = Vec::new();
     let mut bindings: Vec<rusqlite::types::Value> = Vec::new();
     for key in service_instance_keys {
         let Some((host, service)) = super::entity_resolution::split_service_instance_key(key)
         else {
             continue;
         };
-        predicates.push(
-            "(l.hostname = ? AND (l.app_name = ? OR l.app_name LIKE ? \
-             OR json_extract(l.metadata_json, '$.agent_docker.compose_service') = ?))"
-                .to_string(),
-        );
+        arms.push(format!(
+            "SELECT * FROM (SELECT {FTS_SELECT_COLS}
+               FROM logs l
+              WHERE l.hostname = ? AND (l.app_name = ? OR l.app_name LIKE ? ESCAPE '\\' \
+             OR json_extract(l.metadata_json, '$.agent_docker.compose_service') = ?){tail_sql}
+              ORDER BY l.timestamp DESC, l.id DESC
+              LIMIT ?)"
+        ));
         bindings.push(host.to_string().into());
         bindings.push(service.to_string().into());
-        bindings.push(format!("{service}/%").into());
+        bindings.push(format!("{}/%", escape_like(service)).into());
         bindings.push(service.to_string().into());
+        bindings.extend(tail_bindings.iter().cloned());
+        bindings.push((limit as i64).into());
     }
-    if predicates.is_empty() {
+    if arms.is_empty() {
         return Ok(Vec::new());
     }
-    let mut where_sql = format!("({})", predicates.join(" OR "));
-    if let Some(since) = since {
-        where_sql.push_str(" AND l.timestamp >= ?");
-        bindings.push(rusqlite::types::Value::Text(since.to_string()));
-    }
-    if let Some(until) = until {
-        where_sql.push_str(" AND l.timestamp <= ?");
-        bindings.push(rusqlite::types::Value::Text(until.to_string()));
-    }
-    if let Some(kinds) = source_kinds {
-        if !kinds.is_empty() {
-            let kind_strs: Vec<String> = kinds.iter().map(|k| k.as_str().to_string()).collect();
-            let ph = bind_in_list(&mut bindings, &kind_strs);
-            where_sql.push_str(&format!(
-                " AND json_extract(l.metadata_json, '$.source_kind') IN ({ph})"
-            ));
-        }
-    }
-    bindings.push((limit as i64).into());
-    let sql = format!(
-        "SELECT {FTS_SELECT_COLS}
-           FROM logs l
-          WHERE {where_sql}
-          ORDER BY l.timestamp DESC, l.id DESC
-          LIMIT ?"
-    );
+    let sql = arms.join(" UNION ALL ");
     let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt.query_map(rusqlite::params_from_iter(bindings.iter()), map_row)?;
-    rows.map(|row| {
-        row.map(|entry| GraphRelatedLogEntry {
+    let mut entries = stmt
+        .query_map(rusqlite::params_from_iter(bindings.iter()), map_row)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    entries.sort_by(|a, b| b.timestamp.cmp(&a.timestamp).then_with(|| b.id.cmp(&a.id)));
+    entries.dedup_by_key(|entry| entry.id);
+    entries.truncate(limit);
+    Ok(entries
+        .into_iter()
+        .map(|entry| GraphRelatedLogEntry {
             entry,
             inclusion_reason: "service_instance".to_string(),
             resolver_status: "resolved".to_string(),
             fallback_kind: None,
         })
-    })
-    .collect::<rusqlite::Result<Vec<_>>>()
-    .map_err(Into::into)
+        .collect())
 }
 
 /// Graph-anchored, session-scoped correlation inputs for `ai_correlate`.
@@ -2167,38 +2199,32 @@ fn search_logs_by_hostnames(
     }
     let limit = limit.clamp(1, 1000);
     let conn = pool.get()?;
+    let (tail_sql, tail_bindings) = log_window_filter_tail(since, until, source_kinds);
+    // Per-hostname UNION ALL arms with LIMIT pushdown (same shape as
+    // `search_logs_for_service_instances`): each arm is an index search on
+    // `idx_logs_host_time`, merged and re-truncated in Rust.
+    let mut arms: Vec<String> = Vec::new();
     let mut bindings: Vec<rusqlite::types::Value> = Vec::new();
-    let ph = bind_in_list(&mut bindings, hostnames);
-    let mut where_sql = format!("l.hostname IN ({ph})");
-    if let Some(since) = since {
-        where_sql.push_str(" AND l.timestamp >= ?");
-        bindings.push(rusqlite::types::Value::Text(since.to_string()));
+    for hostname in hostnames {
+        arms.push(format!(
+            "SELECT * FROM (SELECT {FTS_SELECT_COLS}
+               FROM logs l
+              WHERE l.hostname = ?{tail_sql}
+              ORDER BY l.timestamp DESC, l.id DESC
+              LIMIT ?)"
+        ));
+        bindings.push(hostname.clone().into());
+        bindings.extend(tail_bindings.iter().cloned());
+        bindings.push((limit as i64).into());
     }
-    if let Some(until) = until {
-        where_sql.push_str(" AND l.timestamp <= ?");
-        bindings.push(rusqlite::types::Value::Text(until.to_string()));
-    }
-    if let Some(kinds) = source_kinds {
-        if !kinds.is_empty() {
-            let kind_strs: Vec<String> = kinds.iter().map(|k| k.as_str().to_string()).collect();
-            let ph = bind_in_list(&mut bindings, &kind_strs);
-            where_sql.push_str(&format!(
-                " AND json_extract(l.metadata_json, '$.source_kind') IN ({ph})"
-            ));
-        }
-    }
-    bindings.push((limit as i64).into());
-    let sql = format!(
-        "SELECT {FTS_SELECT_COLS}
-           FROM logs l
-          WHERE {where_sql}
-          ORDER BY l.timestamp DESC, l.id DESC
-          LIMIT ?"
-    );
+    let sql = arms.join(" UNION ALL ");
     let mut stmt = conn.prepare(&sql)?;
-    let logs = stmt
+    let mut logs = stmt
         .query_map(rusqlite::params_from_iter(bindings.iter()), map_row)?
         .collect::<rusqlite::Result<Vec<_>>>()?;
+    logs.sort_by(|a, b| b.timestamp.cmp(&a.timestamp).then_with(|| b.id.cmp(&a.id)));
+    logs.dedup_by_key(|entry| entry.id);
+    logs.truncate(limit);
     Ok(logs)
 }
 
