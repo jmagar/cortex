@@ -136,8 +136,10 @@ CREATE TABLE IF NOT EXISTS graph_entity_aliases (
     alias_key     TEXT NOT NULL,
     alias_value   TEXT NOT NULL,
     source_kind   TEXT NOT NULL DEFAULT '',
+    -- Migration 42 adds 'refuted' (missed by migrations 35/41 on the other
+    -- three graph tables).
     trust_level   TEXT NOT NULL CHECK (trust_level IN (
-        'verified', 'claimed', 'inferred', 'correlated'
+        'verified', 'claimed', 'inferred', 'correlated', 'refuted'
     )),
     first_seen_at TEXT,
     last_seen_at  TEXT,

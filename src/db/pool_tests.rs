@@ -2384,3 +2384,93 @@ fn migration_41_prunes_relationships_evidence_and_aliases_touching_legacy_entiti
         .unwrap();
     assert_eq!(status, "stale");
 }
+
+#[test]
+fn migration_42_allows_refuted_alias_trust_level() {
+    // Migrations 35/41 added 'refuted' to graph_entities, graph_relationships,
+    // and graph_relationship_evidence but missed graph_entity_aliases.
+    // Migration 42 widens that CHECK too; assert a fresh DB accepts an alias
+    // write at 'refuted' trust without violating the constraint.
+    let dir = tempfile::tempdir().unwrap();
+    let config = test_storage_config(dir.path().join("migration-42-refuted-alias.db"));
+    let pool = init_pool(&config).unwrap();
+    let conn = pool.get().unwrap();
+
+    conn.execute(
+        "INSERT INTO graph_entities
+            (entity_type, canonical_key, display_label, source_kind, source_id, trust_level)
+         VALUES ('host', 'refuted-alias-host', 'refuted-alias-host', 'log', 'fixture', 'verified')",
+        [],
+    )
+    .unwrap();
+    let entity_id = conn.last_insert_rowid();
+
+    conn.execute(
+        "INSERT INTO graph_entity_aliases
+            (entity_id, alias_type, alias_key, alias_value, source_kind, trust_level)
+         VALUES (?1, 'hostname', 'refuted-alias-host', 'refuted-alias-host', 'log', 'refuted')",
+        rusqlite::params![entity_id],
+    )
+    .unwrap();
+
+    let stored_trust: String = conn
+        .query_row(
+            "SELECT trust_level FROM graph_entity_aliases WHERE entity_id = ?1",
+            rusqlite::params![entity_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(stored_trust, "refuted");
+}
+
+#[test]
+fn migration_42_widens_old_aliases_constraint_and_preserves_rows() {
+    // Simulate a populated pre-42 DB: run all migrations, seed an alias row
+    // at a pre-refuted trust level, revert the migration 42 marker, then
+    // re-run init_pool. The rebuilt table must preserve the existing row and
+    // accept a subsequent 'refuted' write.
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("migration-42-widen.db");
+    let entity_id;
+    {
+        let pool = init_pool(&StorageConfig::for_test(db_path.clone())).unwrap();
+        let conn = pool.get().unwrap();
+        conn.execute(
+            "INSERT INTO graph_entities
+                (entity_type, canonical_key, display_label, source_kind, source_id, trust_level)
+             VALUES ('host', 'pre42-host', 'pre42-host', 'log', 'fixture', 'verified')",
+            [],
+        )
+        .unwrap();
+        entity_id = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO graph_entity_aliases
+                (entity_id, alias_type, alias_key, alias_value, source_kind, trust_level)
+             VALUES (?1, 'hostname', 'pre42-host', 'pre42-host', 'log', 'claimed')",
+            rusqlite::params![entity_id],
+        )
+        .unwrap();
+        conn.execute("DELETE FROM schema_migrations WHERE version = 42", [])
+            .unwrap();
+    }
+
+    let pool = init_pool(&StorageConfig::for_test(db_path)).unwrap();
+    let conn = pool.get().unwrap();
+
+    let preserved: String = conn
+        .query_row(
+            "SELECT trust_level FROM graph_entity_aliases WHERE entity_id = ?1",
+            rusqlite::params![entity_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(preserved, "claimed");
+
+    conn.execute(
+        "INSERT INTO graph_entity_aliases
+            (entity_id, alias_type, alias_key, alias_value, source_kind, trust_level)
+         VALUES (?1, 'service_name', 'pre42-host-refuted', 'pre42-host-refuted', 'log', 'refuted')",
+        rusqlite::params![entity_id],
+    )
+    .unwrap();
+}

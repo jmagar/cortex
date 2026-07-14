@@ -39,7 +39,7 @@ pub fn write_lock() -> parking_lot::ReentrantMutexGuard<'static, ()> {
     WRITE_LOCK.lock()
 }
 
-pub const KNOWN_SCHEMA_VERSION: i64 = 41;
+pub const KNOWN_SCHEMA_VERSION: i64 = 42;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SchemaVersionInfo {
@@ -2441,6 +2441,51 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
             contract = crate::db::entity_resolution::vocab::GRAPH_PROJECTION_CONTRACT_V2,
             "Migration 41: canonical entity-resolution graph contract"
         );
+    }
+
+    // Migration 42: add the `refuted` trust level to graph_entity_aliases'
+    // trust_level CHECK. Migrations 35 and 41 added `refuted` to
+    // graph_entities, graph_relationships, and graph_relationship_evidence,
+    // but graph_entity_aliases was missed — an alias write at `refuted`
+    // trust fails this CHECK. Rebuilds the constrained table; strict
+    // superset, ids preserved (mirrors migrations 33/34/35/36/41).
+    if !migration_applied(&conn, 42)? {
+        conn.execute_batch(
+            "BEGIN IMMEDIATE;
+
+             CREATE TABLE graph_entity_aliases_new (
+                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                 entity_id     INTEGER NOT NULL,
+                 alias_type    TEXT NOT NULL,
+                 alias_key     TEXT NOT NULL,
+                 alias_value   TEXT NOT NULL,
+                 source_kind   TEXT NOT NULL DEFAULT '',
+                 trust_level   TEXT NOT NULL CHECK (trust_level IN (
+                     'verified', 'claimed', 'inferred', 'correlated', 'refuted'
+                 )),
+                 first_seen_at TEXT,
+                 last_seen_at  TEXT,
+                 created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                 updated_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                 UNIQUE(entity_id, alias_type, alias_key, source_kind)
+             );
+             INSERT INTO graph_entity_aliases_new
+                 (id, entity_id, alias_type, alias_key, alias_value, source_kind,
+                  trust_level, first_seen_at, last_seen_at, created_at, updated_at)
+             SELECT id, entity_id, alias_type, alias_key, alias_value, source_kind,
+                    trust_level, first_seen_at, last_seen_at, created_at, updated_at
+               FROM graph_entity_aliases;
+             DROP TABLE graph_entity_aliases;
+             ALTER TABLE graph_entity_aliases_new RENAME TO graph_entity_aliases;
+             CREATE INDEX idx_graph_aliases_lookup
+                 ON graph_entity_aliases(alias_type, alias_key);
+             CREATE INDEX idx_graph_aliases_entity
+                 ON graph_entity_aliases(entity_id);
+
+             INSERT OR IGNORE INTO schema_migrations (version) VALUES (42);
+             COMMIT;",
+        )?;
+        tracing::info!("Migration 42: added refuted trust level to graph_entity_aliases");
     }
 
     // A server crash/restart mid-check leaves an orphaned 'running' maintenance
