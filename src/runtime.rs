@@ -240,6 +240,7 @@ impl RuntimeCore {
         let enrichment = EnrichmentConfig {
             authelia_source_ip: config.enrichment.authelia_source_ip.clone(),
             adguard_source_ip: config.enrichment.adguard_source_ip.clone(),
+            agent_docker_source_prefixes: config.enrichment.agent_docker_source_prefixes.clone(),
             scrub_prompts: config.enrichment.scrub_prompts,
             api_token: config.mcp.api_token.0.clone(),
         };

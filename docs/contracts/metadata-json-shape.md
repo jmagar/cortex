@@ -449,3 +449,15 @@ agent prefix); the legacy central-pull `docker.*` namespace is separate and
 is not resolver proof. Canonical resolver proof must use `agent-docker`
 structured metadata; `docker://` and `docker-event://` rows are not proof
 for the resolver-backed graph contract.
+
+**Trust boundary:** the marker travels in the unauthenticated syslog
+message body, so its payload is sender-controlled — without the source
+gate, any port-1514 sender can forge agent-docker identity (same class as
+the CEF `UNIFIdeviceName` gotcha). Receiver enrichment therefore scopes the
+merge: only the `agent_docker` object is taken from the payload, existing
+`metadata_json` keys (including a pre-existing `agent_docker`) are never
+overwritten, and `source_kind` is set from the receiver constant, not the
+payload. Operators SHOULD configure `agent_docker_source_prefixes`
+(`CORTEX_AGENT_DOCKER_SOURCE_PREFIXES`, comma-separated) to restrict
+extraction to hosts running the cortex agent; unset keeps
+extract-from-anywhere compatibility.

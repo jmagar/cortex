@@ -314,6 +314,23 @@ The agent emits the metadata as an internal message prefix
 into `metadata_json` (setting the denormalised `metadata_json.source_kind`
 to `agent-docker`) and strips from `message`.
 
+**Trust boundary:** the marker rides the unauthenticated syslog message
+body, so the payload is sender-controlled — without a source gate, any
+port-1514 sender can forge agent-docker identity (same spoofing class as
+the CEF `UNIFIdeviceName` gotcha; `source_ip` is the only network-verified
+identity). Mitigations in receiver enrichment
+(`src/receiver/enrichment.rs`):
+
+- The merge is scoped: only the `agent_docker` object is accepted, it never
+  overwrites keys already present in `metadata_json`, and
+  `metadata_json.source_kind` is set from the receiver's constant, never
+  from the payload.
+- Operators SHOULD set `agent_docker_source_prefixes` (config.toml
+  `[enrichment]`, env `CORTEX_AGENT_DOCKER_SOURCE_PREFIXES`, comma-separated
+  exact IPs or `10.0.0.`-style subnet prefixes) to restrict extraction to
+  the hosts that actually run the cortex agent. When unset, extraction is
+  accepted from any sender for compatibility.
+
 Canonical resolver proof must use `agent-docker` structured metadata.
 `docker://` and `docker-event://` central-pull rows are not proof for the
 resolver-backed graph contract.

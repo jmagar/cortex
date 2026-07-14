@@ -15,9 +15,9 @@ use super::syslog_sender::{PRI_LOCAL0_INFO, PRI_LOCAL0_WARN, SyslogSender, forma
 const CONTAINER_POLL_SECS: u64 = 30;
 
 /// Message prefix marker carrying structured agent Docker identity metadata.
-/// The receiver enrichment path (`src/receiver/enrichment.rs`) extracts the
-/// JSON payload into `metadata_json` and strips the marker from `message`.
-/// Keep in sync with `AGENT_DOCKER_META_MARKER` there.
+/// Single definition — the receiver enrichment path
+/// (`src/receiver/enrichment.rs`) imports this constant, extracts the JSON
+/// payload into `metadata_json`, and strips the marker from `message`.
 pub(crate) const AGENT_DOCKER_META_MARKER: &str = "[cortex-agent-docker-meta:";
 
 struct ContainerInfo {

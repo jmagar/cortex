@@ -222,6 +222,14 @@ pub struct EnrichmentConfigToml {
     pub authelia_source_ip: Option<String>,
     /// Same gating, for AdGuard JSON tag classification.
     pub adguard_source_ip: Option<String>,
+    /// If non-empty, only extract the `[cortex-agent-docker-meta:…]` marker
+    /// into `metadata_json.agent_docker` when the entry's `source_ip` matches
+    /// one of these prefixes (same octet-boundary semantics as
+    /// `authelia_source_ip`). The marker rides the unauthenticated syslog
+    /// body, so without this gate any port-1514 sender can forge agent
+    /// Docker identity. Empty (default) keeps extract-from-anywhere
+    /// compatibility behaviour.
+    pub agent_docker_source_prefixes: Vec<String>,
     /// Best-effort credential scrubbing on AI-source records. Default true.
     /// Set to false only if downstream consumers need raw prompt text and
     /// you trust every tailnet node.
@@ -240,6 +248,7 @@ impl Default for EnrichmentConfigToml {
         Self {
             authelia_source_ip: None,
             adguard_source_ip: None,
+            agent_docker_source_prefixes: Vec::new(),
             scrub_prompts: true,
             fts_merge_pages: 0,
         }
@@ -1063,6 +1072,10 @@ impl Config {
         env_override_opt_str(
             "CORTEX_ADGUARD_SOURCE_IP",
             &mut config.enrichment.adguard_source_ip,
+        );
+        env_override_list(
+            "CORTEX_AGENT_DOCKER_SOURCE_PREFIXES",
+            &mut config.enrichment.agent_docker_source_prefixes,
         );
         env_override_bool("CORTEX_SCRUB_PROMPTS", &mut config.enrichment.scrub_prompts)?;
         env_override_parse(
