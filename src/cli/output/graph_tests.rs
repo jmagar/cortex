@@ -326,3 +326,24 @@ fn graph_evidence_human_output_reports_missing_source_reason() {
 
     print_graph_evidence_lookup_response(&response, false).unwrap();
 }
+
+#[test]
+fn graph_output_formats_resolver_entity_types_as_first_class_rows() {
+    // logical_service / service_instance rows format through the same
+    // entity pipeline as every other entity type — typed label first, no
+    // generic unknown-type fallback.
+    let logical = entity_line("entity", &graph_entity(1, "logical_service", "plex"));
+    assert!(logical.contains("logical_service"));
+    assert!(logical.contains("plex"));
+
+    let instance = entity_line(
+        "entity",
+        &graph_entity(2, "service_instance", "tootie/plex"),
+    );
+    assert!(instance.contains("service_instance"));
+    assert!(instance.contains("tootie/plex"));
+
+    let summary = entity_summary_label(&graph_summary(3, "service_instance", "tootie/plex"));
+    assert!(summary.contains("service_instance"));
+    assert!(summary.contains("tootie/plex"));
+}

@@ -441,3 +441,25 @@ fn schema_exposes_llm_invocations_status_property() {
         );
     }
 }
+
+#[test]
+fn schema_graph_entity_types_expose_resolver_identity_not_legacy_service() {
+    let tools = tool_definitions();
+    let entity_type = &tools[0]["inputSchema"]["properties"]["entity_type"];
+    let values: Vec<&str> = entity_type["enum"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|value| value.as_str().unwrap())
+        .collect();
+    assert!(values.contains(&"logical_service"));
+    assert!(values.contains(&"service_instance"));
+    assert!(
+        !values.contains(&"service"),
+        "legacy `service` must not be offered as a supported graph identity input"
+    );
+    let desc = entity_type["description"].as_str().unwrap();
+    assert!(desc.contains("logical_service"));
+    assert!(desc.contains("service_instance"));
+    assert!(desc.contains("rejected_legacy_shape"));
+}

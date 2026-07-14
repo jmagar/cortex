@@ -64,7 +64,9 @@ are populated today.
 | `source_ip` | `logs.source_ip` | Raw source string from the log row, normalized as a key. Despite the name, this can be an IP or an ingest URI such as `docker://...`, `docker-event://...`, `agent-command://...`, or `shell-history://...`. |
 | `app` | `logs.app_name`, `error_signatures.sample_app_name` | Application/process label observed in logs or error summaries. |
 | `container` | Docker log/event rows | Keyed by Docker host plus container id or name. |
-| `service` | Docker compose labels, inventory services | Log-derived services are keyed by Docker host, compose project, and service. Inventory services are keyed by host and service name, with an additional bare-name alias only when unique in the inventory snapshot. |
+| `logical_service` | Resolver decisions over agent Docker metadata and verified inventory | Canonical logical service identity, keyed by the bare canonical name (`plex`). One node per service regardless of how many hosts run it. |
+| `service_instance` | Resolver decisions over agent Docker metadata and verified inventory | Host-scoped runtime deployment, keyed `host/service` (`tootie/plex`). Linked to its logical service via `instance_of`. |
+| `service` | Legacy (pre entity-resolution) — no longer projected | Stale defect shapes such as `tootie:plex` and `tootie:plex:plex`. Deleted by migration 41; rejected on lookup surfaces with `rejected_legacy_shape`. |
 | `compose_project` | Docker compose project labels, inventory compose projects | Log-derived projects are keyed by Docker host plus project. Inventory projects are scoped by the provenance source host. |
 | `reverse_proxy` | Inventory reverse proxy routes | Keyed from the route id; display label usually comes from the first server name. |
 | `domain` | Inventory reverse proxy server names, AdGuard DNS queries | Reverse proxy domains are verified inventory facts; AdGuard query domains are inferred from DNS logs. Service domains are aliases on `service`, not standalone domain nodes, unless another source creates a domain entity. |
@@ -99,6 +101,7 @@ These are all valid relationship types.
 | `authenticated_as` | Yes | A user authenticated to the log row's host through Authelia. |
 | `accessed` | Yes | A user/device accessed a host or domain. |
 | `communicates_with` | Reserved | Vocabulary for future device-to-peer flow ingestion, not emitted today. |
+| `instance_of` | Yes | A `service_instance` is a deployment of a `logical_service` (`tootie/plex instance_of plex`). |
 
 Relationship direction is meaningful. For example, `service runs_on host` is
 not equivalent to `host runs_on service`.

@@ -42,6 +42,12 @@ pub const ENTITY_TYPE_GIT_COMMIT: &str = "git_commit";
 pub const ENTITY_TYPE_USER: &str = "user";
 /// A client endpoint (DNS client IP, MAC) distinct from a server `host`.
 pub const ENTITY_TYPE_DEVICE: &str = "device";
+/// Canonical logical service identity (`plex`), resolver-owned.
+pub const ENTITY_TYPE_LOGICAL_SERVICE: &str =
+    crate::db::entity_resolution::vocab::ENTITY_TYPE_LOGICAL_SERVICE;
+/// Host-scoped runtime deployment of a logical service (`tootie/plex`).
+pub const ENTITY_TYPE_SERVICE_INSTANCE: &str =
+    crate::db::entity_resolution::vocab::ENTITY_TYPE_SERVICE_INSTANCE;
 
 pub const ENTITY_TYPES: &[&str] = &[
     ENTITY_TYPE_HOST,
@@ -61,6 +67,8 @@ pub const ENTITY_TYPES: &[&str] = &[
     ENTITY_TYPE_GIT_COMMIT,
     ENTITY_TYPE_USER,
     ENTITY_TYPE_DEVICE,
+    ENTITY_TYPE_LOGICAL_SERVICE,
+    ENTITY_TYPE_SERVICE_INSTANCE,
 ];
 
 pub const REL_OBSERVED_AS: &str = "observed_as";
@@ -81,6 +89,8 @@ pub const REL_AUTHENTICATED_AS: &str = "authenticated_as";
 pub const REL_ACCESSED: &str = "accessed";
 /// A device communicates with a peer (UniFi flow data). Vocabulary-reserved.
 pub const REL_COMMUNICATES_WITH: &str = "communicates_with";
+/// A service instance is a deployment of a logical service (resolver-owned).
+pub const REL_INSTANCE_OF: &str = crate::db::entity_resolution::vocab::REL_INSTANCE_OF;
 
 pub const RELATIONSHIP_TYPES: &[&str] = &[
     REL_OBSERVED_AS,
@@ -98,6 +108,7 @@ pub const RELATIONSHIP_TYPES: &[&str] = &[
     REL_AUTHENTICATED_AS,
     REL_ACCESSED,
     REL_COMMUNICATES_WITH,
+    REL_INSTANCE_OF,
 ];
 
 pub const TRUST_VERIFIED: &str = "verified";
@@ -148,6 +159,9 @@ pub fn reason_code_namespace(reason_code: &str) -> &'static str {
         REASON_AUTHELIA_AUTH => "source:authelia:auth",
         REASON_AI_SESSION_PROJECT => "derivation:ai:session_project",
         REASON_ERROR_SIGNATURE_MATCH => "derivation:error:signature_match",
+        REASON_RESOLVER_INSTANCE_OF => "derivation:resolver:instance_of",
+        REASON_RESOLVER_SERVICE_INSTANCE => "derivation:resolver:service_instance",
+        REASON_RESOLVER_RAW_APP_LABEL => "derivation:resolver:raw_app_label",
         _ => "unknown:unknown:unknown",
     }
 }
@@ -209,6 +223,16 @@ pub const REASON_ADGUARD_CLIENT_QUERY: &str = "adguard_client_query";
 pub const REASON_SHELL_HISTORY_USER: &str = "shell_history_user";
 /// Authelia auth event — links a user to the service/host they authenticated to.
 pub const REASON_AUTHELIA_AUTH: &str = "authelia_auth";
+/// Resolver linked a `service_instance` to its `logical_service`.
+pub const REASON_RESOLVER_INSTANCE_OF: &str =
+    crate::db::entity_resolution::vocab::REASON_RESOLVER_INSTANCE_OF;
+/// Resolver projected a `service_instance` from structured evidence.
+pub const REASON_RESOLVER_SERVICE_INSTANCE: &str =
+    crate::db::entity_resolution::vocab::REASON_RESOLVER_SERVICE_INSTANCE;
+/// Resolver linked a raw observed app label to a host (never a self-upgrade
+/// to logical-service identity).
+pub const REASON_RESOLVER_RAW_APP_LABEL: &str =
+    crate::db::entity_resolution::vocab::REASON_RESOLVER_RAW_APP_LABEL;
 
 pub const REASON_CODES: &[&str] = &[
     REASON_SYSLOG_CLAIMED_HOSTNAME,
@@ -232,6 +256,9 @@ pub const REASON_CODES: &[&str] = &[
     REASON_ADGUARD_CLIENT_QUERY,
     REASON_SHELL_HISTORY_USER,
     REASON_AUTHELIA_AUTH,
+    REASON_RESOLVER_INSTANCE_OF,
+    REASON_RESOLVER_SERVICE_INSTANCE,
+    REASON_RESOLVER_RAW_APP_LABEL,
 ];
 
 pub const PROJECTION_STATUS_NEVER_BUILT: &str = "never_built";
@@ -950,6 +977,62 @@ fn graph_evidence_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<GraphEvi
         metadata_path: row.get(14)?,
         evidence_count: row.get(15)?,
     })
+}
+
+/// Remove stale pre-resolver service topology rows from the graph projection:
+/// every `service` entity (old `host:name` / `host:project:service` canonical
+/// keys) and nested `app` labels shaped like `plex/plex/plex`, plus their
+/// aliases, relationships, and evidence. The canonical replacement is the
+/// resolver-owned `logical_service` / `service_instance` projection; old keys
+/// are deleted, never migrated.
+pub fn cleanup_legacy_service_topology(conn: &mut rusqlite::Connection) -> Result<()> {
+    let _guard = write_lock();
+    let tx = conn.transaction()?;
+    tx.execute(
+        "DELETE FROM graph_relationship_evidence
+          WHERE relationship_id IN (
+              SELECT r.id
+                FROM graph_relationships r
+                JOIN graph_entities src ON src.id = r.src_entity_id
+                JOIN graph_entities dst ON dst.id = r.dst_entity_id
+               WHERE src.entity_type = 'service'
+                  OR dst.entity_type = 'service'
+                  OR (src.entity_type = 'app' AND src.canonical_key LIKE '%/%/%')
+                  OR (dst.entity_type = 'app' AND dst.canonical_key LIKE '%/%/%')
+          )",
+        [],
+    )?;
+    tx.execute(
+        "DELETE FROM graph_relationships
+          WHERE src_entity_id IN (
+              SELECT id FROM graph_entities
+               WHERE entity_type = 'service'
+                  OR (entity_type = 'app' AND canonical_key LIKE '%/%/%')
+          )
+             OR dst_entity_id IN (
+              SELECT id FROM graph_entities
+               WHERE entity_type = 'service'
+                  OR (entity_type = 'app' AND canonical_key LIKE '%/%/%')
+          )",
+        [],
+    )?;
+    tx.execute(
+        "DELETE FROM graph_entity_aliases
+          WHERE entity_id IN (
+              SELECT id FROM graph_entities
+               WHERE entity_type = 'service'
+                  OR (entity_type = 'app' AND canonical_key LIKE '%/%/%')
+          )",
+        [],
+    )?;
+    tx.execute(
+        "DELETE FROM graph_entities
+          WHERE entity_type = 'service'
+             OR (entity_type = 'app' AND canonical_key LIKE '%/%/%')",
+        [],
+    )?;
+    tx.commit()?;
+    Ok(())
 }
 
 pub fn refresh_graph_projection(pool: &DbPool) -> Result<GraphRebuildOutcome> {

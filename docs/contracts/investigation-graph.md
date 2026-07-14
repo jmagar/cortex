@@ -113,7 +113,19 @@ config_artifact
 git_commit
 user
 device
+logical_service
+service_instance
 ```
+
+`logical_service` is the canonical logical service identity (key like `plex`).
+`service_instance` is a host-scoped runtime deployment of a logical service
+(key like `tootie/plex`). These two types replace the legacy `service`
+topology rows as the supported service identity: `tootie:plex`,
+`tootie:plex:plex`, and `plex/plex/plex` are stale defect shapes that are
+deleted by migration 41 and rejected on lookup surfaces with
+`rejected_legacy_shape`. Keep logical identity and deployment topology
+separate: `plex` answers "what is this service", `tootie/plex` answers
+"where does it run".
 
 `user` is a human/identity principal (operator name, authenticated username),
 keyed `{hostname}:{username}`. `device` is a client endpoint (DNS client IP,
@@ -148,12 +160,15 @@ has_artifact
 authenticated_as
 accessed
 communicates_with
+instance_of
 ```
 
 `authenticated_as` links a `user` to a service/host they authenticated to
 (Authelia). `accessed` links a `user` or `device` to a domain/service/host it
 reached (AdGuard DNS, shell-history). `communicates_with` (device↔peer, UniFi
-flow data) is vocabulary-reserved for future flow ingestion.
+flow data) is vocabulary-reserved for future flow ingestion. `instance_of`
+links a `service_instance` to its `logical_service`
+(`service_instance:tootie/plex instance_of logical_service:plex`).
 
 ### 4.3 Trust Levels
 
@@ -230,7 +245,18 @@ shell_history_git_commit
 adguard_client_query
 shell_history_user
 authelia_auth
+resolver_instance_of
+resolver_service_instance
+resolver_raw_app_label
 ```
+
+`resolver_instance_of` records the resolver-derived
+`service_instance instance_of logical_service` edge.
+`resolver_service_instance` records resolver-projected service-instance
+identity from structured evidence (agent Docker metadata, verified
+inventory). `resolver_raw_app_label` records a raw observed log app label
+associated with a host; raw labels never self-upgrade into
+`logical_service` identity.
 
 `adguard_client_query` links a client `device` to the queried `domain` (AdGuard
 DNS). `shell_history_user` links the operating `user` to the host (shell

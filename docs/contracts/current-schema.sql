@@ -100,10 +100,16 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS graph_entities (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    -- Migration 41 (entity_resolution_v2): adds 'logical_service' and
+    -- 'service_instance'. Canonical service identity is
+    -- `logical_service:plex` + `service_instance:tootie/plex`; legacy
+    -- 'service' rows ('tootie:plex', 'tootie:plex:plex') are deleted by the
+    -- migration and no longer projected.
     entity_type   TEXT NOT NULL CHECK (entity_type IN (
         'host', 'container', 'service', 'app', 'source_ip',
         'ai_project', 'ai_session', 'error_signature', 'compose_project',
-        'reverse_proxy', 'domain', 'network', 'storage', 'config_artifact'
+        'reverse_proxy', 'domain', 'network', 'storage', 'config_artifact',
+        'git_commit', 'user', 'device', 'logical_service', 'service_instance'
     )),
     canonical_key TEXT NOT NULL,
     display_label TEXT NOT NULL,
@@ -147,21 +153,29 @@ CREATE TABLE IF NOT EXISTS graph_relationships (
     relationship_key  TEXT NOT NULL UNIQUE,
     src_entity_id     INTEGER NOT NULL,
     dst_entity_id     INTEGER NOT NULL,
+    -- Migration 41 adds 'instance_of' (service_instance -> logical_service)
+    -- and the resolver_* reason codes.
     relationship_type TEXT NOT NULL CHECK (relationship_type IN (
         'observed_as', 'runs_on', 'emitted_by', 'worked_on',
         'matches_signature', 'defines_service', 'routes_to',
         'exposes_domain', 'attached_to', 'mounts', 'backed_by',
-        'has_artifact'
+        'has_artifact', 'authenticated_as', 'accessed',
+        'communicates_with', 'instance_of'
     )),
     reason_code       TEXT NOT NULL CHECK (reason_code IN (
         'syslog_claimed_hostname', 'log_app_name', 'docker_container_id',
         'docker_service_label', 'ai_session_project', 'heartbeat_host_state',
         'error_signature_match', 'inventory_node', 'inventory_service',
         'compose_config', 'reverse_proxy_config', 'docker_network',
-        'storage_probe', 'config_artifact'
+        'storage_probe', 'config_artifact', 'agent_command_session',
+        'agent_command_cwd_infer', 'agent_command_git_commit',
+        'shell_history_git_commit', 'adguard_client_query',
+        'shell_history_user', 'authelia_auth',
+        'resolver_instance_of', 'resolver_service_instance',
+        'resolver_raw_app_label'
     )),
     trust_level       TEXT NOT NULL CHECK (trust_level IN (
-        'verified', 'claimed', 'inferred', 'correlated'
+        'verified', 'claimed', 'inferred', 'correlated', 'refuted'
     )),
     confidence        REAL NOT NULL DEFAULT 0.0 CHECK (confidence >= 0.0 AND confidence <= 1.0),
     evidence_count    INTEGER NOT NULL DEFAULT 0 CHECK (evidence_count >= 0),
@@ -194,12 +208,17 @@ CREATE TABLE IF NOT EXISTS graph_relationship_evidence (
         'docker_service_label', 'ai_session_project', 'heartbeat_host_state',
         'error_signature_match', 'inventory_node', 'inventory_service',
         'compose_config', 'reverse_proxy_config', 'docker_network',
-        'storage_probe', 'config_artifact'
+        'storage_probe', 'config_artifact', 'agent_command_session',
+        'agent_command_cwd_infer', 'agent_command_git_commit',
+        'shell_history_git_commit', 'adguard_client_query',
+        'shell_history_user', 'authelia_auth',
+        'resolver_instance_of', 'resolver_service_instance',
+        'resolver_raw_app_label'
     )),
     reason_text           TEXT,
     confidence_delta      REAL NOT NULL DEFAULT 0.0 CHECK (confidence_delta >= -1.0 AND confidence_delta <= 1.0),
     trust_level           TEXT NOT NULL CHECK (trust_level IN (
-        'verified', 'claimed', 'inferred', 'correlated'
+        'verified', 'claimed', 'inferred', 'correlated', 'refuted'
     )),
     safe_excerpt          TEXT CHECK (safe_excerpt IS NULL OR length(safe_excerpt) <= 512),
     metadata_path         TEXT,
@@ -234,7 +253,9 @@ CREATE TABLE IF NOT EXISTS graph_projection_meta (
     last_error         TEXT CHECK (last_error IS NULL OR length(last_error) <= 2048),
     last_runtime_ms    INTEGER NOT NULL DEFAULT 0 CHECK (last_runtime_ms >= 0),
     last_chunk_count   INTEGER NOT NULL DEFAULT 0 CHECK (last_chunk_count >= 0),
-    updated_at         TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    updated_at         TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    -- Migration 41: active graph projection contract identifier.
+    projection_contract TEXT NOT NULL DEFAULT 'entity_resolution_v2'
 );
 
 

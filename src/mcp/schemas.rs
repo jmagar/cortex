@@ -80,8 +80,8 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                 },
                 "entity_type": {
                     "type": "string",
-                    "enum": ["host", "container", "service", "app", "source_ip", "ai_project", "ai_session", "error_signature", "compose_project", "config_artifact", "domain", "network", "reverse_proxy", "storage"],
-                    "description": "For action=graph: entity type for exact canonical-key lookup."
+                    "enum": ["host", "container", "logical_service", "service_instance", "app", "source_ip", "ai_project", "ai_session", "error_signature", "compose_project", "config_artifact", "domain", "network", "reverse_proxy", "storage"],
+                    "description": "For action=graph: entity type for exact canonical-key lookup. Service identity is logical_service (key like 'plex') or service_instance (key like 'tootie/plex'); legacy nested keys such as 'tootie:plex' or 'tootie:plex:plex' are rejected with rejected_legacy_shape."
                 },
                 "key": {
                     "type": "string",

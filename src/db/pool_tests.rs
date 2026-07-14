@@ -2036,3 +2036,141 @@ fn migration_38_creates_ai_skill_events_table() {
         .version;
     assert_eq!(version, KNOWN_SCHEMA_VERSION);
 }
+
+#[test]
+fn graph_schema_accepts_entity_resolution_vocabulary() {
+    let dir = tempfile::tempdir().unwrap();
+    let pool = init_pool(&StorageConfig::for_test(
+        dir.path().join("resolver-vocab.db"),
+    ))
+    .unwrap();
+    let conn = pool.get().unwrap();
+    conn.execute(
+        "INSERT INTO graph_entities
+            (entity_type, canonical_key, display_label, source_kind, source_id, trust_level)
+         VALUES
+            ('logical_service', 'plex', 'plex', 'resolver', 'fixture', 'verified'),
+            ('service_instance', 'tootie/plex', 'tootie/plex', 'resolver', 'fixture', 'verified')",
+        [],
+    )
+    .unwrap();
+    let service = conn
+        .query_row(
+            "SELECT id FROM graph_entities WHERE entity_type = 'logical_service'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap();
+    let instance = conn
+        .query_row(
+            "SELECT id FROM graph_entities WHERE entity_type = 'service_instance'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap();
+    conn.execute(
+        "INSERT INTO graph_relationships
+            (relationship_key, src_entity_id, dst_entity_id, relationship_type,
+             reason_code, trust_level, confidence)
+         VALUES (?1, ?2, ?3, 'instance_of', 'resolver_instance_of', 'verified', 1.0)",
+        rusqlite::params![
+            format!("{instance}:instance_of:{service}"),
+            instance,
+            service
+        ],
+    )
+    .unwrap();
+}
+
+#[test]
+fn stale_service_topology_cleanup_removes_old_canonical_rows() {
+    let dir = tempfile::tempdir().unwrap();
+    let pool = init_pool(&StorageConfig::for_test(
+        dir.path().join("stale-service-cleanup.db"),
+    ))
+    .unwrap();
+    let mut conn = pool.get().unwrap();
+    conn.execute(
+        "INSERT INTO graph_entities
+            (entity_type, canonical_key, display_label, source_kind, source_id, trust_level)
+         VALUES
+            ('service', 'tootie:plex', 'plex', 'log', 'fixture', 'inferred'),
+            ('service', 'tootie:plex:plex', 'tootie/plex/plex', 'log', 'fixture', 'inferred'),
+            ('app', 'plex/plex/plex', 'plex/plex/plex', 'log', 'fixture', 'claimed')",
+        [],
+    )
+    .unwrap();
+    crate::db::graph::cleanup_legacy_service_topology(&mut conn).unwrap();
+    let count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM graph_entities
+              WHERE (entity_type = 'service' AND canonical_key LIKE '%:%')
+                 OR (entity_type = 'app' AND canonical_key = 'plex/plex/plex')",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(count, 0);
+}
+
+#[test]
+fn migration_41_cleans_legacy_service_rows_from_populated_db() {
+    // Simulate a populated pre-41 DB: run all migrations, then re-insert the
+    // old-shaped rows a v40 DB could contain and re-run the 41 cleanup SQL by
+    // reverting the migration marker before a second init_pool pass.
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("migration-41-cutover.db");
+    {
+        let pool = init_pool(&StorageConfig::for_test(db_path.clone())).unwrap();
+        let conn = pool.get().unwrap();
+        conn.execute(
+            "INSERT INTO graph_entities
+                (entity_type, canonical_key, display_label, source_kind, source_id, trust_level)
+             VALUES
+                ('service', 'tootie:plex', 'plex', 'log', 'fixture', 'inferred'),
+                ('service', 'tootie:plex:plex', 'tootie/plex/plex', 'log', 'fixture', 'inferred'),
+                ('app', 'plex/plex/plex', 'plex/plex/plex', 'log', 'fixture', 'claimed'),
+                ('app', 'kernel', 'kernel', 'log', 'fixture', 'claimed')",
+            [],
+        )
+        .unwrap();
+        conn.execute("DELETE FROM schema_migrations WHERE version = 41", [])
+            .unwrap();
+        // Drop the 41-added column so the ALTER TABLE in the replayed
+        // migration does not collide.
+        conn.execute_batch("ALTER TABLE graph_projection_meta DROP COLUMN projection_contract;")
+            .unwrap();
+    }
+    let pool = init_pool(&StorageConfig::for_test(db_path)).unwrap();
+    let conn = pool.get().unwrap();
+    let stale: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM graph_entities
+              WHERE entity_type = 'service'
+                 OR (entity_type = 'app' AND canonical_key LIKE '%/%/%')",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(stale, 0);
+    // Plain app labels survive the cutover; only nested defect shapes go.
+    let plain_app: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM graph_entities WHERE entity_type = 'app' AND canonical_key = 'kernel'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(plain_app, 1);
+    let contract: String = conn
+        .query_row(
+            "SELECT projection_contract FROM graph_projection_meta WHERE id = 1",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        contract,
+        crate::db::entity_resolution::vocab::GRAPH_PROJECTION_CONTRACT_V2
+    );
+}

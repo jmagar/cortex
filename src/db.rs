@@ -1,6 +1,7 @@
 #![allow(unused_imports)]
 
 mod analytics;
+pub mod entity_resolution;
 pub(crate) mod error_signatures;
 pub mod graph;
 pub(crate) mod graph_confidence;
