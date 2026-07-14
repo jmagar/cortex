@@ -143,9 +143,13 @@ Executed the full 7-task plan via a dedicated implementation agent, then ran two
 - Should the agent stop emitting the `proj/svc/name` triplet APP-NAME now that identity rides metadata (`syslog-mcp-5k1zb`)? Affects not-yet-upgraded agents' graph identity.
 - Production deploy scheduling for migration 41 + rebuild on tootie (off-peak, backup first — runbook in openwiki/inventory-graph.md).
 
+## Addendum: CodeRabbit round (post-log)
+
+After this log was first saved at HEAD `c2ead9fa`+`07467fce`, the PR was marked ready for review, triggering CodeRabbit. All 10 of its review comments were valid and fixed in commits `cfa0ab8c`, `e37d66ee`, `a8da1859`, `dc6ca31e`, `41c707b7`: contract clarification (schema-tolerated vs lookup-supported `service`), compose-project key separator in the Plex proof doc, `sqlite3 -readonly` in the validation script, shared `AGENT_DOCKER_SOURCE_KIND` constant, canonicalization of slash-form `service_dependencies` input, accurate resolver evidence paths, URL-safe legacy-shape classifier (`http://…` no longer rejected), chunked legacy-topology cleanup (2000-row phases releasing the write lock), startup warning when the agent-docker source gate is empty, and IPv6-aware `source_ip_matches`. All gates re-ran green (2500+ tests, 0 failed); replies posted and all 10 threads resolved. Untracked `.cache`/`dist` worktree symlinks were excluded via `.git/info/exclude`, and the PR was undrafted.
+
 ## Next Steps
 
-1. Mark PR #133 ready for review / merge when desired — all gates and review waves are green; it remains a draft intentionally.
+1. Merge PR #133 when desired — all gates, review waves, and PR comments are resolved; it is marked ready for review.
 2. After merge + deploy: `cortex db backup`, deploy, then `cortex graph rebuild`, then `scripts/validate-canonical-plex-graph.sh` (expect old_key_count=0, new_key_count>0).
 3. Triage the 9 open follow-up beads (`bd list` — labels `review-sweep`/`pre-existing`); highest value: `syslog-mcp-k5i1x` (unbounded generic walk, P2) and `syslog-mcp-jd0j1` (hostname case policy).
 4. Move the completed plan file to a `complete/` folder in a future docs pass (not done during quick-push by design).
