@@ -1641,10 +1641,10 @@ pub fn search_logs_from_graph_related_entities(
             {
                 // `docker_host:container_id` — the leading segment is the
                 // host the workload runs on.
-                if let Some(host) = entity.canonical_key.split(':').next() {
-                    if !host.is_empty() {
-                        hostnames.push(host.to_string());
-                    }
+                if let Some(host) =
+                    super::entity_resolution::container_key_host(&entity.canonical_key)
+                {
+                    hostnames.push(host.to_string());
                 }
             }
             super::graph::ENTITY_TYPE_AI_PROJECT => ai_projects.push(entity.canonical_key.clone()),
@@ -1854,10 +1854,10 @@ pub fn correlate_session_graph(
                     discovered_hosts.push(entity.canonical_key.clone())
                 }
                 super::graph::ENTITY_TYPE_CONTAINER => {
-                    if let Some(host) = entity.canonical_key.split(':').next() {
-                        if !host.is_empty() {
-                            discovered_hosts.push(host.to_string());
-                        }
+                    if let Some(host) =
+                        super::entity_resolution::container_key_host(&entity.canonical_key)
+                    {
+                        discovered_hosts.push(host.to_string());
                     }
                 }
                 super::graph::ENTITY_TYPE_SERVICE_INSTANCE => {
@@ -2115,10 +2115,10 @@ pub fn topic_correlate_inputs(
         match entity.entity_type.as_str() {
             super::graph::ENTITY_TYPE_HOST => discovered_hosts.push(entity.canonical_key.clone()),
             super::graph::ENTITY_TYPE_CONTAINER => {
-                if let Some(host) = entity.canonical_key.split(':').next() {
-                    if !host.is_empty() {
-                        discovered_hosts.push(host.to_string());
-                    }
+                if let Some(host) =
+                    super::entity_resolution::container_key_host(&entity.canonical_key)
+                {
+                    discovered_hosts.push(host.to_string());
                 }
             }
             super::graph::ENTITY_TYPE_SERVICE_INSTANCE => {

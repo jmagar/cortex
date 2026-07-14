@@ -59,6 +59,22 @@ pub fn split_service_instance_key(key: &str) -> Option<(&str, &str)> {
     Some((host, service))
 }
 
+/// Split a canonical container key `host:container_id` and return just the
+/// host segment. Rejects an empty host or an empty container-id segment
+/// (including keys with no colon at all), mirroring the shape validation
+/// `split_service_instance_key` applies to service-instance keys.
+///
+/// This validates *shape*, not canonicality: the returned host is not
+/// checked against the canonical character set, so do not use this as an
+/// input validator for untrusted keys.
+pub fn container_key_host(key: &str) -> Option<&str> {
+    let (host, container) = key.split_once(':')?;
+    if host.is_empty() || container.is_empty() {
+        return None;
+    }
+    Some(host)
+}
+
 /// Classify legacy service identity shapes (`tootie:plex`,
 /// `tootie:plex:plex`, `plex/plex/plex`). Canonical inputs return `None`, as
 /// do free-text inputs that merely contain colons or slashes without looking

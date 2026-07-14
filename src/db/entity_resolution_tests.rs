@@ -14,6 +14,19 @@ fn canonical_service_keys_separate_logic_from_topology() {
 }
 
 #[test]
+fn container_key_host_extracts_leading_host_segment() {
+    assert_eq!(container_key_host("tootie:abc123"), Some("tootie"));
+    // Extra colons (e.g. a malformed docker_host) still yield the leading
+    // segment as host, matching the container-key construction site which
+    // only ever emits a single colon between host and container id.
+    assert_eq!(container_key_host("tootie:abc:123"), Some("tootie"));
+    assert_eq!(container_key_host("no-colon-key"), None);
+    assert_eq!(container_key_host(":abc123"), None);
+    assert_eq!(container_key_host("tootie:"), None);
+    assert_eq!(container_key_host(""), None);
+}
+
+#[test]
 fn old_nested_service_shapes_are_classified_not_normalized() {
     assert_eq!(
         classify_legacy_shape("tootie:plex"),
