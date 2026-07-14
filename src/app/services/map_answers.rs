@@ -27,7 +27,7 @@ impl CortexService {
                 required_map_target(req.domain.as_deref(), "domain", mode)?,
             ),
             "service_dependencies" => (
-                "service".to_string(),
+                "service_instance".to_string(),
                 service_dependency_key(req.host.as_deref(), req.service.as_deref())?,
             ),
             "findings" => {
@@ -104,13 +104,25 @@ fn required_map_target(value: Option<&str>, field: &str, mode: &str) -> ServiceR
     Ok(value.to_string())
 }
 
+/// Resolve the `service_dependencies` target into a canonical
+/// `service_instance` key (`host/service`). Legacy `host:service` /
+/// `host:project:service` identities are rejected, never looked up.
 fn service_dependency_key(host: Option<&str>, service: Option<&str>) -> ServiceResult<String> {
     let service = required_map_target(service, "service", "service_dependencies")?;
-    if service.contains(':') {
-        return Ok(service);
+    if crate::db::entity_resolution::classify_legacy_shape(&service).is_some() {
+        return Err(ServiceError::InvalidInput(format!(
+            "unsupported legacy graph service identity `{service}`: rejected_legacy_shape"
+        )));
+    }
+    if service.contains('/') {
+        return Ok(service.to_string());
     }
     let host = required_map_target(host, "host", "service_dependencies")?;
-    Ok(format!("{host}:{service}"))
+    crate::db::entity_resolution::service_instance_key(&host, service.as_str()).ok_or_else(|| {
+        ServiceError::InvalidInput(
+            "service_dependencies requires a non-empty host and service".into(),
+        )
+    })
 }
 
 fn map_graph_answer(

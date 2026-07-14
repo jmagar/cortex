@@ -199,12 +199,13 @@ fn refresh_graph_projection_extracts_docker_from_metadata_and_source() {
         ),
         2
     );
+    // Hard break: no legacy `service` topology from central-pull rows.
     assert_eq!(
         count(
             &conn,
             "SELECT COUNT(*) FROM graph_entities WHERE entity_type = 'service'"
         ),
-        1
+        0
     );
     assert_eq!(
         count(
@@ -218,7 +219,7 @@ fn refresh_graph_projection_extracts_docker_from_metadata_and_source() {
             &conn,
             "SELECT COUNT(*) FROM graph_relationships WHERE reason_code = 'docker_service_label'"
         ),
-        1
+        0
     );
 }
 
@@ -866,7 +867,7 @@ fn shell_history_git_commit_links_commit_to_host() {
 }
 
 #[test]
-fn docker_compose_label_projects_compose_project_defines_service() {
+fn docker_compose_label_no_longer_projects_legacy_service_topology() {
     let _guard = GRAPH_TEST_LOCK.lock();
     let dir = tempfile::tempdir().unwrap();
     let pool = init_pool(&test_storage_config(dir.path().join("graph-compose.db"))).unwrap();
@@ -886,22 +887,37 @@ fn docker_compose_label_projects_compose_project_defines_service() {
     refresh_graph_projection(&pool).unwrap();
 
     let conn = pool.get().unwrap();
-    // compose_project entity created from the docker label.
-    let project_key: String = conn
-        .query_row(
-            "SELECT canonical_key FROM graph_entities WHERE entity_type = 'compose_project'",
-            [],
-            |r| r.get(0),
-        )
-        .unwrap();
-    assert_eq!(project_key, "dookie:axon");
-
-    // compose_project --defines_service--> service edge (compose_config).
+    // Hard break: central-pull docker labels no longer synthesize legacy
+    // `service` topology (`dookie:axon:qdrant`) or compose_project edges to
+    // it. Canonical service identity requires agent-docker structured
+    // metadata or verified inventory (resolver decisions).
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*) FROM graph_entities WHERE entity_type = 'service'"
+        ),
+        0
+    );
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*) FROM graph_entities WHERE entity_type = 'compose_project'"
+        ),
+        0
+    );
     assert_eq!(
         count(
             &conn,
             "SELECT COUNT(*) FROM graph_relationships
-             WHERE reason_code = 'compose_config' AND relationship_type = 'defines_service'"
+             WHERE reason_code IN ('compose_config', 'docker_service_label')"
+        ),
+        0
+    );
+    // Verified host/container identity is still projected.
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*) FROM graph_relationships WHERE reason_code = 'docker_container_id'"
         ),
         1
     );
@@ -1151,4 +1167,62 @@ fn fair_share_reports_truncated_when_candidate_pool_capped() {
     let (selected, truncated) = fair_share_relationships(candidates, 10, true);
     assert_eq!(selected.len(), 1);
     assert!(truncated, "candidate-pool cap must propagate as truncated");
+}
+
+#[test]
+fn graph_projection_emits_service_instance_not_nested_service_key() {
+    let _guard = GRAPH_TEST_LOCK.lock();
+    let dir = tempfile::tempdir().unwrap();
+    let pool = init_pool(&test_storage_config(
+        dir.path().join("resolver-graph-projection.db"),
+    ))
+    .unwrap();
+    let mut entry = make_entry(
+        "2026-01-01T00:00:00Z",
+        "tootie",
+        Some("plex/plex/plex"),
+        "Plex started",
+    );
+    entry.metadata_json = Some(
+        r#"{"source_kind":"agent-docker","agent_docker":{"host":"tootie","container_id":"abcdef1234567890","container_name":"plex","compose_project":"plex","compose_service":"plex","stream":"stdout"}}"#
+            .to_string(),
+    );
+    insert_logs_batch(&pool, &[entry]).unwrap();
+    refresh_graph_projection(&pool).unwrap();
+    let conn = pool.get().unwrap();
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*) FROM graph_entities WHERE entity_type = 'logical_service' AND canonical_key = 'plex'"
+        ),
+        1
+    );
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*) FROM graph_entities WHERE entity_type = 'service_instance' AND canonical_key = 'tootie/plex'"
+        ),
+        1
+    );
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*) FROM graph_relationships WHERE relationship_type = 'instance_of' AND reason_code = 'resolver_instance_of'"
+        ),
+        1
+    );
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*) FROM graph_entities WHERE entity_type = 'service' AND canonical_key IN ('tootie:plex', 'tootie:plex:plex')"
+        ),
+        0
+    );
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*) FROM graph_entities WHERE entity_type = 'app' AND canonical_key = 'plex/plex/plex'"
+        ),
+        0
+    );
 }

@@ -103,8 +103,8 @@ These are all valid relationship types.
 | `communicates_with` | Reserved | Vocabulary for future device-to-peer flow ingestion, not emitted today. |
 | `instance_of` | Yes | A `service_instance` is a deployment of a `logical_service` (`tootie/plex instance_of plex`). |
 
-Relationship direction is meaningful. For example, `service runs_on host` is
-not equivalent to `host runs_on service`.
+Relationship direction is meaningful. For example, `service_instance runs_on host`
+is not equivalent to `host runs_on service_instance`.
 
 ## Active Edge Rules
 
@@ -174,12 +174,26 @@ parsed as Docker identity rows. Docker host and container can come from
 | Input | Output Edge | Reason | Trust | Confidence | Evidence |
 | --- | --- | --- | --- | --- | --- |
 | Docker host + container id/name | `container runs_on host` | `docker_container_id` | `verified` | `0.9` | `log`, metadata path `logs.source_ip/metadata_json` |
-| Compose service or container name | `container runs_on service` | `docker_service_label` | `inferred` | `0.7` | `log`, metadata path `metadata_json.compose_service` |
-| Explicit compose project label | `compose_project defines_service service` | `compose_config` | `inferred` | `0.7` | `log`, metadata path `metadata_json.compose_project` |
 
-If `compose_project` is missing for the service edge, Docker host is used as
-the project key fallback. The `compose_project defines_service service` edge is
-created only when an explicit compose project label is present.
+Hard break (entity_resolution_v2): central-pull rows keep verified
+host/container edges only. They no longer synthesize legacy `service`
+topology (`host:project:service`) or compose edges; canonical service
+identity comes exclusively from resolver decisions over structured
+agent-docker metadata and verified inventory.
+
+### Agent Docker Identity Rows
+
+Rows carrying `metadata_json.agent_docker` (structured identity attached by
+the host-local agent) project through the deterministic resolver:
+
+| Input | Output | Reason | Trust | Confidence | Evidence |
+| --- | --- | --- | --- | --- | --- |
+| `agent_docker.host` + `compose_service` (or `container_name`) | `logical_service` and `service_instance` entities | n/a | `verified` | n/a | entity source is `log` |
+| Resolver decision pair | `service_instance instance_of logical_service` | `resolver_instance_of` | `verified` | `1.0` | `log`, metadata path `metadata_json.agent_docker` |
+
+Central-pull `docker://` / `docker-event://` rows are ignored by the
+resolver (not proof). Nested slash-triplet app labels (`plex/plex/plex`)
+are never projected as `app` entities.
 
 ### Heartbeats
 
@@ -219,19 +233,24 @@ does not emit host relationship evidence. It creates entities and aliases.
 
 | Input | Output Edge / Alias | Reason | Trust | Confidence | Evidence |
 | --- | --- | --- | --- | --- | --- |
-| `InventoryService.name`, `host`, `id` | `service` entity | n/a | from inventory trust | n/a | entity source is `app_inventory` |
-| `InventoryService.domains` | `domain` alias on service | n/a | from inventory trust | n/a | alias source is `app_inventory` |
-| `InventoryService.host` matching an inventory host | `service runs_on host` | `inventory_service` | `inferred` | `0.85` | `app_inventory` |
-| `InventoryService.mounts[].target` | `service mounts storage` | `storage_probe` | `inferred` | `0.65` | `app_inventory` |
+| `InventoryService.name` | `logical_service` entity (`plex`) | n/a | from inventory trust | n/a | entity source is `app_inventory` |
+| `InventoryService.name`, `host` | `service_instance` entity (`tootie/plex`) | n/a | from inventory trust | n/a | entity source is `app_inventory` |
+| Instance + logical pair | `service_instance instance_of logical_service` | `resolver_instance_of` | from inventory trust | `0.95` | `app_inventory` |
+| `InventoryService.domains` | `domain` alias on the service instance | n/a | from inventory trust | n/a | alias source is `app_inventory` |
+| `InventoryService.host` matching an inventory host | `service_instance runs_on host` | `inventory_service` | `inferred` | `0.85` | `app_inventory` |
+| `InventoryService.mounts[].target` | `service_instance mounts storage` | `storage_probe` | `inferred` | `0.65` | `app_inventory` |
 
-Service keying is host-scoped: `{host}:{service}`. A bare service-name alias is
-usable only when that service name is unique across the inventory snapshot.
+Service-instance keying is `host/service` (`tootie/plex`); legacy
+`{host}:{service}` keys are never emitted. A service without host context
+projects the `logical_service` only — no `unknown/` instance is guessed. A
+bare service-name alias is usable only when that service name is unique
+across the inventory snapshot.
 
 ### Inventory Compose Projects
 
 | Input | Output Edge | Reason | Trust | Confidence | Evidence |
 | --- | --- | --- | --- | --- | --- |
-| `ComposeProject.services` matching inventory services | `compose_project defines_service service` | `compose_config` | `verified` | `0.90` | `app_inventory` |
+| `ComposeProject.services` matching inventory services | `compose_project defines_service service_instance` | `compose_config` | `verified` | `0.90` | `app_inventory` |
 | `ComposeProject.compose_files` matching artifact refs | `compose_project has_artifact config_artifact` | `config_artifact` | `verified` | `0.95` | `app_inventory` |
 
 Compose project keys are scoped by source host, derived from the provenance
@@ -242,7 +261,7 @@ source string.
 | Input | Output Edge | Reason | Trust | Confidence | Evidence |
 | --- | --- | --- | --- | --- | --- |
 | `ReverseProxyRoute.server_names` | `reverse_proxy exposes_domain domain` | `reverse_proxy_config` | `verified` | `0.95` | `app_inventory` |
-| `ReverseProxyRoute.upstreams` matching inventory services | `reverse_proxy routes_to service` | `reverse_proxy_config` | `verified` | `0.85` | `app_inventory` |
+| `ReverseProxyRoute.upstreams` matching inventory services | `reverse_proxy routes_to service_instance` | `reverse_proxy_config` | `verified` | `0.85` | `app_inventory` |
 
 Upstream matching understands service names and service endpoints. Ambiguous
 bare names are left unlinked.
@@ -251,7 +270,7 @@ bare names are left unlinked.
 
 | Input | Output Edge | Reason | Trust | Confidence | Evidence |
 | --- | --- | --- | --- | --- | --- |
-| `NetworkSegment.members` matching inventory services | `service attached_to network` | `docker_network` | `verified` | `0.80` | `app_inventory` |
+| `NetworkSegment.members` matching inventory services | `service_instance attached_to network` | `docker_network` | `verified` | `0.80` | `app_inventory` |
 
 Network keys are scoped by source host.
 

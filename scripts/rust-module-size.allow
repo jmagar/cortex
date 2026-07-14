@@ -10,6 +10,7 @@ src/cli/parse_logs.rs
 src/command_log.rs
 src/config.rs
 src/db/graph.rs
+src/db/graph_inventory.rs
 src/db/maintenance.rs
 src/db/pool.rs
 src/doctor.rs

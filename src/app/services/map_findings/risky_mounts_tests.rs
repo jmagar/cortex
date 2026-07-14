@@ -59,3 +59,9 @@ fn safe_mount_target_renders_sensitive_targets_safely() {
     assert_eq!(safe_mount_target("/mnt/user/appdata/app"), "appdata_path");
     assert_eq!(safe_mount_target("relative"), "relative_mount_target");
 }
+
+#[test]
+fn canonical_service_key_is_a_service_instance_key_not_legacy_host_colon_name() {
+    assert_eq!(canonical_service_key("Tootie", " Plex "), "tootie/plex");
+    assert!(!canonical_service_key("tootie", "plex").contains(':'));
+}

@@ -488,10 +488,10 @@ async fn map_action_host_services_mode_returns_graph_answer() {
             .as_array()
             .unwrap()
             .iter()
-            .any(|row| row["entity_type"] == "service"
-                && row["key"] == "squirts:swag"
+            .any(|row| row["entity_type"] == "service_instance"
+                && row["key"] == "squirts/swag"
                 && row["relationship_type"] == "runs_on"),
-        "host_services should include services running on the host: {answer}"
+        "host_services should include service instances running on the host: {answer}"
     );
     assert!(
         answer["evidence"]
@@ -558,10 +558,10 @@ async fn map_action_domain_routes_mode_returns_proxy_graph_answer() {
             .as_array()
             .unwrap()
             .iter()
-            .any(|row| row["entity_type"] == "service"
-                && row["key"] == "squirts:swag"
+            .any(|row| row["entity_type"] == "service_instance"
+                && row["key"] == "squirts/swag"
                 && row["relationship_type"] == "routes_to"),
-        "domain_routes should include the route target service through the proxy: {answer}"
+        "domain_routes should include the route target service instance through the proxy: {answer}"
     );
     assert!(
         answer["proof_queries"]
@@ -593,6 +593,46 @@ async fn map_action_graph_mode_requires_target_fields_before_snapshot_work() {
 
 #[tokio::test]
 #[serial_test::serial]
+async fn map_action_service_dependencies_mode_accepts_bare_service_with_host() {
+    let inventory_dir = tempfile::tempdir().unwrap();
+    let _inventory_env = EnvVarGuard::set_path("CORTEX_INVENTORY_DIR", inventory_dir.path());
+    let h = TestHarness::new();
+    {
+        let _guard = db::graph::GRAPH_TEST_LOCK.lock();
+        project_graph_fixture(&h.pool);
+    }
+
+    let value = execute_tool(
+        &h.state,
+        "cortex",
+        json!({
+            "action": "map",
+            "mode": "service_dependencies",
+            "host": "squirts",
+            "service": "swag"
+        }),
+        None,
+    )
+    .await
+    .unwrap();
+
+    let answer = &value["graph_answer"];
+    assert_eq!(answer["mode"], "service_dependencies");
+    assert_eq!(answer["answer_status"], "ok");
+    assert_eq!(answer["target"]["entity_type"], "service_instance");
+    assert_eq!(answer["target"]["key"], "squirts/swag");
+    assert!(
+        answer["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["entity_type"] == "compose_project" && row["key"] == "squirts:edge"),
+        "service_dependencies should include compose project evidence: {answer}"
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
 async fn map_action_service_dependencies_mode_rejects_legacy_service_keys() {
     let inventory_dir = tempfile::tempdir().unwrap();
     let _inventory_env = EnvVarGuard::set_path("CORTEX_INVENTORY_DIR", inventory_dir.path());
@@ -602,23 +642,24 @@ async fn map_action_service_dependencies_mode_rejects_legacy_service_keys() {
         project_graph_fixture(&h.pool);
     }
 
-    // Legacy `host:service` identity is a hard-break rejection, never a
-    // lookup. (Bare host+service resolves through `service_instance` keys —
-    // see the resolver-backed map coverage.)
-    let err = execute_tool(
-        &h.state,
-        "cortex",
-        json!({
-            "action": "map",
-            "mode": "service_dependencies",
-            "service": "squirts:swag"
-        }),
-        None,
-    )
-    .await
-    .unwrap_err()
-    .to_string();
-    assert!(err.contains("rejected_legacy_shape"), "{err}");
+    // Legacy `host:service` / `host:project:service` identities are a
+    // hard-break rejection, never a lookup.
+    for service in ["squirts:swag", "squirts:edge:swag"] {
+        let err = execute_tool(
+            &h.state,
+            "cortex",
+            json!({
+                "action": "map",
+                "mode": "service_dependencies",
+                "service": service
+            }),
+            None,
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("rejected_legacy_shape"), "{service}: {err}");
+    }
 }
 
 #[tokio::test]
@@ -1630,4 +1671,40 @@ fn parse_optional_timestamp_normalizes_offsets_to_utc() {
 fn parse_optional_timestamp_rejects_invalid_values() {
     let err = crate::app::parse_optional_timestamp(Some("not-a-date"), "from").unwrap_err();
     assert!(err.to_string().contains("Invalid from"));
+}
+
+#[tokio::test]
+async fn graph_action_redacts_sensitive_identifiers_in_entity_responses() {
+    let h = TestHarness::new();
+    {
+        let conn = h.pool.get().unwrap();
+        conn.execute(
+            "INSERT INTO graph_entities
+                (entity_type, canonical_key, display_label, source_kind, source_id, trust_level)
+             VALUES ('config_artifact', 'leaky-artifact',
+                     '/home/jmagar/.cortex/compose.yaml',
+                     'app_inventory', 'api_key=super-sensitive', 'verified')",
+            [],
+        )
+        .unwrap();
+    }
+
+    let value = execute_tool(
+        &h.state,
+        "cortex",
+        json!({
+            "action": "graph",
+            "mode": "entity",
+            "entity_type": "config_artifact",
+            "key": "leaky-artifact"
+        }),
+        None,
+    )
+    .await
+    .unwrap();
+
+    let entity = &value["resolved_entity"];
+    assert_eq!(entity["canonical_key"], "leaky-artifact");
+    assert_eq!(entity["display_label"], "[redacted]");
+    assert_eq!(entity["source_id"], "[redacted]");
 }

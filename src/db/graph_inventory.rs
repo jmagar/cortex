@@ -8,13 +8,13 @@ use std::collections::{BTreeMap, btree_map::Entry};
 use anyhow::{Context, Result};
 
 use crate::db::graph;
-use crate::db::{DbPool, write_lock};
+use crate::db::{DbPool, entity_resolution, write_lock};
 use crate::inventory::schema::HomelabInventory;
 
 use self::sql::{
     add_alias, add_relationship, canonical, canonical_or_raw, graph_counts,
-    prune_previous_inventory_projection, safe_inventory_source_id, scoped_inventory_key,
-    service_key, trust, update_projection_meta, upsert_entity,
+    prune_previous_inventory_projection, safe_inventory_source_id, scoped_inventory_key, trust,
+    update_projection_meta, upsert_entity,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -162,18 +162,69 @@ fn build_projection_plan(inventory: &HomelabInventory) -> InventoryProjectionPla
 
     let mut services = BTreeMap::new();
     let mut unique_service_aliases = BTreeMap::new();
+    let mut logical_services: BTreeMap<String, PlannedEntityKey> = BTreeMap::new();
     for service in &inventory.services {
+        // Canonical service identity (entity_resolution_v2): inventory
+        // services project as `logical_service` (`plex`) plus a host-scoped
+        // `service_instance` (`tootie/plex`). Legacy `service` entities
+        // (`host:name`) are never emitted.
+        let Some(logical_key) = entity_resolution::logical_service_key(&service.name) else {
+            continue;
+        };
+        let logical_entity = match logical_services.entry(logical_key.clone()) {
+            Entry::Occupied(entry) => entry.get().clone(),
+            Entry::Vacant(entry) => {
+                let entity = plan.entity(
+                    graph::ENTITY_TYPE_LOGICAL_SERVICE,
+                    &logical_key,
+                    &service.name,
+                    graph::SOURCE_KIND_APP_INVENTORY,
+                    &service.id,
+                    trust(&service.trust_level),
+                    &service.provenance.collected_at,
+                );
+                entry.insert(entity.clone());
+                entity
+            }
+        };
+
+        let instance_key = service
+            .host
+            .as_deref()
+            .and_then(|host| entity_resolution::service_instance_key(host, &service.name));
+        let Some(instance_key) = instance_key else {
+            // No host context: the logical service exists, but there is no
+            // deployment topology to assert. Ambiguity stays visible instead
+            // of being guessed into an `unknown/` instance.
+            insert_unique_alias(
+                &mut unique_service_aliases,
+                canonical_or_raw(&service.name),
+                logical_entity.clone(),
+            );
+            continue;
+        };
         let service_entity = plan.entity(
-            graph::ENTITY_TYPE_SERVICE,
-            &service_key(service),
-            &service.name,
+            graph::ENTITY_TYPE_SERVICE_INSTANCE,
+            &instance_key,
+            &instance_key,
             graph::SOURCE_KIND_APP_INVENTORY,
             &service.id,
             trust(&service.trust_level),
             &service.provenance.collected_at,
         );
-        let scoped_key = service_key(service);
-        services.insert(scoped_key, service_entity.clone());
+        plan.relationship(
+            &service_entity,
+            &logical_entity,
+            graph::REL_INSTANCE_OF,
+            graph::REASON_RESOLVER_INSTANCE_OF,
+            graph::SOURCE_KIND_APP_INVENTORY,
+            &service.id,
+            &service.provenance.collected_at,
+            trust(&service.trust_level),
+            0.95,
+            &format!("{} is an instance of {}", instance_key, logical_key),
+        );
+        services.insert(instance_key.clone(), service_entity.clone());
         insert_unique_alias(
             &mut unique_service_aliases,
             canonical_or_raw(&service.name),
@@ -612,7 +663,8 @@ fn match_service_name_key<'a>(
     services: &'a BTreeMap<String, PlannedEntityKey>,
 ) -> Option<&'a PlannedEntityKey> {
     source_host(source)
-        .and_then(|host| services.get(&canonical_or_raw(&format!("{host}:{name}"))))
+        .and_then(|host| entity_resolution::service_instance_key(host, name))
+        .and_then(|key| services.get(&key))
         .or_else(|| services.get(&canonical_or_raw(name)))
 }
 

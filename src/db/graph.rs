@@ -1665,7 +1665,21 @@ fn extract_log_row(conn: &rusqlite::Connection, row: &LogGraphRow) -> Result<()>
         )?;
     }
 
-    if let Some(app_name) = row.app_name.as_deref().and_then(normalized_value) {
+    // Nested slash-triplet app labels (`plex/plex/plex`) are stale defect
+    // shapes from the pre-resolver agent app-name format. They are never
+    // projected as `app` entities; structured agent-docker metadata carries
+    // the canonical identity instead.
+    let projectable_app = row
+        .app_name
+        .as_deref()
+        .and_then(normalized_value)
+        .filter(|app| {
+            !matches!(
+                crate::db::entity_resolution::classify_legacy_shape(app),
+                Some(crate::db::entity_resolution::LegacyShape::SlashTriplet)
+            )
+        });
+    if let Some(app_name) = projectable_app {
         let app_id = ensure_entity(
             conn,
             ENTITY_TYPE_APP,
@@ -1714,7 +1728,143 @@ fn extract_log_row(conn: &rusqlite::Connection, row: &LogGraphRow) -> Result<()>
     extract_user_device_row(conn, row)?;
     extract_ai_log_row(conn, row)?;
     extract_docker_log_row(conn, row)?;
+    extract_agent_docker_row(conn, row)?;
     Ok(())
+}
+
+/// Project canonical service identity from structured agent Docker metadata
+/// (`metadata_json.agent_docker`) through the deterministic resolver. This is
+/// the supported Docker identity source for the `logical_service` /
+/// `service_instance` graph contract; central-pull `docker://` /
+/// `docker-event://` rows are not resolver proof and are skipped here.
+fn extract_agent_docker_row(conn: &rusqlite::Connection, row: &LogGraphRow) -> Result<()> {
+    let observations = agent_docker_observations_from_log_row(row);
+    if observations.is_empty() {
+        return Ok(());
+    }
+    let decisions = crate::db::entity_resolution::resolve_observations(&observations);
+    project_resolver_decisions(conn, row, &decisions)
+}
+
+/// Read `metadata_json.agent_docker` into resolver observations. Returns
+/// empty when the row has no structured agent identity or is a central-pull
+/// Docker row (`docker://` / `docker-event://`), which is not proof.
+fn agent_docker_observations_from_log_row(
+    row: &LogGraphRow,
+) -> Vec<crate::db::entity_resolution::ResolverObservation> {
+    if row.source_ip.starts_with("docker://") || row.source_ip.starts_with("docker-event://") {
+        return Vec::new();
+    }
+    let meta = parse_metadata(row.metadata_json.as_deref());
+    let Some(agent) = meta
+        .as_ref()
+        .and_then(|value| value.get("agent_docker"))
+        .filter(|value| value.is_object())
+    else {
+        return Vec::new();
+    };
+    let text = |field: &str| {
+        agent
+            .get(field)
+            .and_then(Value::as_str)
+            .and_then(normalized_value)
+            .map(str::to_string)
+    };
+    let (Some(agent_host), Some(container_id), Some(container_name), Some(stream)) = (
+        text("host"),
+        text("container_id"),
+        text("container_name"),
+        text("stream"),
+    ) else {
+        return Vec::new();
+    };
+    let identity = crate::db::entity_resolution::AgentDockerIdentity {
+        agent_host,
+        container_id,
+        container_name,
+        compose_project: text("compose_project"),
+        compose_service: text("compose_service"),
+        image: text("image"),
+        stream,
+        observed_at: row.timestamp.clone(),
+    };
+    crate::db::entity_resolution::observations_from_agent_docker_identity(&identity)
+}
+
+/// Store resolver decisions as graph entities and link each
+/// `service_instance` to its `logical_service` with an `instance_of` edge.
+fn project_resolver_decisions(
+    conn: &rusqlite::Connection,
+    row: &LogGraphRow,
+    decisions: &[crate::db::entity_resolution::ResolvedEntityDecision],
+) -> Result<()> {
+    let source_id = row.id.to_string();
+    let mut logical_ids = std::collections::BTreeMap::new();
+    let mut instance_ids = std::collections::BTreeMap::new();
+    for decision in decisions {
+        let entity_id = ensure_entity(
+            conn,
+            decision.entity_type,
+            &decision.canonical_key,
+            &decision.display_label,
+            SOURCE_KIND_LOG,
+            &source_id,
+            trust_to_graph(decision.trust),
+            Some(&row.timestamp),
+            Some(&row.timestamp),
+        )?;
+        if decision.entity_type == ENTITY_TYPE_LOGICAL_SERVICE {
+            logical_ids.insert(decision.canonical_key.clone(), entity_id);
+        } else if decision.entity_type == ENTITY_TYPE_SERVICE_INSTANCE {
+            instance_ids.insert(decision.canonical_key.clone(), entity_id);
+        }
+    }
+    for (instance_key, instance_id) in instance_ids {
+        if let Some((_, service)) =
+            crate::db::entity_resolution::split_service_instance_key(&instance_key)
+        {
+            if let Some(logical_id) = logical_ids.get(service) {
+                ensure_relationship_with_evidence(
+                    conn,
+                    instance_id,
+                    *logical_id,
+                    REL_INSTANCE_OF,
+                    REASON_RESOLVER_INSTANCE_OF,
+                    TRUST_VERIFIED,
+                    1.0,
+                    EvidenceInput {
+                        evidence_key: evidence_bucket_key(
+                            "log",
+                            row.id,
+                            REASON_RESOLVER_INSTANCE_OF,
+                            &row.timestamp,
+                        ),
+                        source_kind: SOURCE_KIND_LOG,
+                        source_id: &source_id,
+                        source_log_id: Some(row.id),
+                        source_heartbeat_id: None,
+                        source_signature_hash: None,
+                        observed_at: &row.timestamp,
+                        reason_text: Some("resolver linked service instance to logical service"),
+                        confidence_delta: 1.0,
+                        trust_level: TRUST_VERIFIED,
+                        safe_excerpt: Some(&instance_key),
+                        metadata_path: Some("metadata_json.agent_docker"),
+                    },
+                )?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Map resolver trust levels onto graph trust vocabulary.
+fn trust_to_graph(trust: crate::db::entity_resolution::ResolverTrust) -> &'static str {
+    match trust {
+        crate::db::entity_resolution::ResolverTrust::Verified => TRUST_VERIFIED,
+        crate::db::entity_resolution::ResolverTrust::Claimed => TRUST_CLAIMED,
+        crate::db::entity_resolution::ResolverTrust::Inferred => TRUST_INFERRED,
+    }
 }
 
 /// Project user/device identity topology from identity-bearing log rows:
@@ -2459,118 +2609,12 @@ fn extract_docker_log_row(conn: &rusqlite::Connection, row: &LogGraphRow) -> Res
         },
     )?;
 
-    if let Some(service) = metadata_text(&meta, &["compose_service", "docker.compose_service"])
-        .or_else(|| metadata_text(&meta, &["container_name", "docker.container_name"]))
-        .and_then(normalized_value)
-    {
-        let project = metadata_text(&meta, &["compose_project", "docker.compose_project"])
-            .and_then(normalized_value)
-            .unwrap_or(docker_host);
-        let service_key = format!(
-            "{}:{}:{}",
-            normalize_key(docker_host),
-            normalize_key(project),
-            normalize_key(service)
-        );
-        let service_label = format!("{docker_host}/{project}/{service}");
-        let service_id = ensure_entity(
-            conn,
-            ENTITY_TYPE_SERVICE,
-            &service_key,
-            &service_label,
-            SOURCE_KIND_LOG,
-            &source_id,
-            TRUST_INFERRED,
-            Some(&row.timestamp),
-            Some(&row.timestamp),
-        )?;
-        ensure_relationship_with_evidence(
-            conn,
-            container_id,
-            service_id,
-            REL_RUNS_ON,
-            REASON_DOCKER_SERVICE_LABEL,
-            TRUST_INFERRED,
-            0.7,
-            EvidenceInput {
-                evidence_key: evidence_bucket_key(
-                    "log",
-                    row.id,
-                    REASON_DOCKER_SERVICE_LABEL,
-                    &row.timestamp,
-                ),
-                source_kind: SOURCE_KIND_LOG,
-                source_id: &source_id,
-                source_log_id: Some(row.id),
-                source_heartbeat_id: None,
-                source_signature_hash: None,
-                observed_at: &row.timestamp,
-                reason_text: Some("docker compose labels link container to service"),
-                confidence_delta: 0.7,
-                trust_level: TRUST_INFERRED,
-                safe_excerpt: Some(&service_label),
-                metadata_path: Some("metadata_json.compose_service"),
-            },
-        )?;
-
-        // Log-derived compose topology: when the row carries an explicit
-        // `compose_project` label (not the docker_host fallback), project a
-        // `compose_project --defines_service--> service` edge. This activates
-        // the compose_config inventory path from already-ingested docker rows,
-        // so `topic_correlate <project>` reaches the project's services and
-        // containers even when the SSH inventory snapshot is not configured.
-        // Inferred (label-derived); the SSH inventory path emits the same edge
-        // at higher trust when available, and the two converge by natural key.
-        if let Some(compose_project) =
-            metadata_text(&meta, &["compose_project", "docker.compose_project"])
-                .and_then(normalized_value)
-        {
-            let project_key = format!(
-                "{}:{}",
-                normalize_key(docker_host),
-                normalize_key(compose_project)
-            );
-            let project_id = ensure_entity(
-                conn,
-                ENTITY_TYPE_COMPOSE_PROJECT,
-                &project_key,
-                compose_project,
-                SOURCE_KIND_LOG,
-                &source_id,
-                TRUST_INFERRED,
-                Some(&row.timestamp),
-                Some(&row.timestamp),
-            )?;
-            ensure_relationship_with_evidence(
-                conn,
-                project_id,
-                service_id,
-                REL_DEFINES_SERVICE,
-                REASON_COMPOSE_CONFIG,
-                TRUST_INFERRED,
-                0.7,
-                EvidenceInput {
-                    evidence_key: evidence_bucket_key(
-                        "log",
-                        row.id,
-                        REASON_COMPOSE_CONFIG,
-                        &row.timestamp,
-                    ),
-                    source_kind: SOURCE_KIND_LOG,
-                    source_id: &source_id,
-                    source_log_id: Some(row.id),
-                    source_heartbeat_id: None,
-                    source_signature_hash: None,
-                    observed_at: &row.timestamp,
-                    reason_text: Some("docker compose project label defines this service"),
-                    confidence_delta: 0.7,
-                    trust_level: TRUST_INFERRED,
-                    safe_excerpt: Some(&service_label),
-                    metadata_path: Some("metadata_json.compose_project"),
-                },
-            )?;
-        }
-    }
+    // Hard break (entity_resolution_v2): central-pull rows keep verified
+    // host/container edges only. Legacy `service` topology
+    // (`host:project:service`) is no longer emitted from any projection
+    // path; canonical service identity comes exclusively from resolver
+    // decisions over structured agent-docker metadata and verified
+    // inventory (`logical_service` / `service_instance`).
     Ok(())
 }
 

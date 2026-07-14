@@ -50,7 +50,7 @@ fn risky_mount_finding(
     graph_status: &db::graph::GraphProjectionStatus,
     evidence_limit: usize,
 ) -> TopologyFinding {
-    let mut service_entity = entity("service", &row.service_key, &row.service_label);
+    let mut service_entity = entity("service_instance", &row.service_key, &row.service_label);
     service_entity
         .details
         .insert("kind".to_string(), service.kind.clone());
@@ -189,12 +189,16 @@ fn mount_confidence(confidence: f64, read_only: bool, graph_degraded: bool) -> f
     value.clamp(0.0, 1.0)
 }
 
+/// Canonical `service_instance` key (`host/name`) matching the resolver's
+/// graph projection; never the legacy `host:name` shape.
 fn canonical_service_key(host: &str, name: &str) -> String {
-    format!(
-        "{}:{}",
-        canonical_component(host),
-        canonical_component(name)
-    )
+    crate::db::entity_resolution::service_instance_key(host, name).unwrap_or_else(|| {
+        format!(
+            "{}/{}",
+            canonical_component(host),
+            canonical_component(name)
+        )
+    })
 }
 
 fn canonical_component(value: &str) -> String {

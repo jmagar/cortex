@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use rusqlite::{Connection, params};
 
 use crate::db::graph;
-use crate::inventory::schema::{InventoryService, TrustLevel};
+use crate::inventory::schema::TrustLevel;
 
 use super::InventoryGraphStats;
 
@@ -288,14 +288,6 @@ pub(super) fn safe_inventory_source_id(source: &str) -> String {
             .unwrap_or("inventory")
             .to_string(),
     }
-}
-
-pub(super) fn service_key(service: &InventoryService) -> String {
-    canonical_or_raw(&format!(
-        "{}:{}",
-        service.host.as_deref().unwrap_or("unknown"),
-        service.name
-    ))
 }
 
 pub(super) fn canonical_or_raw(value: &str) -> String {

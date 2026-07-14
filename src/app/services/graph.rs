@@ -467,6 +467,20 @@ impl CortexService {
         target: GraphTarget,
         candidate_limit: u32,
     ) -> ServiceResult<(Option<GraphEntity>, Vec<GraphEntityCandidate>)> {
+        let (resolved_entity, candidates) = self
+            .resolve_graph_target_entity_raw(target, candidate_limit)
+            .await?;
+        Ok((
+            resolved_entity.map(graph_entity_safe),
+            candidates.into_iter().map(graph_candidate_safe).collect(),
+        ))
+    }
+
+    async fn resolve_graph_target_entity_raw(
+        &self,
+        target: GraphTarget,
+        candidate_limit: u32,
+    ) -> ServiceResult<(Option<GraphEntity>, Vec<GraphEntityCandidate>)> {
         match target {
             GraphTarget::EntityId(entity_id) => {
                 let entity = self

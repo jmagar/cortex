@@ -18,7 +18,11 @@ pub(super) fn graph_rows_to_models(
             .or_default()
             .push(item.id);
     }
-    let entities: Vec<GraphEntity> = rows.entities.into_iter().map(Into::into).collect();
+    let entities: Vec<GraphEntity> = rows
+        .entities
+        .into_iter()
+        .map(|row| graph_entity_safe(row.into()))
+        .collect();
     let entity_summaries: HashMap<i64, GraphEntitySummary> = entities
         .iter()
         .map(|entity| (entity.id, GraphEntitySummary::from(entity)))
@@ -32,7 +36,12 @@ pub(super) fn graph_rows_to_models(
             let evidence_ids = evidence_ids_by_relationship
                 .remove(&row.id)
                 .unwrap_or_default();
-            graph_relationship_to_model(row, src_entity, dst_entity, evidence_ids)
+            graph_relationship_safe(graph_relationship_to_model(
+                row,
+                src_entity,
+                dst_entity,
+                evidence_ids,
+            ))
         })
         .collect();
     GraphRowsModels {

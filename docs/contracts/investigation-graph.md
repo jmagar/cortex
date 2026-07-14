@@ -449,34 +449,48 @@ Fields:
 | `evidence.metadata_path` | `logs.source_ip/metadata_json` |
 | `evidence.source_log_id` | source `logs.id` |
 
-### 7.5 Container Runs On Service
+### 7.5 Resolver Service Identity (Agent Docker Metadata)
+
+Hard break (entity_resolution_v2): the previous
+`container runs_on service` rule (`docker_service_label`, legacy
+`host:project:service` keys) is REMOVED. Central-pull `docker://` /
+`docker-event://` rows keep only the verified host/container edges from
+7.4 and are not resolver proof.
 
 Input:
 
-- Docker host,
-- `metadata_json.compose_project`,
-- `metadata_json.compose_service`.
+- `metadata_json.agent_docker.host` (required),
+- `metadata_json.agent_docker.container_id` (required),
+- `metadata_json.agent_docker.container_name` (required),
+- `metadata_json.agent_docker.stream` (required),
+- `metadata_json.agent_docker.compose_project` / `compose_service` /
+  `image` (optional).
 
-If `compose_project` is missing, the Docker host is used as the project key.
-If `compose_service` is missing, `container_name` may be used as the service
-value.
+The compose service label (falling back to the container name) is the
+logical identity; the agent host scopes the instance.
 
-Output:
+Outputs:
 
 ```text
-container runs_on service
+logical_service entity            (canonical key: plex)
+service_instance entity           (canonical key: tootie/plex)
+service_instance instance_of logical_service
 ```
 
 Fields:
 
 | Field | Value |
 | --- | --- |
-| `relationship_type` | `runs_on` |
-| `reason_code` | `docker_service_label` |
-| `trust_level` | `inferred` |
-| `confidence` | `0.7` |
-| `evidence.metadata_path` | `metadata_json.compose_service` |
+| `relationship_type` | `instance_of` |
+| `reason_code` | `resolver_instance_of` |
+| `trust_level` | `verified` |
+| `confidence` | `1.0` |
+| `evidence.metadata_path` | `metadata_json.agent_docker` |
 | `evidence.source_log_id` | source `logs.id` |
+
+Nested slash-triplet app labels (`plex/plex/plex`) are never projected as
+`app` entities; raw app labels never self-upgrade into `logical_service`
+identity.
 
 ### 7.6 Error Signature Links
 
@@ -522,13 +536,15 @@ Input:
 Outputs:
 
 ```text
-service runs_on host
-compose_project defines_service service
+logical_service entity (per unique service name)
+service_instance instance_of logical_service
+service_instance runs_on host
+compose_project defines_service service_instance
 compose_project has_artifact config_artifact
 reverse_proxy exposes_domain domain
-reverse_proxy routes_to service
-service attached_to network
-service mounts storage
+reverse_proxy routes_to service_instance
+service_instance attached_to network
+service_instance mounts storage
 host backed_by storage
 ```
 
@@ -536,26 +552,25 @@ Fields:
 
 | Relationship | Reason Code | Trust | Confidence | Evidence Kind |
 | --- | --- | --- | --- | --- |
-| `service runs_on host` | `inventory_service` | `inferred` | `0.85` | `app_inventory` |
-| `compose_project defines_service service` | `compose_config` | `verified` | `0.90` | `app_inventory` |
-| `compose_project defines_service service` | `compose_config` | `inferred` | `0.70` | `log` |
+| `service_instance instance_of logical_service` | `resolver_instance_of` | inventory trust | `0.95` | `app_inventory` |
+| `service_instance runs_on host` | `inventory_service` | `inferred` | `0.85` | `app_inventory` |
+| `compose_project defines_service service_instance` | `compose_config` | `verified` | `0.90` | `app_inventory` |
 | `compose_project has_artifact config_artifact` | `config_artifact` | `verified` | `0.95` | `app_inventory` |
 | `reverse_proxy exposes_domain domain` | `reverse_proxy_config` | `verified` | `0.95` | `app_inventory` |
-| `reverse_proxy routes_to service` | `reverse_proxy_config` | `verified` | `0.85` | `app_inventory` |
-| `service attached_to network` | `docker_network` | `verified` | `0.80` | `app_inventory` |
-| `service mounts storage` | `storage_probe` | `inferred` | `0.65` | `app_inventory` |
+| `reverse_proxy routes_to service_instance` | `reverse_proxy_config` | `verified` | `0.85` | `app_inventory` |
+| `service_instance attached_to network` | `docker_network` | `verified` | `0.80` | `app_inventory` |
+| `service_instance mounts storage` | `storage_probe` | `inferred` | `0.65` | `app_inventory` |
 | `host backed_by storage` | `storage_probe` | `verified` | `0.75` | `source_inventory` |
 
 The inventory projection paths (`compose_config`, `reverse_proxy_config`,
 `docker_network`) are **active**, projected from the homelab inventory snapshot
-(`app_inventory`). `compose_config` is additionally projected from `compose_project`
-labels on already-ingested docker log rows (`log` source, inferred trust), so
-compose topology is available even without an inventory snapshot; the two
-sources converge by natural key.
+(`app_inventory`). Service-instance keying is `host/service` (`tootie/plex`);
+legacy `{host}:{service}` keys are never emitted. A service without host
+context projects the `logical_service` only.
 
 Bare service-name matches are valid only when the service name is unique across
 the inventory snapshot. Ambiguous service names MUST be matched through a
-host-scoped key or left unlinked.
+host-scoped `service_instance` key or left unlinked.
 
 ## 8. Evidence Contract
 

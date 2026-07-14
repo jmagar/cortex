@@ -48,6 +48,49 @@ pub(super) fn graph_source_log_summary_safe(
     }
 }
 
+/// Redact graph identifiers on a public entity: canonical key, display
+/// label, and source id all pass through the same secret/home-path
+/// redaction as evidence excerpts. Redaction covers identifiers, not just
+/// excerpts — a `/home/...` or token-bearing key must never leak through
+/// entity fields.
+pub(super) fn graph_entity_safe(entity: GraphEntity) -> GraphEntity {
+    GraphEntity {
+        canonical_key: redact_graph_text(entity.canonical_key),
+        display_label: redact_graph_text(entity.display_label),
+        source_id: redact_graph_text(entity.source_id),
+        ..entity
+    }
+}
+
+/// Redact graph identifiers on a lookup candidate (entity + alias key).
+pub(super) fn graph_candidate_safe(candidate: GraphEntityCandidate) -> GraphEntityCandidate {
+    GraphEntityCandidate {
+        entity: graph_entity_safe(candidate.entity),
+        match_reason: redact_graph_text(candidate.match_reason),
+        alias_type: candidate.alias_type.map(redact_graph_text),
+        alias_key: candidate.alias_key.map(redact_graph_text),
+    }
+}
+
+/// Redact identifiers on a public relationship: the relationship key plus
+/// embedded entity summaries.
+pub(super) fn graph_relationship_safe(relationship: GraphRelationship) -> GraphRelationship {
+    GraphRelationship {
+        relationship_key: redact_graph_text(relationship.relationship_key),
+        src_entity: relationship.src_entity.map(graph_entity_summary_safe),
+        dst_entity: relationship.dst_entity.map(graph_entity_summary_safe),
+        ..relationship
+    }
+}
+
+fn graph_entity_summary_safe(summary: GraphEntitySummary) -> GraphEntitySummary {
+    GraphEntitySummary {
+        canonical_key: redact_graph_text(summary.canonical_key),
+        display_label: redact_graph_text(summary.display_label),
+        ..summary
+    }
+}
+
 pub(super) fn redact_graph_text(value: String) -> String {
     truncate_chars(&redact_graph_text_unbounded(value), 512)
 }
