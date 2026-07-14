@@ -725,6 +725,16 @@ pub const GRAPH_SERVICE_TOPIC_ENTITY_CAP: usize = 250;
 /// per-level cap.
 pub const GRAPH_SERVICE_TOPIC_HOP_CAP: usize = 50;
 
+/// Bounded entity cap for the general-purpose n-hop walk ([`graph_walk_n_hops`]):
+/// both the recursive CTE's row budget and the final result `LIMIT`. Mirrors
+/// [`GRAPH_SERVICE_TOPIC_ENTITY_CAP`]'s pattern but is set higher, because
+/// `graph_walk_n_hops` traverses every relationship type (it has no
+/// [`GRAPH_SERVICE_TOPIC_RELATIONSHIPS`]-style restriction), so it needs more
+/// headroom to still return a useful topology for its broader caller set
+/// (`search_logs_from_graph_related_entities`, generic `topic_correlate`
+/// seeds).
+pub const GRAPH_WALK_N_HOPS_ENTITY_CAP: usize = 500;
+
 /// Relationship types a service-topic walk may traverse: only the edges
 /// needed for the canonical service proof. Deliberately excludes the broad
 /// log-identity edges (`observed_as`, `emitted_by`) so a service topic never
@@ -817,6 +827,13 @@ pub fn graph_walk_service_topic(
 /// `(dst_entity_id)` — both indexed — so each hop is index-served. `max_depth`
 /// is clamped to `[1, GRAPH_WALK_MAX_DEPTH]`; an empty seed set returns empty.
 ///
+/// Unlike [`graph_walk_service_topic`], this walk traverses every relationship
+/// type, so a densely connected homelab graph can otherwise expand without
+/// bound. Both the recursive CTE and the final result are bounded at
+/// [`GRAPH_WALK_N_HOPS_ENTITY_CAP`] entities (a single overall `LIMIT`, not a
+/// per-level cap — SQLite's recursive CTE `LIMIT` has no per-level form).
+/// Graphs at or under the cap see no behavior change.
+///
 /// This is the reusable traversal primitive behind graph-anchored log fan-out
 /// (`search_logs_from_graph_related_entities`) and topic correlation.
 pub fn graph_walk_n_hops(
@@ -841,10 +858,12 @@ pub fn graph_walk_n_hops(
              JOIN graph_walk gw
                ON r.src_entity_id = gw.entity_id OR r.dst_entity_id = gw.entity_id
              WHERE gw.depth < ? AND r.trust_level != 'refuted'
+             LIMIT ?
          )
          SELECT DISTINCT e.entity_type, e.canonical_key
          FROM graph_entities e
-         JOIN graph_walk gw ON e.id = gw.entity_id"
+         JOIN graph_walk gw ON e.id = gw.entity_id
+         LIMIT ?"
     );
 
     let mut bindings: Vec<rusqlite::types::Value> = start_keys
@@ -852,6 +871,12 @@ pub fn graph_walk_n_hops(
         .map(|k| rusqlite::types::Value::Text(k.clone()))
         .collect();
     bindings.push(rusqlite::types::Value::Integer(depth));
+    bindings.push(rusqlite::types::Value::Integer(
+        GRAPH_WALK_N_HOPS_ENTITY_CAP as i64,
+    ));
+    bindings.push(rusqlite::types::Value::Integer(
+        GRAPH_WALK_N_HOPS_ENTITY_CAP as i64,
+    ));
 
     let mut stmt = conn.prepare(&sql)?;
     let entities = stmt
@@ -3326,9 +3351,8 @@ fn normalize_key(value: &str) -> String {
 }
 
 fn evidence_bucket_key(prefix: &str, source_id: i64, reason: &str, timestamp: &str) -> String {
-    let _ = source_id;
     let bucket = timestamp.get(0..13).unwrap_or(timestamp);
-    format!("{prefix}:{reason}:{bucket}")
+    format!("{prefix}:{reason}:{source_id}:{bucket}")
 }
 
 fn truncate_safe_excerpt(value: &str) -> String {

@@ -1219,6 +1219,29 @@ fn fair_share_reports_truncated_when_candidate_pool_capped() {
 }
 
 #[test]
+fn evidence_bucket_key_distinguishes_by_source_id_within_same_hour_bucket() {
+    // Two evidence rows with the same prefix/reason and timestamps in the
+    // same hour bucket, but different source_ids, must not collapse into a
+    // single dedup key — each originating log/heartbeat/signature must be
+    // able to leave its own evidence row.
+    let a = evidence_bucket_key("log", 1, "log_app_name", "2026-01-01T00:00:00Z");
+    let b = evidence_bucket_key("log", 2, "log_app_name", "2026-01-01T00:12:00Z");
+    assert_ne!(a, b, "distinct source_ids must yield distinct bucket keys");
+
+    // Same source_id, same prefix/reason, same hour bucket still collapses
+    // (that's the intended within-source hourly dedup).
+    let c = evidence_bucket_key("log", 1, "log_app_name", "2026-01-01T00:45:00Z");
+    assert_eq!(
+        a, c,
+        "same source_id within the same hour bucket must dedup"
+    );
+
+    // A different hour bucket for the same source_id must not collapse.
+    let d = evidence_bucket_key("log", 1, "log_app_name", "2026-01-01T01:00:00Z");
+    assert_ne!(a, d, "different hour buckets must not dedup");
+}
+
+#[test]
 fn graph_projection_emits_service_instance_not_nested_service_key() {
     let _guard = GRAPH_TEST_LOCK.lock();
     let dir = tempfile::tempdir().unwrap();
@@ -1383,5 +1406,54 @@ fn canonical_plex_proof_fixture_projects_only_resolver_identity() {
             "SELECT COUNT(*) FROM graph_relationships WHERE relationship_type = 'instance_of'"
         ),
         2
+    );
+}
+
+#[test]
+fn graph_walk_n_hops_enforces_entity_cap() {
+    let _guard = GRAPH_TEST_LOCK.lock();
+    let dir = tempfile::tempdir().unwrap();
+    let pool = init_pool(&test_storage_config(dir.path().join("graph-nhops-cap.db"))).unwrap();
+    let conn = pool.get().unwrap();
+
+    // Star topology: one seed host directly connected to more apps than the
+    // cap allows, all reachable within a single hop. Without a row cap this
+    // walk would return seed + every app (well over GRAPH_WALK_N_HOPS_ENTITY_CAP).
+    let insert_entity = |etype: &str, key: &str| -> i64 {
+        conn.execute(
+            "INSERT INTO graph_entities (entity_type, canonical_key, display_label, trust_level)
+             VALUES (?1, ?2, ?2, 'verified')",
+            rusqlite::params![etype, key],
+        )
+        .unwrap();
+        conn.last_insert_rowid()
+    };
+    let host = insert_entity(ENTITY_TYPE_HOST, "host-cap-seed");
+    let extra_neighbours = GRAPH_WALK_N_HOPS_ENTITY_CAP + 50;
+    for i in 0..extra_neighbours {
+        let app_key = format!("app-cap-{i}");
+        let app = insert_entity(ENTITY_TYPE_APP, &app_key);
+        conn.execute(
+            "INSERT INTO graph_relationships
+                (relationship_key, src_entity_id, dst_entity_id, relationship_type,
+                 reason_code, trust_level, confidence, last_seen_at)
+             VALUES (?1, ?2, ?3, 'emitted_by', 'log_app_name', 'verified', 0.5, '2026-01-01T00:00:00Z')",
+            rusqlite::params![format!("{app}:emitted_by:{host}"), app, host],
+        )
+        .unwrap();
+    }
+    drop(conn);
+
+    let reached = graph_walk_n_hops(
+        &pool.get().unwrap(),
+        &["host-cap-seed".to_string()],
+        GRAPH_WALK_MAX_DEPTH,
+    )
+    .unwrap();
+
+    assert_eq!(
+        reached.len(),
+        GRAPH_WALK_N_HOPS_ENTITY_CAP,
+        "walk must return exactly the capped entity count, not the full {extra_neighbours}-neighbour reach"
     );
 }
