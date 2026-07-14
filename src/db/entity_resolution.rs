@@ -9,8 +9,12 @@
 //! Legacy nested shapes (`tootie:plex`, `tootie:plex:plex`, `plex/plex/plex`)
 //! are classified for rejection, never normalized.
 
+pub mod adapters;
+pub mod observation;
 pub mod vocab;
 
+pub use adapters::*;
+pub use observation::*;
 pub use vocab::*;
 
 #[cfg(test)]

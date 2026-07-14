@@ -306,6 +306,30 @@ Entities are unique by:
 Repeated observations update first/last seen timestamps and keep the existing
 entity id stable within a rebuild.
 
+### 5.1 Resolver Observation Model
+
+Service identity entities (`logical_service`, `service_instance`) are
+constructed from bounded, typed resolver observations
+(`src/db/entity_resolution/observation.rs`), never from ad-hoc topology
+string building. Observations are chunk-local or aggregated in memory:
+there is no per-log resolver-observation table. Each observation carries a
+kind, canonical keys, a safe display label (`safe_display_value` redacts
+credentialed URLs, home paths, and token/secret material and bounds output
+to 128 printable characters), source kind/id, an evidence path, and a
+resolver trust level (`verified` > `claimed` > `inferred`).
+
+Adapter rules (`src/db/entity_resolution/adapters.rs`):
+
+- Structured agent Docker identity (`metadata_json.agent_docker`) yields
+  verified host, logical-service, and service-instance observations. The
+  compose service label (falling back to container name) is the logical
+  identity; the agent host scopes the instance.
+- Verified/observed inventory services yield verified host,
+  logical-service, service-instance, domain, and storage (mount)
+  observations.
+- Raw log app labels yield only a `RawAppLabel` observation. Raw labels
+  never self-upgrade into `logical_service` identity.
+
 ## 6. Relationship Construction Contract
 
 Relationships are unique by:
