@@ -200,8 +200,9 @@ pub struct DockerCheckpoint {
 ## Agent Docker identity rows (`agent-docker`)
 
 Host-local cortex agents stream Docker container logs and forward them as
-RFC 5424 syslog TCP lines. The syslog APP-NAME is truncated/sanitised at 48
-characters, so canonical container identity rides in structured metadata,
+RFC 5424 syslog TCP lines. A syslog APP-NAME over 48 bytes (or empty /
+non-graphic) is replaced wholesale with the `cortex-agent` fallback -- not
+truncated -- so canonical container identity rides in structured metadata,
 not the app label:
 
 ```text

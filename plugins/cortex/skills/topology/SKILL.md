@@ -84,7 +84,8 @@ a bare time window.
 Look up one entity. Valid `entity_type` values: `host`, `container`,
 `logical_service`, `service_instance`, `app`, `source_ip`, `ai_project`,
 `ai_session`, `error_signature`, `compose_project`, `reverse_proxy`,
-`domain`, `network`, `storage`, `config_artifact`.
+`domain`, `network`, `storage`, `config_artifact`, `git_commit`, `user`,
+`device`.
 
 Service identity is `logical_service` (key like `plex`) plus
 `service_instance` (key like `tootie/plex`). Legacy nested identities

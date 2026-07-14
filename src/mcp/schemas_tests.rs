@@ -454,6 +454,12 @@ fn schema_graph_entity_types_expose_resolver_identity_not_legacy_service() {
         .collect();
     assert!(values.contains(&"logical_service"));
     assert!(values.contains(&"service_instance"));
+    for extended in ["git_commit", "user", "device"] {
+        assert!(
+            values.contains(&extended),
+            "entity_type enum must include `{extended}`"
+        );
+    }
     assert!(
         !values.contains(&"service"),
         "legacy `service` must not be offered as a supported graph identity input"

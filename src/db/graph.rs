@@ -229,10 +229,14 @@ pub const REASON_AUTHELIA_AUTH: &str = "authelia_auth";
 pub const REASON_RESOLVER_INSTANCE_OF: &str =
     crate::db::entity_resolution::vocab::REASON_RESOLVER_INSTANCE_OF;
 /// Resolver projected a `service_instance` from structured evidence.
+/// **Vocabulary-reserved:** registered in the schema/reason registry but not
+/// emitted by any projection path today — only `resolver_instance_of` is.
 pub const REASON_RESOLVER_SERVICE_INSTANCE: &str =
     crate::db::entity_resolution::vocab::REASON_RESOLVER_SERVICE_INSTANCE;
 /// Resolver linked a raw observed app label to a host (never a self-upgrade
-/// to logical-service identity).
+/// to logical-service identity). **Vocabulary-reserved:** registered in the
+/// schema/reason registry but not emitted by any projection path today —
+/// only `resolver_instance_of` is.
 pub const REASON_RESOLVER_RAW_APP_LABEL: &str =
     crate::db::entity_resolution::vocab::REASON_RESOLVER_RAW_APP_LABEL;
 
@@ -713,18 +717,6 @@ pub struct GraphWalkEntity {
     pub canonical_key: String,
 }
 
-/// Walk the investigation graph outward from a set of seed entities (matched by
-/// `canonical_key`) and return every distinct entity reachable within
-/// `max_depth` hops, including the seeds themselves (depth 0).
-///
-/// Uses a `WITH RECURSIVE` CTE with `UNION` (not `UNION ALL`) so cycles in the
-/// topology are de-duplicated before each iteration rather than looping. The
-/// recursive join leads on `graph_relationships(src_entity_id)` /
-/// `(dst_entity_id)` — both indexed — so each hop is index-served. `max_depth`
-/// is clamped to `[1, GRAPH_WALK_MAX_DEPTH]`; an empty seed set returns empty.
-///
-/// This is the reusable traversal primitive behind graph-anchored log fan-out
-/// (`search_logs_from_graph_related_entities`) and topic correlation.
 /// Bounded entity cap for service-topic walks (final result LIMIT).
 pub const GRAPH_SERVICE_TOPIC_ENTITY_CAP: usize = 250;
 /// Per-depth allowance folded into the aggregate CTE row budget of
@@ -815,6 +807,18 @@ pub fn graph_walk_service_topic(
     Ok(entities)
 }
 
+/// Walk the investigation graph outward from a set of seed entities (matched by
+/// `canonical_key`) and return every distinct entity reachable within
+/// `max_depth` hops, including the seeds themselves (depth 0).
+///
+/// Uses a `WITH RECURSIVE` CTE with `UNION` (not `UNION ALL`) so cycles in the
+/// topology are de-duplicated before each iteration rather than looping. The
+/// recursive join leads on `graph_relationships(src_entity_id)` /
+/// `(dst_entity_id)` — both indexed — so each hop is index-served. `max_depth`
+/// is clamped to `[1, GRAPH_WALK_MAX_DEPTH]`; an empty seed set returns empty.
+///
+/// This is the reusable traversal primitive behind graph-anchored log fan-out
+/// (`search_logs_from_graph_related_entities`) and topic correlation.
 pub fn graph_walk_n_hops(
     conn: &rusqlite::Connection,
     start_keys: &[String],
@@ -1713,9 +1717,12 @@ fn fetch_log_graph_rows(
 }
 
 /// Per-chunk memo over `ensure_entity` for resolver-projected identities:
-/// identical container identities collapse to one staging upsert per unique
+/// identical container identities collapse to one upsert per unique
 /// `(entity_type, canonical_key)` per chunk transaction. Scoped to the
-/// resolver projection path only.
+/// resolver projection path only. "Staging" applies only to the full
+/// rebuild path; incremental extraction writes the live tables directly.
+/// Tradeoff: within a chunk the memoised entity keeps the `last_seen_at`
+/// of its first upsert, so it can lag later rows in the same chunk.
 type ResolverEntityMemo = std::collections::HashMap<(&'static str, String), i64>;
 
 fn extract_log_row(

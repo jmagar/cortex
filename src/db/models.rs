@@ -229,8 +229,9 @@ pub struct ResolvedTopicEntity {
     pub entity_type: String,
     pub canonical_key: String,
     pub match_kind: &'static str,
-    /// Resolver outcome: `Resolved` for exact identity, `Ambiguous` for weak
-    /// prefix/label candidates that never drive log fan-out. Stringified via
+    /// Resolver outcome: `Resolved` for exact canonical-key and alias
+    /// identity matches, `Ambiguous` for weak prefix/label candidates that
+    /// never drive log fan-out. Stringified via
     /// [`super::entity_resolution::ResolverStatus::as_str`] only at the serde
     /// boundary.
     pub resolver_status: super::entity_resolution::ResolverStatus,

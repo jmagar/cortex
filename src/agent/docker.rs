@@ -148,9 +148,11 @@ async fn follow_container(
         } else {
             &stdout_prefix
         };
-        // The RFC 5424 APP-NAME is truncated/sanitised at 48 chars, so
-        // canonical identity rides in the metadata prefix instead. The
-        // receiver strips it into `metadata_json.agent_docker`.
+        // An RFC 5424 APP-NAME over 48 bytes (or empty / non-graphic) is
+        // REPLACED wholesale with the `cortex-agent` fallback by
+        // `sanitise_field` -- not truncated -- so canonical identity rides in
+        // the metadata prefix instead. The receiver strips it into
+        // `metadata_json.agent_docker`.
         let msg = format!("{prefix}{msg}");
         let ts = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
         let line = format_rfc5424(

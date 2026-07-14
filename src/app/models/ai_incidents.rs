@@ -330,8 +330,9 @@ pub struct ResolvedTopicEntity {
     pub key: String,
     /// How it matched: `exact`, `prefix`, `label`, or `alias`.
     pub match_kind: String,
-    /// Resolver outcome: `resolved` for exact identity, `ambiguous` for weak
-    /// label/prefix candidates that never drive log fan-out.
+    /// Resolver outcome: `resolved` for exact canonical-key and alias
+    /// identity matches, `ambiguous` for weak label/prefix candidates that
+    /// never drive log fan-out.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resolver_status: Option<String>,
 }

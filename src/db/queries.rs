@@ -1700,9 +1700,10 @@ pub fn search_logs_from_graph_related_entities(
 
 /// Fetch logs that belong to specific service instances (`host/service`
 /// keys) using indexed service-scoped predicates: exact hostname AND
-/// (app label equals or is prefixed by the service name, or the structured
-/// agent-docker compose service matches). This is the canonical service log
-/// fan-out — it never expands to all logs on the host.
+/// (app label equal to the service name OR starting with `{service}/`, or
+/// the structured agent-docker compose service matches). This is the
+/// canonical service log fan-out — it never expands to all logs on the
+/// host.
 pub fn search_logs_for_service_instances(
     pool: &DbPool,
     service_instance_keys: &[String],
@@ -1782,6 +1783,9 @@ pub fn search_logs_for_service_instances(
 /// Falls back to a plain `ai_session_id`-filtered query (`used_graph = false`)
 /// when the graph has no entity for the session yet. Returns empty bounds when
 /// the session has no rows at all.
+///
+/// Deliberate scoping: session correlation uses host/container mapping only
+/// and intentionally does not fan out via `service_instance` predicates.
 pub fn correlate_session_graph(
     pool: &DbPool,
     session_id: &str,

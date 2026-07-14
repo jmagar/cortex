@@ -258,6 +258,11 @@ inventory). `resolver_raw_app_label` records a raw observed log app label
 associated with a host; raw labels never self-upgrade into
 `logical_service` identity.
 
+`resolver_service_instance` and `resolver_raw_app_label` are
+**vocabulary-reserved**: they are registered in the schema and reason
+registry but no projection path emits them today — only
+`resolver_instance_of` is written.
+
 `adguard_client_query` links a client `device` to the queried `domain` (AdGuard
 DNS). `shell_history_user` links the operating `user` to the host (shell
 history). `authelia_auth` links a `user` to the host they authenticated to
@@ -648,7 +653,10 @@ Entity lookup MUST:
 - reject unknown entity types,
 - reject legacy nested service identity keys (`tootie:plex`,
   `tootie:plex:plex`, `plex/plex/plex`) on service-identity lookups with
-  `rejected_legacy_shape` before any graph query runs,
+  `rejected_legacy_shape` before any graph query runs (alias lookups query
+  first and reject a legacy-shaped alias key only when the alias does not
+  resolve — a resolving alias, e.g. a colon-bearing `ai_session` key, is
+  returned normally),
 - return one exact entity when unambiguous,
 - return candidates for ambiguous alias matches,
 - include projection metadata,

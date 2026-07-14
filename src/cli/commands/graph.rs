@@ -25,6 +25,9 @@ const GRAPH_ENTITY_TYPES: &[&str] = &[
     "network",
     "storage",
     "config_artifact",
+    "git_commit",
+    "user",
+    "device",
 ];
 
 pub(crate) fn parse_entity(args: &[String]) -> Result<CliCommand> {
