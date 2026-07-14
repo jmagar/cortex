@@ -538,17 +538,25 @@ impl CortexService {
                 alias_type,
                 alias_key,
             } => {
+                let lookup_key = alias_key.clone();
                 let candidates = self
                     .run_db("graph.entity_alias", move |pool| {
                         db::graph::find_graph_entities_by_alias(
                             pool,
                             &alias_type,
-                            &alias_key,
+                            &lookup_key,
                             candidate_limit,
                         )
                     })
                     .await?;
                 if candidates.is_empty() {
+                    // A missed alias shaped like a legacy service identity
+                    // gets the explicit rejection signal instead of a
+                    // generic not-found. Aliases that DO resolve (e.g.
+                    // colon-bearing ai_session keys) are never rejected.
+                    if let Some(rejected) = reject_legacy_service_identity(&alias_key) {
+                        return Err(rejected);
+                    }
                     return Err(ServiceError::NotFound(
                         "graph entity alias not found".into(),
                     ));

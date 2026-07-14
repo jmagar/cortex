@@ -960,6 +960,59 @@ async fn graph_around_rejects_depth_above_one_and_redacts_safe_evidence() {
 }
 
 #[tokio::test]
+async fn graph_alias_miss_with_legacy_shape_returns_rejected_legacy_shape() {
+    let (service, pool, _dir) = test_service();
+    refresh_graph_projection_for_test(&pool);
+
+    // Missed alias shaped like a legacy service identity → explicit signal.
+    let err = service
+        .graph_entity_lookup(GraphEntityLookupRequest {
+            mode: None,
+            alias_type: Some("hostname".into()),
+            alias_key: Some("tootie:plex".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("rejected_legacy_shape"),
+        "expected legacy rejection on alias miss: {err}"
+    );
+
+    // Missed alias with a canonical shape keeps the generic not-found.
+    let err = service
+        .graph_entity_lookup(GraphEntityLookupRequest {
+            mode: None,
+            alias_type: Some("hostname".into()),
+            alias_key: Some("missing-host".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("not found"), "{err}");
+}
+
+#[tokio::test]
+async fn graph_lookup_rejects_retired_service_entity_type() {
+    let (service, pool, _dir) = test_service();
+    refresh_graph_projection_for_test(&pool);
+
+    let err = service
+        .graph_entity_lookup(GraphEntityLookupRequest {
+            mode: None,
+            entity_type: Some("service".into()),
+            key: Some("plex".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("unsupported graph entity_type"),
+        "'service' must no longer validate as a lookup type: {err}"
+    );
+}
+
+#[tokio::test]
 async fn graph_entity_lookup_missing_entity_returns_not_found() {
     let (service, pool, _dir) = test_service();
     refresh_graph_projection_for_test(&pool);

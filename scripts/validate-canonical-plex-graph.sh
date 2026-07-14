@@ -17,7 +17,7 @@
 # and assert old_key_count=0.
 set -euo pipefail
 
-db_path="${CORTEX_DB_PATH:-/home/jmagar/.cortex/data/cortex.db}"
+db_path="${CORTEX_DB_PATH:-data/cortex.db}"
 mode="${1:-read-only}"
 
 if [ "$mode" != "read-only" ]; then

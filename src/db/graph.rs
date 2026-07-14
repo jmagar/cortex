@@ -24,6 +24,9 @@ pub(crate) static GRAPH_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 pub const ENTITY_TYPE_HOST: &str = "host";
 pub const ENTITY_TYPE_CONTAINER: &str = "container";
+/// Retired legacy entity type: still present in migration CHECK constraints
+/// (and gated for rejection), but deliberately absent from [`ENTITY_TYPES`]
+/// so it no longer validates as a lookup type.
 pub const ENTITY_TYPE_SERVICE: &str = "service";
 pub const ENTITY_TYPE_APP: &str = "app";
 pub const ENTITY_TYPE_SOURCE_IP: &str = "source_ip";
@@ -52,7 +55,6 @@ pub const ENTITY_TYPE_SERVICE_INSTANCE: &str =
 pub const ENTITY_TYPES: &[&str] = &[
     ENTITY_TYPE_HOST,
     ENTITY_TYPE_CONTAINER,
-    ENTITY_TYPE_SERVICE,
     ENTITY_TYPE_APP,
     ENTITY_TYPE_SOURCE_IP,
     ENTITY_TYPE_AI_PROJECT,
@@ -723,9 +725,12 @@ pub struct GraphWalkEntity {
 ///
 /// This is the reusable traversal primitive behind graph-anchored log fan-out
 /// (`search_logs_from_graph_related_entities`) and topic correlation.
-/// Bounded entity cap for service-topic walks.
+/// Bounded entity cap for service-topic walks (final result LIMIT).
 pub const GRAPH_SERVICE_TOPIC_ENTITY_CAP: usize = 250;
-/// Bounded per-level hop cap for service-topic walks.
+/// Per-depth allowance folded into the aggregate CTE row budget of
+/// service-topic walks (`ENTITY_CAP + HOP_CAP * GRAPH_WALK_MAX_DEPTH`).
+/// SQLite's recursive CTE `LIMIT` is a single overall budget — there is no
+/// per-level cap.
 pub const GRAPH_SERVICE_TOPIC_HOP_CAP: usize = 50;
 
 /// Relationship types a service-topic walk may traverse: only the edges
@@ -745,9 +750,11 @@ pub const GRAPH_SERVICE_TOPIC_RELATIONSHIPS: &[&str] = &[
 ];
 
 /// Bounded breadth-first walk for service-topic lookups: traverses only
-/// [`GRAPH_SERVICE_TOPIC_RELATIONSHIPS`], caps each expansion level at
-/// [`GRAPH_SERVICE_TOPIC_HOP_CAP`] rows and the total result at
-/// [`GRAPH_SERVICE_TOPIC_ENTITY_CAP`] entities.
+/// [`GRAPH_SERVICE_TOPIC_RELATIONSHIPS`], bounds the whole recursive
+/// expansion at an aggregate CTE row budget of
+/// `GRAPH_SERVICE_TOPIC_ENTITY_CAP + GRAPH_SERVICE_TOPIC_HOP_CAP *
+/// GRAPH_WALK_MAX_DEPTH` (a single overall `LIMIT`, not a per-level cap),
+/// and caps the final result at [`GRAPH_SERVICE_TOPIC_ENTITY_CAP`] entities.
 pub fn graph_walk_service_topic(
     conn: &rusqlite::Connection,
     start_keys: &[String],
