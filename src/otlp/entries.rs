@@ -6,7 +6,7 @@ use std::net::SocketAddr;
 
 use opentelemetry_proto::tonic::{
     collector::logs::v1::ExportLogsServiceRequest,
-    common::v1::{AnyValue, any_value::Value as AnyValueKind},
+    common::v1::{AnyValue, KeyValue, any_value::Value as AnyValueKind},
 };
 
 use crate::db::LogBatchEntry;
@@ -32,7 +32,10 @@ pub(super) fn build_entries(
             .map(|r| {
                 r.attributes
                     .iter()
-                    .filter_map(|kv| kv.value.as_ref().map(|v| (kv.key.as_str(), v)))
+                    .filter_map(|kv| {
+                        let key = attr_key(kv)?;
+                        kv.value.as_ref().map(|v| (key, v))
+                    })
                     .collect()
             })
             .unwrap_or_default();
@@ -52,7 +55,10 @@ pub(super) fn build_entries(
                 let log_attrs: HashMap<&str, &AnyValue> = log
                     .attributes
                     .iter()
-                    .filter_map(|kv| kv.value.as_ref().map(|v| (kv.key.as_str(), v)))
+                    .filter_map(|kv| {
+                        let key = attr_key(kv)?;
+                        kv.value.as_ref().map(|v| (key, v))
+                    })
                     .collect();
 
                 let ai_session_id = log_attrs
@@ -125,6 +131,24 @@ pub(super) fn build_entries(
         }
     }
     out
+}
+
+/// Resolve an OTLP `KeyValue`'s attribute key, skipping entries that rely on
+/// string-table-indexed keys (`key: ""`, `key_strindex: N`, an experimental
+/// OTLP dedup encoding cortex doesn't implement). Including one under an
+/// empty key would silently collide distinct attributes onto the same ""
+/// slot (last-one-wins); skipping loses the attribute explicitly instead.
+/// `key_strindex: 0` means "not indexed" per the OTLP wire format, so a
+/// genuinely empty attribute key is still passed through unchanged.
+fn attr_key(kv: &KeyValue) -> Option<&str> {
+    if kv.key.is_empty() && kv.key_strindex != 0 {
+        tracing::debug!(
+            key_strindex = kv.key_strindex,
+            "OTLP attribute uses an unresolved string-table-indexed key — skipping"
+        );
+        return None;
+    }
+    Some(kv.key.as_str())
 }
 
 fn attrs_to_json(attrs: &HashMap<&str, &AnyValue>) -> serde_json::Value {
