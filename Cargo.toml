@@ -123,7 +123,7 @@ reqwest = { version = "0.13", default-features = false, features = ["json", "que
 serde_path_to_error = "0.1"
 
 # OTLP HTTP receiver — message types only, no gRPC transport
-opentelemetry-proto = { version = "0.31", default-features = false, features = [
+opentelemetry-proto = { version = "0.32", default-features = false, features = [
   "gen-tonic-messages",
   "logs",
 ] }
