@@ -96,7 +96,7 @@ jobs:
         run: bash scripts/check-public-identity.sh
 
       - name: Check Rust module sizes
-        run: bash scripts/check-rust-module-size.sh --limit 500 src/cli.rs src/cli
+        run: bash scripts/check-rust-module-size.sh --limit 500
 
   fmt:
     name: Formatting
