@@ -112,7 +112,7 @@ pub fn classify_legacy_shape(value: &str) -> Option<LegacyShape> {
     // 2+-slash app label from another source would still be misclassified
     // as legacy and dropped from graph `app`-entity projection. Investigated
     // as part of syslog-mcp-5k1zb: the only other app-label source in this
-    // codebase, OTLP ingest (`otlp::build_entries`), sets `app_name`
+    // codebase, OTLP ingest (`otlp::entries::build_entries`), sets `app_name`
     // exclusively from the resource-level `service.name` attribute — never
     // from OTel instrumentation-scope names (e.g.
     // `go.opentelemetry.io/collector/receiver`), which are stored only in

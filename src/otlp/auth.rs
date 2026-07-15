@@ -7,7 +7,10 @@ use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
 use axum::{
-    http::{HeaderMap, StatusCode, header::AUTHORIZATION, header::USER_AGENT},
+    http::{
+        HeaderMap, StatusCode,
+        header::{AUTHORIZATION, USER_AGENT},
+    },
     response::{IntoResponse, Json},
 };
 use serde_json::json;
