@@ -46,23 +46,24 @@ fn any_value_to_string_renders_string_table_index_as_placeholder() {
     );
 }
 
-// Exercises the pure gating function directly (not the `LAST_STRINDEX_WARNING`
-// global static) so this test can't interfere with or be affected by other
-// tests sharing the process-wide limiter -- same isolation approach as
-// otlp::auth's `unauthorized_warning_rate_limit_suppresses_repeats_per_key`.
+// Exercises the pure gating function directly (not the global
+// LAST_KEY_STRINDEX_WARNING / LAST_VALUE_STRINDEX_WARNING statics) so this
+// test can't interfere with or be affected by other tests sharing the
+// process-wide limiters -- same isolation approach as otlp::auth's
+// `unauthorized_warning_rate_limit_suppresses_repeats_per_key`.
 #[test]
 fn string_table_index_warning_suppresses_repeats_within_interval() {
     let mut last = None;
     let now = std::time::Instant::now();
     let interval = std::time::Duration::from_secs(60);
 
-    assert!(should_warn_string_table_index(&mut last, now, interval));
-    assert!(!should_warn_string_table_index(
+    assert!(record_string_table_index_warning(&mut last, now, interval));
+    assert!(!record_string_table_index_warning(
         &mut last,
         now + std::time::Duration::from_secs(30),
         interval,
     ));
-    assert!(should_warn_string_table_index(
+    assert!(record_string_table_index_warning(
         &mut last,
         now + interval,
         interval,
@@ -427,6 +428,20 @@ fn attr_key_passes_through_genuinely_empty_key() {
 fn attr_key_skips_unresolved_string_table_indexed_key() {
     let entry = KeyValue {
         key: String::new(),
+        value: Some(av_string("x")),
+        key_strindex: 5,
+    };
+    assert_eq!(attr_key(&entry), None);
+}
+
+// Per the OTLP wire format, key_strindex takes precedence over key whenever
+// it's set (nonzero), even if key also holds a literal value -- a
+// non-conformant producer sending both must not have the literal key
+// silently win over the (spec-authoritative) index.
+#[test]
+fn attr_key_skips_when_key_strindex_set_even_if_key_is_also_populated() {
+    let entry = KeyValue {
+        key: "host.name".to_string(),
         value: Some(av_string("x")),
         key_strindex: 5,
     };
