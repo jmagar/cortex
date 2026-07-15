@@ -2,6 +2,8 @@
 
 use std::fs;
 
+use serial_test::serial;
+
 use super::*;
 
 fn entry(app: &str, msg: &str, source_ip: &str, severity: &str) -> LogBatchEntry {
@@ -465,4 +467,225 @@ fn project_from_transcript_path_normalizes_decoded_claude_worktree_fallback() {
         project_from_transcript_path(transcript).as_deref(),
         Some("/home/jmagar/workspace/cortex")
     );
+}
+
+// ---- agent docker identity metadata extraction ----
+
+#[test]
+fn agent_docker_meta_prefix_is_extracted_into_metadata_json_and_stripped() {
+    let cfg = EnrichmentConfig::default();
+    let meta = r#"{"source_kind":"agent-docker","agent_docker":{"host":"tootie","container_id":"abcdef1234567890","container_name":"plex","compose_project":"plex","compose_service":"plex","image":"lscr.io/linuxserver/plex:latest","stream":"stdout"}}"#;
+    let msg = format!("[cortex-agent-docker-meta:{meta}] Plex library scan");
+    let e = entry("plex/plex/plex", &msg, "10.0.0.1:1234", "info");
+    let out = enrich_entry(e, &cfg);
+    assert_eq!(out.message, "Plex library scan");
+    let metadata: serde_json::Value =
+        serde_json::from_str(out.metadata_json.as_deref().unwrap()).unwrap();
+    assert_eq!(metadata["source_kind"], "agent-docker");
+    assert_eq!(metadata["agent_docker"]["host"], "tootie");
+    assert_eq!(metadata["agent_docker"]["compose_service"], "plex");
+    assert_eq!(metadata["agent_docker"]["stream"], "stdout");
+}
+
+#[test]
+fn agent_docker_meta_prefix_merges_with_existing_metadata() {
+    let cfg = EnrichmentConfig::default();
+    let meta = r#"{"source_kind":"agent-docker","agent_docker":{"host":"tootie","container_id":"abc","container_name":"plex","stream":"stdout"}}"#;
+    let msg = format!("[cortex-agent-docker-meta:{meta}] hello");
+    let mut e = entry("plex", &msg, "10.0.0.1:1234", "info");
+    e.metadata_json = Some(r#"{"source_type":"syslog","input_format":"syslog"}"#.to_string());
+    let out = enrich_entry(e, &cfg);
+    assert_eq!(out.message, "hello");
+    let metadata: serde_json::Value =
+        serde_json::from_str(out.metadata_json.as_deref().unwrap()).unwrap();
+    assert_eq!(metadata["source_type"], "syslog");
+    assert_eq!(metadata["source_kind"], "agent-docker");
+    assert_eq!(metadata["agent_docker"]["container_name"], "plex");
+}
+
+#[test]
+fn malformed_agent_docker_meta_prefix_leaves_message_untouched() {
+    let cfg = EnrichmentConfig::default();
+    let msg = "[cortex-agent-docker-meta:{not json] hello";
+    let e = entry("plex", msg, "10.0.0.1:1234", "info");
+    let out = enrich_entry(e, &cfg);
+    assert_eq!(out.message, msg);
+}
+
+#[test]
+// Shares the `AGENT_DOCKER_GATE_BLOCKED_COUNT` process-lifetime static with
+// `agent_docker_gate_blocked_counter_increments_on_forged_source` — serialize
+// so that test's before/after delta assertion isn't racy against this test's
+// own gate-blocked calls.
+#[serial(agent_docker_gate_blocked_counter)]
+fn agent_docker_meta_prefix_ignored_from_non_matching_source_ip() {
+    let cfg = EnrichmentConfig {
+        agent_docker_source_prefixes: vec!["10.0.0.5".to_string(), "100.64.0.".to_string()],
+        ..EnrichmentConfig::default()
+    };
+    let meta = r#"{"agent_docker":{"host":"tootie","container_id":"abc","container_name":"plex","stream":"stdout"}}"#;
+    let msg = format!("[cortex-agent-docker-meta:{meta}] forged");
+    // Forged marker from an unlisted sender: not extracted, message kept.
+    let e = entry("plex", &msg, "10.0.0.99:1234", "info");
+    let out = enrich_entry(e, &cfg);
+    assert_eq!(out.message, msg);
+    assert!(out.metadata_json.is_none());
+    // Octet-boundary check: 10.0.0.50 must not pass an exact-host 10.0.0.5.
+    let e = entry("plex", &msg, "10.0.0.50:1234", "info");
+    let out = enrich_entry(e, &cfg);
+    assert_eq!(out.message, msg);
+    // Matching senders (exact host, subnet prefix) still extract.
+    for ip in ["10.0.0.5:900", "100.64.0.7:900"] {
+        let e = entry("plex", &msg, ip, "info");
+        let out = enrich_entry(e, &cfg);
+        assert_eq!(out.message, "forged");
+        let metadata: serde_json::Value =
+            serde_json::from_str(out.metadata_json.as_deref().unwrap()).unwrap();
+        assert_eq!(metadata["agent_docker"]["container_name"], "plex");
+        assert_eq!(metadata["source_kind"], "agent-docker");
+    }
+}
+
+#[test]
+// See comment on `agent_docker_meta_prefix_ignored_from_non_matching_source_ip`.
+#[serial(agent_docker_gate_blocked_counter)]
+fn agent_docker_gate_blocked_counter_increments_on_forged_source() {
+    let cfg = EnrichmentConfig {
+        agent_docker_source_prefixes: vec!["10.0.0.5".to_string()],
+        ..EnrichmentConfig::default()
+    };
+    let meta = r#"{"agent_docker":{"host":"tootie","container_id":"abc","container_name":"plex","stream":"stdout"}}"#;
+    let msg = format!("[cortex-agent-docker-meta:{meta}] forged");
+
+    let before = agent_docker_gate_blocked_count();
+    // Sender IP does not match the configured gate: extraction is blocked
+    // and the counter must record it.
+    let e = entry("plex", &msg, "10.0.0.99:1234", "info");
+    let out = enrich_entry(e, &cfg);
+    assert_eq!(out.message, msg, "marker must stay in the message");
+    assert!(out.metadata_json.is_none());
+    assert_eq!(
+        agent_docker_gate_blocked_count(),
+        before + 1,
+        "gate-blocked counter must increment exactly once for the blocked entry"
+    );
+
+    // A matching sender extracts normally and must NOT increment the
+    // gate-blocked counter.
+    let e = entry("plex", &msg, "10.0.0.5:1234", "info");
+    let out = enrich_entry(e, &cfg);
+    assert_eq!(out.message, "forged");
+    assert_eq!(
+        agent_docker_gate_blocked_count(),
+        before + 1,
+        "counter must not increment for a gate-matching entry"
+    );
+}
+
+#[test]
+// See comment on `agent_docker_meta_prefix_ignored_from_non_matching_source_ip`.
+#[serial(agent_docker_gate_blocked_counter)]
+fn agent_docker_source_gate_matches_bracketed_ipv6_exact_entry() {
+    let cfg = EnrichmentConfig {
+        agent_docker_source_prefixes: vec!["2001:db8::1".to_string(), "10.0.0.5".to_string()],
+        ..EnrichmentConfig::default()
+    };
+    let meta = r#"{"agent_docker":{"host":"tootie","container_id":"abc","container_name":"plex","stream":"stdout"}}"#;
+    let msg = format!("[cortex-agent-docker-meta:{meta}] hello");
+    // Bracketed IPv6 source with a matching exact IPv6 entry extracts.
+    let out = enrich_entry(entry("plex", &msg, "[2001:db8::1]:514", "info"), &cfg);
+    assert_eq!(out.message, "hello");
+    // Non-canonical spelling of the same address still matches (parsed
+    // address comparison, not string comparison).
+    let out = enrich_entry(
+        entry("plex", &msg, "[2001:0db8:0000::0001]:514", "info"),
+        &cfg,
+    );
+    assert_eq!(out.message, "hello");
+    // A different IPv6 source does not match.
+    let out = enrich_entry(entry("plex", &msg, "[2001:db8::2]:514", "info"), &cfg);
+    assert_eq!(out.message, msg);
+    // IPv4 behavior is unchanged alongside the IPv6 entry: octet-boundary
+    // semantics still hold (10.0.0.50 must not pass exact-host 10.0.0.5).
+    let out = enrich_entry(entry("plex", &msg, "10.0.0.50:1234", "info"), &cfg);
+    assert_eq!(out.message, msg);
+    let out = enrich_entry(entry("plex", &msg, "10.0.0.5:1234", "info"), &cfg);
+    assert_eq!(out.message, "hello");
+}
+
+#[test]
+fn agent_docker_meta_payload_cannot_overwrite_existing_metadata_keys() {
+    let cfg = EnrichmentConfig::default();
+    // Payload tries to smuggle extra top-level keys and clobber parser-set
+    // metadata; only `agent_docker` may be taken, `source_kind` is set from
+    // the receiver constant, and existing keys survive.
+    let meta = r#"{"source_kind":"otlp","source_type":"evil","injected":"x","agent_docker":{"host":"tootie","container_id":"abc","container_name":"plex","stream":"stdout"}}"#;
+    let msg = format!("[cortex-agent-docker-meta:{meta}] hello");
+    let mut e = entry("plex", &msg, "10.0.0.1:1234", "info");
+    e.metadata_json = Some(r#"{"source_type":"syslog"}"#.to_string());
+    let out = enrich_entry(e, &cfg);
+    assert_eq!(out.message, "hello");
+    let metadata: serde_json::Value =
+        serde_json::from_str(out.metadata_json.as_deref().unwrap()).unwrap();
+    assert_eq!(metadata["source_type"], "syslog");
+    assert_eq!(metadata["source_kind"], "agent-docker");
+    assert!(metadata.get("injected").is_none());
+    assert_eq!(metadata["agent_docker"]["container_name"], "plex");
+}
+
+#[test]
+fn agent_docker_meta_overwrites_preexisting_source_kind_with_constant() {
+    let cfg = EnrichmentConfig::default();
+    let meta = r#"{"agent_docker":{"host":"tootie","container_id":"abc","container_name":"plex","stream":"stdout"}}"#;
+    let msg = format!("[cortex-agent-docker-meta:{meta}] hello");
+    let mut e = entry("plex", &msg, "10.0.0.1:1234", "info");
+    // Pins the documented exception: a pre-existing denormalised
+    // `source_kind` IS deliberately overwritten by the receiver constant
+    // (never by the payload) when the marker is extracted.
+    e.metadata_json = Some(r#"{"source_kind":"syslog-tcp"}"#.to_string());
+    let out = enrich_entry(e, &cfg);
+    assert_eq!(out.message, "hello");
+    let metadata: serde_json::Value =
+        serde_json::from_str(out.metadata_json.as_deref().unwrap()).unwrap();
+    assert_eq!(metadata["source_kind"], "agent-docker");
+}
+
+#[test]
+fn agent_docker_meta_backs_out_when_merged_metadata_would_truncate() {
+    let cfg = EnrichmentConfig::default();
+    let meta = r#"{"agent_docker":{"host":"tootie","container_id":"abc","container_name":"plex","stream":"stdout"}}"#;
+    let msg = format!("[cortex-agent-docker-meta:{meta}] hello");
+    // Pre-existing metadata large enough that the merged object exceeds the
+    // 64 KiB bound even after sanitization. Truncating would drop the
+    // freshly extracted agent_docker identity, so extraction must back out
+    // and leave the entry untouched (marker stays in the message).
+    let big: String = (0..120)
+        .map(|i| format!("\"field_{i}\":\"{}\"", "x".repeat(600)))
+        .collect::<Vec<_>>()
+        .join(",");
+    let original_metadata = format!("{{{big}}}");
+    let mut e = entry("plex", &msg, "10.0.0.1:1234", "info");
+    e.metadata_json = Some(original_metadata.clone());
+    let out = enrich_entry(e, &cfg);
+    assert_eq!(out.message, msg, "marker must stay in the message");
+    assert_eq!(
+        out.metadata_json.as_deref(),
+        Some(original_metadata.as_str()),
+        "pre-existing metadata must be untouched"
+    );
+}
+
+#[test]
+fn agent_docker_meta_payload_cannot_replace_existing_agent_docker_object() {
+    let cfg = EnrichmentConfig::default();
+    let meta = r#"{"agent_docker":{"host":"evil","container_id":"abc","container_name":"forged","stream":"stdout"}}"#;
+    let msg = format!("[cortex-agent-docker-meta:{meta}] hello");
+    let mut e = entry("plex", &msg, "10.0.0.1:1234", "info");
+    e.metadata_json = Some(r#"{"agent_docker":{"host":"tootie"}}"#.to_string());
+    let out = enrich_entry(e, &cfg);
+    // Entry left untouched: existing agent_docker identity is never replaced.
+    assert_eq!(out.message, msg);
+    let metadata: serde_json::Value =
+        serde_json::from_str(out.metadata_json.as_deref().unwrap()).unwrap();
+    assert_eq!(metadata["agent_docker"]["host"], "tootie");
 }

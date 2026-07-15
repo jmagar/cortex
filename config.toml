@@ -82,6 +82,17 @@ enabled = false
 reconnect_initial_ms = 1000
 reconnect_max_ms = 30000
 
+# [enrichment]
+# Restrict extraction of the agent Docker identity marker
+# ([cortex-agent-docker-meta:...]) to trusted sender IPs. Each entry is a
+# full IPv4 dotted quad ("100.64.0.5", exact-host match) or a
+# dot-terminated partial quad ("100.64.0.", subnet-prefix match — the
+# trailing dot is required; "100.64.0" would match nothing). IPv6 sources
+# are not matchable by this gate. Empty (default) accepts the marker from
+# any sender for compatibility. Env: CORTEX_AGENT_DOCKER_SOURCE_PREFIXES
+# (comma-separated).
+# agent_docker_source_prefixes = ["100.88.16.79", "100.120.242."]
+
 # Managed file-tail sources are runtime-managed in data/file-tails.json
 # (parent directory of [storage].db_path). Configure with:
 #   cortex file-tail add --id swag-access --path /file-tail-root/path/access.log --tag swag-access

@@ -473,6 +473,11 @@ pub(crate) fn print_stats_response(stats: &DbStats, json: bool) -> Result<()> {
         .phantom_fts_rows
         .map_or_else(|| "skipped".to_string(), |v| v.to_string());
     println!("{}: {}", muted("phantom_fts_rows"), cyan(&phantom));
+    println!(
+        "{}: {}",
+        muted("agent_docker_gate_blocked_count"),
+        cyan(&stats.agent_docker_gate_blocked_count.to_string())
+    );
     Ok(())
 }
 

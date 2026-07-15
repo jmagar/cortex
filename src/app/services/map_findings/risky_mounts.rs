@@ -50,7 +50,7 @@ fn risky_mount_finding(
     graph_status: &db::graph::GraphProjectionStatus,
     evidence_limit: usize,
 ) -> TopologyFinding {
-    let mut service_entity = entity("service", &row.service_key, &row.service_label);
+    let mut service_entity = entity("service_instance", &row.service_key, &row.service_label);
     service_entity
         .details
         .insert("kind".to_string(), service.kind.clone());
@@ -93,11 +93,19 @@ fn service_mount_index(
     inventory: &HomelabInventory,
 ) -> BTreeMap<String, Vec<(&InventoryService, &MountRef)>> {
     let mut services = BTreeMap::new();
+    let mut skipped: Vec<&str> = Vec::new();
     for service in &inventory.services {
         let Some(host) = service.host.as_deref() else {
             continue;
         };
-        let key = canonical_service_key(host, &service.name);
+        // Canonical `service_instance` key (`host/name`) matching the
+        // resolver's graph projection; services whose identity does not
+        // canonicalize are skipped rather than given a divergent key shape.
+        let Some(key) = crate::db::entity_resolution::service_instance_key(host, &service.name)
+        else {
+            skipped.push(service.id.as_str());
+            continue;
+        };
         services.insert(
             key,
             service
@@ -105,6 +113,15 @@ fn service_mount_index(
                 .iter()
                 .map(|mount| (service, mount))
                 .collect::<Vec<_>>(),
+        );
+    }
+    if !skipped.is_empty() {
+        // One warning per evaluation: these services get no risky-mount
+        // findings because their identity failed canonicalization.
+        tracing::warn!(
+            skipped = skipped.len(),
+            service_ids = ?skipped,
+            "services skipped from risky-mount index: identity failed canonicalization"
         );
     }
     services
@@ -175,7 +192,7 @@ fn mount_target_matches(row: &db::MountRelationshipFindingRow, mount: &MountRef)
     row.storage_label == mount.target
         || row
             .storage_key
-            .ends_with(&canonical_component(&mount.target))
+            .ends_with(&normalized_mount_target(&mount.target))
 }
 
 fn mount_confidence(confidence: f64, read_only: bool, graph_degraded: bool) -> f64 {
@@ -189,15 +206,10 @@ fn mount_confidence(confidence: f64, read_only: bool, graph_degraded: bool) -> f
     value.clamp(0.0, 1.0)
 }
 
-fn canonical_service_key(host: &str, name: &str) -> String {
-    format!(
-        "{}:{}",
-        canonical_component(host),
-        canonical_component(name)
-    )
-}
-
-fn canonical_component(value: &str) -> String {
+/// Trim + lowercase a mount target for suffix matching against inventory
+/// storage keys (which store the raw lowercased target). This is NOT the
+/// vocab key grammar — mount targets keep their `/` path separators.
+fn normalized_mount_target(value: &str) -> String {
     value.trim().to_ascii_lowercase()
 }
 

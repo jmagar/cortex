@@ -265,21 +265,35 @@ pub(crate) async fn run_topic_correlate(mode: &CliMode, args: TopicCorrelateArgs
         },
     );
     for entity in &response.resolved_entities {
+        let status = entity
+            .resolver_status
+            .as_deref()
+            .map(|status| format!(", {status}"))
+            .unwrap_or_default();
         println!(
-            "  resolved {}:{} ({})",
-            entity.entity_type, entity.key, entity.match_kind
+            "  resolved {}:{} ({}{})",
+            entity.entity_type, entity.key, entity.match_kind, status
         );
     }
     if !response.discovered_hosts.is_empty() {
         println!("  hosts: {}", response.discovered_hosts.join(", "));
     }
     for row in &response.timeline {
+        let inclusion = match (
+            row.inclusion_reason.as_deref(),
+            row.fallback_kind.as_deref(),
+        ) {
+            (_, Some(fallback)) => format!("  <{fallback}>"),
+            (Some(reason), None) => format!("  <{reason}>"),
+            (None, None) => String::new(),
+        };
         println!(
-            "  {}  [{}]  {}  {}",
+            "  {}  [{}]  {}  {}{}",
             row.timestamp,
             row.entity_path,
             row.hostname,
             row.message.chars().take(120).collect::<String>(),
+            inclusion,
         );
     }
     Ok(())

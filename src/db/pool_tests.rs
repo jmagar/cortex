@@ -2036,3 +2036,345 @@ fn migration_38_creates_ai_skill_events_table() {
         .version;
     assert_eq!(version, KNOWN_SCHEMA_VERSION);
 }
+
+#[test]
+fn graph_schema_accepts_entity_resolution_vocabulary() {
+    let dir = tempfile::tempdir().unwrap();
+    let pool = init_pool(&StorageConfig::for_test(
+        dir.path().join("resolver-vocab.db"),
+    ))
+    .unwrap();
+    let conn = pool.get().unwrap();
+    conn.execute(
+        "INSERT INTO graph_entities
+            (entity_type, canonical_key, display_label, source_kind, source_id, trust_level)
+         VALUES
+            ('logical_service', 'plex', 'plex', 'resolver', 'fixture', 'verified'),
+            ('service_instance', 'tootie/plex', 'tootie/plex', 'resolver', 'fixture', 'verified')",
+        [],
+    )
+    .unwrap();
+    let service = conn
+        .query_row(
+            "SELECT id FROM graph_entities WHERE entity_type = 'logical_service'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap();
+    let instance = conn
+        .query_row(
+            "SELECT id FROM graph_entities WHERE entity_type = 'service_instance'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap();
+    conn.execute(
+        "INSERT INTO graph_relationships
+            (relationship_key, src_entity_id, dst_entity_id, relationship_type,
+             reason_code, trust_level, confidence)
+         VALUES (?1, ?2, ?3, 'instance_of', 'resolver_instance_of', 'verified', 1.0)",
+        rusqlite::params![
+            format!("{instance}:instance_of:{service}"),
+            instance,
+            service
+        ],
+    )
+    .unwrap();
+}
+
+#[test]
+fn migration_41_cleans_legacy_service_rows_from_populated_db() {
+    // Simulate a populated pre-41 DB: run all migrations, then re-insert the
+    // old-shaped rows a v40 DB could contain and re-run the 41 cleanup SQL by
+    // reverting the migration marker before a second init_pool pass.
+    //
+    // NOTE: this replay runs on a post-41 schema (the CHECK constraints
+    // already include the v41 vocabulary), not a byte-faithful v40 schema.
+    // The migration's INSERT…SELECT filters are what is under test.
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("migration-41-cutover.db");
+    {
+        let pool = init_pool(&StorageConfig::for_test(db_path.clone())).unwrap();
+        let conn = pool.get().unwrap();
+        conn.execute(
+            "INSERT INTO graph_entities
+                (entity_type, canonical_key, display_label, source_kind, source_id, trust_level)
+             VALUES
+                ('service', 'tootie:plex', 'plex', 'log', 'fixture', 'inferred'),
+                ('service', 'tootie:plex:plex', 'tootie/plex/plex', 'log', 'fixture', 'inferred'),
+                ('app', 'plex/plex/plex', 'plex/plex/plex', 'log', 'fixture', 'claimed'),
+                ('app', 'kernel', 'kernel', 'log', 'fixture', 'claimed')",
+            [],
+        )
+        .unwrap();
+        conn.execute("DELETE FROM schema_migrations WHERE version = 41", [])
+            .unwrap();
+        // Drop the 41-added column so the ALTER TABLE in the replayed
+        // migration does not collide.
+        conn.execute_batch("ALTER TABLE graph_projection_meta DROP COLUMN projection_contract;")
+            .unwrap();
+    }
+    let pool = init_pool(&StorageConfig::for_test(db_path)).unwrap();
+    let conn = pool.get().unwrap();
+    let stale: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM graph_entities
+              WHERE entity_type = 'service'
+                 OR (entity_type = 'app' AND canonical_key LIKE '%/%/%')",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(stale, 0);
+    // Plain app labels survive the cutover; only nested defect shapes go.
+    let plain_app: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM graph_entities WHERE entity_type = 'app' AND canonical_key = 'kernel'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(plain_app, 1);
+    let contract: String = conn
+        .query_row(
+            "SELECT projection_contract FROM graph_projection_meta WHERE id = 1",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        contract,
+        crate::db::entity_resolution::vocab::GRAPH_PROJECTION_CONTRACT_V2
+    );
+}
+
+#[test]
+fn migration_41_prunes_relationships_evidence_and_aliases_touching_legacy_entities() {
+    // Same replay technique as the cleanup test above (post-41 schema, see
+    // its NOTE): seed a legacy `service` entity wired to a surviving host
+    // via a relationship with evidence plus an alias, and an unrelated
+    // surviving app→host relationship with evidence. Migration 41 must
+    // prune everything touching the legacy entity and nothing else, leaving
+    // no evidence row pointing at a dead relationship id, and flip a ready
+    // projection to stale.
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("migration-41-prune.db");
+    {
+        let pool = init_pool(&StorageConfig::for_test(db_path.clone())).unwrap();
+        let conn = pool.get().unwrap();
+        let insert_entity = |entity_type: &str, key: &str| -> i64 {
+            conn.execute(
+                "INSERT INTO graph_entities
+                    (entity_type, canonical_key, display_label, source_kind,
+                     source_id, trust_level)
+                 VALUES (?1, ?2, ?2, 'log', 'fixture', 'inferred')",
+                rusqlite::params![entity_type, key],
+            )
+            .unwrap();
+            conn.last_insert_rowid()
+        };
+        let insert_rel = |key: &str, src: i64, dst: i64| -> i64 {
+            conn.execute(
+                "INSERT INTO graph_relationships
+                    (relationship_key, src_entity_id, dst_entity_id,
+                     relationship_type, reason_code, trust_level, confidence,
+                     evidence_count)
+                 VALUES (?1, ?2, ?3, 'runs_on', 'log_app_name', 'inferred',
+                         0.5, 1)",
+                rusqlite::params![key, src, dst],
+            )
+            .unwrap();
+            conn.last_insert_rowid()
+        };
+        let insert_evidence = |rel_id: i64, evidence_key: &str| {
+            conn.execute(
+                "INSERT INTO graph_relationship_evidence
+                    (relationship_id, evidence_key, source_kind, source_id,
+                     observed_at, reason_code, trust_level, evidence_count)
+                 VALUES (?1, ?2, 'log', 'fixture', '2026-01-01T00:00:00Z',
+                         'log_app_name', 'inferred', 1)",
+                rusqlite::params![rel_id, evidence_key],
+            )
+            .unwrap();
+        };
+
+        let legacy = insert_entity("service", "tootie:plex");
+        let host = insert_entity("host", "tootie");
+        let app = insert_entity("app", "kernel");
+        let legacy_rel = insert_rel("legacy:runs_on:host", legacy, host);
+        insert_evidence(legacy_rel, "legacy-evidence");
+        conn.execute(
+            "INSERT INTO graph_entity_aliases
+                (entity_id, alias_type, alias_key, alias_value, trust_level)
+             VALUES (?1, 'service_name', 'plex-legacy', 'plex-legacy',
+                     'inferred')",
+            [legacy],
+        )
+        .unwrap();
+        let surviving_rel = insert_rel("app:runs_on:host", app, host);
+        insert_evidence(surviving_rel, "surviving-evidence");
+
+        conn.execute(
+            "UPDATE graph_projection_meta SET projection_status = 'ready' WHERE id = 1",
+            [],
+        )
+        .unwrap();
+
+        conn.execute("DELETE FROM schema_migrations WHERE version = 41", [])
+            .unwrap();
+        conn.execute_batch("ALTER TABLE graph_projection_meta DROP COLUMN projection_contract;")
+            .unwrap();
+    }
+    let pool = init_pool(&StorageConfig::for_test(db_path)).unwrap();
+    let conn = pool.get().unwrap();
+    let count = |sql: &str| -> i64 { conn.query_row(sql, [], |row| row.get(0)).unwrap() };
+
+    // Legacy entity and everything touching it are gone.
+    assert_eq!(
+        count("SELECT COUNT(*) FROM graph_entities WHERE entity_type = 'service'"),
+        0
+    );
+    assert_eq!(
+        count(
+            "SELECT COUNT(*) FROM graph_relationships
+              WHERE relationship_key = 'legacy:runs_on:host'"
+        ),
+        0
+    );
+    assert_eq!(
+        count(
+            "SELECT COUNT(*) FROM graph_relationship_evidence
+              WHERE evidence_key = 'legacy-evidence'"
+        ),
+        0
+    );
+    assert_eq!(
+        count("SELECT COUNT(*) FROM graph_entity_aliases WHERE alias_key = 'plex-legacy'"),
+        0
+    );
+
+    // The unrelated app→host relationship and its evidence survive.
+    assert_eq!(
+        count(
+            "SELECT COUNT(*) FROM graph_relationships
+              WHERE relationship_key = 'app:runs_on:host'"
+        ),
+        1
+    );
+    assert_eq!(
+        count(
+            "SELECT COUNT(*) FROM graph_relationship_evidence
+              WHERE evidence_key = 'surviving-evidence'"
+        ),
+        1
+    );
+
+    // Referential integrity: no evidence row references a dead relationship.
+    assert_eq!(
+        count(
+            "SELECT COUNT(*) FROM graph_relationship_evidence e
+              WHERE e.relationship_id NOT IN (SELECT id FROM graph_relationships)"
+        ),
+        0
+    );
+
+    // A previously-ready projection is flipped to stale by the migration.
+    let status: String = conn
+        .query_row(
+            "SELECT projection_status FROM graph_projection_meta WHERE id = 1",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(status, "stale");
+}
+
+#[test]
+fn migration_42_allows_refuted_alias_trust_level() {
+    // Migrations 35/41 added 'refuted' to graph_entities, graph_relationships,
+    // and graph_relationship_evidence but missed graph_entity_aliases.
+    // Migration 42 widens that CHECK too; assert a fresh DB accepts an alias
+    // write at 'refuted' trust without violating the constraint.
+    let dir = tempfile::tempdir().unwrap();
+    let config = test_storage_config(dir.path().join("migration-42-refuted-alias.db"));
+    let pool = init_pool(&config).unwrap();
+    let conn = pool.get().unwrap();
+
+    conn.execute(
+        "INSERT INTO graph_entities
+            (entity_type, canonical_key, display_label, source_kind, source_id, trust_level)
+         VALUES ('host', 'refuted-alias-host', 'refuted-alias-host', 'log', 'fixture', 'verified')",
+        [],
+    )
+    .unwrap();
+    let entity_id = conn.last_insert_rowid();
+
+    conn.execute(
+        "INSERT INTO graph_entity_aliases
+            (entity_id, alias_type, alias_key, alias_value, source_kind, trust_level)
+         VALUES (?1, 'hostname', 'refuted-alias-host', 'refuted-alias-host', 'log', 'refuted')",
+        rusqlite::params![entity_id],
+    )
+    .unwrap();
+
+    let stored_trust: String = conn
+        .query_row(
+            "SELECT trust_level FROM graph_entity_aliases WHERE entity_id = ?1",
+            rusqlite::params![entity_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(stored_trust, "refuted");
+}
+
+#[test]
+fn migration_42_widens_old_aliases_constraint_and_preserves_rows() {
+    // Simulate a populated pre-42 DB: run all migrations, seed an alias row
+    // at a pre-refuted trust level, revert the migration 42 marker, then
+    // re-run init_pool. The rebuilt table must preserve the existing row and
+    // accept a subsequent 'refuted' write.
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("migration-42-widen.db");
+    let entity_id;
+    {
+        let pool = init_pool(&StorageConfig::for_test(db_path.clone())).unwrap();
+        let conn = pool.get().unwrap();
+        conn.execute(
+            "INSERT INTO graph_entities
+                (entity_type, canonical_key, display_label, source_kind, source_id, trust_level)
+             VALUES ('host', 'pre42-host', 'pre42-host', 'log', 'fixture', 'verified')",
+            [],
+        )
+        .unwrap();
+        entity_id = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO graph_entity_aliases
+                (entity_id, alias_type, alias_key, alias_value, source_kind, trust_level)
+             VALUES (?1, 'hostname', 'pre42-host', 'pre42-host', 'log', 'claimed')",
+            rusqlite::params![entity_id],
+        )
+        .unwrap();
+        conn.execute("DELETE FROM schema_migrations WHERE version = 42", [])
+            .unwrap();
+    }
+
+    let pool = init_pool(&StorageConfig::for_test(db_path)).unwrap();
+    let conn = pool.get().unwrap();
+
+    let preserved: String = conn
+        .query_row(
+            "SELECT trust_level FROM graph_entity_aliases WHERE entity_id = ?1",
+            rusqlite::params![entity_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(preserved, "claimed");
+
+    conn.execute(
+        "INSERT INTO graph_entity_aliases
+            (entity_id, alias_type, alias_key, alias_value, source_kind, trust_level)
+         VALUES (?1, 'service_name', 'pre42-host-refuted', 'pre42-host-refuted', 'log', 'refuted')",
+        rusqlite::params![entity_id],
+    )
+    .unwrap();
+}

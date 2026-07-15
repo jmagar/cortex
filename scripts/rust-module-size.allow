@@ -1,6 +1,7 @@
-src/api.rs
 src/agent_deploy.rs
+src/api.rs
 src/app/llm_runner.rs
+src/app/services/graph.rs
 src/cli/dispatch_sessions.rs
 src/cli/help.rs
 src/cli/http_client.rs
@@ -8,8 +9,11 @@ src/cli/parse_ai.rs
 src/cli/parse_logs.rs
 src/command_log.rs
 src/config.rs
+src/db/graph.rs
+src/db/graph_inventory.rs
 src/db/maintenance.rs
 src/db/pool.rs
+src/db/queries.rs
 src/doctor.rs
 src/heartbeat_agent.rs
 src/main.rs

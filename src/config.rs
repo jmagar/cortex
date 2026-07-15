@@ -222,6 +222,14 @@ pub struct EnrichmentConfigToml {
     pub authelia_source_ip: Option<String>,
     /// Same gating, for AdGuard JSON tag classification.
     pub adguard_source_ip: Option<String>,
+    /// If non-empty, only extract the `[cortex-agent-docker-meta:…]` marker
+    /// into `metadata_json.agent_docker` when the entry's `source_ip` matches
+    /// one of these prefixes (same octet-boundary semantics as
+    /// `authelia_source_ip`). The marker rides the unauthenticated syslog
+    /// body, so without this gate any port-1514 sender can forge agent
+    /// Docker identity. Empty (default) keeps extract-from-anywhere
+    /// compatibility behaviour.
+    pub agent_docker_source_prefixes: Vec<String>,
     /// Best-effort credential scrubbing on AI-source records. Default true.
     /// Set to false only if downstream consumers need raw prompt text and
     /// you trust every tailnet node.
@@ -240,6 +248,7 @@ impl Default for EnrichmentConfigToml {
         Self {
             authelia_source_ip: None,
             adguard_source_ip: None,
+            agent_docker_source_prefixes: Vec::new(),
             scrub_prompts: true,
             fts_merge_pages: 0,
         }
@@ -1064,6 +1073,11 @@ impl Config {
             "CORTEX_ADGUARD_SOURCE_IP",
             &mut config.enrichment.adguard_source_ip,
         );
+        env_override_list(
+            "CORTEX_AGENT_DOCKER_SOURCE_PREFIXES",
+            &mut config.enrichment.agent_docker_source_prefixes,
+        );
+        warn_invalid_agent_docker_prefixes(&config.enrichment.agent_docker_source_prefixes);
         env_override_bool("CORTEX_SCRUB_PROMPTS", &mut config.enrichment.scrub_prompts)?;
         env_override_parse(
             "CORTEX_FTS_MERGE_PAGES",
@@ -1278,6 +1292,55 @@ fn is_supported_setup_env_key(key: &str) -> bool {
         || key.starts_with("CORTEX_")
         || key.starts_with("CORTEX_API_")
         || key.starts_with("CORTEX_DOCKER_")
+}
+
+/// Warn about `agent_docker_source_prefixes` entries that can never match a
+/// source. Valid shapes are a full IP literal (`100.64.0.5` or
+/// `2001:db8::1`, exact-host match) or a dot-terminated partial IPv4 quad
+/// (`100.64.0.`, subnet-prefix match). A partial quad without its trailing
+/// dot (`100.64.0`) is treated by the gate as an exact-host literal that
+/// matches nothing — the failure mode silently disables all agent-docker
+/// extraction. IPv6 entries are exact-host only; there is no IPv6
+/// subnet-prefix form.
+fn warn_invalid_agent_docker_prefixes(prefixes: &[String]) {
+    for prefix in prefixes {
+        if !is_agent_docker_prefix_shape(prefix) {
+            tracing::warn!(
+                prefix = %prefix,
+                "agent_docker_source_prefixes entry is neither a full IP literal \
+                 nor a dot-terminated partial IPv4 quad; it will match no source_ip and \
+                 silently disables agent-docker extraction for the senders it was meant \
+                 to cover (use a trailing dot, e.g. \"100.64.0.\", for a subnet prefix)"
+            );
+        }
+    }
+}
+
+/// `true` when `prefix` is a full IPv4 dotted quad, an IPv6 literal
+/// (exact-host match), or a dot-terminated partial IPv4 quad (1–3 leading
+/// octets), i.e. a shape [`crate::receiver`]'s agent-docker source gate can
+/// actually match.
+fn is_agent_docker_prefix_shape(prefix: &str) -> bool {
+    if prefix.parse::<std::net::Ipv6Addr>().is_ok() {
+        return true;
+    }
+    let (body, partial) = match prefix.strip_suffix('.') {
+        Some(body) => (body, true),
+        None => (prefix, false),
+    };
+    let octets: Vec<&str> = body.split('.').collect();
+    let count_ok = if partial {
+        (1..=3).contains(&octets.len())
+    } else {
+        octets.len() == 4
+    };
+    count_ok
+        && octets.iter().all(|octet| {
+            !octet.is_empty()
+                && octet.len() <= 3
+                && octet.chars().all(|ch| ch.is_ascii_digit())
+                && octet.parse::<u8>().is_ok()
+        })
 }
 
 // --- Env var helpers ---

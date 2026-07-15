@@ -64,7 +64,9 @@ are populated today.
 | `source_ip` | `logs.source_ip` | Raw source string from the log row, normalized as a key. Despite the name, this can be an IP or an ingest URI such as `docker://...`, `docker-event://...`, `agent-command://...`, or `shell-history://...`. |
 | `app` | `logs.app_name`, `error_signatures.sample_app_name` | Application/process label observed in logs or error summaries. |
 | `container` | Docker log/event rows | Keyed by Docker host plus container id or name. |
-| `service` | Docker compose labels, inventory services | Log-derived services are keyed by Docker host, compose project, and service. Inventory services are keyed by host and service name, with an additional bare-name alias only when unique in the inventory snapshot. |
+| `logical_service` | Resolver decisions over agent Docker metadata and verified inventory | Canonical logical service identity, keyed by the bare canonical name (`plex`). One node per service regardless of how many hosts run it. |
+| `service_instance` | Resolver decisions over agent Docker metadata and verified inventory | Host-scoped runtime deployment, keyed `host/service` (`tootie/plex`). Linked to its logical service via `instance_of`. |
+| `service` | Legacy (pre entity-resolution) — no longer projected | Stale defect shapes such as `tootie:plex` and `tootie:plex:plex`. Deleted by migration 41; rejected on lookup surfaces with `rejected_legacy_shape`. |
 | `compose_project` | Docker compose project labels, inventory compose projects | Log-derived projects are keyed by Docker host plus project. Inventory projects are scoped by the provenance source host. |
 | `reverse_proxy` | Inventory reverse proxy routes | Keyed from the route id; display label usually comes from the first server name. |
 | `domain` | Inventory reverse proxy server names, AdGuard DNS queries | Reverse proxy domains are verified inventory facts; AdGuard query domains are inferred from DNS logs. Service domains are aliases on `service`, not standalone domain nodes, unless another source creates a domain entity. |
@@ -99,9 +101,10 @@ These are all valid relationship types.
 | `authenticated_as` | Yes | A user authenticated to the log row's host through Authelia. |
 | `accessed` | Yes | A user/device accessed a host or domain. |
 | `communicates_with` | Reserved | Vocabulary for future device-to-peer flow ingestion, not emitted today. |
+| `instance_of` | Yes | A `service_instance` is a deployment of a `logical_service` (`tootie/plex instance_of plex`). |
 
-Relationship direction is meaningful. For example, `service runs_on host` is
-not equivalent to `host runs_on service`.
+Relationship direction is meaningful. For example, `service_instance runs_on host`
+is not equivalent to `host runs_on service_instance`.
 
 ## Active Edge Rules
 
@@ -171,12 +174,26 @@ parsed as Docker identity rows. Docker host and container can come from
 | Input | Output Edge | Reason | Trust | Confidence | Evidence |
 | --- | --- | --- | --- | --- | --- |
 | Docker host + container id/name | `container runs_on host` | `docker_container_id` | `verified` | `0.9` | `log`, metadata path `logs.source_ip/metadata_json` |
-| Compose service or container name | `container runs_on service` | `docker_service_label` | `inferred` | `0.7` | `log`, metadata path `metadata_json.compose_service` |
-| Explicit compose project label | `compose_project defines_service service` | `compose_config` | `inferred` | `0.7` | `log`, metadata path `metadata_json.compose_project` |
 
-If `compose_project` is missing for the service edge, Docker host is used as
-the project key fallback. The `compose_project defines_service service` edge is
-created only when an explicit compose project label is present.
+Hard break (entity_resolution_v2): central-pull rows keep verified
+host/container edges only. They no longer synthesize legacy `service`
+topology (`host:project:service`) or compose edges; canonical service
+identity comes exclusively from resolver decisions over structured
+agent-docker metadata and verified inventory.
+
+### Agent Docker Identity Rows
+
+Rows carrying `metadata_json.agent_docker` (structured identity attached by
+the host-local agent) project through the deterministic resolver:
+
+| Input | Output | Reason | Trust | Confidence | Evidence |
+| --- | --- | --- | --- | --- | --- |
+| `agent_docker.host` + `compose_service` (or `container_name`) | `logical_service` and `service_instance` entities | n/a | `verified` | n/a | entity source is `log` |
+| Resolver decision pair | `service_instance instance_of logical_service` | `resolver_instance_of` | `verified` | `1.0` | `log`, metadata path `metadata_json.agent_docker` |
+
+Central-pull `docker://` / `docker-event://` rows are ignored by the
+resolver (not proof). Nested slash-triplet app labels (`plex/plex/plex`)
+are never projected as `app` entities.
 
 ### Heartbeats
 
@@ -216,19 +233,24 @@ does not emit host relationship evidence. It creates entities and aliases.
 
 | Input | Output Edge / Alias | Reason | Trust | Confidence | Evidence |
 | --- | --- | --- | --- | --- | --- |
-| `InventoryService.name`, `host`, `id` | `service` entity | n/a | from inventory trust | n/a | entity source is `app_inventory` |
-| `InventoryService.domains` | `domain` alias on service | n/a | from inventory trust | n/a | alias source is `app_inventory` |
-| `InventoryService.host` matching an inventory host | `service runs_on host` | `inventory_service` | `inferred` | `0.85` | `app_inventory` |
-| `InventoryService.mounts[].target` | `service mounts storage` | `storage_probe` | `inferred` | `0.65` | `app_inventory` |
+| `InventoryService.name` | `logical_service` entity (`plex`) | n/a | from inventory trust | n/a | entity source is `app_inventory` |
+| `InventoryService.name`, `host` | `service_instance` entity (`tootie/plex`) | n/a | from inventory trust | n/a | entity source is `app_inventory` |
+| Instance + logical pair | `service_instance instance_of logical_service` | `resolver_instance_of` | from inventory trust | `0.95` | `app_inventory` |
+| `InventoryService.domains` | `domain` alias on the service instance | n/a | from inventory trust | n/a | alias source is `app_inventory` |
+| `InventoryService.host` matching an inventory host | `service_instance runs_on host` | `inventory_service` | `inferred` | `0.85` | `app_inventory` |
+| `InventoryService.mounts[].target` | `service_instance mounts storage` | `storage_probe` | `inferred` | `0.65` | `app_inventory` |
 
-Service keying is host-scoped: `{host}:{service}`. A bare service-name alias is
-usable only when that service name is unique across the inventory snapshot.
+Service-instance keying is `host/service` (`tootie/plex`); legacy
+`{host}:{service}` keys are never emitted. A service without host context
+projects the `logical_service` only — no `unknown/` instance is guessed. A
+bare service-name alias is usable only when that service name is unique
+across the inventory snapshot.
 
 ### Inventory Compose Projects
 
 | Input | Output Edge | Reason | Trust | Confidence | Evidence |
 | --- | --- | --- | --- | --- | --- |
-| `ComposeProject.services` matching inventory services | `compose_project defines_service service` | `compose_config` | `verified` | `0.90` | `app_inventory` |
+| `ComposeProject.services` matching inventory services | `compose_project defines_service service_instance` | `compose_config` | `verified` | `0.90` | `app_inventory` |
 | `ComposeProject.compose_files` matching artifact refs | `compose_project has_artifact config_artifact` | `config_artifact` | `verified` | `0.95` | `app_inventory` |
 
 Compose project keys are scoped by source host, derived from the provenance
@@ -239,7 +261,7 @@ source string.
 | Input | Output Edge | Reason | Trust | Confidence | Evidence |
 | --- | --- | --- | --- | --- | --- |
 | `ReverseProxyRoute.server_names` | `reverse_proxy exposes_domain domain` | `reverse_proxy_config` | `verified` | `0.95` | `app_inventory` |
-| `ReverseProxyRoute.upstreams` matching inventory services | `reverse_proxy routes_to service` | `reverse_proxy_config` | `verified` | `0.85` | `app_inventory` |
+| `ReverseProxyRoute.upstreams` matching inventory services | `reverse_proxy routes_to service_instance` | `reverse_proxy_config` | `verified` | `0.85` | `app_inventory` |
 
 Upstream matching understands service names and service endpoints. Ambiguous
 bare names are left unlinked.
@@ -248,7 +270,7 @@ bare names are left unlinked.
 
 | Input | Output Edge | Reason | Trust | Confidence | Evidence |
 | --- | --- | --- | --- | --- | --- |
-| `NetworkSegment.members` matching inventory services | `service attached_to network` | `docker_network` | `verified` | `0.80` | `app_inventory` |
+| `NetworkSegment.members` matching inventory services | `service_instance attached_to network` | `docker_network` | `verified` | `0.80` | `app_inventory` |
 
 Network keys are scoped by source host.
 
@@ -377,3 +399,50 @@ When adding a new graph fact, update all of these in the same change:
 - Projection code and tests for the new entity/edge/evidence rule.
 - [`docs/contracts/investigation-graph.md`](../docs/contracts/investigation-graph.md).
 - This page.
+
+## Canonical Resolver Proof: Plex
+
+The canonical graph shape for Plex is:
+
+- `logical_service:plex`
+- `service_instance:tootie/plex`
+- `service_instance:tootie/plex instance_of logical_service:plex`
+- `service_instance:tootie/plex runs_on host:tootie`
+- `compose_project:tootie:plex defines_service service_instance:tootie/plex`
+  (compose-project canonical keys are colon-scoped `source-host:project-name`
+  via `scoped_inventory_key`; only `service_instance` uses the `/` separator)
+- route/domain/storage/container/error/session evidence links to the service
+  instance when deterministic evidence exists
+
+`tootie:plex`, `tootie:plex:plex`, and `plex/plex/plex` are not supported
+service identity inputs. They are stale defect shapes: migration 41 deletes
+them from populated databases and every public lookup surface rejects them
+with `rejected_legacy_shape`.
+
+Migration 41 also flips a previously-ready projection to `stale`. Run
+`cortex graph rebuild` (or wait for the in-server scheduler when
+`CORTEX_GRAPH_REFRESH_INTERVAL_SECS > 0`) before expecting
+`topic_correlate` service results to populate: until the rebuild, a topic
+that resolves to a logical service with no `instance_of` instances reports
+`resolver_status: degraded` with an empty service timeline.
+
+Read-only proof commands (safe against production):
+
+```bash
+scripts/validate-canonical-plex-graph.sh
+cortex entity logical_service plex
+cortex graph around logical_service:plex
+cortex graph around service_instance:tootie/plex
+cortex topic-correlate plex --limit 20
+```
+
+`scripts/validate-canonical-plex-graph.sh` prints `old_key_count` (must be 0
+after migration + rebuild), `new_key_count` (must be > 0 once resolver
+projection has seen structured evidence), and the canonical lookup query
+plan. It refuses any live rebuild: back up first (`cortex db backup`), run
+`cortex graph rebuild` off-peak, then re-run the read-only checks.
+
+Central Docker pull rows (`docker://`, `docker-event://`) are not proof for
+this milestone; the proof source is `metadata_json.agent_docker` from
+host-local agents (plus verified inventory). Raw log app labels such as
+`complex` or `plex-backup` never self-upgrade into `logical_service:plex`.

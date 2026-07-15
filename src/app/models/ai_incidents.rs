@@ -330,6 +330,11 @@ pub struct ResolvedTopicEntity {
     pub key: String,
     /// How it matched: `exact`, `prefix`, `label`, or `alias`.
     pub match_kind: String,
+    /// Resolver outcome: `resolved` for exact canonical-key and alias
+    /// identity matches, `ambiguous` for weak label/prefix candidates that
+    /// never drive log fan-out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolver_status: Option<String>,
 }
 
 /// An entity reached by graph expansion from the resolved seeds.
@@ -354,6 +359,17 @@ pub struct TopicTimelineEntry {
     pub message: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
+    /// Why this row is in the timeline (`service_instance`, `graph_related`,
+    /// `host_context`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inclusion_reason: Option<String>,
+    /// Resolver outcome for this row's inclusion path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolver_status: Option<String>,
+    /// Set when the row was included by an explicit degraded fallback
+    /// (`explicit_degraded_host_context`), never silently.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fallback_kind: Option<String>,
 }
 
 /// Response for `topic_correlate`.
@@ -365,7 +381,13 @@ pub struct TopicCorrelateResponse {
     pub discovered_hosts: Vec<String>,
     pub timeline: Vec<TopicTimelineEntry>,
     pub heartbeat_summaries: Vec<db::HeartbeatWindowSummary>,
+    /// `true` when the fanned-out log timeline hit `limit` and was cut off.
     pub truncated: bool,
+    /// `true` when the service-topic graph walk hit its entity cap
+    /// (`GRAPH_SERVICE_TOPIC_ENTITY_CAP`) and the discovered service-instance
+    /// neighborhood was cut off rather than exhaustive. Independent of
+    /// `truncated`, which reflects the log timeline, not the graph walk.
+    pub graph_walk_truncated: bool,
 }
 
 /// One log row in a graph-anchored session correlation, annotated with how it

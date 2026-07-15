@@ -14,10 +14,25 @@ use super::syslog_sender::{PRI_LOCAL0_INFO, PRI_LOCAL0_WARN, SyslogSender, forma
 
 const CONTAINER_POLL_SECS: u64 = 30;
 
+/// Message prefix marker carrying structured agent Docker identity metadata.
+/// Single definition — the receiver enrichment path
+/// (`src/receiver/enrichment.rs`) imports this constant, extracts the JSON
+/// payload into `metadata_json`, and strips the marker from `message`.
+pub(crate) const AGENT_DOCKER_META_MARKER: &str = "[cortex-agent-docker-meta:";
+
+/// Denormalised `metadata_json.source_kind` value for agent-attested Docker
+/// identity. Single definition — the agent emits it in the marker payload
+/// and the receiver enrichment path re-sets it from this constant (never
+/// from the sender-controlled payload); the resolver adapters stamp it on
+/// observations.
+pub(crate) const AGENT_DOCKER_SOURCE_KIND: &str = "agent-docker";
+
 struct ContainerInfo {
     id: String,
     name: String,
     app_name: String,
+    image: Option<String>,
+    labels: HashMap<String, String>,
 }
 
 /// Stream Docker container logs from a local socket and forward as RFC 5424
@@ -100,6 +115,23 @@ async fn follow_container(
         .since(since.clamp(0, i32::MAX as i64) as i32)
         .build();
 
+    // The container identity is constant for the lifetime of this follow, so
+    // both stream-tagged metadata prefixes are rendered once instead of
+    // rebuilding the serde_json value per log line.
+    let meta_prefix = |stream: &str| {
+        let metadata = container_identity_metadata(
+            hostname,
+            &container.id,
+            &container.name,
+            stream,
+            container.image.as_deref(),
+            &container.labels,
+        );
+        format!("{AGENT_DOCKER_META_MARKER}{metadata}] ")
+    };
+    let stdout_prefix = meta_prefix("stdout");
+    let stderr_prefix = meta_prefix("stderr");
+
     let mut stream = docker.logs(&container.id, Some(opts));
     while let Some(output) = stream.next().await {
         let (is_stderr, bytes) = match output? {
@@ -118,6 +150,17 @@ async fn follow_container(
         } else {
             PRI_LOCAL0_INFO
         };
+        let prefix = if is_stderr {
+            &stderr_prefix
+        } else {
+            &stdout_prefix
+        };
+        // An RFC 5424 APP-NAME over 48 bytes (or empty / non-graphic) is
+        // REPLACED wholesale with the `cortex-agent` fallback by
+        // `sanitise_field` -- not truncated -- so canonical identity rides in
+        // the metadata prefix instead. The receiver strips it into
+        // `metadata_json.agent_docker`.
+        let msg = format!("{prefix}{msg}");
         let ts = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
         let line = format_rfc5424(
             pri,
@@ -125,7 +168,7 @@ async fn follow_container(
             hostname,
             &container.app_name,
             &container.id[..12],
-            msg,
+            &msg,
         );
         sender.try_send(line);
     }
@@ -145,7 +188,13 @@ async fn list_containers(docker: &Docker) -> Result<Vec<ContainerInfo>> {
                 return None;
             }
             let app_name = container_app_name(&name, &labels);
-            Some(ContainerInfo { id, name, app_name })
+            Some(ContainerInfo {
+                id,
+                name,
+                app_name,
+                image: s.image,
+                labels,
+            })
         })
         .collect())
 }
@@ -157,15 +206,53 @@ fn container_display_name(id: &str, names: Option<Vec<String>>) -> String {
         .unwrap_or_else(|| id.chars().take(12).collect())
 }
 
+/// Structured agent-attested Docker identity metadata for one log line.
+/// This is the canonical resolver proof shape: `metadata_json.agent_docker`
+/// with required host/container_id/container_name/stream and optional
+/// compose_project/compose_service/image.
+fn container_identity_metadata(
+    host: &str,
+    container_id: &str,
+    container_name: &str,
+    stream: &str,
+    image: Option<&str>,
+    labels: &HashMap<String, String>,
+) -> serde_json::Value {
+    serde_json::json!({
+        "source_kind": AGENT_DOCKER_SOURCE_KIND,
+        "agent_docker": {
+            "host": host,
+            "container_id": container_id,
+            "container_name": container_name,
+            "compose_project": labels.get("com.docker.compose.project"),
+            "compose_service": labels.get("com.docker.compose.service"),
+            "image": image,
+            "stream": stream,
+        }
+    })
+}
+
+/// Flat, non-slash syslog APP-NAME for a container's forwarded log lines.
+///
+/// Canonical service identity (compose project/service, container id/name,
+/// image) now rides in structured, resolver-verified
+/// `metadata_json.agent_docker` (see `container_identity_metadata`) rather
+/// than in this string. Formatting APP-NAME as a `{project}/{service}/{name}`
+/// slash-triplet is therefore both unnecessary and actively harmful: the
+/// canonical entity-resolution vocabulary
+/// (`db::entity_resolution::classify_legacy_shape`) classifies any 2+-slash
+/// app label as a legacy `SlashTriplet` shape and permanently excludes it
+/// from graph `app`-entity projection (see `db::graph`'s `extract_log_row`
+/// handling and the migration-41+ legacy-shape cleanup in `db::pool`), which
+/// would silently drop all graph app identity for these logs with no
+/// resolver replacement. Emitting a flat name keeps APP-NAME human-readable
+/// for raw-text search/display while canonical identity resolution happens
+/// exclusively through the metadata marker.
 fn container_app_name(name: &str, labels: &HashMap<String, String>) -> String {
-    match (
-        labels.get("com.docker.compose.project"),
-        labels.get("com.docker.compose.service"),
-    ) {
-        (Some(proj), Some(svc)) => format!("{proj}/{svc}/{name}"),
-        (_, Some(svc)) => format!("{svc}/{name}"),
-        _ => name.to_string(),
-    }
+    labels
+        .get("com.docker.compose.service")
+        .cloned()
+        .unwrap_or_else(|| name.to_string())
 }
 
 fn should_forward_container_logs(name: &str, labels: &HashMap<String, String>) -> bool {

@@ -285,13 +285,40 @@ fn project_inventory_adds_topology_entities_relationships_and_evidence() {
         relationship_count(&conn, "has_artifact", "config_artifact"),
         1
     );
+    // 6 evidence rows: runs_on, instance_of, defines_service, routes_to,
+    // exposes_domain, has_artifact.
     assert_eq!(
         count(
             &conn,
             "SELECT COUNT(*) FROM graph_relationship_evidence
              WHERE source_kind IN ('source_inventory', 'app_inventory')"
         ),
-        5
+        6
+    );
+    // Hard break: inventory services project as service_instance +
+    // logical_service, never legacy `service` rows.
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*) FROM graph_entities WHERE entity_type = 'service'"
+        ),
+        0
+    );
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*) FROM graph_entities
+             WHERE entity_type = 'service_instance' AND canonical_key = 'squirts/swag'"
+        ),
+        1
+    );
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*) FROM graph_entities
+             WHERE entity_type = 'logical_service' AND canonical_key = 'swag'"
+        ),
+        1
     );
 }
 
@@ -513,8 +540,8 @@ fn project_inventory_routes_to_service_name_beginning_with_http() {
                FROM graph_relationships rel
                JOIN graph_entities dst ON dst.id = rel.dst_entity_id
               WHERE rel.relationship_type = 'routes_to'
-                AND dst.entity_type = 'service'
-                AND dst.canonical_key = 'squirts:http-api'"
+                AND dst.entity_type = 'service_instance'
+                AND dst.canonical_key = 'squirts/http-api'"
         ),
         1
     );
@@ -604,5 +631,295 @@ fn project_inventory_scopes_compose_projects_and_networks_by_source_host() {
     assert_eq!(
         relationship_count(&conn, "attached_to", "docker_network"),
         2
+    );
+}
+
+#[test]
+fn reprojection_prunes_stale_resolver_instance_of_edges_when_service_moves_hosts() {
+    let _guard = graph::GRAPH_TEST_LOCK.lock();
+    let dir = tempfile::tempdir().unwrap();
+    let pool = init_pool(&StorageConfig::for_test(
+        dir.path().join("inventory-reprojection-prune.db"),
+    ))
+    .unwrap();
+
+    let inventory_with_plex_on = |host: &str| {
+        let mut inventory =
+            HomelabInventory::empty("inv-test".to_string(), "2026-01-01T00:00:00Z".to_string());
+        inventory.nodes.push(InventoryNode {
+            id: format!("node:{host}"),
+            hostname: host.to_string(),
+            trust_level: TrustLevel::Observed,
+            provenance: provenance(&format!("ssh:{host}"), "source_inventory"),
+            roles: Vec::new(),
+            ips: Vec::new(),
+            os: None,
+            cpu: None,
+            memory: None,
+            listeners: Vec::new(),
+            storage: Vec::new(),
+            extras: Default::default(),
+        });
+        inventory.services.push(InventoryService {
+            id: format!("container:{host}:plex"),
+            name: "plex".to_string(),
+            kind: "container".to_string(),
+            trust_level: TrustLevel::Observed,
+            provenance: provenance(&format!("docker:{host}"), "app_inventory"),
+            host: Some(host.to_string()),
+            image: None,
+            status: Some("running".to_string()),
+            domains: Vec::new(),
+            ports: Vec::new(),
+            mounts: Vec::new(),
+            env_keys: Vec::new(),
+            labels: Default::default(),
+        });
+        inventory
+    };
+
+    project_inventory(&pool, &inventory_with_plex_on("tootie")).unwrap();
+    {
+        let conn = pool.get().unwrap();
+        assert_eq!(
+            relationship_count(&conn, "instance_of", "resolver_instance_of"),
+            1
+        );
+    }
+
+    // Plex moves to shart: re-projection must not leak the stale
+    // tootie/plex instance_of edge or leave orphan evidence behind.
+    project_inventory(&pool, &inventory_with_plex_on("shart")).unwrap();
+    let conn = pool.get().unwrap();
+    assert_eq!(
+        relationship_count(&conn, "instance_of", "resolver_instance_of"),
+        1
+    );
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*)
+               FROM graph_relationships r
+               JOIN graph_entities src ON src.id = r.src_entity_id
+              WHERE r.relationship_type = 'instance_of'
+                AND src.canonical_key = 'tootie/plex'"
+        ),
+        0
+    );
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*) FROM graph_entities
+              WHERE entity_type = 'service_instance' AND canonical_key = 'tootie/plex'"
+        ),
+        0
+    );
+    // No orphan evidence: every evidence row must reference a live edge.
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*) FROM graph_relationship_evidence e
+              WHERE NOT EXISTS (
+                  SELECT 1 FROM graph_relationships r WHERE r.id = e.relationship_id
+              )"
+        ),
+        0
+    );
+}
+
+#[test]
+fn double_projection_with_log_and_inventory_instance_of_leaves_no_orphans() {
+    let _guard = graph::GRAPH_TEST_LOCK.lock();
+    let dir = tempfile::tempdir().unwrap();
+    let pool = init_pool(&StorageConfig::for_test(
+        dir.path().join("inventory-log-instance-overlap.db"),
+    ))
+    .unwrap();
+
+    // Log-driven instance_of: agent-docker structured metadata row for
+    // (tootie/plex, plex), projected by the log extraction path.
+    let mut entry = log_entry("Plex started");
+    entry.hostname = "tootie".to_string();
+    entry.app_name = Some("plex".to_string());
+    entry.metadata_json = Some(
+        r#"{"source_kind":"agent-docker","agent_docker":{"host":"tootie","container_id":"abcdef1234567890","container_name":"plex","compose_project":"plex","compose_service":"plex","stream":"stdout"}}"#
+            .to_string(),
+    );
+    insert_logs_batch(&pool, &[entry]).unwrap();
+    graph::refresh_graph_projection(&pool).unwrap();
+
+    // Inventory-driven instance_of for the SAME (instance, logical) pair.
+    let mut inventory =
+        HomelabInventory::empty("inv-test".to_string(), "2026-01-01T00:00:00Z".to_string());
+    inventory.services.push(InventoryService {
+        id: "container:tootie:plex".to_string(),
+        name: "plex".to_string(),
+        kind: "container".to_string(),
+        trust_level: TrustLevel::Observed,
+        provenance: provenance("docker:tootie", "app_inventory"),
+        host: Some("tootie".to_string()),
+        image: None,
+        status: Some("running".to_string()),
+        domains: Vec::new(),
+        ports: Vec::new(),
+        mounts: Vec::new(),
+        env_keys: Vec::new(),
+        labels: Default::default(),
+    });
+    project_inventory(&pool, &inventory).unwrap();
+
+    let snapshot = |conn: &rusqlite::Connection| -> (i64, i64) {
+        (
+            count(
+                conn,
+                "SELECT COUNT(*) FROM graph_relationships
+                  WHERE relationship_type = 'instance_of'",
+            ),
+            count(conn, "SELECT COUNT(*) FROM graph_relationship_evidence"),
+        )
+    };
+    let (rels_first, evidence_first) = {
+        let conn = pool.get().unwrap();
+        snapshot(&conn)
+    };
+
+    // Double projection: re-project the same inventory. The log-driven and
+    // inventory-driven paths use distinct relationship_key shapes BY DESIGN,
+    // so we assert stability and zero orphans — NOT exactly-one edge.
+    project_inventory(&pool, &inventory).unwrap();
+    let conn = pool.get().unwrap();
+    let (rels_second, evidence_second) = snapshot(&conn);
+    assert_eq!(
+        rels_first, rels_second,
+        "instance_of rowcount must be stable"
+    );
+    assert_eq!(
+        evidence_first, evidence_second,
+        "evidence rowcount must be stable"
+    );
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*) FROM graph_relationship_evidence e
+              WHERE NOT EXISTS (
+                  SELECT 1 FROM graph_relationships r WHERE r.id = e.relationship_id
+              )"
+        ),
+        0,
+        "no evidence row may reference a dead relationship"
+    );
+}
+
+#[test]
+fn inventory_projection_links_service_instance_to_host_storage_compose_and_route() {
+    let _guard = graph::GRAPH_TEST_LOCK.lock();
+    let dir = tempfile::tempdir().unwrap();
+    let pool = init_pool(&StorageConfig::for_test(
+        dir.path().join("inventory-service-instance.db"),
+    ))
+    .unwrap();
+    let mut inventory =
+        HomelabInventory::empty("plex-proof".to_string(), "2026-01-01T00:00:00Z".to_string());
+    inventory.nodes.push(InventoryNode {
+        id: "node:tootie".to_string(),
+        hostname: "tootie".to_string(),
+        trust_level: TrustLevel::Observed,
+        provenance: provenance("ssh:tootie", "source_inventory"),
+        roles: Vec::new(),
+        ips: vec!["100.120.242.29".to_string()],
+        os: Some("Unraid".to_string()),
+        cpu: None,
+        memory: None,
+        listeners: Vec::new(),
+        storage: Vec::new(),
+        extras: Default::default(),
+    });
+    inventory.services.push(InventoryService {
+        id: "service:tootie:plex".to_string(),
+        name: "plex".to_string(),
+        kind: "container".to_string(),
+        trust_level: TrustLevel::Observed,
+        provenance: provenance("docker:tootie", "app_inventory"),
+        host: Some("tootie".to_string()),
+        image: Some("lscr.io/linuxserver/plex:latest".to_string()),
+        status: Some("running".to_string()),
+        domains: vec!["plex.tootie.tv".to_string()],
+        ports: vec![PortMapping {
+            host_ip: Some("0.0.0.0".to_string()),
+            host_port: Some(32400),
+            container_port: Some(32400),
+            protocol: "tcp".to_string(),
+        }],
+        mounts: vec![crate::inventory::schema::MountRef {
+            source: Some("/mnt/user/media".to_string()),
+            target: "/media".to_string(),
+            read_only: false,
+        }],
+        env_keys: Vec::new(),
+        labels: Default::default(),
+    });
+    inventory.compose_projects.push(ComposeProject {
+        name: "plex".to_string(),
+        provenance: provenance("compose:tootie:/opt/plex/compose.yaml", "app_inventory"),
+        services: vec!["plex".to_string()],
+        compose_files: Vec::new(),
+        domains: Vec::new(),
+        ports: Vec::new(),
+    });
+    inventory.reverse_proxies.push(ReverseProxyRoute {
+        id: "proxy:plex.tootie.tv".to_string(),
+        server_names: vec!["plex.tootie.tv".to_string()],
+        upstreams: vec!["plex:32400".to_string()],
+        provenance: provenance("swag:tootie:/config/nginx/plex.conf", "app_inventory"),
+    });
+    project_inventory(&pool, &inventory).unwrap();
+    let conn = pool.get().unwrap();
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*) FROM graph_entities WHERE entity_type = 'service_instance' AND canonical_key = 'tootie/plex'"
+        ),
+        1
+    );
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*) FROM graph_entities WHERE entity_type = 'logical_service' AND canonical_key = 'plex'"
+        ),
+        1
+    );
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*) FROM graph_entities WHERE entity_type = 'service'"
+        ),
+        0
+    );
+    assert_eq!(
+        relationship_count(&conn, "instance_of", "resolver_instance_of"),
+        1
+    );
+    assert_eq!(relationship_count(&conn, "runs_on", "inventory_service"), 1);
+    assert_eq!(
+        relationship_count(&conn, "defines_service", "compose_config"),
+        1
+    );
+    assert_eq!(
+        relationship_count(&conn, "routes_to", "reverse_proxy_config"),
+        1
+    );
+    assert_eq!(relationship_count(&conn, "mounts", "storage_probe"), 1);
+    // Every service edge terminates at the service_instance, never at a
+    // legacy `service` node.
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*)
+               FROM graph_relationships rel
+               JOIN graph_entities dst ON dst.id = rel.dst_entity_id
+              WHERE rel.relationship_type IN ('defines_service', 'routes_to')
+                AND dst.entity_type <> 'service_instance'"
+        ),
+        0
     );
 }

@@ -1034,8 +1034,15 @@ aliases return candidates instead of silently choosing one.
 ```bash
 cortex entity host tootie
 cortex entity host:tootie --json
+cortex entity logical_service plex
+cortex entity service_instance tootie/plex
 cortex entity --alias-type hostname --alias-key tootie
 ```
+
+Canonical service identity is `logical_service` (`plex`) plus
+`service_instance` (`tootie/plex`). Legacy nested service identities such as
+`tootie:plex` or `tootie:plex:plex` are rejected with
+`rejected_legacy_shape`.
 
 Flags:
 
@@ -1060,8 +1067,13 @@ and follow-up commands.
 ```bash
 cortex graph around host tootie
 cortex graph around host:tootie --limit 25
+cortex graph around logical_service:plex
+cortex graph around service_instance tootie/plex
 cortex graph around --entity-id 42 --json
 ```
+
+Service topics use `logical_service:plex` / `service_instance:tootie/plex`;
+`tootie:plex` and `tootie:plex:plex` return `rejected_legacy_shape`.
 
 Flags:
 

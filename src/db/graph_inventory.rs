@@ -8,13 +8,14 @@ use std::collections::{BTreeMap, btree_map::Entry};
 use anyhow::{Context, Result};
 
 use crate::db::graph;
-use crate::db::{DbPool, write_lock};
+use crate::db::graph_resolver_projection::trust_to_graph;
+use crate::db::{DbPool, entity_resolution, write_lock};
 use crate::inventory::schema::HomelabInventory;
 
 use self::sql::{
     add_alias, add_relationship, canonical, canonical_or_raw, graph_counts,
-    prune_previous_inventory_projection, safe_inventory_source_id, scoped_inventory_key,
-    service_key, trust, update_projection_meta, upsert_entity,
+    prune_previous_inventory_projection, safe_inventory_source_id, scoped_inventory_key, trust,
+    update_projection_meta, upsert_entity,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -30,7 +31,20 @@ pub fn project_inventory(
     inventory: &HomelabInventory,
 ) -> Result<InventoryGraphStats> {
     let plan = build_projection_plan(inventory);
+    warn_skipped_services(&plan);
     apply_projection_plan(pool, &plan, || {})
+}
+
+/// One warning per inventory projection listing the services whose identity
+/// failed canonicalization and were therefore left out of the graph.
+fn warn_skipped_services(plan: &InventoryProjectionPlan) {
+    if !plan.skipped_service_ids.is_empty() {
+        tracing::warn!(
+            skipped = plan.skipped_service_ids.len(),
+            service_ids = ?plan.skipped_service_ids,
+            "inventory services skipped from graph projection: service name failed canonicalization"
+        );
+    }
 }
 
 #[cfg(test)]
@@ -40,6 +54,7 @@ fn project_inventory_with_apply_hook(
     before_apply: impl FnOnce(),
 ) -> Result<InventoryGraphStats> {
     let plan = build_projection_plan(inventory);
+    warn_skipped_services(&plan);
     apply_projection_plan(pool, &plan, before_apply)
 }
 
@@ -162,18 +177,77 @@ fn build_projection_plan(inventory: &HomelabInventory) -> InventoryProjectionPla
 
     let mut services = BTreeMap::new();
     let mut unique_service_aliases = BTreeMap::new();
+    let mut logical_services: BTreeMap<String, PlannedEntityKey> = BTreeMap::new();
     for service in &inventory.services {
+        // Canonical service identity (entity_resolution_v2): inventory
+        // services flow through the shared resolver adapter, projecting as
+        // `logical_service` (`plex`) plus a host-scoped `service_instance`
+        // (`tootie/plex`). Legacy `service` entities (`host:name`) are never
+        // emitted.
+        let observations = entity_resolution::observations_from_inventory_service(service);
+        let decisions = entity_resolution::resolve_observations(&observations);
+        let logical_decision = decisions
+            .iter()
+            .find(|d| d.entity_type == graph::ENTITY_TYPE_LOGICAL_SERVICE);
+        let instance_decision = decisions
+            .iter()
+            .find(|d| d.entity_type == graph::ENTITY_TYPE_SERVICE_INSTANCE);
+        let Some(logical_decision) = logical_decision else {
+            plan.skipped_service_ids.push(service.id.clone());
+            continue;
+        };
+        let logical_key = logical_decision.canonical_key.clone();
+        let logical_entity = match logical_services.entry(logical_key.clone()) {
+            Entry::Occupied(entry) => entry.get().clone(),
+            Entry::Vacant(entry) => {
+                let entity = plan.entity(
+                    graph::ENTITY_TYPE_LOGICAL_SERVICE,
+                    &logical_key,
+                    &service.name,
+                    graph::SOURCE_KIND_APP_INVENTORY,
+                    &service.id,
+                    trust_to_graph(logical_decision.trust),
+                    &service.provenance.collected_at,
+                );
+                entry.insert(entity.clone());
+                entity
+            }
+        };
+
+        let Some(instance_decision) = instance_decision else {
+            // No host context: the logical service exists, but there is no
+            // deployment topology to assert. Ambiguity stays visible instead
+            // of being guessed into an `unknown/` instance.
+            insert_unique_alias(
+                &mut unique_service_aliases,
+                canonical_or_raw(&service.name),
+                logical_entity.clone(),
+            );
+            continue;
+        };
+        let instance_key = instance_decision.canonical_key.clone();
         let service_entity = plan.entity(
-            graph::ENTITY_TYPE_SERVICE,
-            &service_key(service),
-            &service.name,
+            graph::ENTITY_TYPE_SERVICE_INSTANCE,
+            &instance_key,
+            &instance_key,
             graph::SOURCE_KIND_APP_INVENTORY,
             &service.id,
-            trust(&service.trust_level),
+            trust_to_graph(instance_decision.trust),
             &service.provenance.collected_at,
         );
-        let scoped_key = service_key(service);
-        services.insert(scoped_key, service_entity.clone());
+        plan.relationship(
+            &service_entity,
+            &logical_entity,
+            graph::REL_INSTANCE_OF,
+            graph::REASON_RESOLVER_INSTANCE_OF,
+            graph::SOURCE_KIND_APP_INVENTORY,
+            &service.id,
+            &service.provenance.collected_at,
+            trust_to_graph(instance_decision.trust),
+            0.95,
+            &format!("{} is an instance of {}", instance_key, logical_key),
+        );
+        services.insert(instance_key.clone(), service_entity.clone());
         insert_unique_alias(
             &mut unique_service_aliases,
             canonical_or_raw(&service.name),
@@ -507,6 +581,10 @@ struct InventoryProjectionPlan {
     entities: Vec<EntityPlan>,
     aliases: Vec<AliasPlan>,
     relationships: Vec<RelationshipPlan>,
+    /// Inventory service ids skipped because their names failed
+    /// canonicalization (no logical-service decision). Surfaced by the
+    /// caller so silently absent services are diagnosable.
+    skipped_service_ids: Vec<String>,
 }
 
 impl InventoryProjectionPlan {
@@ -612,7 +690,8 @@ fn match_service_name_key<'a>(
     services: &'a BTreeMap<String, PlannedEntityKey>,
 ) -> Option<&'a PlannedEntityKey> {
     source_host(source)
-        .and_then(|host| services.get(&canonical_or_raw(&format!("{host}:{name}"))))
+        .and_then(|host| entity_resolution::service_instance_key(host, name))
+        .and_then(|key| services.get(&key))
         .or_else(|| services.get(&canonical_or_raw(name)))
 }
 

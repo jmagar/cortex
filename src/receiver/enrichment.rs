@@ -20,6 +20,7 @@
 
 use std::borrow::Cow;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{LazyLock, Mutex};
 use std::{
     fs,
@@ -28,6 +29,7 @@ use std::{
 
 use regex::Regex;
 use serde::Deserialize;
+use serde_json::Value;
 
 use crate::ai_project::normalize_ai_project_path;
 use crate::db::LogBatchEntry;
@@ -42,6 +44,14 @@ pub struct EnrichmentConfig {
     pub authelia_source_ip: Option<String>,
     /// Same gating, for AdGuard.
     pub adguard_source_ip: Option<String>,
+    /// If non-empty, only extract the agent Docker metadata marker when the
+    /// entry's `source_ip` matches one of these prefixes (octet-boundary
+    /// semantics, see [`source_ip_matches`]). The marker rides the
+    /// unauthenticated syslog message body, so without this gate any
+    /// port-1514 sender can forge agent-docker identity (same trust class as
+    /// the CEF `UNIFIdeviceName` gotcha). Empty keeps the legacy
+    /// extract-from-anywhere behaviour.
+    pub agent_docker_source_prefixes: Vec<String>,
     /// When `true`, redact known secret patterns from AI-source messages.
     pub scrub_prompts: bool,
     /// Optional API token value to add to the redaction set so a leaked token
@@ -138,9 +148,16 @@ struct ClaudeSessionsIndexEntry {
     project_path: Option<String>,
 }
 
+// `AGENT_DOCKER_SOURCE_KIND` is the denormalised `metadata_json.source_kind`
+// value written by the receiver when it extracts the agent Docker marker.
+// Set from the shared constant, never from the (sender-controlled) marker
+// payload.
+use crate::agent::docker::{AGENT_DOCKER_META_MARKER, AGENT_DOCKER_SOURCE_KIND};
+
 /// Apply enrichment to one entry. Pure function — never panics, never logs at
 /// `error`. Parse failures fall through, leaving the entry unchanged.
 pub(crate) fn enrich_entry(mut entry: LogBatchEntry, config: &EnrichmentConfig) -> LogBatchEntry {
+    extract_agent_docker_metadata(&mut entry, config);
     enrich_ai_metadata(&mut entry);
 
     if matches_app(&entry, "authelia")
@@ -170,6 +187,101 @@ fn matches_app(entry: &LogBatchEntry, expected: &str) -> bool {
     entry.app_name.as_deref() == Some(expected)
 }
 
+/// Process-lifetime count of marker-bearing entries whose `source_ip` failed
+/// the `agent_docker_source_prefixes` gate (see [`extract_agent_docker_metadata`]).
+/// A blocked gate is otherwise only visible at `debug` log level, which is
+/// off in production — this counter surfaces it via the `stats` MCP action
+/// (`agent_docker_gate_blocked_count`) so operators can tell a misconfigured
+/// prefix list from a quiet one.
+static AGENT_DOCKER_GATE_BLOCKED_COUNT: AtomicU64 = AtomicU64::new(0);
+
+/// Read the current value of [`AGENT_DOCKER_GATE_BLOCKED_COUNT`]. Cheap
+/// (relaxed atomic load); safe to call on every `stats` request.
+pub(crate) fn agent_docker_gate_blocked_count() -> u64 {
+    AGENT_DOCKER_GATE_BLOCKED_COUNT.load(Ordering::Relaxed)
+}
+
+/// Extract the agent Docker metadata prefix from `message` into
+/// `metadata_json` and strip the marker from `message`. Malformed payloads
+/// leave the entry untouched — the raw line is still stored and searchable.
+///
+/// **Trust boundary:** the marker rides the unauthenticated syslog body, so
+/// the payload is sender-controlled. The merge is therefore scoped: only the
+/// `agent_docker` object is accepted, it never overwrites a key already
+/// present in `metadata_json`, and the denormalised `source_kind` is set
+/// from [`AGENT_DOCKER_SOURCE_KIND`] rather than the payload. When
+/// `agent_docker_source_prefixes` is configured, extraction is further
+/// restricted to entries whose `source_ip` matches one of the prefixes.
+fn extract_agent_docker_metadata(entry: &mut LogBatchEntry, config: &EnrichmentConfig) {
+    let Some(payload_start) = entry.message.strip_prefix(AGENT_DOCKER_META_MARKER) else {
+        return;
+    };
+    if !config.agent_docker_source_prefixes.is_empty()
+        && !config
+            .agent_docker_source_prefixes
+            .iter()
+            .any(|prefix| source_ip_matches(entry, Some(prefix)))
+    {
+        AGENT_DOCKER_GATE_BLOCKED_COUNT.fetch_add(1, Ordering::Relaxed);
+        tracing::debug!(
+            source_ip = %entry.source_ip,
+            hostname = %entry.hostname,
+            "agent-docker marker present but source_ip matched no configured prefix; \
+             marker left in message, identity not extracted"
+        );
+        return;
+    }
+    // The payload is a single JSON object; use the streaming deserializer to
+    // find where it ends without guessing about braces inside strings.
+    let mut stream = serde_json::Deserializer::from_str(payload_start).into_iter::<Value>();
+    let Some(Ok(metadata)) = stream.next() else {
+        return;
+    };
+    let Some(agent_docker) = metadata
+        .get("agent_docker")
+        .filter(|v| v.is_object())
+        .cloned()
+    else {
+        return;
+    };
+    let consumed = stream.byte_offset();
+    let rest = &payload_start[consumed..];
+    let Some(rest) = rest.strip_prefix("] ").or_else(|| rest.strip_prefix(']')) else {
+        return;
+    };
+
+    // Ordering dependency: this extraction runs FIRST in `enrich_entry`, so
+    // any pre-existing `metadata_json` here was set by the receiver/parser.
+    // A non-object value (corrupt or non-JSON) is deliberately replaced with
+    // a fresh object — later enrichment stages must keep running after this
+    // one, not before, or their metadata would be discarded here.
+    let mut merged = entry
+        .metadata_json
+        .as_deref()
+        .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+        .filter(Value::is_object)
+        .unwrap_or_else(|| Value::Object(Default::default()));
+    if let Value::Object(target) = &mut merged {
+        // Sender-controlled payload must never clobber parser-set keys.
+        if target.contains_key("agent_docker") {
+            return;
+        }
+        target.insert("agent_docker".to_string(), agent_docker);
+        target.insert(
+            "source_kind".to_string(),
+            Value::String(AGENT_DOCKER_SOURCE_KIND.to_string()),
+        );
+    }
+    // If the merged object would blow the metadata bound, truncation would
+    // drop the `agent_docker` identity we just extracted. Back out instead:
+    // the marker stays in the message, so identity is never silently lost.
+    let Some(bounded) = crate::ingest_metadata::try_bounded_metadata_json(merged) else {
+        return;
+    };
+    entry.message = rest.to_string();
+    entry.metadata_json = Some(bounded);
+}
+
 /// Match `entry.source_ip` against an operator-configured prefix at the
 /// IP-octet boundary. Plain `starts_with` would let an attacker on
 /// `10.0.0.10` (or `10.0.0.123`) pass a gate configured for `10.0.0.1`
@@ -177,8 +289,15 @@ fn matches_app(entry: &LogBatchEntry, expected: &str) -> bool {
 ///
 /// * **Subnet prefix** ending with `.` (e.g. `"10.0.0."`): match any IP
 ///   in the subnet — the byte after the prefix must be a digit (next octet).
-/// * **Exact host** without trailing dot (e.g. `"10.0.0.5"`): match only
-///   that IP — extract the IP portion of `"<ip>:<port>"` and require equality.
+/// * **Exact host** without trailing dot (e.g. `"10.0.0.5"`, `"2001:db8::1"`):
+///   match only that IP — compare parsed addresses when both sides parse
+///   (canonical-form insensitive), else compare the extracted IP string.
+///
+/// The source IP is parsed as a [`std::net::SocketAddr`] first, which handles
+/// `"<ipv4>:<port>"` and bracketed IPv6 `"[<ipv6>]:<port>"`; a bare IP
+/// without a port is parsed as [`std::net::IpAddr`]. Only if both parses fail
+/// does the legacy `split(':')` string handling apply (which would truncate a
+/// raw IPv6 literal — such values never reach it because they parse).
 ///
 /// `None` or empty prefix preserves the legacy "apply to all matching
 /// app_name" default.
@@ -186,10 +305,23 @@ fn source_ip_matches(entry: &LogBatchEntry, configured_prefix: Option<&str>) -> 
     let Some(prefix) = configured_prefix.filter(|p| !p.is_empty()) else {
         return true;
     };
-    let ip_only = entry.source_ip.split(':').next().unwrap_or("");
+    let source_ip = entry.source_ip.as_str();
+    let parsed_ip: Option<std::net::IpAddr> = source_ip
+        .parse::<std::net::SocketAddr>()
+        .map(|addr| addr.ip())
+        .or_else(|_| source_ip.parse::<std::net::IpAddr>())
+        .ok();
+    let ip_only = match &parsed_ip {
+        Some(ip) => ip.to_string(),
+        None => source_ip.split(':').next().unwrap_or("").to_string(),
+    };
     if prefix.ends_with('.') {
         // Subnet match: prefix is a partial dotted-quad like "10.0.0."
         ip_only.starts_with(prefix)
+    } else if let (Some(ip), Ok(prefix_ip)) = (parsed_ip, prefix.parse::<std::net::IpAddr>()) {
+        // Exact-host match on parsed addresses: canonical-form insensitive
+        // (e.g. `2001:0db8::1` matches `2001:db8::1`).
+        ip == prefix_ip
     } else {
         // Exact-host match: prefix is a full IP literal
         ip_only == prefix

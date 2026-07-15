@@ -145,7 +145,7 @@ pub fn list_mount_relationship_findings(
         .query_map(
             params![
                 graph::REL_MOUNTS,
-                graph::ENTITY_TYPE_SERVICE,
+                graph::ENTITY_TYPE_SERVICE_INSTANCE,
                 graph::ENTITY_TYPE_STORAGE,
                 i64::from(limit),
             ],

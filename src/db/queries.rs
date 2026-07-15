@@ -19,17 +19,22 @@ use rusqlite::{OptionalExtension, params};
 use crate::config::StorageConfig;
 use crate::enrich::parser::SourceKind;
 
+use super::entity_resolution::{
+    FALLBACK_EXPLICIT_DEGRADED_HOST_CONTEXT, INCLUSION_GRAPH_RELATED, INCLUSION_HOST_CONTEXT,
+    INCLUSION_SERVICE_INSTANCE, ResolverStatus,
+};
 use super::maintenance::{exceeds_trigger, get_storage_metrics};
 use super::models::{
     AbuseIncident, AiAbuseMatch, AiAbuseParams, AiAbuseResult, AiCorrelateParams, AiIncidentParams,
     AiIncidentResult, AiInvestigateParams, AiInvestigateResult, AiProjectInventoryEntry,
     AiRelatedLogsForAnchor, AiRelatedLogsParams, AiSessionEntry, AiToolInventoryEntry, DbStats,
-    ErrorSummaryEntry, HostEntry, IncidentEvidence, ListAiProjectsParams, ListAiProjectsResult,
-    ListAiSessionsParams, ListAiToolsParams, ListAiToolsResult, LogEntry, ResolvedTopicEntity,
-    SearchAiSessionsParams, SearchAiSessionsResult, SearchParams, SearchedAiSessionEntry,
-    SessionGraphInputs, TopicGraphInputs,
+    ErrorSummaryEntry, GraphRelatedLogEntry, HostEntry, IncidentEvidence, ListAiProjectsParams,
+    ListAiProjectsResult, ListAiSessionsParams, ListAiToolsParams, ListAiToolsResult, LogEntry,
+    ResolvedTopicEntity, SearchAiSessionsParams, SearchAiSessionsResult, SearchParams,
+    SearchedAiSessionEntry, SessionGraphInputs, TopicGraphInputs,
 };
 use super::pool::DbPool;
+use super::queries_service_instances;
 
 const SEARCH_FTS_CANDIDATE_CAP: usize = 10_000;
 const SIMILAR_INCIDENT_FTS_CANDIDATE_CAP: usize = 5_000;
@@ -113,7 +118,7 @@ pub fn validate_fts_query(query: &str) -> Result<()> {
 }
 
 /// Column list for the FTS result projection (must match `map_row`'s order).
-const FTS_SELECT_COLS: &str = "l.id, l.timestamp, l.hostname, l.facility, l.severity, \
+pub(super) const FTS_SELECT_COLS: &str = "l.id, l.timestamp, l.hostname, l.facility, l.severity, \
      l.app_name, l.process_id, l.message, l.received_at, l.source_ip, \
      l.ai_tool, l.ai_project, l.ai_session_id, l.ai_transcript_path, l.metadata_json";
 
@@ -1479,12 +1484,30 @@ pub fn search_ai_related_logs(
 
 /// Push each value as a bound `Text` parameter and return a `?, ?, …`
 /// placeholder list of matching arity for an `IN (...)` clause.
-fn bind_in_list(bindings: &mut Vec<rusqlite::types::Value>, values: &[String]) -> String {
+pub(super) fn bind_in_list(
+    bindings: &mut Vec<rusqlite::types::Value>,
+    values: &[String],
+) -> String {
     let start = bindings.len();
     for v in values {
         bindings.push(rusqlite::types::Value::Text(v.clone()));
     }
     vec!["?"; bindings.len() - start].join(", ")
+}
+
+/// Controls which walked entities may contribute host-wide
+/// (`l.hostname IN (…)`) predicates to the graph log fan-out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HostFanoutScope {
+    /// Any reached `host`/`container` entity adds its hostname. Session
+    /// correlation uses this deliberately: following `ai_session → host`
+    /// edges to the host's logs is the point of the query.
+    WalkReached,
+    /// Only `host` entities that were seeds themselves (exact topic match on
+    /// the host) add hostnames. Hosts reached transitively from app/container
+    /// seeds never drive host-wide log inclusion — topic correlation's
+    /// no-silent-fan-out guarantee.
+    SeedHostsOnly,
 }
 
 /// Graph-anchored log fan-out: traverse the investigation graph outward from a
@@ -1498,8 +1521,9 @@ fn bind_in_list(bindings: &mut Vec<rusqlite::types::Value>, values: &[String]) -
 /// log scan — 10-100× fewer rows than an FTS-first scan over a common term.
 ///
 /// Entity → log-column mapping:
-/// - `host` → `hostname`
-/// - `container` / `service` (`docker_host:…` keys) → leading `hostname`
+/// - `host` → `hostname` (subject to `host_fanout_scope`)
+/// - `container` (`docker_host:…` keys) → leading `hostname` (only under
+///   [`HostFanoutScope::WalkReached`])
 /// - `ai_project` → `ai_project`
 /// - `ai_session` (`project:tool:session` keys) → trailing `ai_session_id`
 ///
@@ -1514,6 +1538,7 @@ pub fn search_logs_from_graph_related_entities(
     until: Option<&str>,
     source_kinds: Option<&[SourceKind]>,
     limit: usize,
+    host_fanout_scope: HostFanoutScope,
 ) -> Result<Vec<LogEntry>> {
     if entity_canonical_keys.is_empty() {
         return Ok(Vec::new());
@@ -1526,21 +1551,36 @@ pub fn search_logs_from_graph_related_entities(
     if entities.is_empty() {
         return Ok(Vec::new());
     }
+    let seed_set: std::collections::HashSet<&str> =
+        entity_canonical_keys.iter().map(String::as_str).collect();
 
     // 2. Map related entities to indexed log-column filters.
+    //
+    // Hard break (entity_resolution_v2): `service_instance` entities do NOT
+    // map to host-wide log filters here — service-scoped logs come from
+    // `search_logs_for_service_instances` predicates instead, so a service
+    // topic never silently expands to every log on its host.
     let mut hostnames: Vec<String> = Vec::new();
     let mut ai_projects: Vec<String> = Vec::new();
     let mut ai_sessions: Vec<String> = Vec::new();
     for entity in &entities {
         match entity.entity_type.as_str() {
-            super::graph::ENTITY_TYPE_HOST => hostnames.push(entity.canonical_key.clone()),
-            super::graph::ENTITY_TYPE_CONTAINER | super::graph::ENTITY_TYPE_SERVICE => {
-                // `docker_host:container_id` / `docker_host:project:service` —
-                // the leading segment is the host the workload runs on.
-                if let Some(host) = entity.canonical_key.split(':').next() {
-                    if !host.is_empty() {
-                        hostnames.push(host.to_string());
-                    }
+            super::graph::ENTITY_TYPE_HOST => {
+                if host_fanout_scope == HostFanoutScope::WalkReached
+                    || seed_set.contains(entity.canonical_key.as_str())
+                {
+                    hostnames.push(entity.canonical_key.clone());
+                }
+            }
+            super::graph::ENTITY_TYPE_CONTAINER
+                if host_fanout_scope == HostFanoutScope::WalkReached =>
+            {
+                // `docker_host:container_id` — the leading segment is the
+                // host the workload runs on.
+                if let Some(host) =
+                    super::entity_resolution::container_key_host(&entity.canonical_key)
+                {
+                    hostnames.push(host.to_string());
                 }
             }
             super::graph::ENTITY_TYPE_AI_PROJECT => ai_projects.push(entity.canonical_key.clone()),
@@ -1632,6 +1672,9 @@ pub fn search_logs_from_graph_related_entities(
 /// Falls back to a plain `ai_session_id`-filtered query (`used_graph = false`)
 /// when the graph has no entity for the session yet. Returns empty bounds when
 /// the session has no rows at all.
+///
+/// Deliberate scoping: session correlation uses host/container mapping only
+/// and intentionally does not fan out via `service_instance` predicates.
 pub fn correlate_session_graph(
     pool: &DbPool,
     session_id: &str,
@@ -1685,11 +1728,18 @@ pub fn correlate_session_graph(
                 super::graph::ENTITY_TYPE_HOST => {
                     discovered_hosts.push(entity.canonical_key.clone())
                 }
-                super::graph::ENTITY_TYPE_CONTAINER | super::graph::ENTITY_TYPE_SERVICE => {
-                    if let Some(host) = entity.canonical_key.split(':').next() {
-                        if !host.is_empty() {
-                            discovered_hosts.push(host.to_string());
-                        }
+                super::graph::ENTITY_TYPE_CONTAINER => {
+                    if let Some(host) =
+                        super::entity_resolution::container_key_host(&entity.canonical_key)
+                    {
+                        discovered_hosts.push(host.to_string());
+                    }
+                }
+                super::graph::ENTITY_TYPE_SERVICE_INSTANCE => {
+                    if let Some((host, _)) =
+                        super::entity_resolution::split_service_instance_key(&entity.canonical_key)
+                    {
+                        discovered_hosts.push(host.to_string());
                     }
                 }
                 _ => {}
@@ -1713,6 +1763,7 @@ pub fn correlate_session_graph(
             Some(&end),
             None,
             limit,
+            HostFanoutScope::WalkReached,
         )?
     } else {
         // Fallback: the graph hasn't projected this session yet — return its own
@@ -1737,92 +1788,6 @@ pub fn correlate_session_graph(
     })
 }
 
-/// Resolve topic terms to graph entities by exact / prefix / label / alias
-/// match. `terms` must already be lowercased. Strongest match wins per entity
-/// (exact > prefix > label > alias). Capped per term and overall.
-fn resolve_topic_entities(
-    conn: &rusqlite::Connection,
-    terms: &[String],
-) -> Result<Vec<ResolvedTopicEntity>> {
-    const PER_TERM_CAP: usize = 25;
-    const TOTAL_CAP: usize = 100;
-    // (entity_type, canonical_key) -> match priority (lower = stronger).
-    let mut best: std::collections::HashMap<(String, String), u8> =
-        std::collections::HashMap::new();
-
-    let mut direct = conn.prepare(
-        "SELECT entity_type, canonical_key,
-                CASE WHEN canonical_key = ?1 THEN 0
-                     WHEN canonical_key LIKE ?1 || '%' THEN 1
-                     ELSE 2 END AS pri
-         FROM graph_entities
-         WHERE canonical_key = ?1
-            OR canonical_key LIKE ?1 || '%'
-            OR lower(display_label) LIKE '%' || ?1 || '%'
-         ORDER BY pri
-         LIMIT ?2",
-    )?;
-    let mut alias = conn.prepare(
-        "SELECT e.entity_type, e.canonical_key
-         FROM graph_entity_aliases a
-         JOIN graph_entities e ON e.id = a.entity_id
-         WHERE a.alias_key = ?1
-         LIMIT ?2",
-    )?;
-
-    for term in terms {
-        let rows = direct.query_map(rusqlite::params![term, PER_TERM_CAP as i64], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, i64>(2)? as u8,
-            ))
-        })?;
-        for row in rows {
-            let (entity_type, key, pri) = row?;
-            let slot = best.entry((entity_type, key)).or_insert(u8::MAX);
-            *slot = (*slot).min(pri);
-        }
-        let alias_rows = alias.query_map(rusqlite::params![term, PER_TERM_CAP as i64], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })?;
-        for row in alias_rows {
-            let (entity_type, key) = row?;
-            // Alias match has priority 3 (weakest), only fills if nothing stronger.
-            let slot = best.entry((entity_type, key)).or_insert(u8::MAX);
-            *slot = (*slot).min(3);
-        }
-    }
-
-    let mut resolved: Vec<ResolvedTopicEntity> = best
-        .into_iter()
-        .map(|((entity_type, canonical_key), pri)| ResolvedTopicEntity {
-            entity_type,
-            canonical_key,
-            match_kind: match pri {
-                0 => "exact",
-                1 => "prefix",
-                2 => "label",
-                _ => "alias",
-            },
-        })
-        .collect();
-    // Stable, deterministic ordering: strongest match first, then key.
-    resolved.sort_by(|a, b| {
-        let rank = |m: &str| match m {
-            "exact" => 0,
-            "prefix" => 1,
-            "label" => 2,
-            _ => 3,
-        };
-        rank(a.match_kind)
-            .cmp(&rank(b.match_kind))
-            .then_with(|| a.canonical_key.cmp(&b.canonical_key))
-    });
-    resolved.truncate(TOTAL_CAP);
-    Ok(resolved)
-}
-
 /// Topic-anchored universal correlation: resolve a set of (lowercased) topic
 /// terms to graph entities, expand the graph `max_depth` hops, and fan logs out
 /// across all source kinds within `[since, until]` via
@@ -1845,27 +1810,109 @@ pub fn topic_correlate_inputs(
         return Ok(TopicGraphInputs::default());
     }
     let conn = pool.get()?;
-    let resolved = resolve_topic_entities(&conn, terms)?;
+    let mut resolved = queries_service_instances::resolve_topic_entities(&conn, terms)?;
     if resolved.is_empty() {
         return Ok(TopicGraphInputs::default());
     }
 
-    let mut seeds: Vec<String> = resolved.iter().map(|r| r.canonical_key.clone()).collect();
-    seeds.sort();
-    seeds.dedup();
-    let seed_set: std::collections::HashSet<&str> = seeds.iter().map(String::as_str).collect();
+    // Partition seeds. Only `resolved` (exact/alias) identities drive log
+    // fan-out; weak prefix/label candidates stay visible as `ambiguous`.
+    // Service identity seeds resolve through service-instance predicates:
+    // an exact `logical_service` expands to its `instance_of` instances.
+    let mut instance_keys: Vec<String> = Vec::new();
+    let mut logical_keys: Vec<String> = Vec::new();
+    let mut generic_seeds: Vec<String> = Vec::new();
+    for entity in &resolved {
+        if entity.resolver_status != ResolverStatus::Resolved {
+            continue;
+        }
+        match entity.entity_type.as_str() {
+            super::graph::ENTITY_TYPE_LOGICAL_SERVICE => {
+                logical_keys.push(entity.canonical_key.clone())
+            }
+            super::graph::ENTITY_TYPE_SERVICE_INSTANCE => {
+                instance_keys.push(entity.canonical_key.clone())
+            }
+            _ => generic_seeds.push(entity.canonical_key.clone()),
+        }
+    }
+    if !logical_keys.is_empty() {
+        let linked =
+            queries_service_instances::service_instances_of_logical_services(&conn, &logical_keys)?;
+        // A resolved logical service with ZERO instance_of instances means
+        // the projection is stale or unbuilt (e.g. right after migration 41
+        // before `cortex graph rebuild`). Mark it degraded so the empty
+        // service timeline is explained rather than silent. Canonical
+        // instance keys are `host/<logical_key>` by the resolver grammar.
+        let covered: std::collections::HashSet<String> = linked
+            .iter()
+            .filter_map(|key| {
+                super::entity_resolution::split_service_instance_key(key)
+                    .map(|(_, service)| service.to_string())
+            })
+            .collect();
+        for entity in resolved.iter_mut() {
+            if entity.entity_type == super::graph::ENTITY_TYPE_LOGICAL_SERVICE
+                && entity.resolver_status == ResolverStatus::Resolved
+                && !covered.contains(entity.canonical_key.as_str())
+            {
+                entity.resolver_status = ResolverStatus::Degraded;
+            }
+        }
+        instance_keys.extend(linked);
+    }
+    instance_keys.sort();
+    instance_keys.dedup();
+    generic_seeds.sort();
+    generic_seeds.dedup();
 
-    // Graph expansion + host discovery.
+    // Graph expansion + host discovery. Service seeds use the bounded
+    // service-topic walk (proof relationships only); generic seeds keep the
+    // general walk.
+    let mut walk_entities = Vec::new();
+    let mut service_seeds: Vec<String> = logical_keys.clone();
+    service_seeds.extend(instance_keys.iter().cloned());
+    service_seeds.sort();
+    service_seeds.dedup();
+    let mut graph_walk_truncated = false;
+    if !service_seeds.is_empty() {
+        let (entities, truncated) = super::graph_resolver_projection::graph_walk_service_topic(
+            &conn,
+            &service_seeds,
+            max_depth,
+        )?;
+        walk_entities.extend(entities);
+        graph_walk_truncated |= truncated;
+    }
+    if !generic_seeds.is_empty() {
+        walk_entities.extend(super::graph::graph_walk_n_hops(
+            &conn,
+            &generic_seeds,
+            max_depth,
+        )?);
+    }
+    let seed_set: std::collections::HashSet<&str> = service_seeds
+        .iter()
+        .chain(generic_seeds.iter())
+        .map(String::as_str)
+        .collect();
     let mut expansion: Vec<(String, String)> = Vec::new();
     let mut discovered_hosts: Vec<String> = Vec::new();
-    for entity in super::graph::graph_walk_n_hops(&conn, &seeds, max_depth)? {
+    for entity in walk_entities {
         match entity.entity_type.as_str() {
             super::graph::ENTITY_TYPE_HOST => discovered_hosts.push(entity.canonical_key.clone()),
-            super::graph::ENTITY_TYPE_CONTAINER | super::graph::ENTITY_TYPE_SERVICE => {
-                if let Some(host) = entity.canonical_key.split(':').next() {
-                    if !host.is_empty() {
-                        discovered_hosts.push(host.to_string());
-                    }
+            super::graph::ENTITY_TYPE_CONTAINER => {
+                if let Some(host) =
+                    super::entity_resolution::container_key_host(&entity.canonical_key)
+                {
+                    discovered_hosts.push(host.to_string());
+                }
+            }
+            super::graph::ENTITY_TYPE_SERVICE_INSTANCE => {
+                if let Some((host, _)) =
+                    super::entity_resolution::split_service_instance_key(&entity.canonical_key)
+                {
+                    discovered_hosts.push(host.to_string());
                 }
             }
             _ => {}
@@ -1880,21 +1927,101 @@ pub fn topic_correlate_inputs(
     expansion.dedup();
     drop(conn);
 
-    let logs = search_logs_from_graph_related_entities(
-        pool,
-        &seeds,
-        max_depth,
-        since,
-        until,
-        source_kinds,
-        limit,
-    )?;
+    // Log fan-out: service instances use service-scoped predicates; generic
+    // seeds use the graph-related fan-out. Never both for the same rows —
+    // results merge newest-first under the shared limit.
+    let mut logs: Vec<GraphRelatedLogEntry> = Vec::new();
+    if !instance_keys.is_empty() {
+        logs.extend(
+            queries_service_instances::search_logs_for_service_instances(
+                pool,
+                &instance_keys,
+                since,
+                until,
+                source_kinds,
+                limit,
+            )?,
+        );
+    }
+    if !generic_seeds.is_empty() {
+        // SeedHostsOnly: a host reached transitively from an app/container
+        // seed (e.g. app:plex —emitted_by→ host:tootie) must never drive
+        // host-wide `l.hostname IN (…)` inclusion labelled `resolved`. Only
+        // hosts that were exact topic matches themselves fan out.
+        logs.extend(
+            search_logs_from_graph_related_entities(
+                pool,
+                &generic_seeds,
+                max_depth,
+                since,
+                until,
+                source_kinds,
+                limit,
+                HostFanoutScope::SeedHostsOnly,
+            )?
+            .into_iter()
+            .map(|entry| GraphRelatedLogEntry {
+                entry,
+                inclusion_reason: INCLUSION_GRAPH_RELATED.to_string(),
+                resolver_status: ResolverStatus::Resolved,
+                fallback_kind: None,
+            }),
+        );
+    }
+
+    // Explicit degraded host-context fallback: a service topic whose
+    // instance predicates matched no rows falls back to the instances' host
+    // context, annotated (`explicit_degraded_host_context`) — never silent.
+    if logs.is_empty() && !instance_keys.is_empty() && generic_seeds.is_empty() {
+        let hosts: Vec<String> = instance_keys
+            .iter()
+            .filter_map(|key| {
+                let split = super::entity_resolution::split_service_instance_key(key);
+                if split.is_none() {
+                    tracing::debug!(
+                        key = %key,
+                        "discarding non-canonical service_instance key in host-context fallback"
+                    );
+                }
+                split.map(|(host, _)| host.to_string())
+            })
+            .collect();
+        if !hosts.is_empty() {
+            logs.extend(
+                queries_service_instances::search_logs_by_hostnames(
+                    pool,
+                    &hosts,
+                    since,
+                    until,
+                    source_kinds,
+                    limit,
+                )?
+                .into_iter()
+                .map(|entry| GraphRelatedLogEntry {
+                    entry,
+                    inclusion_reason: INCLUSION_HOST_CONTEXT.to_string(),
+                    resolver_status: ResolverStatus::Degraded,
+                    fallback_kind: Some(FALLBACK_EXPLICIT_DEGRADED_HOST_CONTEXT.to_string()),
+                }),
+            );
+        }
+    }
+
+    logs.sort_by(|a, b| {
+        b.entry
+            .timestamp
+            .cmp(&a.entry.timestamp)
+            .then_with(|| b.entry.id.cmp(&a.entry.id))
+    });
+    logs.dedup_by_key(|row| row.entry.id);
+    logs.truncate(limit);
 
     Ok(TopicGraphInputs {
         resolved,
         expansion,
         discovered_hosts,
         logs,
+        graph_walk_truncated,
     })
 }
 

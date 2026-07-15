@@ -420,3 +420,44 @@ Step (3) ran the `sshd` parser (if one exists) and wrote `parser.*`.
 | `docs/contracts/incident-card.md` §4 / §5 (allowlist references) | Note that the allowlist applies to the OUTPUT (Qdrant payload), not to `metadata_json` itself — `metadata_json` is the input source. |
 | `docs/superpowers/specs/2026-05-16-agent-mode-design.md` §4.1 / §10 (WS ingest handler) | Document the wholesale wrapping of `AgentLogEntry.metadata` under the `agent` top-level key. Currently the spec says "stored in logs.metadata_json" without specifying the wrap; the wrap is a security boundary. |
 | `src/db/ingest.rs` (insert path) | Implement the writer-side validator (§5 step 5). Today there is no validator; this contract requires one to land alongside enrichment migration 10. |
+
+## Agent Docker identity namespace (`agent_docker`)
+
+The host-local agent forwards Docker container logs as syslog with a
+structured identity prefix; receiver enrichment merges it into
+`metadata_json`:
+
+```json
+{
+  "source_kind": "agent-docker",
+  "agent_docker": {
+    "host": "tootie",
+    "container_id": "abcdef1234567890",
+    "container_name": "plex",
+    "compose_project": "plex",
+    "compose_service": "plex",
+    "image": "lscr.io/linuxserver/plex:latest",
+    "stream": "stdout"
+  }
+}
+```
+
+Required fields: `host`, `container_id`, `container_name`, `stream`.
+Optional fields: `compose_project`, `compose_service`, `image`. The
+`agent_docker` namespace has a single writer (receiver enrichment from the
+agent prefix); the legacy central-pull `docker.*` namespace is separate and
+is not resolver proof. Canonical resolver proof must use `agent-docker`
+structured metadata; `docker://` and `docker-event://` rows are not proof
+for the resolver-backed graph contract.
+
+**Trust boundary:** the marker travels in the unauthenticated syslog
+message body, so its payload is sender-controlled — without the source
+gate, any port-1514 sender can forge agent-docker identity (same class as
+the CEF `UNIFIdeviceName` gotcha). Receiver enrichment therefore scopes the
+merge: only the `agent_docker` object is taken from the payload, existing
+`metadata_json` keys (including a pre-existing `agent_docker`) are never
+overwritten, and `source_kind` is set from the receiver constant, not the
+payload. Operators SHOULD configure `agent_docker_source_prefixes`
+(`CORTEX_AGENT_DOCKER_SOURCE_PREFIXES`, comma-separated) to restrict
+extraction to hosts running the cortex agent; unset keeps
+extract-from-anywhere compatibility.

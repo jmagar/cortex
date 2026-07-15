@@ -158,6 +158,9 @@ CORTEX_MAX_MESSAGE_SIZE=8192
 CORTEX_BATCH_SIZE=100
 CORTEX_FLUSH_INTERVAL=500        # ms
 
+# Enrichment
+CORTEX_AGENT_DOCKER_SOURCE_PREFIXES=100.88.16.79,100.120.242.  # comma-separated; full IPv4 (exact host) or dot-terminated partial quad (subnet); trailing dot required for subnets — "100.64.0" matches nothing; IPv6 not matchable; empty = accept from any sender
+
 # MCP server
 CORTEX_HOST=127.0.0.1               # default loopback; 0.0.0.0 requires CORTEX_TOKEN/OAuth
 CORTEX_PORT=3100

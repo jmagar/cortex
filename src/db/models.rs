@@ -229,6 +229,22 @@ pub struct ResolvedTopicEntity {
     pub entity_type: String,
     pub canonical_key: String,
     pub match_kind: &'static str,
+    /// Resolver outcome: `Resolved` for exact canonical-key and alias
+    /// identity matches, `Ambiguous` for weak prefix/label candidates that
+    /// never drive log fan-out. Stringified via
+    /// [`super::entity_resolution::ResolverStatus::as_str`] only at the serde
+    /// boundary.
+    pub resolver_status: super::entity_resolution::ResolverStatus,
+}
+
+/// One correlated log row annotated with why it was included and the
+/// resolver outcome for its inclusion path.
+#[derive(Debug, Clone)]
+pub struct GraphRelatedLogEntry {
+    pub entry: LogEntry,
+    pub inclusion_reason: String,
+    pub resolver_status: super::entity_resolution::ResolverStatus,
+    pub fallback_kind: Option<String>,
 }
 
 /// DB-layer carrier for topic correlation: the entities the topic resolved to,
@@ -239,7 +255,12 @@ pub struct TopicGraphInputs {
     /// Entities reached by traversal that were not themselves resolved seeds.
     pub expansion: Vec<(String, String)>,
     pub discovered_hosts: Vec<String>,
-    pub logs: Vec<LogEntry>,
+    pub logs: Vec<GraphRelatedLogEntry>,
+    /// `true` when the service-topic graph walk
+    /// ([`super::graph_resolver_projection::graph_walk_service_topic`]) hit
+    /// `GRAPH_SERVICE_TOPIC_ENTITY_CAP` and the reached neighborhood was cut
+    /// off rather than exhaustive.
+    pub graph_walk_truncated: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

@@ -4,14 +4,21 @@
 
 Rust syslog receiver and MCP server for homelab log intelligence. Ingests syslog over UDP and TCP, stores it in SQLite with FTS5 full-text indexing, and exposes action-based log search, inventory, correlation, status, and analysis tools through MCP, REST, and CLI adapters backed by the shared service layer.
 
-cortex also maintains derived projection tables for future investigation graph
-features. Those graph tables connect source IPs, claimed hosts, apps, services,
-containers, AI projects/sessions, and error signatures with evidence, but raw
-logs, heartbeats, inventory, signatures, and session rows remain the source of
-truth. The graph projection is rebuildable and intentionally has no ingest
-triggers. Graph rebuilds use staging tables plus a short serialized swap and
-record explicit projection status, source watermarks, row counts, runtime
-metrics, and degraded failure state.
+cortex also maintains derived projection tables for the investigation graph.
+Those graph tables connect source IPs, claimed hosts, apps, canonical
+services, containers, AI projects/sessions, and error signatures with
+evidence, but raw logs, heartbeats, inventory, signatures, and session rows
+remain the source of truth. The graph projection is rebuildable and
+intentionally has no ingest triggers. Graph rebuilds use staging tables plus
+a short serialized swap and record explicit projection status, source
+watermarks, row counts, runtime metrics, and degraded failure state.
+
+Service identity is resolver-backed: searching `plex` resolves the logical
+service first (`logical_service:plex`), then concrete service instances such
+as `service_instance:tootie/plex`. Cortex no longer treats `tootie:plex` or
+`tootie:plex:plex` as canonical service identities — those legacy shapes are
+rejected with `rejected_legacy_shape` (see
+`openwiki/inventory-graph.md`, "Canonical Resolver Proof: Plex").
 
 ## Contents
 
@@ -1699,6 +1706,7 @@ Before upgrading a populated database:
 2. Schedule a short ingest maintenance window for large databases.
 3. Start the new version and monitor logs for `Migration N: starting ...` and `Migration N: ... created`.
 4. Keep the previous image or binary available until `/health` returns `ok` and `cortex stats` reports sane counts.
+5. **Upgrading across migration 41 (canonical entity resolution):** the inventory graph projection is marked stale and legacy `service` entities are pruned. Run `cortex graph rebuild` (or wait for the projection scheduler when `CORTEX_GRAPH_REFRESH_INTERVAL_SECS > 0`) before expecting `topic_correlate` service results — until the rebuild, a resolved logical service with no instances reports `resolver_status: degraded` with an empty service timeline.
 
 See [docs/RELEASE.md](docs/RELEASE.md) for the current release and deploy
 gate checklist.

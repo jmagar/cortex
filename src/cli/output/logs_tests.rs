@@ -60,6 +60,7 @@ fn human_log_summary_outputs_accept_representative_payloads() {
             min_free_disk_mb: 0,
             write_blocked: false,
             phantom_fts_rows: Some(0),
+            agent_docker_gate_blocked_count: 0,
         },
         false,
     )

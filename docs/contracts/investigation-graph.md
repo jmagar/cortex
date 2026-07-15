@@ -93,12 +93,11 @@ Valid `projection_status` values:
 
 ### 4.1 Entity Types
 
-These entity type strings are valid:
+These entity type strings are valid on lookup surfaces:
 
 ```text
 host
 container
-service
 app
 source_ip
 ai_project
@@ -113,7 +112,34 @@ config_artifact
 git_commit
 user
 device
+logical_service
+service_instance
 ```
+
+`logical_service` is the canonical logical service identity (key like `plex`).
+`service_instance` is a host-scoped runtime deployment of a logical service
+(key like `tootie/plex`). These two types replace the legacy `service`
+topology rows as the supported service identity: `tootie:plex`,
+`tootie:plex:plex`, and `plex/plex/plex` are stale defect shapes that are
+deleted by migration 41 and rejected on lookup surfaces with
+`rejected_legacy_shape`. Keep logical identity and deployment topology
+separate: `plex` answers "what is this service", `tootie/plex` answers
+"where does it run".
+
+The retired `service` entity type is **schema-tolerated but not
+lookup-supported**: the SQLite CHECK constraints still accept `service` rows
+for migration compatibility (a pre-resolver binary may write them during a
+downgrade window; the incremental refresh detects and purges them), but every
+public lookup surface rejects `service` as an entity type with
+`unsupported graph entity_type` — it is deliberately absent from the valid
+lookup list above.
+
+Case sensitivity: canonical keys are lowercase, but the log fan-out
+predicates compare `logs.hostname` / `logs.app_name` with SQLite's default
+BINARY collation, so matching is case-sensitive. A mixed-case syslog
+hostname (`Tootie`) never matches the canonical instance key
+(`tootie/plex`) — syslog senders should emit lowercase hostnames. Hostname
+case normalization at ingest is tracked separately.
 
 `user` is a human/identity principal (operator name, authenticated username),
 keyed `{hostname}:{username}`. `device` is a client endpoint (DNS client IP,
@@ -148,12 +174,15 @@ has_artifact
 authenticated_as
 accessed
 communicates_with
+instance_of
 ```
 
 `authenticated_as` links a `user` to a service/host they authenticated to
 (Authelia). `accessed` links a `user` or `device` to a domain/service/host it
 reached (AdGuard DNS, shell-history). `communicates_with` (device↔peer, UniFi
-flow data) is vocabulary-reserved for future flow ingestion.
+flow data) is vocabulary-reserved for future flow ingestion. `instance_of`
+links a `service_instance` to its `logical_service`
+(`service_instance:tootie/plex instance_of logical_service:plex`).
 
 ### 4.3 Trust Levels
 
@@ -230,7 +259,23 @@ shell_history_git_commit
 adguard_client_query
 shell_history_user
 authelia_auth
+resolver_instance_of
+resolver_service_instance
+resolver_raw_app_label
 ```
+
+`resolver_instance_of` records the resolver-derived
+`service_instance instance_of logical_service` edge.
+`resolver_service_instance` records resolver-projected service-instance
+identity from structured evidence (agent Docker metadata, verified
+inventory). `resolver_raw_app_label` records a raw observed log app label
+associated with a host; raw labels never self-upgrade into
+`logical_service` identity.
+
+`resolver_service_instance` and `resolver_raw_app_label` are
+**vocabulary-reserved**: they are registered in the schema and reason
+registry but no projection path emits them today — only
+`resolver_instance_of` is written.
 
 `adguard_client_query` links a client `device` to the queried `domain` (AdGuard
 DNS). `shell_history_user` links the operating `user` to the host (shell
@@ -279,6 +324,30 @@ Entities are unique by:
 
 Repeated observations update first/last seen timestamps and keep the existing
 entity id stable within a rebuild.
+
+### 5.1 Resolver Observation Model
+
+Service identity entities (`logical_service`, `service_instance`) are
+constructed from bounded, typed resolver observations
+(`src/db/entity_resolution/observation.rs`), never from ad-hoc topology
+string building. Observations are chunk-local or aggregated in memory:
+there is no per-log resolver-observation table. Each observation carries a
+kind, canonical keys, a safe display label (`safe_display_value` redacts
+credentialed URLs, home paths, and token/secret material and bounds output
+to 128 printable characters), source kind/id, an evidence path, and a
+resolver trust level (`verified` > `claimed` > `inferred`).
+
+Adapter rules (`src/db/entity_resolution/adapters.rs`):
+
+- Structured agent Docker identity (`metadata_json.agent_docker`) yields
+  verified host, logical-service, and service-instance observations. The
+  compose service label (falling back to container name) is the logical
+  identity; the agent host scopes the instance.
+- Verified/observed inventory services yield verified host,
+  logical-service, service-instance, domain, and storage (mount)
+  observations.
+- Raw log app labels yield only a `RawAppLabel` observation. Raw labels
+  never self-upgrade into `logical_service` identity.
 
 ## 6. Relationship Construction Contract
 
@@ -399,34 +468,48 @@ Fields:
 | `evidence.metadata_path` | `logs.source_ip/metadata_json` |
 | `evidence.source_log_id` | source `logs.id` |
 
-### 7.5 Container Runs On Service
+### 7.5 Resolver Service Identity (Agent Docker Metadata)
+
+Hard break (entity_resolution_v2): the previous
+`container runs_on service` rule (`docker_service_label`, legacy
+`host:project:service` keys) is REMOVED. Central-pull `docker://` /
+`docker-event://` rows keep only the verified host/container edges from
+7.4 and are not resolver proof.
 
 Input:
 
-- Docker host,
-- `metadata_json.compose_project`,
-- `metadata_json.compose_service`.
+- `metadata_json.agent_docker.host` (required),
+- `metadata_json.agent_docker.container_id` (required),
+- `metadata_json.agent_docker.container_name` (required),
+- `metadata_json.agent_docker.stream` (required),
+- `metadata_json.agent_docker.compose_project` / `compose_service` /
+  `image` (optional).
 
-If `compose_project` is missing, the Docker host is used as the project key.
-If `compose_service` is missing, `container_name` may be used as the service
-value.
+The compose service label (falling back to the container name) is the
+logical identity; the agent host scopes the instance.
 
-Output:
+Outputs:
 
 ```text
-container runs_on service
+logical_service entity            (canonical key: plex)
+service_instance entity           (canonical key: tootie/plex)
+service_instance instance_of logical_service
 ```
 
 Fields:
 
 | Field | Value |
 | --- | --- |
-| `relationship_type` | `runs_on` |
-| `reason_code` | `docker_service_label` |
-| `trust_level` | `inferred` |
-| `confidence` | `0.7` |
-| `evidence.metadata_path` | `metadata_json.compose_service` |
+| `relationship_type` | `instance_of` |
+| `reason_code` | `resolver_instance_of` |
+| `trust_level` | `verified` |
+| `confidence` | `1.0` |
+| `evidence.metadata_path` | `metadata_json.agent_docker` |
 | `evidence.source_log_id` | source `logs.id` |
+
+Nested slash-triplet app labels (`plex/plex/plex`) are never projected as
+`app` entities; raw app labels never self-upgrade into `logical_service`
+identity.
 
 ### 7.6 Error Signature Links
 
@@ -472,13 +555,15 @@ Input:
 Outputs:
 
 ```text
-service runs_on host
-compose_project defines_service service
+logical_service entity (per unique service name)
+service_instance instance_of logical_service
+service_instance runs_on host
+compose_project defines_service service_instance
 compose_project has_artifact config_artifact
 reverse_proxy exposes_domain domain
-reverse_proxy routes_to service
-service attached_to network
-service mounts storage
+reverse_proxy routes_to service_instance
+service_instance attached_to network
+service_instance mounts storage
 host backed_by storage
 ```
 
@@ -486,26 +571,25 @@ Fields:
 
 | Relationship | Reason Code | Trust | Confidence | Evidence Kind |
 | --- | --- | --- | --- | --- |
-| `service runs_on host` | `inventory_service` | `inferred` | `0.85` | `app_inventory` |
-| `compose_project defines_service service` | `compose_config` | `verified` | `0.90` | `app_inventory` |
-| `compose_project defines_service service` | `compose_config` | `inferred` | `0.70` | `log` |
+| `service_instance instance_of logical_service` | `resolver_instance_of` | inventory trust | `0.95` | `app_inventory` |
+| `service_instance runs_on host` | `inventory_service` | `inferred` | `0.85` | `app_inventory` |
+| `compose_project defines_service service_instance` | `compose_config` | `verified` | `0.90` | `app_inventory` |
 | `compose_project has_artifact config_artifact` | `config_artifact` | `verified` | `0.95` | `app_inventory` |
 | `reverse_proxy exposes_domain domain` | `reverse_proxy_config` | `verified` | `0.95` | `app_inventory` |
-| `reverse_proxy routes_to service` | `reverse_proxy_config` | `verified` | `0.85` | `app_inventory` |
-| `service attached_to network` | `docker_network` | `verified` | `0.80` | `app_inventory` |
-| `service mounts storage` | `storage_probe` | `inferred` | `0.65` | `app_inventory` |
+| `reverse_proxy routes_to service_instance` | `reverse_proxy_config` | `verified` | `0.85` | `app_inventory` |
+| `service_instance attached_to network` | `docker_network` | `verified` | `0.80` | `app_inventory` |
+| `service_instance mounts storage` | `storage_probe` | `inferred` | `0.65` | `app_inventory` |
 | `host backed_by storage` | `storage_probe` | `verified` | `0.75` | `source_inventory` |
 
 The inventory projection paths (`compose_config`, `reverse_proxy_config`,
 `docker_network`) are **active**, projected from the homelab inventory snapshot
-(`app_inventory`). `compose_config` is additionally projected from `compose_project`
-labels on already-ingested docker log rows (`log` source, inferred trust), so
-compose topology is available even without an inventory snapshot; the two
-sources converge by natural key.
+(`app_inventory`). Service-instance keying is `host/service` (`tootie/plex`);
+legacy `{host}:{service}` keys are never emitted. A service without host
+context projects the `logical_service` only.
 
 Bare service-name matches are valid only when the service name is unique across
 the inventory snapshot. Ambiguous service names MUST be matched through a
-host-scoped key or left unlinked.
+host-scoped `service_instance` key or left unlinked.
 
 ## 8. Evidence Contract
 
@@ -580,11 +664,22 @@ cortex entity --alias-type TYPE --alias-key KEY [--limit N] [--json]
 
 Entity lookup MUST:
 
-- reject unknown entity types,
+- reject unknown entity types with `unsupported graph entity_type`,
+  including the retired `service` type (schema-tolerated for migration
+  compatibility but not a valid lookup type — see §4.1),
+- reject legacy nested service identity keys (`tootie:plex`,
+  `tootie:plex:plex`, `plex/plex/plex`) on service-identity lookups with
+  `rejected_legacy_shape` before any graph query runs (alias lookups query
+  first and reject a legacy-shaped alias key only when the alias does not
+  resolve — a resolving alias, e.g. a colon-bearing `ai_session` key, is
+  returned normally),
 - return one exact entity when unambiguous,
 - return candidates for ambiguous alias matches,
 - include projection metadata,
-- respect bounded limits.
+- respect bounded limits,
+- redact identifiers (canonical keys, display labels, source ids,
+  relationship keys, alias keys) with the same secret/home-path redaction as
+  evidence excerpts.
 
 ### 9.2 Neighborhood Lookup
 
