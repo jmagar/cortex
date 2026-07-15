@@ -3,6 +3,8 @@
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::sync::{LazyLock, Mutex};
+use std::time::{Duration, Instant};
 
 use opentelemetry_proto::tonic::{
     collector::logs::v1::ExportLogsServiceRequest,
@@ -171,9 +173,48 @@ fn any_value_to_json(v: &AnyValue) -> serde_json::Value {
         Some(AnyValueKind::ArrayValue(arr)) => serde_json::json!({"array_len": arr.values.len()}),
         Some(AnyValueKind::KvlistValue(kv)) => serde_json::json!({"kvlist_len": kv.values.len()}),
         Some(AnyValueKind::StringValueStrindex(idx)) => {
+            warn_string_table_index_once(*idx);
             serde_json::json!({"string_table_index": idx})
         }
         None => serde_json::Value::Null,
+    }
+}
+
+// `StringValueStrindex` is an experimental OTLP wire feature primarily
+// intended for the Profiling signal (per upstream .proto comments); seeing
+// it on the Logs endpoint indicates a non-conformant or misconfigured
+// producer. Rate-limited by signal type, not by sender (unlike
+// `otlp::auth`'s per-attacker UNAUTHORIZED_WARNINGS) -- there is no useful
+// per-sender key here, just "have we already flagged this recently".
+static LAST_STRINDEX_WARNING: LazyLock<Mutex<Option<Instant>>> = LazyLock::new(|| Mutex::new(None));
+
+const STRINDEX_WARNING_INTERVAL: Duration = Duration::from_secs(60);
+
+fn warn_string_table_index_once(idx: i32) {
+    let Ok(mut last) = LAST_STRINDEX_WARNING.lock() else {
+        return;
+    };
+    if should_warn_string_table_index(&mut last, Instant::now(), STRINDEX_WARNING_INTERVAL) {
+        tracing::warn!(
+            string_table_index = idx,
+            "OTLP AnyValue::StringValueStrindex seen on /v1/logs -- this wire \
+             feature is intended for the Profiling signal; the producer may \
+             be non-conformant or misconfigured"
+        );
+    }
+}
+
+fn should_warn_string_table_index(
+    last: &mut Option<Instant>,
+    now: Instant,
+    interval: Duration,
+) -> bool {
+    match *last {
+        Some(prev) if now.duration_since(prev) < interval => false,
+        _ => {
+            *last = Some(now);
+            true
+        }
     }
 }
 
@@ -239,7 +280,10 @@ fn any_value_to_string(v: &AnyValue) -> Option<String> {
         AnyValueKind::BytesValue(b) => Some(format!("[{} bytes]", b.len())),
         AnyValueKind::ArrayValue(arr) => Some(format!("[array len={}]", arr.values.len())),
         AnyValueKind::KvlistValue(kv) => Some(format!("[kvlist len={}]", kv.values.len())),
-        AnyValueKind::StringValueStrindex(idx) => Some(format!("[string_table_index={idx}]")),
+        AnyValueKind::StringValueStrindex(idx) => {
+            warn_string_table_index_once(*idx);
+            Some(format!("[string_table_index={idx}]"))
+        }
     }
 }
 

@@ -46,6 +46,29 @@ fn any_value_to_string_renders_string_table_index_as_placeholder() {
     );
 }
 
+// Exercises the pure gating function directly (not the `LAST_STRINDEX_WARNING`
+// global static) so this test can't interfere with or be affected by other
+// tests sharing the process-wide limiter -- same isolation approach as
+// otlp::auth's `unauthorized_warning_rate_limit_suppresses_repeats_per_key`.
+#[test]
+fn string_table_index_warning_suppresses_repeats_within_interval() {
+    let mut last = None;
+    let now = std::time::Instant::now();
+    let interval = std::time::Duration::from_secs(60);
+
+    assert!(should_warn_string_table_index(&mut last, now, interval));
+    assert!(!should_warn_string_table_index(
+        &mut last,
+        now + std::time::Duration::from_secs(30),
+        interval,
+    ));
+    assert!(should_warn_string_table_index(
+        &mut last,
+        now + interval,
+        interval,
+    ));
+}
+
 fn sample_request(
     host: &str,
     service: &str,
