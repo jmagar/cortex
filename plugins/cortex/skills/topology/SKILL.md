@@ -27,8 +27,10 @@ shape:
   `media_services`, `projects`, plus a `cortex_overlay` summary. Use for
   "what's out there" broad surveys.
 - `host_services` (needs `host`) — services running on one host.
-- `service_dependencies` (needs `service`, as `host:name` or `host` +
-  bare name) — what a service depends on / is depended on by.
+- `service_dependencies` (needs `service`, as a `service_instance` key
+  `host/name` — e.g. `tootie/plex` — or `host` + bare name) — what a
+  service depends on / is depended on by. Legacy `host:name` identities
+  are rejected with `rejected_legacy_shape`.
 - `domain_routes` (needs `domain`) — which reverse-proxy routes serve a
   public domain.
 - `findings` — scans for `potential_public_route`, `risky_mounts`, and
@@ -80,9 +82,16 @@ a bare time window.
 --alias-key K` for alias lookups)
 
 Look up one entity. Valid `entity_type` values: `host`, `container`,
-`service`, `app`, `source_ip`, `ai_project`, `ai_session`,
-`error_signature`, `compose_project`, `reverse_proxy`, `domain`, `network`,
-`storage`, `config_artifact`.
+`logical_service`, `service_instance`, `app`, `source_ip`, `ai_project`,
+`ai_session`, `error_signature`, `compose_project`, `reverse_proxy`,
+`domain`, `network`, `storage`, `config_artifact`, `git_commit`, `user`,
+`device`.
+
+Service identity is `logical_service` (key like `plex`) plus
+`service_instance` (key like `tootie/plex`). Legacy nested identities
+(`tootie:plex`, `tootie:plex:plex`, `plex/plex/plex`) are rejected with
+`rejected_legacy_shape` — resolve the logical service first, then follow
+its `instance_of` instances.
 
 `cortex action=graph mode=around entity_id=<id>|key=<name> [depth=1] [limit=N] [evidence_sample_limit=N]`
 (CLI: `cortex graph around <entity-type> <key> [--limit N]`, or

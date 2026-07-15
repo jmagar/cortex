@@ -105,7 +105,7 @@ All three share a common `CortexService` layer that enforces consistent limits, 
 | **[Log Intelligence](log-intelligence.md)** | Syslog/OTLP/Docker ingest, SQLite storage, FTS5 search, maintenance | `src/receiver/`, `src/ingest.rs`, `src/otlp.rs`, `src/db/` |
 | **[AI Incidents](ai-incidents.md)** | Skill/MCP/hook event tracking, signal detection, incident grouping, LLM assessment | `src/app/*/incident_findings.rs`, `src/db/*_incidents.rs` |
 | **[Exposure Surfaces](exposure-surfaces.md)** | MCP tool dispatch, REST API routes, CLI parity, scope gates | `src/mcp/`, `src/api.rs`, `src/cli/`, `src/app/` |
-| **[Inventory Graph](inventory-graph.md)** | Fleet inventory collection, heartbeat telemetry, graph projection | `src/inventory/`, `src/heartbeat.rs`, `src/db/graph.rs` |
+| **[Inventory Graph](inventory-graph.md)** | Fleet inventory collection, heartbeat telemetry, graph projection, canonical service identity (`logical_service:plex` / `service_instance:tootie/plex`, resolver-backed — see "Canonical Resolver Proof: Plex") | `src/inventory/`, `src/heartbeat.rs`, `src/db/graph.rs`, `src/db/entity_resolution.rs` |
 | **[Operations](operations.md)** | Deployment lifecycle, config management, notifications, diagnostics | `src/compose/`, `src/setup/`, `src/config.rs` |
 | **[Development](development.md)** | Build/test commands, module organization, adding features, test coverage | `src/lib.rs`, `Justfile`, `.github/workflows/` |
 

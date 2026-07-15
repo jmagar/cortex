@@ -18,7 +18,11 @@ pub(super) fn graph_rows_to_models(
             .or_default()
             .push(item.id);
     }
-    let entities: Vec<GraphEntity> = rows.entities.into_iter().map(Into::into).collect();
+    let entities: Vec<GraphEntity> = rows
+        .entities
+        .into_iter()
+        .map(|row| graph_entity_safe(row.into()))
+        .collect();
     let entity_summaries: HashMap<i64, GraphEntitySummary> = entities
         .iter()
         .map(|entity| (entity.id, GraphEntitySummary::from(entity)))
@@ -32,7 +36,12 @@ pub(super) fn graph_rows_to_models(
             let evidence_ids = evidence_ids_by_relationship
                 .remove(&row.id)
                 .unwrap_or_default();
-            graph_relationship_to_model(row, src_entity, dst_entity, evidence_ids)
+            graph_relationship_safe(graph_relationship_to_model(
+                row,
+                src_entity,
+                dst_entity,
+                evidence_ids,
+            ))
         })
         .collect();
     GraphRowsModels {
@@ -373,6 +382,42 @@ pub(super) fn graph_rebuild_stats_response(
         runtime_ms: stats.runtime_ms,
         chunk_count: stats.chunk_count,
     }
+}
+
+/// Reject legacy nested service identity keys (`tootie:plex`,
+/// `tootie:plex:plex`, `plex/plex/plex`) on service-identity lookups before
+/// any graph query runs. The check is scoped to service-identity entity
+/// types: other entity types (`ai_session`, `user`, `git_commit`, `storage`)
+/// legitimately use `:`-separated key grammars and must not be rejected.
+pub(super) fn legacy_service_identity_rejection(
+    entity_type: &str,
+    key: &str,
+) -> Option<ServiceError> {
+    let service_identity = matches!(
+        entity_type,
+        db::graph::ENTITY_TYPE_LOGICAL_SERVICE
+            | db::graph::ENTITY_TYPE_SERVICE_INSTANCE
+            | db::graph::ENTITY_TYPE_SERVICE
+            | db::graph::ENTITY_TYPE_APP
+    );
+    if !service_identity {
+        return None;
+    }
+    reject_legacy_service_identity(key)
+}
+
+/// Canonical rejection for legacy (pre entity-resolution) service identity
+/// shapes: the single source of the `rejected_legacy_shape` error wording.
+/// Returns `None` for canonical keys and free text. Callers that only reject
+/// specific entity types must gate before calling (see
+/// [`legacy_service_identity_rejection`]).
+pub(super) fn reject_legacy_service_identity(key: &str) -> Option<ServiceError> {
+    let diagnostic = db::entity_resolution::diagnose_lookup_input(key);
+    (diagnostic.status == db::entity_resolution::ResolverStatus::RejectedLegacyShape).then(|| {
+        ServiceError::InvalidInput(format!(
+            "unsupported legacy graph service identity `{key}`: rejected_legacy_shape"
+        ))
+    })
 }
 
 pub(super) fn validate_graph_entity_type(entity_type: &str) -> ServiceResult<()> {

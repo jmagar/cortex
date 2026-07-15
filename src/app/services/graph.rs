@@ -467,6 +467,20 @@ impl CortexService {
         target: GraphTarget,
         candidate_limit: u32,
     ) -> ServiceResult<(Option<GraphEntity>, Vec<GraphEntityCandidate>)> {
+        let (resolved_entity, candidates) = self
+            .resolve_graph_target_entity_raw(target, candidate_limit)
+            .await?;
+        Ok((
+            resolved_entity.map(graph_entity_safe),
+            candidates.into_iter().map(graph_candidate_safe).collect(),
+        ))
+    }
+
+    async fn resolve_graph_target_entity_raw(
+        &self,
+        target: GraphTarget,
+        candidate_limit: u32,
+    ) -> ServiceResult<(Option<GraphEntity>, Vec<GraphEntityCandidate>)> {
         match target {
             GraphTarget::EntityId(entity_id) => {
                 let entity = self
@@ -478,6 +492,9 @@ impl CortexService {
                 Ok((Some(entity.into()), Vec::new()))
             }
             GraphTarget::CanonicalKey { entity_type, key } => {
+                if let Some(rejected) = legacy_service_identity_rejection(&entity_type, &key) {
+                    return Err(rejected);
+                }
                 validate_graph_entity_type(&entity_type)?;
                 let lookup_type = entity_type.clone();
                 let lookup_key = key.clone();
@@ -521,17 +538,25 @@ impl CortexService {
                 alias_type,
                 alias_key,
             } => {
+                let lookup_key = alias_key.clone();
                 let candidates = self
                     .run_db("graph.entity_alias", move |pool| {
                         db::graph::find_graph_entities_by_alias(
                             pool,
                             &alias_type,
-                            &alias_key,
+                            &lookup_key,
                             candidate_limit,
                         )
                     })
                     .await?;
                 if candidates.is_empty() {
+                    // A missed alias shaped like a legacy service identity
+                    // gets the explicit rejection signal instead of a
+                    // generic not-found. Aliases that DO resolve (e.g.
+                    // colon-bearing ai_session keys) are never rejected.
+                    if let Some(rejected) = reject_legacy_service_identity(&alias_key) {
+                        return Err(rejected);
+                    }
                     return Err(ServiceError::NotFound(
                         "graph entity alias not found".into(),
                     ));

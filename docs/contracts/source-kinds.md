@@ -294,3 +294,54 @@ Cross-checked against:
   through `field_eq` like any other field.
 - incident-card.md: uses `source` (Epic-B source tag), not
   `source_kind`. Separation preserved.
+
+## Agent Docker identity source (`agent-docker`)
+
+Agent-forwarded Docker container lines arrive over syslog TCP, so their
+row-level `source_kind` (derived from `source_ip`) stays `syslog-tcp`. The
+Docker identity itself is carried by the host-local agent as structured
+metadata:
+
+```text
+Agent Docker identity source: agent-docker.
+Structured metadata path: metadata_json.agent_docker.
+Required fields: host, container_id, container_name, stream.
+Optional fields: compose_project, compose_service, image.
+```
+
+The agent emits the metadata as an internal message prefix
+(`[cortex-agent-docker-meta:{json}] `), which receiver enrichment extracts
+into `metadata_json` (setting the denormalised `metadata_json.source_kind`
+to `agent-docker`) and strips from `message`.
+
+**Trust boundary:** the marker rides the unauthenticated syslog message
+body, so the payload is sender-controlled — without a source gate, any
+port-1514 sender can forge agent-docker identity (same spoofing class as
+the CEF `UNIFIdeviceName` gotcha; `source_ip` is the only network-verified
+identity). Mitigations in receiver enrichment
+(`src/receiver/enrichment.rs`):
+
+- The merge is scoped: only the `agent_docker` object is accepted, it never
+  overwrites keys already present in `metadata_json`, and
+  `metadata_json.source_kind` is set from the receiver's constant, never
+  from the payload.
+- Operators SHOULD set `agent_docker_source_prefixes` (config.toml
+  `[enrichment]`, env `CORTEX_AGENT_DOCKER_SOURCE_PREFIXES`, comma-separated
+  exact IPs or `10.0.0.`-style subnet prefixes) to restrict extraction to
+  the hosts that actually run the cortex agent. When unset, extraction is
+  accepted from any sender for compatibility.
+- Each prefix entry must be a **full IP literal** (`100.64.0.5` or
+  `2001:db8::1`, exact-host match) or a **dot-terminated partial IPv4
+  quad** (`100.64.0.`, subnet-prefix match). A partial quad without its
+  trailing dot (`100.64.0`) is treated as an exact-host literal that
+  matches nothing — the failure mode silently disables all agent-docker
+  extraction. Config load warns about entries with any other shape.
+- IPv6 sources are supported for **exact-host entries only**: the source
+  address (including bracketed `[2001:db8::1]:514` forms) is parsed and
+  compared as an address, so non-canonical spellings still match. There
+  is no IPv6 subnet-prefix form — the dot-terminated prefix syntax is
+  IPv4-only.
+
+Canonical resolver proof must use `agent-docker` structured metadata.
+`docker://` and `docker-event://` central-pull rows are not proof for the
+resolver-backed graph contract.

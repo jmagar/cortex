@@ -26,6 +26,15 @@ pub(crate) fn bounded_metadata_json(value: Value) -> String {
     .to_string()
 }
 
+/// Like [`bounded_metadata_json`], but refuses to truncate: returns `None`
+/// when the sanitized encoding exceeds [`MAX_METADATA_JSON_BYTES`], so
+/// callers whose metadata carries load-bearing keys (e.g. the extracted
+/// `agent_docker` identity) can back out instead of losing them.
+pub(crate) fn try_bounded_metadata_json(value: Value) -> Option<String> {
+    let encoded = sanitize_value(value, None).to_string();
+    (encoded.len() <= MAX_METADATA_JSON_BYTES).then_some(encoded)
+}
+
 pub(crate) fn attrs_to_metadata_object<'a, I>(attrs: I) -> Value
 where
     I: IntoIterator<Item = (&'a str, Value)>,

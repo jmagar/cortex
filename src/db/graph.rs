@@ -15,6 +15,7 @@ use rusqlite::{OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use super::graph_resolver_projection;
 use super::pool::{DbPool, write_lock};
 
 const GRAPH_REBUILD_CHUNK_SIZE: i64 = 10_000;
@@ -24,6 +25,9 @@ pub(crate) static GRAPH_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 pub const ENTITY_TYPE_HOST: &str = "host";
 pub const ENTITY_TYPE_CONTAINER: &str = "container";
+/// Retired legacy entity type: still present in migration CHECK constraints
+/// (and gated for rejection), but deliberately absent from [`ENTITY_TYPES`]
+/// so it no longer validates as a lookup type.
 pub const ENTITY_TYPE_SERVICE: &str = "service";
 pub const ENTITY_TYPE_APP: &str = "app";
 pub const ENTITY_TYPE_SOURCE_IP: &str = "source_ip";
@@ -42,11 +46,16 @@ pub const ENTITY_TYPE_GIT_COMMIT: &str = "git_commit";
 pub const ENTITY_TYPE_USER: &str = "user";
 /// A client endpoint (DNS client IP, MAC) distinct from a server `host`.
 pub const ENTITY_TYPE_DEVICE: &str = "device";
+/// Canonical logical service identity (`plex`), resolver-owned.
+pub const ENTITY_TYPE_LOGICAL_SERVICE: &str =
+    crate::db::entity_resolution::vocab::ENTITY_TYPE_LOGICAL_SERVICE;
+/// Host-scoped runtime deployment of a logical service (`tootie/plex`).
+pub const ENTITY_TYPE_SERVICE_INSTANCE: &str =
+    crate::db::entity_resolution::vocab::ENTITY_TYPE_SERVICE_INSTANCE;
 
 pub const ENTITY_TYPES: &[&str] = &[
     ENTITY_TYPE_HOST,
     ENTITY_TYPE_CONTAINER,
-    ENTITY_TYPE_SERVICE,
     ENTITY_TYPE_APP,
     ENTITY_TYPE_SOURCE_IP,
     ENTITY_TYPE_AI_PROJECT,
@@ -61,6 +70,8 @@ pub const ENTITY_TYPES: &[&str] = &[
     ENTITY_TYPE_GIT_COMMIT,
     ENTITY_TYPE_USER,
     ENTITY_TYPE_DEVICE,
+    ENTITY_TYPE_LOGICAL_SERVICE,
+    ENTITY_TYPE_SERVICE_INSTANCE,
 ];
 
 pub const REL_OBSERVED_AS: &str = "observed_as";
@@ -81,6 +92,8 @@ pub const REL_AUTHENTICATED_AS: &str = "authenticated_as";
 pub const REL_ACCESSED: &str = "accessed";
 /// A device communicates with a peer (UniFi flow data). Vocabulary-reserved.
 pub const REL_COMMUNICATES_WITH: &str = "communicates_with";
+/// A service instance is a deployment of a logical service (resolver-owned).
+pub const REL_INSTANCE_OF: &str = crate::db::entity_resolution::vocab::REL_INSTANCE_OF;
 
 pub const RELATIONSHIP_TYPES: &[&str] = &[
     REL_OBSERVED_AS,
@@ -98,6 +111,7 @@ pub const RELATIONSHIP_TYPES: &[&str] = &[
     REL_AUTHENTICATED_AS,
     REL_ACCESSED,
     REL_COMMUNICATES_WITH,
+    REL_INSTANCE_OF,
 ];
 
 pub const TRUST_VERIFIED: &str = "verified";
@@ -148,6 +162,9 @@ pub fn reason_code_namespace(reason_code: &str) -> &'static str {
         REASON_AUTHELIA_AUTH => "source:authelia:auth",
         REASON_AI_SESSION_PROJECT => "derivation:ai:session_project",
         REASON_ERROR_SIGNATURE_MATCH => "derivation:error:signature_match",
+        REASON_RESOLVER_INSTANCE_OF => "derivation:resolver:instance_of",
+        REASON_RESOLVER_SERVICE_INSTANCE => "derivation:resolver:service_instance",
+        REASON_RESOLVER_RAW_APP_LABEL => "derivation:resolver:raw_app_label",
         _ => "unknown:unknown:unknown",
     }
 }
@@ -209,6 +226,20 @@ pub const REASON_ADGUARD_CLIENT_QUERY: &str = "adguard_client_query";
 pub const REASON_SHELL_HISTORY_USER: &str = "shell_history_user";
 /// Authelia auth event — links a user to the service/host they authenticated to.
 pub const REASON_AUTHELIA_AUTH: &str = "authelia_auth";
+/// Resolver linked a `service_instance` to its `logical_service`.
+pub const REASON_RESOLVER_INSTANCE_OF: &str =
+    crate::db::entity_resolution::vocab::REASON_RESOLVER_INSTANCE_OF;
+/// Resolver projected a `service_instance` from structured evidence.
+/// **Vocabulary-reserved:** registered in the schema/reason registry but not
+/// emitted by any projection path today — only `resolver_instance_of` is.
+pub const REASON_RESOLVER_SERVICE_INSTANCE: &str =
+    crate::db::entity_resolution::vocab::REASON_RESOLVER_SERVICE_INSTANCE;
+/// Resolver linked a raw observed app label to a host (never a self-upgrade
+/// to logical-service identity). **Vocabulary-reserved:** registered in the
+/// schema/reason registry but not emitted by any projection path today —
+/// only `resolver_instance_of` is.
+pub const REASON_RESOLVER_RAW_APP_LABEL: &str =
+    crate::db::entity_resolution::vocab::REASON_RESOLVER_RAW_APP_LABEL;
 
 pub const REASON_CODES: &[&str] = &[
     REASON_SYSLOG_CLAIMED_HOSTNAME,
@@ -232,6 +263,9 @@ pub const REASON_CODES: &[&str] = &[
     REASON_ADGUARD_CLIENT_QUERY,
     REASON_SHELL_HISTORY_USER,
     REASON_AUTHELIA_AUTH,
+    REASON_RESOLVER_INSTANCE_OF,
+    REASON_RESOLVER_SERVICE_INSTANCE,
+    REASON_RESOLVER_RAW_APP_LABEL,
 ];
 
 pub const PROJECTION_STATUS_NEVER_BUILT: &str = "never_built";
@@ -392,19 +426,19 @@ pub struct GraphEvidenceLookupRows {
 }
 
 #[derive(Debug)]
-struct LogGraphRow {
-    id: i64,
-    timestamp: String,
-    hostname: String,
-    app_name: Option<String>,
-    source_ip: String,
-    ai_tool: Option<String>,
-    ai_project: Option<String>,
-    ai_session_id: Option<String>,
-    metadata_json: Option<String>,
+pub(crate) struct LogGraphRow {
+    pub(crate) id: i64,
+    pub(crate) timestamp: String,
+    pub(crate) hostname: String,
+    pub(crate) app_name: Option<String>,
+    pub(crate) source_ip: String,
+    pub(crate) ai_tool: Option<String>,
+    pub(crate) ai_project: Option<String>,
+    pub(crate) ai_session_id: Option<String>,
+    pub(crate) metadata_json: Option<String>,
     /// The log message — for agent-command and shell-history rows this is the
     /// (scrubbed) command surface, used to detect `git commit`/`git push`.
-    message: String,
+    pub(crate) message: String,
 }
 
 pub fn graph_projection_status(pool: &DbPool) -> Result<GraphProjectionStatus> {
@@ -684,6 +718,17 @@ pub struct GraphWalkEntity {
     pub canonical_key: String,
 }
 
+/// Bounded entity cap for the general-purpose n-hop walk ([`graph_walk_n_hops`]):
+/// both the recursive CTE's row budget and the final result `LIMIT`. Mirrors
+/// [`crate::db::graph_resolver_projection::GRAPH_SERVICE_TOPIC_ENTITY_CAP`]'s
+/// pattern but is set higher, because `graph_walk_n_hops` traverses every
+/// relationship type (it has no
+/// [`crate::db::graph_resolver_projection::GRAPH_SERVICE_TOPIC_RELATIONSHIPS`]-style
+/// restriction), so it needs more headroom to still return a useful topology
+/// for its broader caller set (`search_logs_from_graph_related_entities`,
+/// generic `topic_correlate` seeds).
+pub const GRAPH_WALK_N_HOPS_ENTITY_CAP: usize = 500;
+
 /// Walk the investigation graph outward from a set of seed entities (matched by
 /// `canonical_key`) and return every distinct entity reachable within
 /// `max_depth` hops, including the seeds themselves (depth 0).
@@ -693,6 +738,14 @@ pub struct GraphWalkEntity {
 /// recursive join leads on `graph_relationships(src_entity_id)` /
 /// `(dst_entity_id)` — both indexed — so each hop is index-served. `max_depth`
 /// is clamped to `[1, GRAPH_WALK_MAX_DEPTH]`; an empty seed set returns empty.
+///
+/// Unlike [`crate::db::graph_resolver_projection::graph_walk_service_topic`],
+/// this walk traverses every relationship
+/// type, so a densely connected homelab graph can otherwise expand without
+/// bound. Both the recursive CTE and the final result are bounded at
+/// [`GRAPH_WALK_N_HOPS_ENTITY_CAP`] entities (a single overall `LIMIT`, not a
+/// per-level cap — SQLite's recursive CTE `LIMIT` has no per-level form).
+/// Graphs at or under the cap see no behavior change.
 ///
 /// This is the reusable traversal primitive behind graph-anchored log fan-out
 /// (`search_logs_from_graph_related_entities`) and topic correlation.
@@ -718,10 +771,12 @@ pub fn graph_walk_n_hops(
              JOIN graph_walk gw
                ON r.src_entity_id = gw.entity_id OR r.dst_entity_id = gw.entity_id
              WHERE gw.depth < ? AND r.trust_level != 'refuted'
+             LIMIT ?
          )
          SELECT DISTINCT e.entity_type, e.canonical_key
          FROM graph_entities e
-         JOIN graph_walk gw ON e.id = gw.entity_id"
+         JOIN graph_walk gw ON e.id = gw.entity_id
+         LIMIT ?"
     );
 
     let mut bindings: Vec<rusqlite::types::Value> = start_keys
@@ -729,6 +784,12 @@ pub fn graph_walk_n_hops(
         .map(|k| rusqlite::types::Value::Text(k.clone()))
         .collect();
     bindings.push(rusqlite::types::Value::Integer(depth));
+    bindings.push(rusqlite::types::Value::Integer(
+        GRAPH_WALK_N_HOPS_ENTITY_CAP as i64,
+    ));
+    bindings.push(rusqlite::types::Value::Integer(
+        GRAPH_WALK_N_HOPS_ENTITY_CAP as i64,
+    ));
 
     let mut stmt = conn.prepare(&sql)?;
     let entities = stmt
@@ -987,6 +1048,30 @@ pub fn refresh_graph_projection_incremental(pool: &DbPool) -> Result<GraphRebuil
         return Ok(GraphRebuildOutcome::AlreadyRunning);
     };
 
+    // Contract-drift probe (downgrade → re-upgrade): a pre-resolver binary
+    // may have projected legacy `service` rows after migration 41 already
+    // ran (the CHECK constraint still allows the string for compat). Cheap
+    // EXISTS; when found, purge the legacy topology and force a full rebuild
+    // instead of merging deltas on top of a mixed-contract graph.
+    {
+        let mut conn = pool.get()?;
+        let legacy_rows: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM graph_entities WHERE entity_type = 'service')",
+            [],
+            |row| row.get(0),
+        )?;
+        if legacy_rows {
+            tracing::warn!(
+                contract = crate::db::entity_resolution::vocab::GRAPH_PROJECTION_CONTRACT_V2,
+                "legacy service topology detected in graph projection; \
+                 cleaning and forcing a full rebuild"
+            );
+            graph_resolver_projection::cleanup_legacy_service_topology(&mut conn)?;
+            drop(conn);
+            return full_rebuild_locked(pool);
+        }
+    }
+
     let status = graph_projection_status(pool)?;
     let after_log_id = if status.projection_status == "ready" && !status.is_degraded {
         parse_log_watermark(&status.source_watermark)
@@ -1042,10 +1127,11 @@ fn project_graph_delta(
         chunk_count += 1;
         {
             let tx = conn.transaction()?;
+            let mut entity_memo = EntityMemo::default();
             for row in &rows {
                 cursor = cursor.max(row.id);
                 delta_log_rows += 1;
-                extract_log_row(&tx, row)?;
+                extract_log_row(&tx, row, &mut entity_memo)?;
             }
             tx.commit()?;
         }
@@ -1314,10 +1400,11 @@ fn refresh_graph_projection_inner(pool: &DbPool, started: Instant) -> Result<Gra
         chunk_count += 1;
         {
             let tx = conn.transaction()?;
+            let mut entity_memo = EntityMemo::default();
             for row in &rows {
                 after_id = after_id.max(row.id);
                 source_row_count += 1;
-                extract_log_row(&tx, row)?;
+                extract_log_row(&tx, row, &mut entity_memo)?;
             }
             tx.commit()?;
         }
@@ -1505,11 +1592,38 @@ fn fetch_log_graph_rows(
     Ok(rows)
 }
 
-fn extract_log_row(conn: &rusqlite::Connection, row: &LogGraphRow) -> Result<()> {
+/// Per-chunk memo over `ensure_entity`, shared by every `extract_*_row`
+/// projection (resolver and non-resolver alike): identical entity identities
+/// collapse to one upsert per unique `(entity_type, canonical_key)` per chunk
+/// transaction, instead of one upsert per log row that happens to name the
+/// same host/container/app/etc. One instance is created per chunk (see the
+/// `while cursor < max_log_id` loops in `project_graph_delta` and
+/// `refresh_graph_projection_inner`) and threaded by `&mut` through
+/// `extract_log_row` into every function it calls. "Staging" applies only to
+/// the full rebuild path; incremental extraction writes the live tables
+/// directly.
+/// Tradeoff: within a chunk the memoised entity keeps the `last_seen_at` of
+/// its first upsert, so it can lag later rows in the same chunk that
+/// reference the same entity. This mirrors the resolver-path memo's
+/// pre-existing tradeoff (syslog-mcp-g3fgk) — extended here to every
+/// extract_*_row projection instead of the resolver path alone.
+pub(crate) type EntityMemo = std::collections::HashMap<(&'static str, String), i64>;
+
+/// `metadata_json` is parsed exactly once per row (here, in the dispatcher)
+/// and threaded down as `Option<&Value>` to every `extract_*_row` function
+/// that needs it, instead of each one independently re-parsing the same
+/// JSON string.
+fn extract_log_row(
+    conn: &rusqlite::Connection,
+    row: &LogGraphRow,
+    memo: &mut EntityMemo,
+) -> Result<()> {
+    let meta = parse_metadata(row.metadata_json.as_deref());
     let source_id = row.id.to_string();
     let source_entity = if let Some(key) = normalized(&row.source_ip) {
-        Some(ensure_entity(
+        Some(ensure_entity_memoized(
             conn,
+            memo,
             ENTITY_TYPE_SOURCE_IP,
             &key,
             &row.source_ip,
@@ -1523,8 +1637,9 @@ fn extract_log_row(conn: &rusqlite::Connection, row: &LogGraphRow) -> Result<()>
         None
     };
     let host_entity = if let Some(key) = normalized(&row.hostname) {
-        Some(ensure_entity(
+        Some(ensure_entity_memoized(
             conn,
+            memo,
             ENTITY_TYPE_HOST,
             &key,
             &row.hostname,
@@ -1582,9 +1697,24 @@ fn extract_log_row(conn: &rusqlite::Connection, row: &LogGraphRow) -> Result<()>
         )?;
     }
 
-    if let Some(app_name) = row.app_name.as_deref().and_then(normalized_value) {
-        let app_id = ensure_entity(
+    // Nested slash-triplet app labels (`plex/plex/plex`) are stale defect
+    // shapes from the pre-resolver agent app-name format. They are never
+    // projected as `app` entities; structured agent-docker metadata carries
+    // the canonical identity instead.
+    let projectable_app = row
+        .app_name
+        .as_deref()
+        .and_then(normalized_value)
+        .filter(|app| {
+            !matches!(
+                crate::db::entity_resolution::classify_legacy_shape(app),
+                Some(crate::db::entity_resolution::LegacyShape::SlashTriplet)
+            )
+        });
+    if let Some(app_name) = projectable_app {
+        let app_id = ensure_entity_memoized(
             conn,
+            memo,
             ENTITY_TYPE_APP,
             &normalize_key(app_name),
             app_name,
@@ -1626,11 +1756,12 @@ fn extract_log_row(conn: &rusqlite::Connection, row: &LogGraphRow) -> Result<()>
         }
     }
 
-    extract_agent_command_row(conn, row)?;
-    extract_git_commit_row(conn, row)?;
-    extract_user_device_row(conn, row)?;
-    extract_ai_log_row(conn, row)?;
-    extract_docker_log_row(conn, row)?;
+    extract_agent_command_row(conn, row, meta.as_ref(), memo)?;
+    extract_git_commit_row(conn, row, memo)?;
+    extract_user_device_row(conn, row, meta.as_ref(), memo)?;
+    extract_ai_log_row(conn, row, memo)?;
+    extract_docker_log_row(conn, row, meta.as_ref(), memo)?;
+    graph_resolver_projection::extract_agent_docker_row(conn, row, meta.as_ref(), memo)?;
     Ok(())
 }
 
@@ -1644,10 +1775,14 @@ fn extract_log_row(conn: &rusqlite::Connection, row: &LogGraphRow) -> Result<()>
 ///   segment becomes a `user` entity that `accessed` the host.
 ///
 /// These close "who/what did this" questions that previously dead-ended.
-fn extract_user_device_row(conn: &rusqlite::Connection, row: &LogGraphRow) -> Result<()> {
+fn extract_user_device_row(
+    conn: &rusqlite::Connection,
+    row: &LogGraphRow,
+    meta: Option<&Value>,
+    memo: &mut EntityMemo,
+) -> Result<()> {
     let source_id = row.id.to_string();
     let app = row.app_name.as_deref().unwrap_or("");
-    let meta = parse_metadata(row.metadata_json.as_deref());
 
     // shell-history → user accessed host.
     if let Some(rest) = row.source_ip.strip_prefix("shell-history://") {
@@ -1657,8 +1792,9 @@ fn extract_user_device_row(conn: &rusqlite::Connection, row: &LogGraphRow) -> Re
         if let (Some(host), Some(user)) = (host, user) {
             if user != "unknown" {
                 let user_key = format!("{}:{}", normalize_key(host), normalize_key(user));
-                let user_id = ensure_entity(
+                let user_id = ensure_entity_memoized(
                     conn,
+                    memo,
                     ENTITY_TYPE_USER,
                     &user_key,
                     &user_key,
@@ -1668,7 +1804,9 @@ fn extract_user_device_row(conn: &rusqlite::Connection, row: &LogGraphRow) -> Re
                     Some(&row.timestamp),
                     Some(&row.timestamp),
                 )?;
-                if let Some(host_id) = ensure_host_entity(conn, host, &source_id, &row.timestamp)? {
+                if let Some(host_id) =
+                    ensure_host_entity(conn, memo, host, &source_id, &row.timestamp)?
+                {
                     ensure_relationship_with_evidence(
                         conn,
                         user_id,
@@ -1696,11 +1834,12 @@ fn extract_user_device_row(conn: &rusqlite::Connection, row: &LogGraphRow) -> Re
 
     // AdGuard → device accessed domain.
     if app.starts_with("adguard") {
-        let client = metadata_text(&meta, &["client", "adguard.client"]).and_then(normalized_value);
-        let query = metadata_text(&meta, &["query", "adguard.query"]).and_then(normalized_value);
+        let client = metadata_text(meta, &["client", "adguard.client"]).and_then(normalized_value);
+        let query = metadata_text(meta, &["query", "adguard.query"]).and_then(normalized_value);
         if let (Some(client), Some(query)) = (client, query) {
-            let device_id = ensure_entity(
+            let device_id = ensure_entity_memoized(
                 conn,
+                memo,
                 ENTITY_TYPE_DEVICE,
                 &normalize_key(client),
                 client,
@@ -1710,8 +1849,9 @@ fn extract_user_device_row(conn: &rusqlite::Connection, row: &LogGraphRow) -> Re
                 Some(&row.timestamp),
                 Some(&row.timestamp),
             )?;
-            let domain_id = ensure_entity(
+            let domain_id = ensure_entity_memoized(
                 conn,
+                memo,
                 ENTITY_TYPE_DOMAIN,
                 &normalize_key(query),
                 query,
@@ -1747,12 +1887,13 @@ fn extract_user_device_row(conn: &rusqlite::Connection, row: &LogGraphRow) -> Re
     // Authelia → user authenticated_as host.
     if app == "authelia" {
         if let Some(username) =
-            metadata_text(&meta, &["username", "authelia.username"]).and_then(normalized_value)
+            metadata_text(meta, &["username", "authelia.username"]).and_then(normalized_value)
         {
             if let Some(host) = normalized_value(&row.hostname) {
                 let user_key = format!("{}:{}", normalize_key(host), normalize_key(username));
-                let user_id = ensure_entity(
+                let user_id = ensure_entity_memoized(
                     conn,
+                    memo,
                     ENTITY_TYPE_USER,
                     &user_key,
                     &user_key,
@@ -1762,7 +1903,9 @@ fn extract_user_device_row(conn: &rusqlite::Connection, row: &LogGraphRow) -> Re
                     Some(&row.timestamp),
                     Some(&row.timestamp),
                 )?;
-                if let Some(host_id) = ensure_host_entity(conn, host, &source_id, &row.timestamp)? {
+                if let Some(host_id) =
+                    ensure_host_entity(conn, memo, host, &source_id, &row.timestamp)?
+                {
                     ensure_relationship_with_evidence(
                         conn,
                         user_id,
@@ -1792,6 +1935,7 @@ fn extract_user_device_row(conn: &rusqlite::Connection, row: &LogGraphRow) -> Re
 /// Ensure a `host` entity (claimed) for a hostname, returning its id.
 fn ensure_host_entity(
     conn: &rusqlite::Connection,
+    memo: &mut EntityMemo,
     hostname: &str,
     source_id: &str,
     timestamp: &str,
@@ -1799,8 +1943,9 @@ fn ensure_host_entity(
     let Some(key) = normalized(hostname) else {
         return Ok(None);
     };
-    Ok(Some(ensure_entity(
+    Ok(Some(ensure_entity_memoized(
         conn,
+        memo,
         ENTITY_TYPE_HOST,
         &key,
         hostname,
@@ -1847,7 +1992,11 @@ fn identity_evidence<'a>(
 /// the full working-directory path and fragment it from transcript sessions).
 const AGENT_COMMAND_SOURCE_PREFIX: &str = "agent-command://";
 
-fn extract_ai_log_row(conn: &rusqlite::Connection, row: &LogGraphRow) -> Result<()> {
+fn extract_ai_log_row(
+    conn: &rusqlite::Connection,
+    row: &LogGraphRow,
+    memo: &mut EntityMemo,
+) -> Result<()> {
     // Agent-command rows are owned by extract_agent_command_row: their
     // `ai_project` is the raw cwd, not a clean project key.
     if row.source_ip.starts_with(AGENT_COMMAND_SOURCE_PREFIX) {
@@ -1865,8 +2014,9 @@ fn extract_ai_log_row(conn: &rusqlite::Connection, row: &LogGraphRow) -> Result<
         .and_then(normalized_value)
         .unwrap_or("unknown");
     let source_id = row.id.to_string();
-    let project_id = ensure_entity(
+    let project_id = ensure_entity_memoized(
         conn,
+        memo,
         ENTITY_TYPE_AI_PROJECT,
         &normalize_key(project),
         project,
@@ -1883,8 +2033,9 @@ fn extract_ai_log_row(conn: &rusqlite::Connection, row: &LogGraphRow) -> Result<
         session
     );
     let session_label = format!("{project}/{tool}/{session}");
-    let session_id = ensure_entity(
+    let session_id = ensure_entity_memoized(
         conn,
+        memo,
         ENTITY_TYPE_AI_SESSION,
         &session_key,
         &session_label,
@@ -1940,7 +2091,12 @@ fn extract_ai_log_row(conn: &rusqlite::Connection, row: &LogGraphRow) -> Result<
 /// `{project}:{tool}:{session}` shape with the *inferred* project so
 /// agent-command sessions converge with transcript-derived session entities for
 /// the same session id, instead of fragmenting on the full cwd path.
-fn extract_agent_command_row(conn: &rusqlite::Connection, row: &LogGraphRow) -> Result<()> {
+fn extract_agent_command_row(
+    conn: &rusqlite::Connection,
+    row: &LogGraphRow,
+    meta: Option<&Value>,
+    memo: &mut EntityMemo,
+) -> Result<()> {
     if !row.source_ip.starts_with(AGENT_COMMAND_SOURCE_PREFIX) {
         return Ok(());
     }
@@ -1959,12 +2115,11 @@ fn extract_agent_command_row(conn: &rusqlite::Connection, row: &LogGraphRow) -> 
 
     // The cwd is stored in `ai_project` for these rows; fall back to the
     // structured metadata copy if the column is empty.
-    let meta = parse_metadata(row.metadata_json.as_deref());
     let cwd = row
         .ai_project
         .as_deref()
         .and_then(normalized_value)
-        .or_else(|| metadata_text(&meta, &["agent_command.cwd"]));
+        .or_else(|| metadata_text(meta, &["agent_command.cwd"]));
     let inferred_project = cwd.and_then(infer_project_from_cwd);
 
     let project_key_part = inferred_project
@@ -1975,8 +2130,9 @@ fn extract_agent_command_row(conn: &rusqlite::Connection, row: &LogGraphRow) -> 
     let session_key = format!("{project_key_part}:{}:{session}", normalize_key(tool));
     let session_label = format!("{project_label_part}/{tool}/{session}");
 
-    let session_entity = ensure_entity(
+    let session_entity = ensure_entity_memoized(
         conn,
+        memo,
         ENTITY_TYPE_AI_SESSION,
         &session_key,
         &session_label,
@@ -1987,8 +2143,9 @@ fn extract_agent_command_row(conn: &rusqlite::Connection, row: &LogGraphRow) -> 
         Some(&row.timestamp),
     )?;
 
-    let host_entity = ensure_entity(
+    let host_entity = ensure_entity_memoized(
         conn,
+        memo,
         ENTITY_TYPE_HOST,
         &host,
         &row.hostname,
@@ -2031,8 +2188,9 @@ fn extract_agent_command_row(conn: &rusqlite::Connection, row: &LogGraphRow) -> 
 
     // Inferred lane: the session worked on the project inferred from the cwd.
     if let Some(project) = inferred_project.as_deref() {
-        let project_entity = ensure_entity(
+        let project_entity = ensure_entity_memoized(
             conn,
+            memo,
             ENTITY_TYPE_AI_PROJECT,
             &normalize_key(project),
             project,
@@ -2111,7 +2269,11 @@ fn is_git_commit_command(message: &str) -> bool {
 /// history rows carry no project/session, so they produce a commit keyed by
 /// `{hostname}:{timestamp}` linked to the host (`emitted_by`). All edges are
 /// inferred — the row proves a commit happened but not the exact SHA.
-fn extract_git_commit_row(conn: &rusqlite::Connection, row: &LogGraphRow) -> Result<()> {
+fn extract_git_commit_row(
+    conn: &rusqlite::Connection,
+    row: &LogGraphRow,
+    memo: &mut EntityMemo,
+) -> Result<()> {
     if !is_git_commit_command(&row.message) {
         return Ok(());
     }
@@ -2142,8 +2304,9 @@ fn extract_git_commit_row(conn: &rusqlite::Connection, row: &LogGraphRow) -> Res
             .unwrap_or_else(|| "unknown".to_string());
 
         let commit_key = format!("{project_key_part}:{}", row.timestamp);
-        let commit_entity = ensure_entity(
+        let commit_entity = ensure_entity_memoized(
             conn,
+            memo,
             ENTITY_TYPE_GIT_COMMIT,
             &commit_key,
             &commit_key,
@@ -2156,8 +2319,9 @@ fn extract_git_commit_row(conn: &rusqlite::Connection, row: &LogGraphRow) -> Res
 
         // session worked_on commit
         let session_key = format!("{project_key_part}:{}:{session}", normalize_key(tool));
-        let session_entity = ensure_entity(
+        let session_entity = ensure_entity_memoized(
             conn,
+            memo,
             ENTITY_TYPE_AI_SESSION,
             &session_key,
             &session_key,
@@ -2198,8 +2362,9 @@ fn extract_git_commit_row(conn: &rusqlite::Connection, row: &LogGraphRow) -> Res
 
         // commit has_artifact project
         if let Some(project) = inferred_project.as_deref() {
-            let project_entity = ensure_entity(
+            let project_entity = ensure_entity_memoized(
                 conn,
+                memo,
                 ENTITY_TYPE_AI_PROJECT,
                 &normalize_key(project),
                 project,
@@ -2246,8 +2411,9 @@ fn extract_git_commit_row(conn: &rusqlite::Connection, row: &LogGraphRow) -> Res
         return Ok(());
     };
     let commit_key = format!("{host}:{}", row.timestamp);
-    let commit_entity = ensure_entity(
+    let commit_entity = ensure_entity_memoized(
         conn,
+        memo,
         ENTITY_TYPE_GIT_COMMIT,
         &commit_key,
         &commit_key,
@@ -2257,8 +2423,9 @@ fn extract_git_commit_row(conn: &rusqlite::Connection, row: &LogGraphRow) -> Res
         Some(&row.timestamp),
         Some(&row.timestamp),
     )?;
-    let host_entity = ensure_entity(
+    let host_entity = ensure_entity_memoized(
         conn,
+        memo,
         ENTITY_TYPE_HOST,
         &host,
         &row.hostname,
@@ -2299,17 +2466,21 @@ fn extract_git_commit_row(conn: &rusqlite::Connection, row: &LogGraphRow) -> Res
     Ok(())
 }
 
-fn extract_docker_log_row(conn: &rusqlite::Connection, row: &LogGraphRow) -> Result<()> {
+fn extract_docker_log_row(
+    conn: &rusqlite::Connection,
+    row: &LogGraphRow,
+    meta: Option<&Value>,
+    memo: &mut EntityMemo,
+) -> Result<()> {
     if !row.source_ip.starts_with("docker://") && !row.source_ip.starts_with("docker-event://") {
         return Ok(());
     }
-    let meta = parse_metadata(row.metadata_json.as_deref());
     let parsed = parse_docker_source(&row.source_ip);
-    let docker_host = metadata_text(&meta, &["docker_host", "docker.host"])
+    let docker_host = metadata_text(meta, &["docker_host", "docker.host"])
         .or(parsed.host)
         .and_then(normalized_value);
-    let container = metadata_text(&meta, &["container_id", "docker.container_id"])
-        .or_else(|| metadata_text(&meta, &["container_name", "docker.container_name"]))
+    let container = metadata_text(meta, &["container_id", "docker.container_id"])
+        .or_else(|| metadata_text(meta, &["container_name", "docker.container_name"]))
         .or(parsed.container)
         .and_then(normalized_value);
     let Some(docker_host) = docker_host else {
@@ -2319,8 +2490,9 @@ fn extract_docker_log_row(conn: &rusqlite::Connection, row: &LogGraphRow) -> Res
         return Ok(());
     };
     let source_id = row.id.to_string();
-    let host_id = ensure_entity(
+    let host_id = ensure_entity_memoized(
         conn,
+        memo,
         ENTITY_TYPE_HOST,
         &normalize_key(docker_host),
         docker_host,
@@ -2336,8 +2508,9 @@ fn extract_docker_log_row(conn: &rusqlite::Connection, row: &LogGraphRow) -> Res
         normalize_key(container)
     );
     let container_label = format!("{docker_host}/{container}");
-    let container_id = ensure_entity(
+    let container_id = ensure_entity_memoized(
         conn,
+        memo,
         ENTITY_TYPE_CONTAINER,
         &container_key,
         &container_label,
@@ -2376,118 +2549,12 @@ fn extract_docker_log_row(conn: &rusqlite::Connection, row: &LogGraphRow) -> Res
         },
     )?;
 
-    if let Some(service) = metadata_text(&meta, &["compose_service", "docker.compose_service"])
-        .or_else(|| metadata_text(&meta, &["container_name", "docker.container_name"]))
-        .and_then(normalized_value)
-    {
-        let project = metadata_text(&meta, &["compose_project", "docker.compose_project"])
-            .and_then(normalized_value)
-            .unwrap_or(docker_host);
-        let service_key = format!(
-            "{}:{}:{}",
-            normalize_key(docker_host),
-            normalize_key(project),
-            normalize_key(service)
-        );
-        let service_label = format!("{docker_host}/{project}/{service}");
-        let service_id = ensure_entity(
-            conn,
-            ENTITY_TYPE_SERVICE,
-            &service_key,
-            &service_label,
-            SOURCE_KIND_LOG,
-            &source_id,
-            TRUST_INFERRED,
-            Some(&row.timestamp),
-            Some(&row.timestamp),
-        )?;
-        ensure_relationship_with_evidence(
-            conn,
-            container_id,
-            service_id,
-            REL_RUNS_ON,
-            REASON_DOCKER_SERVICE_LABEL,
-            TRUST_INFERRED,
-            0.7,
-            EvidenceInput {
-                evidence_key: evidence_bucket_key(
-                    "log",
-                    row.id,
-                    REASON_DOCKER_SERVICE_LABEL,
-                    &row.timestamp,
-                ),
-                source_kind: SOURCE_KIND_LOG,
-                source_id: &source_id,
-                source_log_id: Some(row.id),
-                source_heartbeat_id: None,
-                source_signature_hash: None,
-                observed_at: &row.timestamp,
-                reason_text: Some("docker compose labels link container to service"),
-                confidence_delta: 0.7,
-                trust_level: TRUST_INFERRED,
-                safe_excerpt: Some(&service_label),
-                metadata_path: Some("metadata_json.compose_service"),
-            },
-        )?;
-
-        // Log-derived compose topology: when the row carries an explicit
-        // `compose_project` label (not the docker_host fallback), project a
-        // `compose_project --defines_service--> service` edge. This activates
-        // the compose_config inventory path from already-ingested docker rows,
-        // so `topic_correlate <project>` reaches the project's services and
-        // containers even when the SSH inventory snapshot is not configured.
-        // Inferred (label-derived); the SSH inventory path emits the same edge
-        // at higher trust when available, and the two converge by natural key.
-        if let Some(compose_project) =
-            metadata_text(&meta, &["compose_project", "docker.compose_project"])
-                .and_then(normalized_value)
-        {
-            let project_key = format!(
-                "{}:{}",
-                normalize_key(docker_host),
-                normalize_key(compose_project)
-            );
-            let project_id = ensure_entity(
-                conn,
-                ENTITY_TYPE_COMPOSE_PROJECT,
-                &project_key,
-                compose_project,
-                SOURCE_KIND_LOG,
-                &source_id,
-                TRUST_INFERRED,
-                Some(&row.timestamp),
-                Some(&row.timestamp),
-            )?;
-            ensure_relationship_with_evidence(
-                conn,
-                project_id,
-                service_id,
-                REL_DEFINES_SERVICE,
-                REASON_COMPOSE_CONFIG,
-                TRUST_INFERRED,
-                0.7,
-                EvidenceInput {
-                    evidence_key: evidence_bucket_key(
-                        "log",
-                        row.id,
-                        REASON_COMPOSE_CONFIG,
-                        &row.timestamp,
-                    ),
-                    source_kind: SOURCE_KIND_LOG,
-                    source_id: &source_id,
-                    source_log_id: Some(row.id),
-                    source_heartbeat_id: None,
-                    source_signature_hash: None,
-                    observed_at: &row.timestamp,
-                    reason_text: Some("docker compose project label defines this service"),
-                    confidence_delta: 0.7,
-                    trust_level: TRUST_INFERRED,
-                    safe_excerpt: Some(&service_label),
-                    metadata_path: Some("metadata_json.compose_project"),
-                },
-            )?;
-        }
-    }
+    // Hard break (entity_resolution_v2): central-pull rows keep verified
+    // host/container edges only. Legacy `service` topology
+    // (`host:project:service`) is no longer emitted from any projection
+    // path; canonical service identity comes exclusively from resolver
+    // decisions over structured agent-docker metadata and verified
+    // inventory (`logical_service` / `service_instance`).
     Ok(())
 }
 
@@ -2702,6 +2769,52 @@ fn ensure_entity(
     .map_err(Into::into)
 }
 
+/// Test-only counter of actual `ensure_entity` upserts (memo hits are not
+/// counted), so tests can assert the chunk-scoped `EntityMemo` collapsed
+/// repeated `(entity_type, canonical_key)` pairs to a single upsert instead
+/// of one per occurrence.
+#[cfg(test)]
+pub(crate) static ENSURE_ENTITY_CALLS: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+
+/// Memoized wrapper over [`ensure_entity`]: within one chunk transaction, a
+/// repeated `(entity_type, canonical_key)` pair resolves from `memo` instead
+/// of re-running the upsert. See [`EntityMemo`] for the scope and the
+/// `last_seen_at` tradeoff this implies.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn ensure_entity_memoized(
+    conn: &rusqlite::Connection,
+    memo: &mut EntityMemo,
+    entity_type: &'static str,
+    canonical_key: &str,
+    display_label: &str,
+    source_kind: &str,
+    source_id: &str,
+    trust_level: &str,
+    first_seen_at: Option<&str>,
+    last_seen_at: Option<&str>,
+) -> Result<i64> {
+    let memo_key = (entity_type, canonical_key.to_string());
+    if let Some(id) = memo.get(&memo_key) {
+        return Ok(*id);
+    }
+    #[cfg(test)]
+    ENSURE_ENTITY_CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let id = ensure_entity(
+        conn,
+        entity_type,
+        canonical_key,
+        display_label,
+        source_kind,
+        source_id,
+        trust_level,
+        first_seen_at,
+        last_seen_at,
+    )?;
+    memo.insert(memo_key, id);
+    Ok(id)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn insert_alias(
     conn: &rusqlite::Connection,
@@ -2738,23 +2851,23 @@ fn insert_alias(
     Ok(())
 }
 
-struct EvidenceInput<'a> {
-    evidence_key: String,
-    source_kind: &'a str,
-    source_id: &'a str,
-    source_log_id: Option<i64>,
-    source_heartbeat_id: Option<i64>,
-    source_signature_hash: Option<&'a str>,
-    observed_at: &'a str,
-    reason_text: Option<&'a str>,
-    confidence_delta: f64,
-    trust_level: &'a str,
-    safe_excerpt: Option<&'a str>,
-    metadata_path: Option<&'a str>,
+pub(crate) struct EvidenceInput<'a> {
+    pub(crate) evidence_key: String,
+    pub(crate) source_kind: &'a str,
+    pub(crate) source_id: &'a str,
+    pub(crate) source_log_id: Option<i64>,
+    pub(crate) source_heartbeat_id: Option<i64>,
+    pub(crate) source_signature_hash: Option<&'a str>,
+    pub(crate) observed_at: &'a str,
+    pub(crate) reason_text: Option<&'a str>,
+    pub(crate) confidence_delta: f64,
+    pub(crate) trust_level: &'a str,
+    pub(crate) safe_excerpt: Option<&'a str>,
+    pub(crate) metadata_path: Option<&'a str>,
 }
 
 #[allow(clippy::too_many_arguments)]
-fn ensure_relationship_with_evidence(
+pub(crate) fn ensure_relationship_with_evidence(
     conn: &rusqlite::Connection,
     src_entity_id: i64,
     dst_entity_id: i64,
@@ -2953,12 +3066,22 @@ fn table_count(conn: &rusqlite::Connection, table: &str) -> Result<i64> {
         .map_err(Into::into)
 }
 
+/// Test-only counter of `parse_metadata` calls, so tests can assert
+/// `extract_log_row` parses each row's `metadata_json` exactly once and
+/// threads the result down to every `extract_*_row` function that needs it,
+/// instead of each one independently re-parsing the same JSON string.
+#[cfg(test)]
+pub(crate) static PARSE_METADATA_CALLS: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+
 fn parse_metadata(input: Option<&str>) -> Option<Value> {
+    #[cfg(test)]
+    PARSE_METADATA_CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     input.and_then(|raw| serde_json::from_str::<Value>(raw).ok())
 }
 
-fn metadata_text<'a>(meta: &'a Option<Value>, paths: &[&str]) -> Option<&'a str> {
-    let value = meta.as_ref()?;
+fn metadata_text<'a>(meta: Option<&'a Value>, paths: &[&str]) -> Option<&'a str> {
+    let value = meta?;
     for path in paths {
         let mut current = value;
         let mut found = true;
@@ -3003,7 +3126,7 @@ fn normalized(value: &str) -> Option<String> {
     normalized_value(value).map(normalize_key)
 }
 
-fn normalized_value(value: &str) -> Option<&str> {
+pub(crate) fn normalized_value(value: &str) -> Option<&str> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
         None
@@ -3016,10 +3139,14 @@ fn normalize_key(value: &str) -> String {
     value.trim().to_ascii_lowercase()
 }
 
-fn evidence_bucket_key(prefix: &str, source_id: i64, reason: &str, timestamp: &str) -> String {
-    let _ = source_id;
+pub(crate) fn evidence_bucket_key(
+    prefix: &str,
+    source_id: i64,
+    reason: &str,
+    timestamp: &str,
+) -> String {
     let bucket = timestamp.get(0..13).unwrap_or(timestamp);
-    format!("{prefix}:{reason}:{bucket}")
+    format!("{prefix}:{reason}:{source_id}:{bucket}")
 }
 
 fn truncate_safe_excerpt(value: &str) -> String {

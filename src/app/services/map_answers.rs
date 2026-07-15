@@ -27,7 +27,7 @@ impl CortexService {
                 required_map_target(req.domain.as_deref(), "domain", mode)?,
             ),
             "service_dependencies" => (
-                "service".to_string(),
+                "service_instance".to_string(),
                 service_dependency_key(req.host.as_deref(), req.service.as_deref())?,
             ),
             "findings" => {
@@ -104,13 +104,32 @@ fn required_map_target(value: Option<&str>, field: &str, mode: &str) -> ServiceR
     Ok(value.to_string())
 }
 
+/// Resolve the `service_dependencies` target into a canonical
+/// `service_instance` key (`host/service`). Legacy `host:service` /
+/// `host:project:service` identities are rejected, never looked up.
 fn service_dependency_key(host: Option<&str>, service: Option<&str>) -> ServiceResult<String> {
     let service = required_map_target(service, "service", "service_dependencies")?;
-    if service.contains(':') {
-        return Ok(service);
+    if let Some(rejected) = super::graph_support::reject_legacy_service_identity(&service) {
+        return Err(rejected);
+    }
+    if let Some((host_part, service_part)) = service.split_once('/') {
+        // Canonicalize an explicit `host/service` target instead of passing
+        // it through verbatim: a mixed-case `Tootie/Plex` would otherwise
+        // silently miss the lowercase canonical instance key.
+        return crate::db::entity_resolution::service_instance_key(host_part, service_part)
+            .ok_or_else(|| {
+                ServiceError::InvalidInput(format!(
+                    "service_dependencies `service` value `{service}` does not canonicalize \
+                     to a `host/service` instance key"
+                ))
+            });
     }
     let host = required_map_target(host, "host", "service_dependencies")?;
-    Ok(format!("{host}:{service}"))
+    crate::db::entity_resolution::service_instance_key(&host, service.as_str()).ok_or_else(|| {
+        ServiceError::InvalidInput(
+            "service_dependencies requires a non-empty host and service".into(),
+        )
+    })
 }
 
 fn map_graph_answer(
@@ -493,3 +512,7 @@ fn estimated_map_answer_bytes(rows: &[HomelabMapAnswerRow], evidence: &[GraphEvi
         .sum::<usize>();
     row_bytes + evidence_bytes
 }
+
+#[cfg(test)]
+#[path = "map_answers_tests.rs"]
+mod tests;

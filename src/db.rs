@@ -1,11 +1,13 @@
 #![allow(unused_imports)]
 
 mod analytics;
+pub mod entity_resolution;
 pub(crate) mod error_signatures;
 pub mod graph;
 pub(crate) mod graph_confidence;
 pub mod graph_findings;
 pub mod graph_inventory;
+mod graph_resolver_projection;
 mod heartbeat;
 mod hook_events;
 mod hook_incident_evidence;
@@ -21,6 +23,7 @@ mod models;
 pub(crate) mod notifications;
 mod pool;
 mod queries;
+mod queries_service_instances;
 mod skill_events;
 mod skill_incident_evidence;
 mod skill_incidents;
@@ -93,12 +96,12 @@ pub use models::{
     AiProjectContextParams, AiProjectInventoryEntry, AiRelatedLogsForAnchor, AiRelatedLogsParams,
     AiRelatedWindow, AiSessionEntry, AiToolInventoryEntry, AiUsageBlock, AiUsageBlocksParams,
     AiUsageBlocksResult, AppLogCount, CorrelatedSession, DbStats, DockerCheckpoint,
-    ErrorSummaryEntry, HostEntry, IncidentCluster, IncidentContextParams, IncidentContextResult,
-    IncidentEvidence, ListAiProjectsParams, ListAiProjectsResult, ListAiSessionsParams,
-    ListAiToolsParams, ListAiToolsResult, LogBatchEntry, LogEntry, ResolvedTopicEntity,
-    SearchAiSessionsParams, SearchAiSessionsResult, SearchParams, SearchedAiSessionEntry,
-    SessionGraphInputs, SeverityCount, SimilarIncidentsParams, SimilarIncidentsResult,
-    TopicGraphInputs,
+    ErrorSummaryEntry, GraphRelatedLogEntry, HostEntry, IncidentCluster, IncidentContextParams,
+    IncidentContextResult, IncidentEvidence, ListAiProjectsParams, ListAiProjectsResult,
+    ListAiSessionsParams, ListAiToolsParams, ListAiToolsResult, LogBatchEntry, LogEntry,
+    ResolvedTopicEntity, SearchAiSessionsParams, SearchAiSessionsResult, SearchParams,
+    SearchedAiSessionEntry, SessionGraphInputs, SeverityCount, SimilarIncidentsParams,
+    SimilarIncidentsResult, TopicGraphInputs,
 };
 pub use models::{StorageBudgetState, StorageEnforcementOutcome, StorageMetrics, StorageRecovery};
 pub use pool::{
@@ -117,6 +120,7 @@ pub use queries::{
     similar_incidents_clusters, tail_logs, timeline_rollup_status, topic_correlate_inputs,
     validate_fts_query,
 };
+pub use queries_service_instances::search_logs_for_service_instances;
 pub(crate) use skill_events::insert_skill_events_in_tx;
 pub use skill_events::{
     AiSkillEventEntry, AiSkillEventParams, ListSkillEventsResult, SkillEventInsert,

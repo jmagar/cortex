@@ -207,9 +207,17 @@ fn search_logs_from_graph_fans_out_from_session_to_host_logs() {
 
     // Seed from the AI session entity; traversal reaches host:dookie.
     let session_key = "cortex:claude:sess-7".to_string();
-    let logs =
-        search_logs_from_graph_related_entities(&pool, &[session_key], 2, None, None, None, 100)
-            .unwrap();
+    let logs = search_logs_from_graph_related_entities(
+        &pool,
+        &[session_key],
+        2,
+        None,
+        None,
+        None,
+        100,
+        HostFanoutScope::WalkReached,
+    )
+    .unwrap();
 
     let hosts: std::collections::HashSet<&str> = logs.iter().map(|l| l.hostname.as_str()).collect();
     assert!(
@@ -255,6 +263,7 @@ fn search_logs_from_graph_respects_source_kind_filter() {
         None,
         Some(&[SourceKind::SyslogUdp]),
         100,
+        HostFanoutScope::WalkReached,
     )
     .unwrap();
     assert!(!logs.is_empty(), "syslog row should survive the filter");
@@ -276,7 +285,117 @@ fn search_logs_from_graph_empty_for_unknown_seed() {
         None,
         None,
         100,
+        HostFanoutScope::WalkReached,
     )
     .unwrap();
     assert!(logs.is_empty());
+}
+
+#[test]
+fn topic_resolving_logical_service_with_no_instances_reports_degraded() {
+    let (_dir, pool) = test_pool("topic-zero-instance-degraded.db");
+    // Stale/unbuilt projection: the logical service entity exists but has no
+    // `instance_of` service instances (e.g. right after migration 41 before
+    // `cortex graph rebuild` runs). The resolved entity must surface as
+    // degraded so the empty service timeline is explained, never silent.
+    {
+        let conn = pool.get().unwrap();
+        insert_entity(&conn, graph::ENTITY_TYPE_LOGICAL_SERVICE, "plex");
+    }
+    let inputs =
+        topic_correlate_inputs(&pool, &["plex".to_string()], 2, None, None, None, 100).unwrap();
+    let entity = inputs
+        .resolved
+        .iter()
+        .find(|e| e.entity_type == graph::ENTITY_TYPE_LOGICAL_SERVICE && e.canonical_key == "plex")
+        .expect("logical service must resolve");
+    assert_eq!(entity.resolver_status, ResolverStatus::Degraded);
+    assert!(inputs.logs.is_empty(), "no instances → no service fan-out");
+}
+
+#[test]
+fn topic_correlate_app_seed_does_not_fan_out_to_whole_host() {
+    let (_dir, pool) = test_pool("topic-app-seed-no-host-fanout.db");
+    // Bare `plex` app label (no agent-docker metadata) plus an unrelated
+    // kernel row on the same host.
+    insert_logs_batch(
+        &pool,
+        &[
+            syslog_row("2026-01-01T00:00:00Z", "tootie", "plex"),
+            syslog_row("2026-01-01T00:01:00Z", "tootie", "kernel"),
+        ],
+    )
+    .unwrap();
+    // Graph: app:plex —emitted_by→ host:tootie (log-identity edge).
+    {
+        let conn = pool.get().unwrap();
+        let app = insert_entity(&conn, graph::ENTITY_TYPE_APP, "plex");
+        let host = insert_entity(&conn, graph::ENTITY_TYPE_HOST, "tootie");
+        insert_rel(&conn, app, host, graph::REL_EMITTED_BY);
+    }
+
+    let inputs =
+        topic_correlate_inputs(&pool, &["plex".to_string()], 2, None, None, None, 100).unwrap();
+    // The topic resolves to the raw app entity and the walk reaches
+    // host:tootie, but the transitively reached host must never drive
+    // host-wide log inclusion labelled `resolved`.
+    assert!(
+        inputs
+            .resolved
+            .iter()
+            .any(|entity| entity.entity_type == graph::ENTITY_TYPE_APP
+                && entity.canonical_key == "plex"),
+        "topic must resolve the raw app entity: {:?}",
+        inputs.resolved
+    );
+    assert!(
+        !inputs.logs.iter().any(|row| {
+            row.entry.app_name.as_deref() == Some("kernel")
+                && row.resolver_status == ResolverStatus::Resolved
+        }),
+        "unrelated kernel row on the host must not be included as resolved: {:?}",
+        inputs
+            .logs
+            .iter()
+            .map(|row| (
+                row.entry.app_name.clone(),
+                row.resolver_status,
+                row.fallback_kind.clone()
+            ))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn ambiguous_prefix_candidates_surface_without_log_fanout() {
+    let (_dir, pool) = test_pool("topic-ambiguous-prefix.db");
+    insert_logs_batch(
+        &pool,
+        &[syslog_row(
+            "2026-01-01T00:00:00Z",
+            "tootie",
+            "plexmediaserver",
+        )],
+    )
+    .unwrap();
+    {
+        let conn = pool.get().unwrap();
+        insert_entity(&conn, graph::ENTITY_TYPE_LOGICAL_SERVICE, "plexmediaserver");
+    }
+    // "plexmedia" prefix-matches logical_service:plexmediaserver: the
+    // candidate must surface as ambiguous but contribute ZERO log fan-out.
+    let inputs =
+        topic_correlate_inputs(&pool, &["plexmedia".to_string()], 2, None, None, None, 100)
+            .unwrap();
+    let entity = inputs
+        .resolved
+        .iter()
+        .find(|e| e.canonical_key == "plexmediaserver")
+        .expect("prefix candidate must surface");
+    assert_eq!(entity.match_kind, "prefix");
+    assert_eq!(entity.resolver_status, ResolverStatus::Ambiguous);
+    assert!(
+        inputs.logs.is_empty(),
+        "ambiguous candidates must contribute zero log fan-out"
+    );
 }

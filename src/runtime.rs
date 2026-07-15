@@ -240,9 +240,22 @@ impl RuntimeCore {
         let enrichment = EnrichmentConfig {
             authelia_source_ip: config.enrichment.authelia_source_ip.clone(),
             adguard_source_ip: config.enrichment.adguard_source_ip.clone(),
+            agent_docker_source_prefixes: config.enrichment.agent_docker_source_prefixes.clone(),
             scrub_prompts: config.enrichment.scrub_prompts,
             api_token: config.mcp.api_token.0.clone(),
         };
+        // Unsafe-default guard (see `reject_unsafe_otlp_oauth_only_exposure`
+        // for the hard-fail sibling): with no source gate configured, any
+        // port-1514 sender can forge agent-docker identity metadata. Stdio
+        // query-only mode never ingests, so it stays quiet.
+        if !is_stdio && enrichment.agent_docker_source_prefixes.is_empty() {
+            tracing::warn!(
+                "agent_docker_source_prefixes is empty: agent-docker identity extraction is \
+                 unauthenticated and accepts the metadata marker from ANY syslog sender. Set \
+                 CORTEX_AGENT_DOCKER_SOURCE_PREFIXES (or [enrichment] \
+                 agent_docker_source_prefixes) to the agent hosts' source IPs to gate it"
+            );
+        }
         let observability = Arc::new(RuntimeObservability::default());
         let ingest = crate::ingest::start_writer_from_receiver_config(
             &config.receiver,

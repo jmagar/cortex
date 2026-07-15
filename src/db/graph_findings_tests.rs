@@ -108,7 +108,8 @@ fn public_route_findings_return_route_target_and_evidence() {
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].domain_key, "one.example.test");
     assert_eq!(rows[0].proxy_key, "proxy:one.example.test");
-    assert_eq!(rows[0].service_key.as_deref(), Some("squirts:svc-0"));
+    // Canonical service-instance key (`host/service`), never `host:service`.
+    assert_eq!(rows[0].service_key.as_deref(), Some("squirts/svc-0"));
     assert!(rows[0].exposes_evidence_id.is_some());
     assert!(rows[0].routes_evidence_id.is_some());
 }

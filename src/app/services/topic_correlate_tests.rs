@@ -261,3 +261,111 @@ fn source_kinds_deserializer_rejects_non_string_values() {
     .unwrap_err();
     assert!(err.to_string().contains("source_kinds"), "{err}");
 }
+
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn topic_plex_uses_service_instance_without_host_wide_fanout() {
+    let _guard = crate::db::graph::GRAPH_TEST_LOCK.lock();
+    let (svc, pool, _dir) = test_service();
+    let mut plex = syslog("2026-01-01T00:01:00Z", "tootie", "plex/plex/plex");
+    plex.message = "Plex library scan".to_string();
+    plex.raw = "Plex library scan".to_string();
+    plex.metadata_json = Some(
+        r#"{"source_kind":"agent-docker","agent_docker":{"host":"tootie","container_id":"abcdef1234567890","container_name":"plex","compose_project":"plex","compose_service":"plex","stream":"stdout"}}"#
+            .to_string(),
+    );
+    insert_logs_batch(
+        &pool,
+        &[syslog("2026-01-01T00:00:00Z", "tootie", "kernel"), plex],
+    )
+    .unwrap();
+    crate::db::graph::refresh_graph_projection(&pool).unwrap();
+    let resp = svc
+        .topic_correlate(TopicCorrelateRequest {
+            topic: "plex".to_string(),
+            limit: Some(10),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert!(
+        resp.resolved_entities
+            .iter()
+            .any(|e| { e.entity_type == "logical_service" && e.key == "plex" }),
+        "topic must resolve logical_service:plex: {:?}",
+        resp.resolved_entities
+    );
+    assert!(
+        resp.timeline
+            .iter()
+            .any(|row| row.message.contains("Plex library scan"))
+    );
+    // No silent host-wide fan-out: the kernel row on tootie stays out.
+    assert!(
+        !resp
+            .timeline
+            .iter()
+            .any(|row| row.app_name.as_deref() == Some("kernel")),
+        "topic plex must not fan out to all tootie logs: {:?}",
+        resp.timeline
+    );
+    assert!(resp.timeline.iter().all(|row| {
+        row.inclusion_reason.as_deref() == Some("service_instance")
+            || row.fallback_kind.as_deref() == Some("explicit_degraded_host_context")
+    }));
+}
+
+#[tokio::test]
+async fn topic_rejects_legacy_service_shapes() {
+    let (svc, _pool, _dir) = test_service();
+    for topic in ["tootie:plex", "tootie:plex:plex", "plex/plex/plex"] {
+        let err = svc
+            .topic_correlate(TopicCorrelateRequest {
+                topic: topic.to_string(),
+                ..Default::default()
+            })
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("rejected_legacy_shape"), "{topic}");
+    }
+}
+
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn topic_service_instance_fallback_to_host_context_is_explicit() {
+    let _guard = crate::db::graph::GRAPH_TEST_LOCK.lock();
+    let (svc, pool, _dir) = test_service();
+    // The plex service instance exists in the graph (via agent-docker
+    // identity), but the only logs in the window are host-context rows that
+    // no service-instance predicate matches.
+    let mut plex = syslog("2026-01-01T00:01:00Z", "tootie", "plex/plex/plex");
+    plex.metadata_json = Some(
+        r#"{"source_kind":"agent-docker","agent_docker":{"host":"tootie","container_id":"abcdef1234567890","container_name":"plex","compose_project":"plex","compose_service":"plex","stream":"stdout"}}"#
+            .to_string(),
+    );
+    insert_logs_batch(
+        &pool,
+        &[syslog("2026-01-01T00:00:00Z", "tootie", "kernel"), plex],
+    )
+    .unwrap();
+    crate::db::graph::refresh_graph_projection(&pool).unwrap();
+    // Restrict the window so the plex row is excluded; only kernel remains.
+    let resp = svc
+        .topic_correlate(TopicCorrelateRequest {
+            topic: "plex".to_string(),
+            until: Some("2026-01-01T00:00:30Z".to_string()),
+            limit: Some(10),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    // Host-context fallback rows are explicitly annotated, never silent.
+    for row in &resp.timeline {
+        assert_eq!(
+            row.fallback_kind.as_deref(),
+            Some("explicit_degraded_host_context"),
+            "fallback rows must be annotated: {row:?}"
+        );
+        assert_eq!(row.resolver_status.as_deref(), Some("degraded"));
+    }
+}

@@ -39,7 +39,7 @@ pub fn write_lock() -> parking_lot::ReentrantMutexGuard<'static, ()> {
     WRITE_LOCK.lock()
 }
 
-pub const KNOWN_SCHEMA_VERSION: i64 = 40;
+pub const KNOWN_SCHEMA_VERSION: i64 = 42;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SchemaVersionInfo {
@@ -2244,6 +2244,248 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
              COMMIT;",
         )?;
         tracing::info!("Migration 40: created ai_hook_events table");
+    }
+
+    // Migration 41: canonical entity-resolution graph contract
+    // (entity_resolution_v2). Adds the `logical_service` / `service_instance`
+    // entity types, the `instance_of` relationship type, and the three
+    // resolver reason codes to the constrained graph tables (rebuild, strict
+    // superset, ids preserved — mirrors migrations 33/34/35/36). The
+    // hard-break cutover for old populated DBs happens inside the copy
+    // itself: legacy `service` topology rows and nested `app` labels
+    // (`plex/plex/plex`) are excluded from the `INSERT … SELECT` (never
+    // migrated, no copy-then-delete), a `projection_contract` column records
+    // the active contract, and any previously-ready projection is marked
+    // stale so the next rebuild reprojects through the resolver.
+    if !migration_applied(&conn, 41)? {
+        conn.execute_batch(&format!(
+            "BEGIN IMMEDIATE;
+
+             CREATE TABLE graph_entities_new (
+                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                 entity_type   TEXT NOT NULL CHECK (entity_type IN (
+                     'host', 'container', 'service', 'app', 'source_ip',
+                     'ai_project', 'ai_session', 'error_signature',
+                     'compose_project', 'reverse_proxy', 'domain', 'network',
+                     'storage', 'config_artifact', 'git_commit', 'user', 'device',
+                     'logical_service', 'service_instance'
+                 )),
+                 canonical_key TEXT NOT NULL,
+                 display_label TEXT NOT NULL,
+                 source_kind   TEXT NOT NULL DEFAULT '',
+                 source_id     TEXT NOT NULL DEFAULT '',
+                 trust_level   TEXT NOT NULL CHECK (trust_level IN (
+                     'verified', 'claimed', 'inferred', 'correlated', 'refuted'
+                 )),
+                 first_seen_at TEXT,
+                 last_seen_at  TEXT,
+                 created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                 updated_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                 UNIQUE(entity_type, canonical_key)
+             );
+             INSERT INTO graph_entities_new
+                 (id, entity_type, canonical_key, display_label, source_kind,
+                  source_id, trust_level, first_seen_at, last_seen_at,
+                  created_at, updated_at)
+             SELECT id, entity_type, canonical_key, display_label, source_kind,
+                    source_id, trust_level, first_seen_at, last_seen_at,
+                    created_at, updated_at
+               FROM graph_entities
+              WHERE entity_type != 'service'
+                AND NOT (entity_type = 'app' AND canonical_key LIKE '%/%/%');
+             DROP TABLE graph_entities;
+             ALTER TABLE graph_entities_new RENAME TO graph_entities;
+             CREATE INDEX idx_graph_entities_type_key
+                 ON graph_entities(entity_type, canonical_key);
+             CREATE INDEX idx_graph_entities_canonical_key
+                 ON graph_entities(canonical_key);
+
+             CREATE TABLE graph_relationships_new (
+                 id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                 relationship_key  TEXT NOT NULL UNIQUE,
+                 src_entity_id     INTEGER NOT NULL,
+                 dst_entity_id     INTEGER NOT NULL,
+                 relationship_type TEXT NOT NULL CHECK (relationship_type IN (
+                     'observed_as', 'runs_on', 'emitted_by', 'worked_on',
+                     'matches_signature', 'defines_service', 'routes_to',
+                     'exposes_domain', 'attached_to', 'mounts', 'backed_by',
+                     'has_artifact', 'authenticated_as', 'accessed',
+                     'communicates_with', 'instance_of'
+                 )),
+                 reason_code       TEXT NOT NULL CHECK (reason_code IN (
+                     'syslog_claimed_hostname', 'log_app_name',
+                     'docker_container_id', 'docker_service_label',
+                     'ai_session_project', 'heartbeat_host_state',
+                     'error_signature_match', 'inventory_node',
+                     'inventory_service', 'compose_config',
+                     'reverse_proxy_config', 'docker_network', 'storage_probe',
+                     'config_artifact', 'agent_command_session',
+                     'agent_command_cwd_infer', 'agent_command_git_commit',
+                     'shell_history_git_commit', 'adguard_client_query',
+                     'shell_history_user', 'authelia_auth',
+                     'resolver_instance_of', 'resolver_service_instance',
+                     'resolver_raw_app_label'
+                 )),
+                 trust_level       TEXT NOT NULL CHECK (trust_level IN (
+                     'verified', 'claimed', 'inferred', 'correlated', 'refuted'
+                 )),
+                 confidence        REAL NOT NULL DEFAULT 0.0 CHECK (confidence >= 0.0 AND confidence <= 1.0),
+                 evidence_count    INTEGER NOT NULL DEFAULT 0 CHECK (evidence_count >= 0),
+                 first_seen_at     TEXT,
+                 last_seen_at      TEXT,
+                 created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                 updated_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                 UNIQUE(src_entity_id, dst_entity_id, relationship_type, relationship_key)
+             );
+             INSERT INTO graph_relationships_new
+                 (id, relationship_key, src_entity_id, dst_entity_id,
+                  relationship_type, reason_code, trust_level, confidence,
+                  evidence_count, first_seen_at, last_seen_at, created_at,
+                  updated_at)
+             SELECT id, relationship_key, src_entity_id, dst_entity_id,
+                    relationship_type, reason_code, trust_level, confidence,
+                    evidence_count, first_seen_at, last_seen_at, created_at,
+                    updated_at
+               FROM graph_relationships
+              WHERE src_entity_id IN (SELECT id FROM graph_entities)
+                AND dst_entity_id IN (SELECT id FROM graph_entities);
+             DROP TABLE graph_relationships;
+             ALTER TABLE graph_relationships_new RENAME TO graph_relationships;
+             CREATE INDEX idx_graph_relationships_src_type_seen
+                 ON graph_relationships(src_entity_id, relationship_type, last_seen_at DESC);
+             CREATE INDEX idx_graph_relationships_dst_type_seen
+                 ON graph_relationships(dst_entity_id, relationship_type, last_seen_at DESC);
+             CREATE INDEX idx_graph_relationships_type_seen
+                 ON graph_relationships(relationship_type, last_seen_at DESC);
+
+             CREATE TABLE graph_relationship_evidence_new (
+                 id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+                 relationship_id    INTEGER NOT NULL,
+                 evidence_key       TEXT NOT NULL,
+                 source_kind        TEXT NOT NULL CHECK (source_kind IN (
+                     'log', 'heartbeat', 'ai_session_rollup', 'source_inventory',
+                     'app_inventory', 'error_signature'
+                 )),
+                 source_id          TEXT NOT NULL DEFAULT '',
+                 source_log_id      INTEGER,
+                 source_heartbeat_id INTEGER,
+                 source_signature_hash TEXT,
+                 observed_at        TEXT NOT NULL,
+                 reason_code        TEXT NOT NULL CHECK (reason_code IN (
+                     'syslog_claimed_hostname', 'log_app_name',
+                     'docker_container_id', 'docker_service_label',
+                     'ai_session_project', 'heartbeat_host_state',
+                     'error_signature_match', 'inventory_node',
+                     'inventory_service', 'compose_config',
+                     'reverse_proxy_config', 'docker_network', 'storage_probe',
+                     'config_artifact', 'agent_command_session',
+                     'agent_command_cwd_infer', 'agent_command_git_commit',
+                     'shell_history_git_commit', 'adguard_client_query',
+                     'shell_history_user', 'authelia_auth',
+                     'resolver_instance_of', 'resolver_service_instance',
+                     'resolver_raw_app_label'
+                 )),
+                 reason_text        TEXT,
+                 confidence_delta   REAL NOT NULL DEFAULT 0.0 CHECK (confidence_delta >= -1.0 AND confidence_delta <= 1.0),
+                 trust_level        TEXT NOT NULL CHECK (trust_level IN (
+                     'verified', 'claimed', 'inferred', 'correlated', 'refuted'
+                 )),
+                 safe_excerpt       TEXT CHECK (safe_excerpt IS NULL OR length(safe_excerpt) <= 512),
+                 metadata_path      TEXT,
+                 evidence_count     INTEGER NOT NULL DEFAULT 1 CHECK (evidence_count >= 1),
+                 created_at         TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                 UNIQUE(relationship_id, evidence_key)
+             );
+             INSERT INTO graph_relationship_evidence_new
+                 (id, relationship_id, evidence_key, source_kind, source_id,
+                  source_log_id, source_heartbeat_id, source_signature_hash,
+                  observed_at, reason_code, reason_text, confidence_delta,
+                  trust_level, safe_excerpt, metadata_path, evidence_count,
+                  created_at)
+             SELECT id, relationship_id, evidence_key, source_kind, source_id,
+                    source_log_id, source_heartbeat_id, source_signature_hash,
+                    observed_at, reason_code, reason_text, confidence_delta,
+                    trust_level, safe_excerpt, metadata_path, evidence_count,
+                    created_at
+               FROM graph_relationship_evidence
+              WHERE relationship_id IN (SELECT id FROM graph_relationships);
+             DROP TABLE graph_relationship_evidence;
+             ALTER TABLE graph_relationship_evidence_new RENAME TO graph_relationship_evidence;
+             CREATE INDEX idx_graph_evidence_relationship_seen
+                 ON graph_relationship_evidence(relationship_id, observed_at DESC);
+             CREATE INDEX idx_graph_evidence_source_ref
+                 ON graph_relationship_evidence(source_kind, source_id);
+             CREATE INDEX idx_graph_evidence_log_id
+                 ON graph_relationship_evidence(source_log_id)
+                 WHERE source_log_id IS NOT NULL;
+             CREATE INDEX idx_graph_evidence_heartbeat_id
+                 ON graph_relationship_evidence(source_heartbeat_id)
+                 WHERE source_heartbeat_id IS NOT NULL;
+
+             DELETE FROM graph_entity_aliases
+              WHERE entity_id NOT IN (SELECT id FROM graph_entities);
+
+             ALTER TABLE graph_projection_meta
+                 ADD COLUMN projection_contract TEXT NOT NULL DEFAULT '{contract_v2}';
+             UPDATE graph_projection_meta
+                SET projection_status = 'stale',
+                    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+              WHERE id = 1 AND projection_status = 'ready';
+
+             INSERT OR IGNORE INTO schema_migrations (version) VALUES (41);
+             COMMIT;",
+            contract_v2 = crate::db::entity_resolution::vocab::GRAPH_PROJECTION_CONTRACT_V2,
+        ))?;
+        tracing::info!(
+            contract_key = crate::db::entity_resolution::vocab::GRAPH_PROJECTION_CONTRACT_KEY,
+            contract = crate::db::entity_resolution::vocab::GRAPH_PROJECTION_CONTRACT_V2,
+            "Migration 41: canonical entity-resolution graph contract"
+        );
+    }
+
+    // Migration 42: add the `refuted` trust level to graph_entity_aliases'
+    // trust_level CHECK. Migrations 35 and 41 added `refuted` to
+    // graph_entities, graph_relationships, and graph_relationship_evidence,
+    // but graph_entity_aliases was missed — an alias write at `refuted`
+    // trust fails this CHECK. Rebuilds the constrained table; strict
+    // superset, ids preserved (mirrors migrations 33/34/35/36/41).
+    if !migration_applied(&conn, 42)? {
+        conn.execute_batch(
+            "BEGIN IMMEDIATE;
+
+             CREATE TABLE graph_entity_aliases_new (
+                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                 entity_id     INTEGER NOT NULL,
+                 alias_type    TEXT NOT NULL,
+                 alias_key     TEXT NOT NULL,
+                 alias_value   TEXT NOT NULL,
+                 source_kind   TEXT NOT NULL DEFAULT '',
+                 trust_level   TEXT NOT NULL CHECK (trust_level IN (
+                     'verified', 'claimed', 'inferred', 'correlated', 'refuted'
+                 )),
+                 first_seen_at TEXT,
+                 last_seen_at  TEXT,
+                 created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                 updated_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                 UNIQUE(entity_id, alias_type, alias_key, source_kind)
+             );
+             INSERT INTO graph_entity_aliases_new
+                 (id, entity_id, alias_type, alias_key, alias_value, source_kind,
+                  trust_level, first_seen_at, last_seen_at, created_at, updated_at)
+             SELECT id, entity_id, alias_type, alias_key, alias_value, source_kind,
+                    trust_level, first_seen_at, last_seen_at, created_at, updated_at
+               FROM graph_entity_aliases;
+             DROP TABLE graph_entity_aliases;
+             ALTER TABLE graph_entity_aliases_new RENAME TO graph_entity_aliases;
+             CREATE INDEX idx_graph_aliases_lookup
+                 ON graph_entity_aliases(alias_type, alias_key);
+             CREATE INDEX idx_graph_aliases_entity
+                 ON graph_entity_aliases(entity_id);
+
+             INSERT OR IGNORE INTO schema_migrations (version) VALUES (42);
+             COMMIT;",
+        )?;
+        tracing::info!("Migration 42: added refuted trust level to graph_entity_aliases");
     }
 
     // A server crash/restart mid-check leaves an orphaned 'running' maintenance

@@ -199,12 +199,13 @@ fn refresh_graph_projection_extracts_docker_from_metadata_and_source() {
         ),
         2
     );
+    // Hard break: no legacy `service` topology from central-pull rows.
     assert_eq!(
         count(
             &conn,
             "SELECT COUNT(*) FROM graph_entities WHERE entity_type = 'service'"
         ),
-        1
+        0
     );
     assert_eq!(
         count(
@@ -218,7 +219,7 @@ fn refresh_graph_projection_extracts_docker_from_metadata_and_source() {
             &conn,
             "SELECT COUNT(*) FROM graph_relationships WHERE reason_code = 'docker_service_label'"
         ),
-        1
+        0
     );
 }
 
@@ -529,6 +530,55 @@ fn incremental_projection_is_idempotent_without_new_logs() {
     assert_eq!(first.entity_count, second.entity_count);
     assert_eq!(first.relationship_count, second.relationship_count);
     assert_eq!(first.evidence_count, second.evidence_count);
+}
+
+/// Downgrade → re-upgrade drift: a legacy `service` row present in a ready
+/// projection must trigger cleanup + a full rebuild instead of an
+/// incremental merge on top of a mixed-contract graph.
+#[test]
+fn incremental_projection_purges_legacy_service_rows_and_forces_full_rebuild() {
+    let _guard = GRAPH_TEST_LOCK.lock();
+    let dir = tempfile::tempdir().unwrap();
+    let pool = init_pool(&test_storage_config(dir.path().join("graph-inc-drift.db"))).unwrap();
+    insert_logs_batch(
+        &pool,
+        &[make_entry(
+            "2026-01-01T00:00:00Z",
+            "host-a",
+            Some("sshd"),
+            "login a",
+        )],
+    )
+    .unwrap();
+    refresh_graph_projection(&pool).unwrap();
+
+    // Simulate a pre-resolver binary projecting legacy service topology into
+    // the ready projection (the CHECK constraint still allows 'service').
+    {
+        let conn = pool.get().unwrap();
+        conn.execute(
+            "INSERT INTO graph_entities
+                (entity_type, canonical_key, display_label, trust_level)
+             VALUES ('service', 'host-a:plex', 'host-a:plex', 'inferred')",
+            [],
+        )
+        .unwrap();
+    }
+
+    let outcome = refresh_graph_projection_incremental(&pool).unwrap();
+    assert!(matches!(outcome, GraphRebuildOutcome::Rebuilt(_)));
+    let conn = pool.get().unwrap();
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*) FROM graph_entities WHERE entity_type = 'service'"
+        ),
+        0,
+        "legacy service rows must be purged by the drift probe"
+    );
+    drop(conn);
+    let status = graph_projection_status(&pool).unwrap();
+    assert_eq!(status.projection_status, "ready");
 }
 
 /// Build a log entry shaped like `command_log::agent_record_to_entry` output:
@@ -866,7 +916,7 @@ fn shell_history_git_commit_links_commit_to_host() {
 }
 
 #[test]
-fn docker_compose_label_projects_compose_project_defines_service() {
+fn docker_compose_label_no_longer_projects_legacy_service_topology() {
     let _guard = GRAPH_TEST_LOCK.lock();
     let dir = tempfile::tempdir().unwrap();
     let pool = init_pool(&test_storage_config(dir.path().join("graph-compose.db"))).unwrap();
@@ -886,22 +936,37 @@ fn docker_compose_label_projects_compose_project_defines_service() {
     refresh_graph_projection(&pool).unwrap();
 
     let conn = pool.get().unwrap();
-    // compose_project entity created from the docker label.
-    let project_key: String = conn
-        .query_row(
-            "SELECT canonical_key FROM graph_entities WHERE entity_type = 'compose_project'",
-            [],
-            |r| r.get(0),
-        )
-        .unwrap();
-    assert_eq!(project_key, "dookie:axon");
-
-    // compose_project --defines_service--> service edge (compose_config).
+    // Hard break: central-pull docker labels no longer synthesize legacy
+    // `service` topology (`dookie:axon:qdrant`) or compose_project edges to
+    // it. Canonical service identity requires agent-docker structured
+    // metadata or verified inventory (resolver decisions).
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*) FROM graph_entities WHERE entity_type = 'service'"
+        ),
+        0
+    );
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*) FROM graph_entities WHERE entity_type = 'compose_project'"
+        ),
+        0
+    );
     assert_eq!(
         count(
             &conn,
             "SELECT COUNT(*) FROM graph_relationships
-             WHERE reason_code = 'compose_config' AND relationship_type = 'defines_service'"
+             WHERE reason_code IN ('compose_config', 'docker_service_label')"
+        ),
+        0
+    );
+    // Verified host/container identity is still projected.
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*) FROM graph_relationships WHERE reason_code = 'docker_container_id'"
         ),
         1
     );
@@ -1151,4 +1216,417 @@ fn fair_share_reports_truncated_when_candidate_pool_capped() {
     let (selected, truncated) = fair_share_relationships(candidates, 10, true);
     assert_eq!(selected.len(), 1);
     assert!(truncated, "candidate-pool cap must propagate as truncated");
+}
+
+#[test]
+fn evidence_bucket_key_distinguishes_by_source_id_within_same_hour_bucket() {
+    // Two evidence rows with the same prefix/reason and timestamps in the
+    // same hour bucket, but different source_ids, must not collapse into a
+    // single dedup key — each originating log/heartbeat/signature must be
+    // able to leave its own evidence row.
+    let a = evidence_bucket_key("log", 1, "log_app_name", "2026-01-01T00:00:00Z");
+    let b = evidence_bucket_key("log", 2, "log_app_name", "2026-01-01T00:12:00Z");
+    assert_ne!(a, b, "distinct source_ids must yield distinct bucket keys");
+
+    // Same source_id, same prefix/reason, same hour bucket still collapses
+    // (that's the intended within-source hourly dedup).
+    let c = evidence_bucket_key("log", 1, "log_app_name", "2026-01-01T00:45:00Z");
+    assert_eq!(
+        a, c,
+        "same source_id within the same hour bucket must dedup"
+    );
+
+    // A different hour bucket for the same source_id must not collapse.
+    let d = evidence_bucket_key("log", 1, "log_app_name", "2026-01-01T01:00:00Z");
+    assert_ne!(a, d, "different hour buckets must not dedup");
+}
+
+#[test]
+fn graph_projection_emits_service_instance_not_nested_service_key() {
+    let _guard = GRAPH_TEST_LOCK.lock();
+    let dir = tempfile::tempdir().unwrap();
+    let pool = init_pool(&test_storage_config(
+        dir.path().join("resolver-graph-projection.db"),
+    ))
+    .unwrap();
+    let mut entry = make_entry(
+        "2026-01-01T00:00:00Z",
+        "tootie",
+        Some("plex/plex/plex"),
+        "Plex started",
+    );
+    entry.metadata_json = Some(
+        r#"{"source_kind":"agent-docker","agent_docker":{"host":"tootie","container_id":"abcdef1234567890","container_name":"plex","compose_project":"plex","compose_service":"plex","stream":"stdout"}}"#
+            .to_string(),
+    );
+    insert_logs_batch(&pool, &[entry]).unwrap();
+    refresh_graph_projection(&pool).unwrap();
+    let conn = pool.get().unwrap();
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*) FROM graph_entities WHERE entity_type = 'logical_service' AND canonical_key = 'plex'"
+        ),
+        1
+    );
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*) FROM graph_entities WHERE entity_type = 'service_instance' AND canonical_key = 'tootie/plex'"
+        ),
+        1
+    );
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*) FROM graph_relationships WHERE relationship_type = 'instance_of' AND reason_code = 'resolver_instance_of'"
+        ),
+        1
+    );
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*) FROM graph_entities WHERE entity_type = 'service' AND canonical_key IN ('tootie:plex', 'tootie:plex:plex')"
+        ),
+        0
+    );
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*) FROM graph_entities WHERE entity_type = 'app' AND canonical_key = 'plex/plex/plex'"
+        ),
+        0
+    );
+}
+
+#[test]
+fn canonical_plex_proof_fixture_projects_only_resolver_identity() {
+    let _guard = GRAPH_TEST_LOCK.lock();
+    let dir = tempfile::tempdir().unwrap();
+    let pool = init_pool(&test_storage_config(dir.path().join("plex-proof.db"))).unwrap();
+
+    let agent_docker_meta = |host: &str| {
+        format!(
+            r#"{{"source_kind":"agent-docker","agent_docker":{{"host":"{host}","container_id":"abcdef1234567890","container_name":"plex","compose_project":"plex","compose_service":"plex","stream":"stdout"}}}}"#
+        )
+    };
+    let mut tootie_plex = make_entry(
+        "2026-01-01T00:00:00Z",
+        "tootie",
+        Some("plex/plex/plex"),
+        "Plex started",
+    );
+    tootie_plex.metadata_json = Some(agent_docker_meta("tootie"));
+    let mut shart_plex = make_entry(
+        "2026-01-01T00:01:00Z",
+        "shart",
+        Some("plex/plex/plex"),
+        "Plex replica started",
+    );
+    shart_plex.metadata_json = Some(agent_docker_meta("shart"));
+    // Raw syslog labels that merely contain "plex": never logical services.
+    let complex = make_entry(
+        "2026-01-01T00:02:00Z",
+        "tootie",
+        Some("complex"),
+        "complex event",
+    );
+    let plex_backup = make_entry(
+        "2026-01-01T00:03:00Z",
+        "tootie",
+        Some("plex-backup"),
+        "backup ran",
+    );
+    // AI command row whose project path mentions plex.
+    let mut ai_row = make_entry(
+        "2026-01-01T00:04:00Z",
+        "dookie",
+        Some("claude"),
+        "edited compose file",
+    );
+    ai_row.source_ip = "agent-command://dookie/claude/sess-plex".to_string();
+    ai_row.ai_tool = Some("claude".to_string());
+    ai_row.ai_project = Some("/home/jmagar/workspace/plex-tools".to_string());
+    ai_row.ai_session_id = Some("sess-plex".to_string());
+
+    insert_logs_batch(
+        &pool,
+        &[tootie_plex, shart_plex, complex, plex_backup, ai_row],
+    )
+    .unwrap();
+    refresh_graph_projection(&pool).unwrap();
+
+    let conn = pool.get().unwrap();
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*) FROM graph_entities WHERE entity_type = 'logical_service' AND canonical_key = 'plex'"
+        ),
+        1
+    );
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*) FROM graph_entities WHERE entity_type = 'service_instance' AND canonical_key = 'tootie/plex'"
+        ),
+        1
+    );
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*) FROM graph_entities WHERE entity_type = 'service_instance' AND canonical_key = 'shart/plex'"
+        ),
+        1
+    );
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*) FROM graph_entities WHERE canonical_key IN ('tootie:plex', 'tootie:plex:plex', 'plex/plex/plex')"
+        ),
+        0
+    );
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*) FROM graph_entities WHERE canonical_key = 'complex' AND entity_type = 'logical_service'"
+        ),
+        0
+    );
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*) FROM graph_entities WHERE canonical_key = 'plex-backup' AND entity_type = 'logical_service'"
+        ),
+        0
+    );
+    // Both instances converge on ONE logical service via instance_of.
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*) FROM graph_relationships WHERE relationship_type = 'instance_of'"
+        ),
+        2
+    );
+}
+
+#[test]
+fn extract_log_row_parses_metadata_json_exactly_once_per_row() {
+    let _guard = GRAPH_TEST_LOCK.lock();
+    let dir = tempfile::tempdir().unwrap();
+    let pool = init_pool(&test_storage_config(dir.path().join("graph-parse-once.db"))).unwrap();
+
+    // Each of these rows previously drove metadata_json through TWO
+    // independent `parse_metadata` calls (extract_user_device_row parsed
+    // unconditionally for every row, plus one gated extractor re-parsed the
+    // same string): a docker:// row (extract_docker_log_row), an
+    // agent-command:// row with a cwd fallback in metadata
+    // (extract_agent_command_row), and a plain row carrying
+    // metadata_json.agent_docker (extract_agent_docker_row's resolver path).
+    let mut docker_row = make_entry("2026-01-01T00:00:00Z", "docker-host", Some("cortex"), "log");
+    docker_row.source_ip = "docker://dookie/abcdef/stdout".to_string();
+    docker_row.metadata_json = Some(
+        r#"{"docker_host":"dookie","container_id":"abcdef","container_name":"cortex"}"#.to_string(),
+    );
+
+    let mut agent_command_row = make_entry(
+        "2026-01-01T00:01:00Z",
+        "dookie",
+        Some("claude"),
+        "ran a command",
+    );
+    agent_command_row.source_ip = "agent-command://dookie/claude/sess-parse".to_string();
+    agent_command_row.ai_tool = Some("claude".to_string());
+    agent_command_row.ai_session_id = Some("sess-parse".to_string());
+    agent_command_row.metadata_json =
+        Some(r#"{"agent_command":{"cwd":"/home/jmagar/workspace/cortex"}}"#.to_string());
+
+    let mut agent_docker_row = make_entry(
+        "2026-01-01T00:02:00Z",
+        "tootie",
+        Some("plex/plex/plex"),
+        "Plex started",
+    );
+    agent_docker_row.metadata_json = Some(
+        r#"{"agent_docker":{"host":"tootie","container_id":"abcdef1234567890","container_name":"plex","stream":"stdout"}}"#
+            .to_string(),
+    );
+
+    // A malformed-JSON row: parse_metadata must still run exactly once for
+    // it (returning None), not fail partially in some extractors and
+    // succeed in others from independent re-parses.
+    let mut malformed_row = make_entry("2026-01-01T00:03:00Z", "docker-host", Some("x"), "log");
+    malformed_row.source_ip = "docker://dookie/badjson/stderr".to_string();
+    malformed_row.metadata_json = Some("{not-json".to_string());
+
+    insert_logs_batch(
+        &pool,
+        &[
+            docker_row,
+            agent_command_row,
+            agent_docker_row,
+            malformed_row,
+        ],
+    )
+    .unwrap();
+
+    PARSE_METADATA_CALLS.store(0, std::sync::atomic::Ordering::Relaxed);
+    refresh_graph_projection(&pool).unwrap();
+
+    assert_eq!(
+        PARSE_METADATA_CALLS.load(std::sync::atomic::Ordering::Relaxed),
+        4,
+        "metadata_json must be parsed exactly once per row (4 rows in), not once per extractor that reads it"
+    );
+
+    // Correctness is preserved despite parsing once and threading the
+    // result down: the docker row and the resolver-identity row both still
+    // project their entities, and the malformed row degrades cleanly.
+    let conn = pool.get().unwrap();
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*) FROM graph_entities WHERE entity_type = 'container'"
+        ),
+        2
+    );
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*) FROM graph_entities WHERE entity_type = 'logical_service' AND canonical_key = 'plex'"
+        ),
+        1
+    );
+}
+
+#[test]
+fn chunk_scoped_entity_memo_collapses_repeated_ensure_entity_upserts() {
+    let _guard = GRAPH_TEST_LOCK.lock();
+    let dir = tempfile::tempdir().unwrap();
+    let pool = init_pool(&test_storage_config(
+        dir.path().join("graph-entity-memo.db"),
+    ))
+    .unwrap();
+
+    // 50 rows all naming the same host/app/source_ip (make_entry's fixed
+    // source_ip), with strictly increasing timestamps, all well within one
+    // GRAPH_REBUILD_CHUNK_SIZE (10_000) chunk transaction.
+    const ROW_COUNT: usize = 50;
+    let entries: Vec<_> = (0..ROW_COUNT)
+        .map(|i| {
+            make_entry(
+                &format!("2026-01-01T00:{i:02}:00Z"),
+                "warden",
+                Some("sshd"),
+                "repeated event",
+            )
+        })
+        .collect();
+    insert_logs_batch(&pool, &entries).unwrap();
+
+    ENSURE_ENTITY_CALLS.store(0, std::sync::atomic::Ordering::Relaxed);
+    refresh_graph_projection(&pool).unwrap();
+
+    // Correctness: still exactly one entity per distinct (entity_type,
+    // canonical_key) — source_ip, host, app — no matter how many rows
+    // referenced them.
+    let conn = pool.get().unwrap();
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*) FROM graph_entities WHERE entity_type IN ('source_ip', 'host', 'app')"
+        ),
+        3
+    );
+    // Every row still contributes its own evidence (evidence_key includes
+    // the log row id), so nothing was silently dropped by memoizing the
+    // entity upsert.
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT SUM(evidence_count) FROM graph_relationship_evidence
+             WHERE reason_code = 'syslog_claimed_hostname'"
+        ),
+        ROW_COUNT as i64
+    );
+
+    // The memo collapsed the 3 distinct entities * 50 rows = 150 potential
+    // ensure_entity invocations down to exactly 3 real upserts (one per
+    // unique (entity_type, canonical_key) per chunk).
+    assert_eq!(
+        ENSURE_ENTITY_CALLS.load(std::sync::atomic::Ordering::Relaxed),
+        3,
+        "memo must collapse repeated (entity_type, canonical_key) upserts within a chunk"
+    );
+
+    // Documented tradeoff: because rows 2..50 never reach ensure_entity at
+    // all (the memo short-circuits them), the host entity's first/last_seen
+    // window reflects only the FIRST row processed for that key in this
+    // chunk, not the widened window across all 50 rows.
+    let (first_seen, last_seen): (String, String) = conn
+        .query_row(
+            "SELECT first_seen_at, last_seen_at FROM graph_entities
+             WHERE entity_type = 'host' AND canonical_key = 'warden'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(first_seen, "2026-01-01T00:00:00Z");
+    assert_eq!(
+        last_seen, "2026-01-01T00:00:00Z",
+        "memoized entity keeps the first upsert's last_seen_at within the chunk, per the documented tradeoff"
+    );
+}
+
+#[test]
+fn graph_walk_n_hops_enforces_entity_cap() {
+    let _guard = GRAPH_TEST_LOCK.lock();
+    let dir = tempfile::tempdir().unwrap();
+    let pool = init_pool(&test_storage_config(dir.path().join("graph-nhops-cap.db"))).unwrap();
+    let conn = pool.get().unwrap();
+
+    // Star topology: one seed host directly connected to more apps than the
+    // cap allows, all reachable within a single hop. Without a row cap this
+    // walk would return seed + every app (well over GRAPH_WALK_N_HOPS_ENTITY_CAP).
+    let insert_entity = |etype: &str, key: &str| -> i64 {
+        conn.execute(
+            "INSERT INTO graph_entities (entity_type, canonical_key, display_label, trust_level)
+             VALUES (?1, ?2, ?2, 'verified')",
+            rusqlite::params![etype, key],
+        )
+        .unwrap();
+        conn.last_insert_rowid()
+    };
+    let host = insert_entity(ENTITY_TYPE_HOST, "host-cap-seed");
+    let extra_neighbours = GRAPH_WALK_N_HOPS_ENTITY_CAP + 50;
+    // Batch the fixture seed in one transaction — one autocommit per row
+    // makes this loop ~1000x slower and needlessly extends how long
+    // GRAPH_TEST_LOCK is held.
+    conn.execute_batch("BEGIN;").unwrap();
+    for i in 0..extra_neighbours {
+        let app_key = format!("app-cap-{i}");
+        let app = insert_entity(ENTITY_TYPE_APP, &app_key);
+        conn.execute(
+            "INSERT INTO graph_relationships
+                (relationship_key, src_entity_id, dst_entity_id, relationship_type,
+                 reason_code, trust_level, confidence, last_seen_at)
+             VALUES (?1, ?2, ?3, 'emitted_by', 'log_app_name', 'verified', 0.5, '2026-01-01T00:00:00Z')",
+            rusqlite::params![format!("{app}:emitted_by:{host}"), app, host],
+        )
+        .unwrap();
+    }
+    conn.execute_batch("COMMIT;").unwrap();
+    drop(conn);
+
+    let reached = graph_walk_n_hops(
+        &pool.get().unwrap(),
+        &["host-cap-seed".to_string()],
+        GRAPH_WALK_MAX_DEPTH,
+    )
+    .unwrap();
+
+    assert_eq!(
+        reached.len(),
+        GRAPH_WALK_N_HOPS_ENTITY_CAP,
+        "walk must return exactly the capped entity count, not the full {extra_neighbours}-neighbour reach"
+    );
 }

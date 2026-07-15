@@ -34,7 +34,7 @@ async fn mocked_docker_engine_fixture_lists_containers_and_maps_log_frame() {
     assert_eq!(containers.len(), 1);
     let container = &containers[0];
     assert_eq!(container.name, "swag-1");
-    assert_eq!(container.app_name(), "edge/swag/swag-1");
+    assert_eq!(container.app_name(), "swag");
 
     let entry = log_output_to_entry(
         "squirts",
@@ -47,7 +47,7 @@ async fn mocked_docker_engine_fixture_lists_containers_and_maps_log_frame() {
     .expect("stdout frame should produce an entry");
 
     assert_eq!(entry.hostname, "squirts");
-    assert_eq!(entry.app_name.as_deref(), Some("edge/swag/swag-1"));
+    assert_eq!(entry.app_name.as_deref(), Some("swag"));
     assert_eq!(entry.source_ip, "docker://squirts/swag-1/stdout");
     assert_eq!(entry.message, "live docker fixture marker");
     assert_eq!(
