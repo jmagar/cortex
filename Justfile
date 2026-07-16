@@ -21,7 +21,7 @@ release:
 
 check:
     cargo check
-    bash scripts/check-rust-module-size.sh --limit 500 src/cli.rs src/cli
+    bash scripts/check-rust-module-size.sh --limit 500
 
 lint:
     just test-cargo-wrapper

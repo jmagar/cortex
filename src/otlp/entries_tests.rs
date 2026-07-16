@@ -46,6 +46,30 @@ fn any_value_to_string_renders_string_table_index_as_placeholder() {
     );
 }
 
+// Exercises the pure gating function directly (not the global
+// LAST_KEY_STRINDEX_WARNING / LAST_VALUE_STRINDEX_WARNING statics) so this
+// test can't interfere with or be affected by other tests sharing the
+// process-wide limiters -- same isolation approach as otlp::auth's
+// `unauthorized_warning_rate_limit_suppresses_repeats_per_key`.
+#[test]
+fn string_table_index_warning_suppresses_repeats_within_interval() {
+    let mut last = None;
+    let now = std::time::Instant::now();
+    let interval = std::time::Duration::from_secs(60);
+
+    assert!(record_string_table_index_warning(&mut last, now, interval));
+    assert!(!record_string_table_index_warning(
+        &mut last,
+        now + std::time::Duration::from_secs(30),
+        interval,
+    ));
+    assert!(record_string_table_index_warning(
+        &mut last,
+        now + interval,
+        interval,
+    ));
+}
+
 fn sample_request(
     host: &str,
     service: &str,
@@ -380,6 +404,103 @@ fn build_entries_ignores_unknown_or_oversized_ai_tool() {
     let entries = build_entries(&req, peer);
     assert_eq!(entries[0].ai_tool, None);
     assert_eq!(entries[1].ai_tool, None);
+}
+
+// ---- key_strindex (syslog-mcp-774ia) ----
+
+#[test]
+fn attr_key_resolves_normal_keys() {
+    let entry = kv("host.name", av_string("x"));
+    assert_eq!(attr_key(&entry), Some("host.name"));
+}
+
+#[test]
+fn attr_key_passes_through_genuinely_empty_key() {
+    let entry = KeyValue {
+        key: String::new(),
+        value: Some(av_string("x")),
+        key_strindex: 0,
+    };
+    assert_eq!(attr_key(&entry), Some(""));
+}
+
+#[test]
+fn attr_key_skips_unresolved_string_table_indexed_key() {
+    let entry = KeyValue {
+        key: String::new(),
+        value: Some(av_string("x")),
+        key_strindex: 5,
+    };
+    assert_eq!(attr_key(&entry), None);
+}
+
+// Per the OTLP wire format, key_strindex takes precedence over key whenever
+// it's set (nonzero), even if key also holds a literal value -- a
+// non-conformant producer sending both must not have the literal key
+// silently win over the (spec-authoritative) index.
+#[test]
+fn attr_key_skips_when_key_strindex_set_even_if_key_is_also_populated() {
+    let entry = KeyValue {
+        key: "host.name".to_string(),
+        value: Some(av_string("x")),
+        key_strindex: 5,
+    };
+    assert_eq!(attr_key(&entry), None);
+}
+
+#[test]
+fn build_entries_skips_string_table_indexed_keys_instead_of_colliding() {
+    let peer = "127.0.0.1:1".parse().unwrap();
+    let req = ExportLogsServiceRequest {
+        resource_logs: vec![ResourceLogs {
+            resource: Some(Resource {
+                attributes: vec![
+                    kv("host.name", av_string("tootie")),
+                    KeyValue {
+                        key: String::new(),
+                        value: Some(av_string("unresolvable-1")),
+                        key_strindex: 1,
+                    },
+                    KeyValue {
+                        key: String::new(),
+                        value: Some(av_string("unresolvable-2")),
+                        key_strindex: 2,
+                    },
+                ],
+                dropped_attributes_count: 0,
+                entity_refs: vec![],
+            }),
+            scope_logs: vec![ScopeLogs {
+                scope: None,
+                log_records: vec![LogRecord {
+                    time_unix_nano: 0,
+                    observed_time_unix_nano: 0,
+                    severity_number: 9,
+                    severity_text: String::new(),
+                    body: Some(av_string("msg")),
+                    attributes: vec![],
+                    dropped_attributes_count: 0,
+                    flags: 0,
+                    trace_id: vec![],
+                    span_id: vec![],
+                    event_name: String::new(),
+                }],
+                schema_url: String::new(),
+            }],
+            schema_url: String::new(),
+        }],
+    };
+
+    let entries = build_entries(&req, peer);
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].hostname, "tootie");
+    let metadata: serde_json::Value =
+        serde_json::from_str(entries[0].metadata_json.as_deref().unwrap()).unwrap();
+    let resource_attrs = &metadata["resource_attributes"];
+    assert_eq!(resource_attrs["host.name"], "tootie");
+    // Both string-table-indexed attributes are skipped rather than
+    // colliding onto (and clobbering each other via) an "" key.
+    assert!(resource_attrs.get("").is_none());
 }
 
 #[test]
