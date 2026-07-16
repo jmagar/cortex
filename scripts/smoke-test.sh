@@ -227,7 +227,8 @@ run_cortex_ai_add() {
         fi
     fi
 
-    CORTEX_DB_PATH="$db_path" "$cortex_bin" sessions add --file "$fixture" --json
+    CORTEX_USE_HTTP=false CORTEX_DB_PATH="$db_path" \
+        "$cortex_bin" sessions add --file "$fixture" --json
 }
 
 # Resolve the cortex CLI binary (env CORTEX_BIN, PATH, or debug build), echoing
@@ -244,10 +245,21 @@ resolve_cortex_bin() {
     fi
 }
 
+resolve_smoke_db_path() {
+    if [[ -n "${CORTEX_SMOKE_DB_PATH:-}" ]]; then
+        printf '%s\n' "$CORTEX_SMOKE_DB_PATH"
+    elif [[ "${CORTEX_DB_PATH:-}" == /data/* && "${CORTEX_DATA_VOLUME:-}" == /* ]]; then
+        printf '%s/%s\n' "${CORTEX_DATA_VOLUME%/}" "${CORTEX_DB_PATH#/data/}"
+    else
+        printf '%s\n' "${CORTEX_DB_PATH:-data/cortex.db}"
+    fi
+}
+
 seed_ai_fixture() {
     [[ -f "$AI_SMOKE_FIXTURE" ]] || return 1
 
-    local db_path="${CORTEX_SMOKE_DB_PATH:-${CORTEX_DB_PATH:-data/cortex.db}}"
+    local db_path
+    db_path="$(resolve_smoke_db_path)"
     local output
     if output="$(run_cortex_ai_add "$db_path" "$AI_SMOKE_FIXTURE" 2>&1)"; then
         AI_SEEDED=1
@@ -406,11 +418,11 @@ echo ""
 echo -e "${COLOR_BOLD}[2/4] Seeding test data${COLOR_RESET}"
 
 if [[ "$SKIP_SEED" -eq 0 ]]; then
-    printf '<14>%s %s sshd[42]: smoke-test: info message\n'           "$(date '+%b %e %H:%M:%S')" "$SEED_HOST" | nc -u -w1 "$CORTEX_RECEIVER_HOST" "$CORTEX_RECEIVER_PORT"
-    printf '<11>%s %s sshd[42]: smoke-test: error authentication failure\n' "$(date '+%b %e %H:%M:%S')" "$SEED_HOST" | nc -u -w1 "$CORTEX_RECEIVER_HOST" "$CORTEX_RECEIVER_PORT"
-    printf '<2>%s %s kernel: smoke-test: crit memory allocation failed\n'    "$(date '+%b %e %H:%M:%S')" "$SEED_HOST" | nc -u -w1 "$CORTEX_RECEIVER_HOST" "$CORTEX_RECEIVER_PORT"
-    printf '<12>%s %s dockerd[99]: smoke-test: warning container restart\n'  "$(date '+%b %e %H:%M:%S')" "$SEED_HOST" | nc -u -w1 "$CORTEX_RECEIVER_HOST" "$CORTEX_RECEIVER_PORT"
-    send_tcp_seed "<14>$(date '+%b %e %H:%M:%S') ${SEED_HOST} tcpsmoke[77]: smoke-test tcp seed ${TCP_MARKER} bounded frame ok"
+    printf '<14>%s %s sshd[42]: smoke-test: info message\n'           "$(date -u '+%b %e %H:%M:%S')" "$SEED_HOST" | nc -u -w1 "$CORTEX_RECEIVER_HOST" "$CORTEX_RECEIVER_PORT"
+    printf '<11>%s %s sshd[42]: smoke-test: error authentication failure\n' "$(date -u '+%b %e %H:%M:%S')" "$SEED_HOST" | nc -u -w1 "$CORTEX_RECEIVER_HOST" "$CORTEX_RECEIVER_PORT"
+    printf '<2>%s %s kernel: smoke-test: crit memory allocation failed\n'    "$(date -u '+%b %e %H:%M:%S')" "$SEED_HOST" | nc -u -w1 "$CORTEX_RECEIVER_HOST" "$CORTEX_RECEIVER_PORT"
+    printf '<12>%s %s dockerd[99]: smoke-test: warning container restart\n'  "$(date -u '+%b %e %H:%M:%S')" "$SEED_HOST" | nc -u -w1 "$CORTEX_RECEIVER_HOST" "$CORTEX_RECEIVER_PORT"
+    send_tcp_seed "<14>$(date -u '+%b %e %H:%M:%S') ${SEED_HOST} tcpsmoke[77]: smoke-test tcp seed ${TCP_MARKER} bounded frame ok"
     if ! seed_ai_fixture; then
         echo -e "${COLOR_RED}ABORT${COLOR_RESET}  AI transcript fixture seed failed"
         exit 1
@@ -631,7 +643,7 @@ echo "Action: sessions"
 # Use a time-windowed query so smoke data seeded directly into SQLite is read
 # live instead of through a periodically refreshed session rollup.
 if [[ "$AI_SEEDED" -eq 1 ]]; then
-    SESSIONS=$(mcp_call sessions "limit=10" "since=1970-01-01T00:00:00Z" 2>&1)
+    SESSIONS=$(mcp_call sessions "project=${AI_SMOKE_PROJECT}" "limit=10" "since=1970-01-01T00:00:00Z" 2>&1)
 else
     SESSIONS=$(mcp_call sessions "limit=10" 2>&1)
     AI_SMOKE_QUERY='"cortex"'
@@ -874,7 +886,7 @@ print('ok')
 assert_eq "search(query=authentication): response structure valid" "$SEARCH_VALID" "ok"
 
 # Phrase search
-SEARCH_PHRASE=$(mcp_call search 'query="authentication failure"' "limit=10" 2>&1)
+SEARCH_PHRASE=$(mcp_call search 'query="authentication failure"' "host=${SEED_HOST}" "severity=err" "limit=10" 2>&1)
 assert_no_error "search(phrase): no error" "$SEARCH_PHRASE"
 if [[ "$SKIP_SEED" -eq 0 ]]; then
     PHRASE_MATCH=$(printf '%s\n' "$SEARCH_PHRASE" | python3 -c "
@@ -884,6 +896,8 @@ assert logs, 'phrase search returned no results'
 for l in logs:
     if 'authentication failure' not in (l.get('message') or '').lower():
         print(f'phrase not found in: {l[\"message\"][:80]}'); sys.exit(0)
+    assert l['hostname'] == '${SEED_HOST}', f'wrong hostname: {l[\"hostname\"]}'
+    assert l['severity'] == 'err', f'wrong severity: {l[\"severity\"]}'
 print('ok')
 " 2>/dev/null || echo "error")
     assert_eq "search(phrase): seeded results contain exact phrase" "$PHRASE_MATCH" "ok"
@@ -902,19 +916,6 @@ assert not wrong, f'hostname filter leaked other hosts: {wrong}'
 print('ok')
 " 2>/dev/null || echo "error")
     assert_eq "search(hostname filter): only returns logs for '$SEED_HOST'" "$SEARCH_HOST_VALID" "ok"
-
-    # severity= filter: warning should only return warning-level logs
-    SEARCH_SEV=$(mcp_call search "host=${SEED_HOST}" "severity=warning" "limit=50" 2>&1)
-    assert_no_error "search(severity filter): no error" "$SEARCH_SEV"
-    SEARCH_SEV_VALID=$(printf '%s\n' "$SEARCH_SEV" | python3 -c "
-import sys, json
-logs = json.load(sys.stdin)['logs']
-assert logs, 'severity filter returned no warning logs'
-wrong = [l['severity'] for l in logs if l['severity'] != 'warning']
-assert not wrong, f'severity filter leaked wrong levels: {set(wrong)}'
-print('ok')
-" 2>/dev/null || echo "error")
-    assert_eq "search(severity filter): only returns warning-level logs" "$SEARCH_SEV_VALID" "ok"
 
     SEARCH_TCP=$(mcp_call search "query=${TCP_MARKER}" "host=${SEED_HOST}" "limit=10" 2>&1)
     assert_no_error "search(TCP seed marker): no error" "$SEARCH_TCP"
