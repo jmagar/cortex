@@ -181,7 +181,7 @@ pub(crate) struct ShellIndexArgs {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ShellAtuinIndexArgs {
-    pub path: String,
+    pub path: Option<String>,
     pub json: bool,
 }
 

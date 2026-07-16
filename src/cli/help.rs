@@ -226,7 +226,7 @@ const CATALOG: &[CommandDoc] = &[
         summary: "Manual ingest and ingest-source management",
         usage: &[
             "cortex ingest shell user index PATH [--shell zsh] [--json]",
-            "cortex ingest shell user atuinindex PATH [--json]",
+            "cortex ingest shell user atuinindex [PATH] [--json]",
             "cortex ingest shell agent index PATH [--json] [--server URL] [--token TOKEN]",
             "cortex ingest shell agent wrap SPOOL -- COMMAND...",
             "cortex ingest inventory refresh|status [--json]",
@@ -683,7 +683,7 @@ const NESTED_CATALOG: &[NestedCommandDoc] = &[
         summary: "Index shell history typed by a human",
         usage: &[
             "cortex ingest shell user index PATH [--shell zsh] [--json]",
-            "cortex ingest shell user atuinindex PATH [--json]",
+            "cortex ingest shell user atuinindex [PATH] [--json]",
         ],
     },
     NestedCommandDoc {

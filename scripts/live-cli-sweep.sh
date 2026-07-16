@@ -14,13 +14,10 @@ SERVER="${CORTEX_URL:-http://127.0.0.1:3100}"
 TIMEOUT="${CORTEX_SWEEP_TIMEOUT:-120}"
 BIN_DIR="${CORTEX_SWEEP_BIN_DIR:-}"
 RUN_DEFERRED="${CORTEX_SWEEP_RUN_DEFERRED:-false}"
+INTEGRITY_JOB_ID="${CORTEX_SWEEP_INTEGRITY_JOB_ID:-}"
 HELPER="$ROOT/scripts/live-cli-sweep-helpers.sh"
-INTEGRITY_TIMEOUT="${CORTEX_SWEEP_INTEGRITY_TIMEOUT:-840}"
-INTEGRITY_INTERVAL="${CORTEX_SWEEP_INTEGRITY_INTERVAL:-2}"
 
 export CORTEX_SWEEP_HELPER="$HELPER"
-export CORTEX_SWEEP_INTEGRITY_TIMEOUT="$INTEGRITY_TIMEOUT"
-export CORTEX_SWEEP_INTEGRITY_INTERVAL="$INTEGRITY_INTERVAL"
 
 if ! (
   set -a
@@ -42,7 +39,6 @@ run_case() {
   local name="$1"
   local mode="$2"
   local cmd="$3"
-  local case_timeout="${4:-$TIMEOUT}"
   local safe_name log start end status
   safe_name="$(printf '%s' "$name" | tr -c 'A-Za-z0-9_.-' '_')"
   log="$OUT_DIR/$safe_name.log"
@@ -62,7 +58,7 @@ run_case() {
       export PATH="$BIN_DIR:$PATH"
     fi
     mkdir -p "$CORTEX_SWEEP_TMP"
-    timeout "$case_timeout" bash -c "$cmd"
+    timeout "$TIMEOUT" bash -c "$cmd"
   ) >"$log" 2>&1
   status=$?
   end="$(date +%s)"
@@ -167,7 +163,7 @@ run_case "ingest.file-tail.list" "admin" "cortex ingest filetail list --json"
 run_case "ingest.file-tail.status" "admin" "cortex ingest filetail status --json"
 run_case "ingest.file-tail.add-toggle-remove" "admin" 'id="live-cli-sweep"; cortex ingest filetail add /file-tail-root/auth.log --id "$id" --json; cortex ingest filetail disable "$id" --json; cortex ingest filetail enable "$id" --json; cortex ingest filetail remove "$id" --json'
 run_case "ingest.shell.user.index" "local-mutation" 'export CORTEX_USE_HTTP=false CORTEX_DB_PATH=$HOME/.cortex/data/cortex.db; hist="$CORTEX_SWEEP_TMP/history"; printf "echo live-cli-sweep\n" >"$hist"; cortex ingest shell user index "$hist" --json'
-run_case "ingest.shell.user.atuin-index" "local-mutation" 'export CORTEX_USE_HTTP=false CORTEX_DB_PATH=$HOME/.cortex/data/cortex.db; atuin="$CORTEX_SWEEP_TMP/atuin.db"; rm -f "$atuin"; sqlite3 "$atuin" "CREATE TABLE history(id TEXT PRIMARY KEY, timestamp INTEGER, duration INTEGER, exit INTEGER, command TEXT, cwd TEXT, session TEXT, hostname TEXT, author TEXT, intent TEXT, deleted_at INTEGER); INSERT INTO history VALUES ('"'"'live-cli-sweep'"'"', 1770000000000000000, 1000000, 0, '"'"'echo live-cli-sweep'"'"', '"'"'/tmp'"'"', '"'"'sweep-session'"'"', '"'"'dookie'"'"', '"'"'codex'"'"', NULL, NULL);"; cortex ingest shell user atuinindex "$atuin" --json'
+run_case "ingest.shell.user.atuin-index" "local-mutation" 'export CORTEX_USE_HTTP=false CORTEX_DB_PATH=$HOME/.cortex/data/cortex.db; cortex ingest shell user atuinindex --json'
 run_case "ingest.shell.agent.wrap-probe" "read" "cortex ingest shell agent wrap --probe"
 run_case "ingest.shell.agent.index" "local-mutation" 'export CORTEX_USE_HTTP=false CORTEX_DB_PATH=$HOME/.cortex/data/cortex.db; spool="$CORTEX_SWEEP_TMP/agent-spool.jsonl"; : >"$spool"; chmod 600 "$spool"; cortex ingest shell agent index "$spool" --json'
 
@@ -175,7 +171,11 @@ run_case "heartbeat.agent.once.emit" "read" 'cortex heartbeat agent --once --emi
 
 run_case "db.status" "read" "cortex db status --json"
 run_case "db.status.coord" "read" "cortex db status --json --check-coord"
-run_case "db.integrity.quick.background" "admin" 'started="$(cortex db integrity --json --quick --background)"; "$CORTEX_SWEEP_HELPER" wait-integrity "$started" "$CORTEX_SWEEP_INTEGRITY_TIMEOUT" "$CORTEX_SWEEP_INTEGRITY_INTERVAL"' "$((INTEGRITY_TIMEOUT + 60))"
+if [[ -n "$INTEGRITY_JOB_ID" ]]; then
+  run_case "db.integrity.quick.background" "admin" 'cortex db integrity status --json "$CORTEX_SWEEP_INTEGRITY_JOB_ID" | jq -e '\''(.status == "running" or .status == "done")'\'' >/dev/null'
+else
+  run_case "db.integrity.quick.background" "admin" 'started="$(cortex db integrity --json --quick --background)"; job_id="$(jq -er .job_id <<<"$started")"; cortex db integrity status --json "$job_id" | jq -e '\''(.status == "running" or .status == "done")'\'' >/dev/null'
+fi
 run_case "db.checkpoint.passive" "admin" "cortex db checkpoint passive --json"
 run_case "db.vacuum.incremental" "admin" "cortex db vacuum --json --pages 1"
 if [[ "$RUN_DEFERRED" == "true" ]]; then

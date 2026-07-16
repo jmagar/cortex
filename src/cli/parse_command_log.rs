@@ -99,7 +99,6 @@ fn parse_shell_atuin_index(args: &[String]) -> Result<ShellUserCommand> {
         }
         i += 1;
     }
-    let path = path.ok_or_else(|| anyhow::anyhow!("shell atuinindex requires a path"))?;
     Ok(ShellUserCommand::AtuinIndex(ShellAtuinIndexArgs {
         path,
         json,
