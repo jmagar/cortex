@@ -43,7 +43,7 @@ use crate::app::{
     SilentHostsRequest, SimilarIncidentsRequest, TailLogsRequest, TimelineRequest,
     TopicCorrelateRequest, UnackErrorRequest, UnaddressedErrorsRequest, UsageBlocksRequest,
 };
-use crate::config::ApiConfig;
+use crate::config::{ApiConfig, NotificationsConfig};
 use crate::mcp::{AuthPolicy, build_auth_layer};
 
 mod investigation;
@@ -158,6 +158,10 @@ pub struct ApiState {
     /// `cortex:admin` scope in addition to `cortex:read`. Mirrors
     /// [`crate::config::McpConfig::static_token_is_admin`]. Default: `false`.
     pub static_token_is_admin: bool,
+    /// Server-side notification destinations used by `/api/notifications/test`.
+    /// This mirrors MCP state so the REST admin endpoint has the same behavior
+    /// as the `notifications_test` MCP action.
+    pub notifications_config: NotificationsConfig,
 }
 
 impl ApiState {
@@ -172,6 +176,7 @@ impl ApiState {
         allowed_origins: Vec<String>,
         auth_policy: AuthPolicy,
         static_token_is_admin: bool,
+        notifications_config: NotificationsConfig,
     ) -> anyhow::Result<Self> {
         let schema_version = service.schema_version()?;
         let version_info = Arc::new(VersionInfo {
@@ -190,6 +195,7 @@ impl ApiState {
             full_vacuum_size_guard_bytes: FULL_VACUUM_SIZE_GUARD_BYTES,
             maintenance_permit: shared_maintenance_permit(),
             static_token_is_admin,
+            notifications_config,
         })
     }
 
@@ -878,10 +884,46 @@ async fn ai_hooks(
     respond(state.service.list_hook_events(req).await)
 }
 
-async fn notifications_test() -> impl IntoResponse {
-    (
-        axum::http::StatusCode::NOT_IMPLEMENTED,
-        "notifications_test requires server-side apprise config; use MCP notify test instead",
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct NotificationsTestBody {
+    body: Option<String>,
+}
+
+async fn notifications_test(
+    State(state): State<ApiState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> axum::response::Response {
+    if let Some(resp) = require_api_admin_token(&state, &headers) {
+        return resp;
+    }
+    let req: NotificationsTestBody = if body.is_empty() {
+        NotificationsTestBody { body: None }
+    } else {
+        match serde_json::from_slice(&body) {
+            Ok(req) => req,
+            Err(err) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": format!("invalid request body: {err}")})),
+                )
+                    .into_response();
+            }
+        }
+    };
+    tracing::warn!(caller_ip = %peer.ip(), "admin: notifications_test invoked");
+    let message = req
+        .body
+        .unwrap_or_else(|| "Test notification from cortex".to_string());
+    respond(
+        state
+            .service
+            .alerts()
+            .test_notification(message, RequestActor::api(), &state.notifications_config)
+            .await
+            .map(|result| json!({ "result": result })),
     )
 }
 

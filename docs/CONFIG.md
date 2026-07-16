@@ -318,6 +318,7 @@ its own table.
 | --- | --- | --- | --- | --- |
 | `CORTEX_UID` | no | `1000` | no | Container user ID |
 | `CORTEX_GID` | no | `1000` | no | Container group ID |
+| `CORTEX_FILE_TAIL_GROUP` | no | `adm` | no | Extra container group added by Compose so the non-root cortex user can read group-owned log files mounted at `/file-tail-root`; set a numeric gid if your host log-reader group differs |
 | `CORTEX_RECEIVER_PORT` | no | `1514` | no | Host-side syslog port mapping |
 | `CORTEX_PORT` | no | `3100` | no | Host-side MCP port mapping |
 | `CORTEX_MCP_BIND` | no | `127.0.0.1` | no | Host interface the MCP port is published on (loopback by default; set `0.0.0.0` only with `CORTEX_TOKEN`) |

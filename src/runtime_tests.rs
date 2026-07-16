@@ -319,6 +319,7 @@ async fn full_serve_mcp_router_chain_merges_without_panicking() {
         runtime.config.mcp.allowed_origins.clone(),
         runtime.auth_policy().clone(),
         runtime.config.mcp.static_token_is_admin,
+        runtime.config.notifications.clone(),
     )
     .expect("ApiState::new should succeed against a fresh pool");
 

@@ -83,6 +83,7 @@ fn test_state_full(
         allowed_origins,
         auth_policy,
         false, // static_token_is_admin: read-only in tests
+        crate::config::NotificationsConfig::default(),
     )
     .expect("ApiState::new should succeed against a fresh pool")
     .with_isolated_maintenance_permit();
@@ -285,6 +286,28 @@ async fn file_tails_route_rejects_wrong_admin_token() {
         value["error"],
         "X-Cortex-Admin-Token required for admin API actions"
     );
+}
+
+#[tokio::test]
+async fn notifications_test_rest_route_uses_service_instead_of_501_stub() {
+    let (mut state, _pool, _dir) = test_state_with_admin(Some("secret".into()), "admin-secret");
+    state.notifications_config = crate::config::NotificationsConfig {
+        apprise_url: "http://127.0.0.1:1".to_string(),
+        apprise_urls: vec!["gotify://token@example.test".to_string()],
+        ..crate::config::NotificationsConfig::default()
+    };
+    let app = test_router(state);
+
+    let (status, value) = post_json_admin(
+        app,
+        "/api/notifications/test",
+        serde_json::json!({ "body": "live-cli-sweep" }),
+    )
+    .await;
+
+    assert_ne!(status, axum::http::StatusCode::NOT_IMPLEMENTED);
+    assert_eq!(status, axum::http::StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(value["error"], "internal_error");
 }
 
 #[tokio::test]
@@ -982,6 +1005,7 @@ async fn cors_localhost_defaults_suppressed_on_external_bind() {
         vec![],
         AuthPolicy::Mounted { auth_state: None },
         false, // static_token_is_admin: read-only in tests
+        crate::config::NotificationsConfig::default(),
     )
     .unwrap()
     .with_isolated_maintenance_permit();

@@ -2517,6 +2517,23 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
           WHERE status = 'running';",
     )?;
 
+    if table_exists(&conn, "host_heartbeats")? && table_exists(&conn, "host_heartbeats_latest")? {
+        let deleted_heartbeat_latest = conn.execute(
+            "DELETE FROM host_heartbeats_latest
+             WHERE NOT EXISTS (
+                 SELECT 1 FROM host_heartbeats
+                 WHERE host_heartbeats.id = host_heartbeats_latest.heartbeat_id
+             )",
+            [],
+        )?;
+        if deleted_heartbeat_latest > 0 {
+            tracing::info!(
+                deleted_rows = deleted_heartbeat_latest,
+                "Reconciled orphan heartbeat latest cache rows"
+            );
+        }
+    }
+
     conn.execute_batch(
         "CREATE INDEX IF NOT EXISTS idx_logs_ai_project_time
              ON logs(ai_project, timestamp)
@@ -2536,6 +2553,15 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
 
     tracing::info!(path = %config.db_path.display(), "Database initialized");
     Ok(pool)
+}
+
+fn table_exists(conn: &Connection, table: &str) -> Result<bool> {
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+        [table],
+        |row| row.get(0),
+    )?;
+    Ok(count > 0)
 }
 
 fn migration_applied(conn: &Connection, version: i64) -> rusqlite::Result<bool> {

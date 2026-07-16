@@ -133,6 +133,7 @@ pub struct DbCheckpointResult {
     pub busy: i64,
     pub log_frames: i64,
     pub checkpointed_frames: i64,
+    pub complete: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

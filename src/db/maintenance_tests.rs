@@ -284,7 +284,7 @@ fn test_heartbeat_cleanup_removes_all_child_tables_and_orphans() {
     drop(conn);
 
     let deleted = purge_old_heartbeats(&pool, 90, 100).unwrap();
-    assert_eq!(deleted, 1);
+    assert_eq!(deleted, 2);
 
     let conn = pool.get().unwrap();
     for table in HEARTBEAT_CHILD_TABLES {
@@ -407,6 +407,34 @@ fn test_enforce_storage_budget_reconciles_hosts_after_deletes() {
         .find(|host| host.hostname == "surviving-host")
         .unwrap();
     assert_eq!(surviving.log_count, 1);
+}
+
+#[test]
+fn delete_orphan_heartbeat_latest_removes_cache_rows_without_parent_sample() {
+    let (pool, _dir) = test_pool();
+    let conn = pool.get().unwrap();
+    conn.execute(
+        "INSERT INTO host_heartbeats_latest
+             (host_id, heartbeat_id, hostname, sampled_at, received_at,
+              partial, agent_version, os, architecture, metadata_json)
+         VALUES ('host-a', 12345, 'dookie', '2026-07-16T00:00:00Z',
+                 '2026-07-16T00:00:00Z', 0, '0.1.0', 'linux', 'x86_64', '{}')",
+        [],
+    )
+    .unwrap();
+    drop(conn);
+
+    let deleted = delete_orphan_heartbeat_latest(&pool).unwrap();
+
+    assert_eq!(deleted, 1);
+    let remaining: i64 = pool
+        .get()
+        .unwrap()
+        .query_row("SELECT COUNT(*) FROM host_heartbeats_latest", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(remaining, 0);
 }
 
 #[derive(Clone)]

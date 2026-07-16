@@ -92,6 +92,7 @@ Hosts specified via `CORTEX_DOCKER_HOSTS` default to plain `http://` on port 237
 | --- | --- | --- | --- | --- |
 | `CORTEX_UID` | no | `1000` | Container user ID | no |
 | `CORTEX_GID` | no | `1000` | Container group ID | no |
+| `CORTEX_FILE_TAIL_GROUP` | no | `adm` | Supplementary container group for reading group-owned mounted log files | no |
 | `CORTEX_CONFIG_VOLUME` | no | `./config` | Read-only config mount for optional config files | no |
 | `DOCKER_NETWORK` | no | `cortex` | External Docker network name | no |
 
