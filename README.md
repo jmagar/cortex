@@ -1179,6 +1179,10 @@ and emitted as `source_kind="file-tail"` rows. Row metadata includes
 The documented safe default is to keep managed tails inside `/file-tail-root`.
 Set `CORTEX_FILE_TAIL_ALLOWED_ROOTS` explicitly only when an operator has
 mounted and reviewed broader read-only roots such as `/var/log` or `/logs`.
+The Compose service also adds `CORTEX_FILE_TAIL_GROUP` (default `adm`) as a
+supplementary group so the non-root `cortex` process can read common
+group-owned logs such as `/var/log/auth.log`; set it to a numeric gid if your
+host uses a different log-reader group.
 
 ```bash
 cortex ingest file-tail add --id swag-access \

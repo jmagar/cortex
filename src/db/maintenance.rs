@@ -657,11 +657,20 @@ pub fn purge_old_heartbeats(
 
     let mut total_deleted = 0usize;
     let orphan_children = delete_orphan_heartbeat_children(pool)?;
+    let orphan_latest = delete_orphan_heartbeat_latest(pool)?;
     if orphan_children > 0 {
         tracing::warn!(
             deleted_rows = orphan_children,
             "Purged orphan heartbeat child rows"
         );
+        total_deleted += orphan_children;
+    }
+    if orphan_latest > 0 {
+        tracing::warn!(
+            deleted_rows = orphan_latest,
+            "Purged orphan heartbeat latest cache rows"
+        );
+        total_deleted += orphan_latest;
     }
     loop {
         let deleted = delete_heartbeat_chunk_before(pool, &cutoff, chunk_size)?;
@@ -1100,6 +1109,20 @@ fn delete_orphan_heartbeat_children(pool: &DbPool) -> Result<usize> {
         total_deleted += deleted;
     }
     Ok(total_deleted)
+}
+
+pub fn delete_orphan_heartbeat_latest(pool: &DbPool) -> Result<usize> {
+    let conn = pool.get()?;
+    let _write_guard = crate::db::write_lock();
+    let deleted = conn.execute(
+        "DELETE FROM host_heartbeats_latest
+         WHERE NOT EXISTS (
+             SELECT 1 FROM host_heartbeats
+             WHERE host_heartbeats.id = host_heartbeats_latest.heartbeat_id
+         )",
+        [],
+    )?;
+    Ok(deleted)
 }
 
 const HEARTBEAT_CHILD_TABLES: &[&str] = &[

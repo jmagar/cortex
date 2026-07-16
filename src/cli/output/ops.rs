@@ -246,6 +246,11 @@ pub(crate) fn print_db_checkpoint_response(
         muted("checkpointed_frames"),
         cyan(&response.checkpointed_frames.to_string())
     );
+    println!(
+        "{}: {}",
+        muted("complete"),
+        primary(&response.complete.to_string())
+    );
     Ok(())
 }
 

@@ -46,6 +46,26 @@ fn env_allowed_root_allows_file_inside_root() {
     validate_file_tail_path(&log_path.to_string_lossy()).unwrap();
 }
 
+#[cfg(unix)]
+#[test]
+#[serial]
+fn env_allowed_root_rejects_unreadable_file_before_registry_commit() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let temp = tempfile::tempdir().unwrap();
+    let log_path = temp.path().join("auth.log");
+    std::fs::write(&log_path, "hello\n").unwrap();
+    std::fs::set_permissions(&log_path, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let _guard = EnvGuard::set(
+        "CORTEX_FILE_TAIL_ALLOWED_ROOTS",
+        temp.path().to_string_lossy().into_owned(),
+    );
+
+    let err = validate_file_tail_path(&log_path.to_string_lossy()).unwrap_err();
+
+    assert!(err.to_string().contains("not readable"));
+}
+
 #[test]
 #[serial]
 fn symlink_allowed_root_is_canonicalized() {

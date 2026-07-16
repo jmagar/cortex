@@ -484,6 +484,34 @@ async fn ack_error_sends_admin_token_header() {
     assert_eq!(resp.actor, "cli");
 }
 
+#[tokio::test]
+async fn notifications_test_sends_admin_token_header() {
+    let server = MockServer::start().await;
+    let client = HttpClient::discover(Some(server.uri()), Some("test-value".into()))
+        .unwrap()
+        .with_api_admin_token_for_test("admin-value");
+    Mock::given(method("POST"))
+        .and(path("/api/notifications/test"))
+        .and(header("authorization", "Bearer test-value"))
+        .and(header("x-cortex-admin-token", "admin-value"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "result": {
+                "sent": true,
+                "destinations": 1
+            }
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let resp = client
+        .notifications_test(Some("live-cli-remediation".into()))
+        .await
+        .expect("notifications test should send admin token");
+
+    assert_eq!(resp["result"]["sent"], true);
+}
+
 // ─── Malformed JSON: serde_path_to_error surfaces field path + preview ──────
 
 #[tokio::test]

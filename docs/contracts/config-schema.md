@@ -239,7 +239,7 @@ The `cortex mcp` (stdio) entrypoint **bypasses** invariant (1) only, via `Config
 - `~/.cortex/.env` — operator-editable env file written by setup; loader rules in §2.
 - `~/.cortex/config.toml` — operator-editable TOML file (overlaid before env).
 - `.claude-plugin/plugin.json::userConfig` — plugin-managed subset that maps to env vars at setup time. The `plugin.json` column in §4 names the userConfig field that drives each row.
-- `docker-compose.yml` — references `CORTEX_UID`, `CORTEX_GID`, `CORTEX_RECEIVER_HOST_PORT`, `CORTEX_RECEIVER_PORT`, `CORTEX_PORT`, `CORTEX_DATA_VOLUME`, `CORTEX_VERSION`, `DOCKER_NETWORK` — these are **compose-level** vars, not server config; they shape the container, not the process inside it.
+- `docker-compose.yml` — references `CORTEX_UID`, `CORTEX_GID`, `CORTEX_FILE_TAIL_GROUP`, `CORTEX_RECEIVER_HOST_PORT`, `CORTEX_RECEIVER_PORT`, `CORTEX_PORT`, `CORTEX_DATA_VOLUME`, `CORTEX_VERSION`, `DOCKER_NETWORK` — these are **compose-level** vars, not server config; they shape the container, not the process inside it.
 - `docs/CONFIG.md` — narrative operator guide; should link **here** for the canonical table.
 - `docs/SETUP.md` — first-run procedure; references the secret files in `docs/contracts/data-layout.md`.
 - `docs/contracts/runtime-lifecycle.md` — what happens when validations above fail (exit codes).

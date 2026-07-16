@@ -781,7 +781,7 @@ impl HttpClient {
             #[serde(skip_serializing_if = "Option::is_none")]
             body: Option<String>,
         }
-        self.post_json("/api/notifications/test", &Payload { body })
+        self.post_json_with_admin_no_retry("/api/notifications/test", &Payload { body })
             .await
     }
 

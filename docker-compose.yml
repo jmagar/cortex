@@ -8,6 +8,11 @@ services:
       dockerfile: config/Dockerfile
     container_name: cortex
     user: "${CORTEX_UID:-1000}:${CORTEX_GID:-1000}"
+    group_add:
+      # Lets the non-root cortex user read common /var/log files such as
+      # auth.log/syslog when CORTEX_FILE_TAIL_LOG_VOLUME defaults to /var/log.
+      # Set to a numeric host group id if your log-reader group is not adm.
+      - "${CORTEX_FILE_TAIL_GROUP:-adm}"
     env_file:
       - path: ${CORTEX_ENV_FILE:-.env}
         required: false

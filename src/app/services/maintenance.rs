@@ -170,7 +170,8 @@ impl CortexService {
     async fn db_checkpoint(&self, mode: String) -> ServiceResult<DbCheckpointResult> {
         self.run_db("db_checkpoint", move |pool| {
             let (busy, log_frames, checkpointed_frames) = db::db_wal_checkpoint(pool, &mode)?;
-            if !db::wal_checkpoint_complete(busy, log_frames, checkpointed_frames) {
+            let complete = db::wal_checkpoint_complete(busy, log_frames, checkpointed_frames);
+            if !complete && mode != "passive" {
                 return Err(ServiceError::Busy(format!(
                     "wal_checkpoint_incomplete busy={busy} checkpointed_frames={checkpointed_frames} log_frames={log_frames}"
                 ))
@@ -181,6 +182,7 @@ impl CortexService {
                 busy,
                 log_frames,
                 checkpointed_frames,
+                complete,
             })
         })
         .await

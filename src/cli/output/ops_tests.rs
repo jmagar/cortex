@@ -116,6 +116,7 @@ fn human_db_maintenance_outputs_accept_representative_payloads() {
             busy: 0,
             log_frames: 3,
             checkpointed_frames: 3,
+            complete: true,
         },
         false,
     )

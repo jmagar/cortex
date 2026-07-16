@@ -64,6 +64,7 @@ Pulled from `docker-compose.yml` and the `Dockerfile`.
 |---|---|---|---|
 | `CORTEX_UID` | `1000` | Compose `user:` line | Numeric UID the process runs as inside the container. |
 | `CORTEX_GID` | `1000` | Compose `user:` line | Numeric GID. |
+| `CORTEX_FILE_TAIL_GROUP` | `adm` | Compose `group_add:` line | Supplementary group for reading group-owned logs mounted at `/file-tail-root`. |
 
 - **The data dir MUST be owned by the chosen UID before container start.** The container has no `chown`-on-startup step (and shouldn't — running as root for that purpose defeats the unprivileged-user posture).
 - **WSL gotcha.** Bind-mounted Linux volumes from a Windows host may appear with `uid=0 gid=0` regardless of the host UID. Symptom: SQLite startup fails with `unable to open database file`. Fix on the host before first run:

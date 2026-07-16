@@ -174,11 +174,20 @@ pub(crate) async fn run_db_checkpoint(mode: &CliMode, args: DbCheckpointArgs) ->
         CliMode::Http(client) => http_or_cancel(client.db_checkpoint(&req)).await?,
     };
     print_db_checkpoint_response(&response, json)?;
-    if !wal_checkpoint_complete(
+    let complete = wal_checkpoint_complete(
         response.busy,
         response.log_frames,
         response.checkpointed_frames,
-    ) {
+    );
+    if !complete && response.mode == "passive" {
+        eprintln!(
+            "warning: passive checkpoint did not finish because writers are active; \
+             rerun with --mode full|restart|truncate during a quiet window if you need \
+             the WAL fully drained"
+        );
+        return Ok(());
+    }
+    if !complete {
         bail!(
             "database WAL checkpoint incomplete: busy={} checkpointed_frames={} log_frames={}",
             response.busy,

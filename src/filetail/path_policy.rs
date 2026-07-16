@@ -35,6 +35,9 @@ pub(crate) fn validate_file_tail_path(path: &str) -> Result<()> {
 
     let allowed_roots = canonical_allowed_file_tail_roots();
     if allowed_roots.iter().any(|root| canonical.starts_with(root)) {
+        let file = std::fs::File::open(raw)
+            .map_err(|err| anyhow::anyhow!("file-tail path is not readable: {path}: {err}"))?;
+        drop(file);
         return Ok(());
     }
 

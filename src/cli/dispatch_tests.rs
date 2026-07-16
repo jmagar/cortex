@@ -1265,6 +1265,7 @@ async fn run_db_checkpoint_http_sends_exactly_one_request() {
             "busy": 0,
             "log_frames": 0,
             "checkpointed_frames": 0,
+            "complete": true,
         })))
         .expect(1)
         .mount(&server)
@@ -1335,7 +1336,7 @@ async fn run_db_integrity_bails_when_response_not_ok() {
 }
 
 #[tokio::test]
-async fn run_db_checkpoint_bails_when_busy_nonzero() {
+async fn run_db_checkpoint_warns_but_succeeds_when_passive_incomplete() {
     let (server, mode) = http_mode_with_admin_token("admin-secret").await;
     Mock::given(method("POST"))
         .and(path("/api/db/checkpoint"))
@@ -1345,10 +1346,11 @@ async fn run_db_checkpoint_bails_when_busy_nonzero() {
             "busy": 1,
             "log_frames": 0,
             "checkpointed_frames": 0,
+            "complete": false,
         })))
         .mount(&server)
         .await;
-    let err = run_db_checkpoint(
+    run_db_checkpoint(
         &mode,
         DbCheckpointArgs {
             mode: "passive".into(),
@@ -1356,11 +1358,7 @@ async fn run_db_checkpoint_bails_when_busy_nonzero() {
         },
     )
     .await
-    .expect_err("must bail when busy");
-    assert_eq!(
-        err.to_string(),
-        "database WAL checkpoint incomplete: busy=1 checkpointed_frames=0 log_frames=0"
-    );
+    .expect("passive incomplete checkpoint should be advisory");
 }
 
 // ─── DB vacuum --force serializes correctly in the request body ─────────────
