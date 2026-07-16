@@ -1222,7 +1222,7 @@ fn search_ai_sessions_sql(
             FROM logs_fts
             JOIN logs l ON l.id = logs_fts.rowid
             WHERE logs_fts MATCH ?1{filters}
-            ORDER BY l.id DESC
+            ORDER BY logs_fts.rowid DESC
             LIMIT {}
          ),
          bounded_candidates AS MATERIALIZED (
@@ -1235,20 +1235,22 @@ fn search_ai_sessions_sql(
                    ai_session_id,
                    hostname,
                    COUNT(*) AS match_count,
-                   (
-                       SELECT c2.message
-                       FROM bounded_candidates c2
-                       WHERE c2.ai_project = c.ai_project
-                         AND c2.ai_tool = c.ai_tool
-                         AND c2.ai_session_id = c.ai_session_id
-                         AND c2.hostname = c.hostname
-                       ORDER BY c2.timestamp DESC
-                       LIMIT 1
-                   ) AS best_snippet
+                   MIN(timestamp) AS first_match,
+                   MAX(timestamp) AS latest_match
             FROM bounded_candidates c
             GROUP BY ai_project, ai_tool, ai_session_id, hostname
          ),
-         session_stats AS MATERIALIZED (
+         selected AS MATERIALIZED (
+            SELECT *
+            FROM grouped
+            ORDER BY latest_match DESC
+            LIMIT {limit}
+         ),
+         rollup_meta AS MATERIALIZED (
+            SELECT COALESCE(MAX(source_max_id), 0) AS source_max_id
+            FROM ai_session_rollup_meta
+         ),
+         tail_stats AS MATERIALIZED (
             SELECT l.ai_project,
                    l.ai_tool,
                    l.ai_session_id,
@@ -1256,12 +1258,14 @@ fn search_ai_sessions_sql(
                    MIN(l.timestamp) AS first_seen,
                    MAX(l.timestamp) AS last_seen,
                    COUNT(*) AS event_count
-            FROM grouped g
+            FROM selected g
+            CROSS JOIN rollup_meta meta
             JOIN logs l INDEXED BY idx_logs_ai_session_host_time
               ON g.ai_project = l.ai_project
              AND g.ai_tool = l.ai_tool
              AND g.ai_session_id = l.ai_session_id
              AND g.hostname = l.hostname
+             AND l.id > meta.source_max_id
             WHERE l.ai_project IS NOT NULL
               AND l.ai_tool IS NOT NULL
               AND l.ai_session_id IS NOT NULL
@@ -1277,21 +1281,47 @@ fn search_ai_sessions_sql(
             ) filtered_sessions
          )
          SELECT g.ai_project, g.ai_tool, g.ai_session_id, g.hostname,
-                stats.first_seen,
-                stats.last_seen,
-                stats.event_count,
+                COALESCE(CASE
+                    WHEN rollup.first_seen IS NULL THEN tail.first_seen
+                    WHEN tail.first_seen IS NULL THEN rollup.first_seen
+                    ELSE MIN(rollup.first_seen, tail.first_seen)
+                END, g.first_match) AS first_seen,
+                COALESCE(CASE
+                    WHEN rollup.last_seen IS NULL THEN tail.last_seen
+                    WHEN tail.last_seen IS NULL THEN rollup.last_seen
+                    ELSE MAX(rollup.last_seen, tail.last_seen)
+                END, g.latest_match) AS last_seen,
+                CASE
+                    WHEN rollup.event_count IS NULL AND tail.event_count IS NULL
+                        THEN g.match_count
+                    ELSE COALESCE(rollup.event_count, 0) + COALESCE(tail.event_count, 0)
+                END AS event_count,
                 g.match_count,
-                g.best_snippet,
+                (
+                    SELECT c2.message
+                    FROM bounded_candidates c2
+                    WHERE c2.ai_project = g.ai_project
+                      AND c2.ai_tool = g.ai_tool
+                      AND c2.ai_session_id = g.ai_session_id
+                      AND c2.hostname = g.hostname
+                    ORDER BY c2.timestamp DESC
+                    LIMIT 1
+                ) AS best_snippet,
                 totals.total_candidates,
                 totals.raw_candidate_count
-         FROM grouped g
-         JOIN session_stats stats
-           ON stats.ai_project = g.ai_project
-          AND stats.ai_tool = g.ai_tool
-          AND stats.ai_session_id = g.ai_session_id
-          AND stats.hostname = g.hostname
+         FROM selected g
+         LEFT JOIN ai_session_rollup rollup
+           ON rollup.ai_project = g.ai_project
+          AND rollup.ai_tool = g.ai_tool
+          AND rollup.ai_session_id = g.ai_session_id
+          AND rollup.hostname = g.hostname
+         LEFT JOIN tail_stats tail
+           ON tail.ai_project = g.ai_project
+          AND tail.ai_tool = g.ai_tool
+          AND tail.ai_session_id = g.ai_session_id
+          AND tail.hostname = g.hostname
          CROSS JOIN totals
-         ORDER BY stats.last_seen DESC
+         ORDER BY last_seen DESC
          LIMIT {limit}",
         CANDIDATE_CAP + 1
     );

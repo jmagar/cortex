@@ -1022,8 +1022,8 @@ fn search_ai_sessions_query_plan_uses_session_host_time_index() {
         "session search must bound filtered matching rows"
     );
     assert!(
-        !sql.contains("ai_session_rollup"),
-        "search must not use a potentially stale rollup as its candidate source"
+        sql.contains("LEFT JOIN ai_session_rollup rollup"),
+        "selected sessions should combine rollup statistics with post-refresh rows"
     );
 
     let conn = pool.get().unwrap();
@@ -1088,6 +1088,50 @@ fn search_ai_sessions_finds_rows_inserted_after_rollup_refresh() {
     assert_eq!(result.total_candidates, 1);
     assert_eq!(result.sessions[0].ai_session_id, "after-refresh");
     assert!(!result.truncated);
+}
+
+#[test]
+fn search_ai_sessions_combines_rollup_with_post_refresh_session_rows() {
+    let (pool, _dir) = test_pool();
+    insert_logs_batch(
+        &pool,
+        &[make_ai_entry(
+            "2026-01-01T00:00:00Z",
+            "host-a",
+            "claude",
+            "/tmp/project",
+            "shared-session",
+            "background transcript event",
+        )],
+    )
+    .unwrap();
+    refresh_ai_session_rollup(&pool).unwrap();
+    insert_logs_batch(
+        &pool,
+        &[make_ai_entry(
+            "2026-01-01T00:01:00Z",
+            "host-a",
+            "claude",
+            "/tmp/project",
+            "shared-session",
+            "freshneedle appears immediately",
+        )],
+    )
+    .unwrap();
+
+    let result = search_ai_sessions(
+        &pool,
+        &SearchAiSessionsParams {
+            query: "freshneedle".into(),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(result.sessions.len(), 1);
+    assert_eq!(result.sessions[0].event_count, 2);
+    assert_eq!(result.sessions[0].first_seen, "2026-01-01T00:00:00Z");
+    assert_eq!(result.sessions[0].last_seen, "2026-01-01T00:01:00Z");
 }
 
 #[test]

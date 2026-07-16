@@ -233,6 +233,9 @@ impl RuntimeCore {
         }
         reject_unsafe_otlp_oauth_only_exposure(&config, is_stdio)?;
         let pool = Arc::new(db::init_pool(&config.storage)?);
+        if !is_stdio {
+            db::reconcile_interrupted_server_work(&pool)?;
+        }
         let storage_state = Arc::new(Mutex::new(None));
         if enforce_initial_storage_budget
             && (config.storage.max_db_size_mb > 0 || config.storage.min_free_disk_mb > 0)

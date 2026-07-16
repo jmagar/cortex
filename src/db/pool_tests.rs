@@ -1916,13 +1916,11 @@ fn migration_37_indexes_exist() {
 // PR #106 reconciliation fix (code-reviewer): if the process is killed
 // between `LlmRunner::write_start_row` (status='running') and the matching
 // finish-row write, the audit row is orphaned in 'running' forever — no
-// process is left to finish it. `init_pool` now reconciles orphaned
-// 'running' rows to 'interrupted' on every startup, mirroring the existing
-// `maintenance_jobs` orphan-reconciliation immediately above it in
-// `init_pool`. Simulate a crash (insert a 'running' row directly, bypassing
-// `LlmRunner`) then a restart (re-run `init_pool` against the same path).
+// process is left to finish it. Authoritative server startup reconciles
+// orphaned rows after opening the pool. Query-only CLI processes deliberately
+// skip this step because they can coexist with live server-owned work.
 #[test]
-fn init_pool_reconciles_orphaned_running_llm_invocations_on_restart() {
+fn server_start_reconciles_orphaned_running_work_without_pool_side_effects() {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("test.db");
     let config = test_storage_config(db_path);
@@ -1947,11 +1945,40 @@ fn init_pool_reconciles_orphaned_running_llm_invocations_on_restart() {
     )
     .expect("seed clean success row");
 
+    conn.execute(
+        "INSERT INTO maintenance_jobs (kind, status, started_at)
+         VALUES ('db_integrity', 'running', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+        [],
+    )
+    .expect("seed running maintenance job");
+
     drop(conn);
     drop(pool);
 
-    // Re-run init_pool (simulating a restart) — must reconcile the orphan.
+    // Merely opening another pool, as a local CLI does, must not alter work
+    // still owned by the running server.
     let pool2 = init_pool(&config).expect("second init_pool should succeed");
+    let conn2 = pool2.get().unwrap();
+
+    let untouched: String = conn2
+        .query_row(
+            "SELECT status FROM llm_invocations WHERE id = 'llm-orphan'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(untouched, "running");
+    let maintenance_untouched: String = conn2
+        .query_row(
+            "SELECT status FROM maintenance_jobs WHERE kind = 'db_integrity'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(maintenance_untouched, "running");
+    drop(conn2);
+
+    reconcile_interrupted_server_work(&pool2).unwrap();
     let conn2 = pool2.get().unwrap();
 
     let (status, finished_at, error): (String, Option<String>, Option<String>) = conn2
@@ -1967,6 +1994,17 @@ fn init_pool_reconciles_orphaned_running_llm_invocations_on_restart() {
         "reconciled row must get a finished_at timestamp"
     );
     assert_eq!(error.as_deref(), Some("interrupted by server restart"));
+
+    let (maintenance_status, maintenance_error): (String, String) = conn2
+        .query_row(
+            "SELECT status, json_extract(result_json, '$.error')
+             FROM maintenance_jobs WHERE kind = 'db_integrity'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(maintenance_status, "failed");
+    assert_eq!(maintenance_error, "interrupted by server restart");
 
     let clean_status: String = conn2
         .query_row(

@@ -107,7 +107,7 @@ pub use models::{StorageBudgetState, StorageEnforcementOutcome, StorageMetrics, 
 pub use pool::{
     DbPool, KNOWN_SCHEMA_VERSION, SchemaVersionInfo, backfill_inventory_stats, init_pool,
     inventory_backfill_complete, read_schema_version_info, read_schema_version_info_conn,
-    write_lock,
+    reconcile_interrupted_server_work, write_lock,
 };
 pub use queries::{
     AiSessionRollupStatus, RollupRefresh, SEVERITY_LEVELS, TimelineRollupStatus,

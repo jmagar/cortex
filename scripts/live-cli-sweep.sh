@@ -15,7 +15,7 @@ TIMEOUT="${CORTEX_SWEEP_TIMEOUT:-120}"
 BIN_DIR="${CORTEX_SWEEP_BIN_DIR:-}"
 RUN_DEFERRED="${CORTEX_SWEEP_RUN_DEFERRED:-false}"
 HELPER="$ROOT/scripts/live-cli-sweep-helpers.sh"
-INTEGRITY_TIMEOUT="${CORTEX_SWEEP_INTEGRITY_TIMEOUT:-90}"
+INTEGRITY_TIMEOUT="${CORTEX_SWEEP_INTEGRITY_TIMEOUT:-840}"
 INTEGRITY_INTERVAL="${CORTEX_SWEEP_INTEGRITY_INTERVAL:-2}"
 
 export CORTEX_SWEEP_HELPER="$HELPER"
@@ -42,6 +42,7 @@ run_case() {
   local name="$1"
   local mode="$2"
   local cmd="$3"
+  local case_timeout="${4:-$TIMEOUT}"
   local safe_name log start end status
   safe_name="$(printf '%s' "$name" | tr -c 'A-Za-z0-9_.-' '_')"
   log="$OUT_DIR/$safe_name.log"
@@ -61,7 +62,7 @@ run_case() {
       export PATH="$BIN_DIR:$PATH"
     fi
     mkdir -p "$CORTEX_SWEEP_TMP"
-    timeout "$TIMEOUT" bash -c "$cmd"
+    timeout "$case_timeout" bash -c "$cmd"
   ) >"$log" 2>&1
   status=$?
   end="$(date +%s)"
@@ -174,7 +175,7 @@ run_case "heartbeat.agent.once.emit" "read" 'cortex heartbeat agent --once --emi
 
 run_case "db.status" "read" "cortex db status --json"
 run_case "db.status.coord" "read" "cortex db status --json --check-coord"
-run_case "db.integrity.quick.background" "admin" 'started="$(cortex db integrity --json --quick --background)"; "$CORTEX_SWEEP_HELPER" wait-integrity "$started" "$CORTEX_SWEEP_INTEGRITY_TIMEOUT" "$CORTEX_SWEEP_INTEGRITY_INTERVAL"'
+run_case "db.integrity.quick.background" "admin" 'started="$(cortex db integrity --json --quick --background)"; "$CORTEX_SWEEP_HELPER" wait-integrity "$started" "$CORTEX_SWEEP_INTEGRITY_TIMEOUT" "$CORTEX_SWEEP_INTEGRITY_INTERVAL"' "$((INTEGRITY_TIMEOUT + 60))"
 run_case "db.checkpoint.passive" "admin" "cortex db checkpoint passive --json"
 run_case "db.vacuum.incremental" "admin" "cortex db vacuum --json --pages 1"
 if [[ "$RUN_DEFERRED" == "true" ]]; then

@@ -2488,35 +2488,6 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
         tracing::info!("Migration 42: added refuted trust level to graph_entity_aliases");
     }
 
-    // A server crash/restart mid-check leaves an orphaned 'running' maintenance
-    // job that would never resolve. Mark any such rows 'failed' on every startup
-    // so polls get a terminal answer instead of hanging forever. Idempotent and
-    // a no-op in the common case (no running jobs across a clean restart).
-    conn.execute_batch(
-        "UPDATE maintenance_jobs
-            SET status = 'failed',
-                finished_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
-                result_json = json_object('error', 'interrupted by server restart')
-          WHERE status = 'running';",
-    )?;
-
-    // Same reconciliation, same rationale, for `llm_invocations`: if the
-    // process is killed between `write_start_row` (status='running') and
-    // the matching `write_finish_row*` call — e.g. the `run_fn` future is
-    // dropped/cancelled by a server crash or forced shutdown — the audit
-    // row is stuck 'running' forever with no process left to finish it. A
-    // fresh process start means nothing from a prior process can still
-    // legitimately be running, so reconcile unconditionally on every
-    // startup. Idempotent and a no-op in the common case (clean restart,
-    // no in-flight invocations).
-    conn.execute_batch(
-        "UPDATE llm_invocations
-            SET status = 'interrupted',
-                finished_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
-                error = 'interrupted by server restart'
-          WHERE status = 'running';",
-    )?;
-
     if table_exists(&conn, "host_heartbeats")? && table_exists(&conn, "host_heartbeats_latest")? {
         let deleted_heartbeat_latest = conn.execute(
             "DELETE FROM host_heartbeats_latest
@@ -2553,6 +2524,29 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
 
     tracing::info!(path = %config.db_path.display(), "Database initialized");
     Ok(pool)
+}
+
+/// Reconcile work that could only remain `running` after the authoritative
+/// server process exited. Query-only CLI processes may open the same live
+/// database concurrently, so this must be called by server startup rather
+/// than by [`init_pool`].
+pub fn reconcile_interrupted_server_work(pool: &DbPool) -> Result<()> {
+    let conn = pool.get()?;
+    let _write_guard = write_lock();
+    conn.execute_batch(
+        "UPDATE maintenance_jobs
+            SET status = 'failed',
+                finished_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+                result_json = json_object('error', 'interrupted by server restart')
+          WHERE status = 'running';
+
+         UPDATE llm_invocations
+            SET status = 'interrupted',
+                finished_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+                error = 'interrupted by server restart'
+          WHERE status = 'running';",
+    )?;
+    Ok(())
 }
 
 fn table_exists(conn: &Connection, table: &str) -> Result<bool> {
