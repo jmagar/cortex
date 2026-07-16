@@ -39,7 +39,7 @@ set -euo pipefail
 image="${CORTEX_TEST_IMAGE:-cortex:local-debug}"
 case "$*" in
   "ps --filter name=^/cortex$ --format {{.ID}}"*) echo cid ;;
-  "inspect cid --format {{ index .Config.Labels \"com.docker.compose.project.working_dir\" }}"*) echo /tmp/legacy-compose ;;
+  "inspect cid --format {{ index .Config.Labels \"com.docker.compose.project.working_dir\" }}"*) echo "${CORTEX_TEST_COMPOSE_DIR:-/tmp/legacy-compose}" ;;
   "inspect cid --format {{.Config.Image}}"*) echo "$image" ;;
   "inspect cid --format {{.Image}}"*) echo sha256:debug ;;
   "image inspect "*" --format {{.Id}}"*) echo sha256:debug ;;
@@ -73,6 +73,16 @@ status=$?
 set -e
 [[ "${status}" -eq 1 ]] || fail "custom local image exit=${status}, want 1"
 [[ "${out}" == *"unsupported image"* ]] || fail "custom local image message missing"
+
+# A Compose project owned by this checkout may use Compose's generated local
+# image name. It remains safe because the checker still compares exact image
+# IDs and the embedded binary version.
+set +e
+out="$(CORTEX_TEST_IMAGE=custom/syslog:dev CORTEX_TEST_COMPOSE_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)" PATH="${tmpdir}:${PATH}" "${CHECKER}" --mode docker 2>&1)"
+status=$?
+set -e
+[[ "${status}" -eq 0 ]] || fail "checkout-built image exit=${status}, want 0; output=${out}"
+[[ "${out}" == *"CURRENT:"* ]] || fail "checkout-built image current message missing"
 
 # ── Env-file resolution (cortex Issue 2 regression) ──────────────────────
 # The deployed compose stack stores its env file one level above the compose
