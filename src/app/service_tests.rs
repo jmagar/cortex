@@ -287,6 +287,53 @@ async fn grouped_domain_facades_preserve_service_limiters() {
     drop(held_db);
 }
 
+// Regression: with only `until` supplied (no `since`), `patterns` must apply
+// its 24h default anchored to `until` (until - 24h). A pre-fix build passed
+// from=None, so it scanned all retained history before `until` and folded in
+// stale rows outside the intended window.
+#[tokio::test]
+async fn patterns_until_only_bounds_window_to_24h_before_until() {
+    let (service, pool, _dir) = test_service();
+    insert_logs_batch(
+        &pool,
+        &[
+            // >24h before `until` — outside the default window, must be excluded.
+            entry(
+                "2025-12-01T00:00:00.000Z",
+                "host-a",
+                "info",
+                "patternwindow boundary marker",
+                "10.0.0.1:514",
+            ),
+            // Inside the 24h window ending at `until` — must be included.
+            entry(
+                "2026-01-01T12:00:00.000Z",
+                "host-a",
+                "info",
+                "patternwindow boundary marker",
+                "10.0.0.1:514",
+            ),
+        ],
+    )
+    .unwrap();
+
+    let result = service
+        .analysis()
+        .patterns(PatternsRequest {
+            until: Some("2026-01-02T00:00:00Z".to_string()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(
+        result.scanned, 1,
+        "only the in-window row should be scanned"
+    );
+    assert_eq!(result.patterns.len(), 1);
+    assert_eq!(result.patterns[0].count, 1);
+}
+
 #[tokio::test]
 async fn graph_entity_lookup_resolves_exact_key_and_alias() {
     let (service, pool, _dir) = test_service();

@@ -112,13 +112,24 @@ impl CortexService {
     }
 
     pub async fn patterns(&self, req: PatternsRequest) -> ServiceResult<PatternsResponse> {
-        let default_since = (chrono::Utc::now() - chrono::Duration::hours(24)).to_rfc3339();
-        let since = req
-            .since
+        let until_dt = req
+            .until
             .as_deref()
-            .or_else(|| req.until.is_none().then_some(default_since.as_str()));
-        let from = parse_optional_timestamp(since, "since")?;
-        let to = parse_optional_timestamp(req.until.as_deref(), "until")?;
+            .map(|until| parse_required_timestamp(until, "until"))
+            .transpose()?;
+        let to = until_dt.map(rfc3339_z);
+        // Apply the advertised 24h default when the caller omits `since`. Anchor
+        // the window to `until` (until - 24h) when one is provided so an
+        // `--until`-only request stays bounded instead of scanning the newest
+        // PATTERN_SCAN_LIMIT rows across all retained history; otherwise anchor
+        // to now.
+        let from = match req.since.as_deref() {
+            Some(since) => Some(rfc3339_z(parse_required_timestamp(since, "since")?)),
+            None => {
+                let anchor = until_dt.unwrap_or_else(chrono::Utc::now);
+                Some(rfc3339_z(anchor - chrono::Duration::hours(24)))
+            }
+        };
         let severity_in = match req.severity_min.as_deref() {
             Some(min) => Some(severity_at_or_above(min)?),
             None => None,
