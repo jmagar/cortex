@@ -32,7 +32,7 @@ pub async fn run_setup_doctor(fix: bool, yes: bool) -> io::Result<SetupReport> {
         check_file_phase(
             "debug-wrapper",
             &wrapper_path,
-            "run cortex setup debug-wrapper install",
+            "run cortex setup debugwrapper install",
         ),
         downgrade_dev_phase(
             check_debug_wrapper_content_phase(&wrapper_path, &repo_path),
@@ -41,7 +41,7 @@ pub async fn run_setup_doctor(fix: bool, yes: bool) -> io::Result<SetupReport> {
         check_file_phase(
             "debug-compose",
             &debug_override_path,
-            "run cortex setup debug-compose install",
+            "run cortex setup debugcompose install",
         ),
         downgrade_dev_phase(
             check_debug_compose_content_phase(&debug_override_path, &repo_path),
@@ -79,7 +79,7 @@ pub async fn run_setup_doctor(fix: bool, yes: bool) -> io::Result<SetupReport> {
 /// when a production binary/override is installed. In `setup doctor` that's the
 /// expected steady state, so we downgrade Error → Warn with a clearer detail
 /// and rewrite the issue kind accordingly. Other contexts (e.g. `cortex setup
-/// debug-wrapper check`) keep the raw Error semantics.
+/// debugwrapper check`) keep the raw Error semantics.
 pub(super) fn downgrade_dev_phase(phase: SetupPhase, detail: &str) -> SetupPhase {
     if matches!(phase.status, SetupStatus::Error) {
         SetupPhase {

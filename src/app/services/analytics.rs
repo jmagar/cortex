@@ -112,8 +112,24 @@ impl CortexService {
     }
 
     pub async fn patterns(&self, req: PatternsRequest) -> ServiceResult<PatternsResponse> {
-        let from = parse_optional_timestamp(req.since.as_deref(), "since")?;
-        let to = parse_optional_timestamp(req.until.as_deref(), "until")?;
+        let until_dt = req
+            .until
+            .as_deref()
+            .map(|until| parse_required_timestamp(until, "until"))
+            .transpose()?;
+        let to = until_dt.map(rfc3339_z);
+        // Apply the advertised 24h default when the caller omits `since`. Anchor
+        // the window to `until` (until - 24h) when one is provided so an
+        // `--until`-only request stays bounded instead of scanning the newest
+        // PATTERN_SCAN_LIMIT rows across all retained history; otherwise anchor
+        // to now.
+        let from = match req.since.as_deref() {
+            Some(since) => Some(rfc3339_z(parse_required_timestamp(since, "since")?)),
+            None => {
+                let anchor = until_dt.unwrap_or_else(chrono::Utc::now);
+                Some(rfc3339_z(anchor - chrono::Duration::hours(24)))
+            }
+        };
         let severity_in = match req.severity_min.as_deref() {
             Some(min) => Some(severity_at_or_above(min)?),
             None => None,
@@ -382,10 +398,31 @@ impl CortexService {
     }
 
     pub async fn compare(&self, req: CompareRequest) -> ServiceResult<CompareResponse> {
-        let a_from_ts = parse_required_timestamp(&req.a_from, "a_from")?;
-        let a_to_ts = parse_required_timestamp(&req.a_to, "a_to")?;
-        let b_from_ts = parse_required_timestamp(&req.b_from, "b_from")?;
-        let b_to_ts = parse_required_timestamp(&req.b_to, "b_to")?;
+        let supplied = [
+            req.a_from.as_ref(),
+            req.a_to.as_ref(),
+            req.b_from.as_ref(),
+            req.b_to.as_ref(),
+        ];
+        let (a_from_ts, a_to_ts, b_from_ts, b_to_ts) = if supplied.iter().all(|v| v.is_none()) {
+            let b_to = chrono::Utc::now();
+            let b_from = b_to - chrono::Duration::hours(1);
+            let a_to = b_from;
+            let a_from = a_to - chrono::Duration::hours(1);
+            (a_from, a_to, b_from, b_to)
+        } else if supplied.iter().all(|v| v.is_some()) {
+            (
+                parse_required_timestamp(req.a_from.as_deref().unwrap(), "a_from")?,
+                parse_required_timestamp(req.a_to.as_deref().unwrap(), "a_to")?,
+                parse_required_timestamp(req.b_from.as_deref().unwrap(), "b_from")?,
+                parse_required_timestamp(req.b_to.as_deref().unwrap(), "b_to")?,
+            )
+        } else {
+            return Err(ServiceError::InvalidInput(
+                "compare accepts either no timestamps or all of a_from, a_to, b_from, and b_to"
+                    .into(),
+            ));
+        };
 
         // Each range scans the timestamp partition; an uncapped width let a
         // single compare call scan the whole table on retention-disabled DBs

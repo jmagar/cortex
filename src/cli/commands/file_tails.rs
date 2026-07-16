@@ -5,7 +5,7 @@ use crate::cli::{FileTailAddArgs, FileTailCommand, FileTailIdArgs, FileTailListA
 pub(crate) fn parse_file_tail_command(args: &[String]) -> Result<FileTailCommand> {
     let (command, rest) = args
         .split_first()
-        .ok_or_else(|| anyhow!("file-tail subcommand is required"))?;
+        .ok_or_else(|| anyhow!("filetail subcommand is required"))?;
     match command.as_str() {
         "list" => Ok(FileTailCommand::List(parse_list(rest)?)),
         "status" => Ok(FileTailCommand::Status(parse_list(rest)?)),
@@ -16,7 +16,7 @@ pub(crate) fn parse_file_tail_command(args: &[String]) -> Result<FileTailCommand
         _ => bail!(
             "{}",
             suggest::unknown_command(
-                "file-tail subcommand",
+                "filetail subcommand",
                 command,
                 &["list", "status", "add", "remove", "enable", "disable"],
             )
@@ -32,7 +32,7 @@ fn parse_list(args: &[String]) -> Result<FileTailListArgs> {
             "--help" | "-h" => bail!("{}", usage()),
             other => bail!(
                 "{}",
-                suggest::unknown_option("file-tail list", other, &["--json"])
+                suggest::unknown_option("filetail list", other, &["--json"])
             ),
         }
     }
@@ -51,24 +51,25 @@ fn parse_id(args: &[String]) -> Result<FileTailIdArgs> {
             }
             "--json" => json = true,
             "--help" | "-h" => bail!("{}", usage()),
+            other if !other.starts_with('-') && id.is_none() => id = Some(other.to_string()),
             other => bail!(
                 "{}",
-                suggest::unknown_option("file-tail", other, &["--id", "--json"])
+                suggest::unknown_option("filetail", other, &["--id", "--json"])
             ),
         }
         i += 1;
     }
     Ok(FileTailIdArgs {
-        id: id.ok_or_else(|| anyhow!("--id is required"))?,
+        id: id.ok_or_else(|| anyhow!("filetail requires an id"))?,
         json,
     })
 }
 
 fn parse_add(args: &[String]) -> Result<FileTailAddArgs> {
     let mut out = FileTailAddArgs {
-        id: String::new(),
+        id: None,
         path: String::new(),
-        tag: String::new(),
+        tag: None,
         host: None,
         facility: None,
         severity: None,
@@ -80,7 +81,7 @@ fn parse_add(args: &[String]) -> Result<FileTailAddArgs> {
         match args[i].as_str() {
             "--id" => {
                 i += 1;
-                out.id = required(args, i, "--id")?;
+                out.id = Some(required(args, i, "--id")?);
             }
             "--path" => {
                 i += 1;
@@ -88,7 +89,7 @@ fn parse_add(args: &[String]) -> Result<FileTailAddArgs> {
             }
             "--tag" => {
                 i += 1;
-                out.tag = required(args, i, "--tag")?;
+                out.tag = Some(required(args, i, "--tag")?);
             }
             "--host" => {
                 i += 1;
@@ -105,10 +106,13 @@ fn parse_add(args: &[String]) -> Result<FileTailAddArgs> {
             "--from-start" => out.start_at_end = false,
             "--json" => out.json = true,
             "--help" | "-h" => bail!("{}", usage()),
+            other if !other.starts_with('-') && out.path.is_empty() => {
+                out.path = other.to_string();
+            }
             other => bail!(
                 "{}",
                 suggest::unknown_option(
-                    "file-tail add",
+                    "filetail add",
                     other,
                     &[
                         "--id",
@@ -125,8 +129,8 @@ fn parse_add(args: &[String]) -> Result<FileTailAddArgs> {
         }
         i += 1;
     }
-    if out.id.is_empty() || out.path.is_empty() || out.tag.is_empty() || out.host.is_none() {
-        bail!("file-tail add requires --id, --path, --tag, and --host");
+    if out.path.is_empty() {
+        bail!("filetail add requires a path");
     }
     Ok(out)
 }
@@ -142,5 +146,5 @@ fn required(args: &[String], index: usize, flag: &str) -> Result<String> {
 }
 
 fn usage() -> &'static str {
-    "Usage: cortex file-tail list [--json]\n       cortex file-tail status [--json]\n       cortex file-tail add --id ID --path PATH --tag TAG --host HOST [--facility FACILITY] [--severity SEVERITY] [--from-start] [--json]\n       cortex file-tail remove --id ID [--json]\n       cortex file-tail enable --id ID [--json]\n       cortex file-tail disable --id ID [--json]"
+    "Usage: cortex ingest filetail list [--json]\n       cortex ingest filetail status [--json]\n       cortex ingest filetail add PATH [--id ID] [--tag TAG] [--host HOST] [--facility FACILITY] [--severity SEVERITY] [--from-start] [--json]\n       cortex ingest filetail remove ID [--json]\n       cortex ingest filetail enable ID [--json]\n       cortex ingest filetail disable ID [--json]"
 }

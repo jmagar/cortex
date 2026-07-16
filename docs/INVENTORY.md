@@ -111,9 +111,9 @@ methods as the MCP actions.
 | `cortex sessions incidents` | `abuse_incidents` | Grouped abuse incident candidates |
 | `cortex sessions investigate` | `abuse_investigate` | Abuse incident evidence bundles |
 | `cortex sessions similar` | `similar_incidents` | Historical incident clusters |
-| `cortex sessions incident-context` | `incident_context` | Full context bundle for a time window |
+| `cortex sessions incidentcontext` | `incident_context` | Full context bundle for a time window |
 | `cortex stats` | `stats` | Database and storage metrics |
-| `cortex stats ingest-rate` | `ingest_rate` | Recent ingest throughput and write-block state |
+| `cortex stats ingestrate` | `ingest_rate` | Recent ingest throughput and write-block state |
 
 ## MCP resources
 

@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 use std::io::{self, ErrorKind, Write as _};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 use std::time::Instant;
 
@@ -36,7 +36,11 @@ pub async fn run_setup(mode: SetupMode) -> io::Result<SetupReport> {
     phases.push(command_phase("docker", ["--version"]));
     phases.push(command_phase("docker compose", ["compose", "version"]));
     if mode.mutates() {
-        phases.push(cleanup_legacy_systemd());
+        let systemd_dir = super::user_home_dir()?.join(".config/systemd/user");
+        phases.push(super::managed_units::rewrite_stale_managed_unit_commands(
+            &systemd_dir,
+        )?);
+        phases.push(super::managed_units::cleanup_legacy_systemd());
     }
 
     let prereq_failed = phases
@@ -410,64 +414,6 @@ pub(crate) fn command_phase<const N: usize>(name: &'static str, args: [&str; N])
         }
         Err(err) => timer.finish(SetupStatus::Error, err.to_string()),
     }
-}
-
-pub(crate) fn cleanup_legacy_systemd() -> SetupPhase {
-    let timer = PhaseTimer::start("legacy-systemd");
-    let home = match std::env::var("HOME") {
-        Ok(home) => PathBuf::from(home),
-        Err(_) => {
-            return timer.finish(SetupStatus::Skipped, "HOME unset");
-        }
-    };
-    let mut failures = Vec::new();
-    for unit in ["cortex.service", "mnemo-index.service", "mnemo-index.timer"] {
-        match super::systemd::run_systemctl_user(&["disable", "--now", unit]) {
-            Ok(output) if output.status.success() => {}
-            Ok(output) => failures.push(format!(
-                "systemctl disable --now {unit}: {}",
-                String::from_utf8_lossy(&output.stderr)
-                    .lines()
-                    .next()
-                    .unwrap_or("failed")
-            )),
-            Err(error) if error.kind() == ErrorKind::NotFound => {}
-            Err(error) => failures.push(format!("systemctl disable --now {unit}: {error}")),
-        }
-    }
-    for name in ["cortex.service", "mnemo-index.service", "mnemo-index.timer"] {
-        let unit = home.join(".config/systemd/user").join(name);
-        let dropins = home.join(".config/systemd/user").join(format!("{name}.d"));
-        if let Err(error) = std::fs::remove_file(&unit) {
-            if error.kind() != ErrorKind::NotFound {
-                failures.push(format!("remove {}: {error}", unit.display()));
-            }
-        }
-        if let Err(error) = std::fs::remove_dir_all(&dropins) {
-            if error.kind() != ErrorKind::NotFound {
-                failures.push(format!("remove {}: {error}", dropins.display()));
-            }
-        }
-    }
-    match super::systemd::run_systemctl_user(&["daemon-reload"]) {
-        Ok(output) if output.status.success() => {}
-        Ok(output) => failures.push(format!(
-            "systemctl daemon-reload: {}",
-            String::from_utf8_lossy(&output.stderr)
-                .lines()
-                .next()
-                .unwrap_or("failed")
-        )),
-        Err(error) if error.kind() == ErrorKind::NotFound => {}
-        Err(error) => failures.push(format!("systemctl daemon-reload: {error}")),
-    }
-    if !failures.is_empty() {
-        return timer.finish(SetupStatus::Warn, failures.join("; "));
-    }
-    timer.finish(
-        SetupStatus::Ok,
-        "removed stale cortex and mnemo-index user units/drop-ins if present",
-    )
 }
 
 pub(crate) fn ensure_network_phase(

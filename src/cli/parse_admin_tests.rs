@@ -86,6 +86,41 @@ fn parse_compose_service_logs_and_db_commands_dispatch_expected_subcommands() {
 }
 
 #[test]
+fn db_checkpoint_and_backup_accept_positional_values() {
+    let checkpoint = parse_db(&strings(&["checkpoint", "truncate"])).unwrap();
+    match checkpoint {
+        crate::cli::CliCommand::Db(crate::cli::DbCommand::Checkpoint(args)) => {
+            assert_eq!(args.mode, "truncate");
+        }
+        other => panic!("unexpected command: {other:?}"),
+    }
+
+    let backup = parse_db(&strings(&["backup", "/tmp/cortex.db"])).unwrap();
+    match backup {
+        crate::cli::CliCommand::Db(crate::cli::DbCommand::Backup(args)) => {
+            assert_eq!(args.output.as_deref(), Some("/tmp/cortex.db"));
+        }
+        other => panic!("unexpected command: {other:?}"),
+    }
+}
+
+#[test]
+fn db_checkpoint_rejects_duplicate_mode_inputs() {
+    for args in [
+        &["full", "truncate"][..],
+        &["full", "--mode", "truncate"][..],
+        &["--mode=full", "truncate"][..],
+        &["--mode", "full", "--mode=truncate"][..],
+    ] {
+        let error = parse_db_checkpoint(&strings(args)).unwrap_err().to_string();
+        assert!(
+            error.contains("mode may only be specified once"),
+            "unexpected duplicate-mode error for {args:?}: {error}"
+        );
+    }
+}
+
+#[test]
 fn parse_compose_mutation_marks_down_as_non_interactive() {
     let args = strings(&["--yes", "--dry-run"]);
 
@@ -148,7 +183,7 @@ fn parse_setup_and_plugin_hook_commands_accept_json_flags() {
         other => panic!("unexpected command: {other:?}"),
     }
 
-    let hook = parse_setup(&strings(&["hook", "--json", "--no-repair"])).unwrap();
+    let hook = parse_setup(&strings(&["pluginhook", "--json", "--no-repair"])).unwrap();
     match hook {
         crate::cli::CliCommand::Setup(crate::cli::SetupCommand::PluginHook(args)) => {
             assert!(args.json);
@@ -186,7 +221,7 @@ fn parse_admin_commands_report_validation_errors() {
         (
             parse_plugin_hook_args_as_command,
             vec!["--bogus"],
-            "unknown setup plugin-hook option",
+            "unknown setup pluginhook option",
         ),
     ] {
         let err = parser(&strings(&args)).unwrap_err().to_string();

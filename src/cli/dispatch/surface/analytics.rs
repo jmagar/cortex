@@ -45,18 +45,10 @@ impl AnomaliesArgs {
 impl CompareArgs {
     pub(crate) fn into_request(self) -> Result<CompareRequest> {
         Ok(CompareRequest {
-            a_from: self
-                .a_from
-                .ok_or_else(|| anyhow::anyhow!("--a-from is required"))?,
-            a_to: self
-                .a_to
-                .ok_or_else(|| anyhow::anyhow!("--a-to is required"))?,
-            b_from: self
-                .b_from
-                .ok_or_else(|| anyhow::anyhow!("--b-from is required"))?,
-            b_to: self
-                .b_to
-                .ok_or_else(|| anyhow::anyhow!("--b-to is required"))?,
+            a_from: self.a_from,
+            a_to: self.a_to,
+            b_from: self.b_from,
+            b_to: self.b_to,
         })
     }
 }

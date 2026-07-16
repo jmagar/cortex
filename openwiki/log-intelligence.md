@@ -260,7 +260,7 @@ Two ingestion modes:
 
 ### Ingest Issues
 - **Check listener health**: `cortex status` or `GET /health/full` for `syslog_udp_listener_state` / `syslog_tcp_listener_state`
-- **Check rate**: `cortex ingest-rate` for recent throughput
+- **Check rate**: `cortex stats ingestrate` for recent throughput
 - **Check write-block**: `cortex stats` for `write_blocked` flag
 
 ### Search Issues

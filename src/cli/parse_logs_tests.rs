@@ -228,12 +228,6 @@ fn parse_log_commands_report_help_and_unknown_argument_errors() {
             vec!["extra"],
             "unexpected sessions argument",
         ),
-        (parse_incident, vec!["--service=x"], "requires --around"),
-        (
-            parse_correlate,
-            vec!["--window-minutes=5"],
-            "requires --reference-time",
-        ),
         (
             parse_hosts_sources,
             vec!["--bogus"],
@@ -249,7 +243,7 @@ fn parse_log_commands_report_help_and_unknown_argument_errors() {
     let err = parse_ingest_rate_args(&strings(&["--host"]))
         .unwrap_err()
         .to_string();
-    assert!(err.contains("unknown ingest-rate option"), "got {err:?}");
+    assert!(err.contains("unknown ingestrate option"), "got {err:?}");
 }
 
 #[test]
@@ -341,7 +335,7 @@ fn tail_positional_sets_host_and_default_limit() {
         panic!("expected Tail")
     };
     assert_eq!(args.host.as_deref(), Some("dookie"));
-    assert_eq!(args.n, Some(50)); // default applied when -n/--limit omitted
+    assert_eq!(args.n, None); // shared service applies the default
 }
 
 #[test]
@@ -391,7 +385,7 @@ fn search_applies_default_limit() {
         panic!("expected Search")
     };
     assert_eq!(args.query.as_deref(), Some("oom"));
-    assert_eq!(args.limit, Some(50));
+    assert_eq!(args.limit, None); // shared service applies the default
 }
 
 #[test]
@@ -409,18 +403,7 @@ fn errors_defaults_to_one_hour_window() {
     let crate::cli::CliCommand::Errors(args) = cmd else {
         panic!("expected Errors")
     };
-    let since = args.since.expect("default since applied");
-    assert!(since.ends_with("+00:00"), "{since}"); // absolute RFC3339 from the 1h default
-    // Pin the actual one-hour semantics, not just the shape: the default window
-    // should land ~1h before now (allow slack for clock + execution time).
-    let parsed = chrono::DateTime::parse_from_rfc3339(&since).expect("rfc3339");
-    let age_min = chrono::Utc::now()
-        .signed_duration_since(parsed.with_timezone(&chrono::Utc))
-        .num_minutes();
-    assert!(
-        (55..=65).contains(&age_min),
-        "default window should be ~1h ago, was {age_min} min: {since}"
-    );
+    assert!(args.since.is_none()); // shared service applies the one-hour default
 }
 
 #[test]

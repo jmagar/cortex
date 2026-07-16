@@ -10,7 +10,7 @@ use super::{
 };
 pub(crate) fn parse_stats(args: &[String]) -> Result<CliCommand> {
     if let Some((subcommand, rest)) = args.split_first() {
-        if subcommand == "ingest-rate" {
+        if subcommand == "ingestrate" {
             return Ok(CliCommand::Stats(StatsCommand::IngestRate(
                 super::parse_logs::parse_ingest_rate_args(rest)?,
             )));
@@ -143,20 +143,34 @@ pub(crate) fn parse_db_integrity_status(args: &[String]) -> Result<CliCommand> {
 
 pub(crate) fn parse_db_checkpoint(args: &[String]) -> Result<CliCommand> {
     let mut parsed = DbCheckpointArgs::default();
+    let mut mode = None;
     let mut flags = FlagCursor::new(args);
     while let Some(arg) = flags.next() {
         match arg.as_str() {
             "--json" => parsed.json = true,
-            "--mode" => parsed.mode = flags.value("--mode")?,
-            _ if arg.starts_with("--mode=") => parsed.mode = value_after_equals(arg, "--mode")?,
+            "--mode" => set_checkpoint_mode(&mut mode, flags.value("--mode")?)?,
+            _ if arg.starts_with("--mode=") => {
+                set_checkpoint_mode(&mut mode, value_after_equals(arg, "--mode")?)?
+            }
+            other if !other.starts_with('-') => set_checkpoint_mode(&mut mode, other.to_string())?,
             _ => bail!("unknown db checkpoint option: {arg}"),
         }
+    }
+    if let Some(mode) = mode {
+        parsed.mode = mode;
     }
     match parsed.mode.as_str() {
         "passive" | "full" | "restart" | "truncate" => {}
         _ => bail!("--mode must be one of passive, full, restart, truncate"),
     }
     Ok(CliCommand::Db(DbCommand::Checkpoint(parsed)))
+}
+
+fn set_checkpoint_mode(mode: &mut Option<String>, value: String) -> Result<()> {
+    if mode.replace(value).is_some() {
+        bail!("db checkpoint mode may only be specified once");
+    }
+    Ok(())
 }
 
 pub(crate) fn parse_db_vacuum(args: &[String]) -> Result<CliCommand> {
@@ -189,6 +203,9 @@ pub(crate) fn parse_db_backup(args: &[String]) -> Result<CliCommand> {
             "--output" => parsed.output = Some(flags.value("--output")?),
             _ if arg.starts_with("--output=") => {
                 parsed.output = Some(value_after_equals(arg, "--output")?)
+            }
+            other if !other.starts_with('-') && parsed.output.is_none() => {
+                parsed.output = Some(other.to_string())
             }
             _ => bail!("unknown db backup option: {arg}"),
         }
@@ -252,7 +269,7 @@ pub(crate) fn parse_setup(args: &[String]) -> Result<CliCommand> {
         "install" => Ok(CliCommand::Setup(SetupCommand::Install(parse_setup_args(
             rest,
         )?))),
-        "plugin-hook" | "hook" => Ok(CliCommand::Setup(SetupCommand::PluginHook(
+        "pluginhook" => Ok(CliCommand::Setup(SetupCommand::PluginHook(
             parse_plugin_hook_args(rest)?,
         ))),
         other => bail!(
@@ -260,7 +277,7 @@ pub(crate) fn parse_setup(args: &[String]) -> Result<CliCommand> {
             super::suggest::unknown_command(
                 "setup subcommand",
                 other,
-                &["check", "repair", "install", "plugin-hook"],
+                &["check", "repair", "install", "pluginhook"],
             )
         ),
     }
@@ -283,7 +300,7 @@ pub(crate) fn parse_plugin_hook_args(args: &[String]) -> Result<PluginHookArgs> 
         match arg.as_str() {
             "--json" => parsed.json = true,
             "--no-repair" => parsed.no_repair = true,
-            _ => bail!("unknown setup plugin-hook option: {arg}"),
+            _ => bail!("unknown setup pluginhook option: {arg}"),
         }
     }
     Ok(parsed)

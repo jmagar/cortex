@@ -36,9 +36,9 @@ pub(crate) fn parse_sessions_mcp_incidents(args: &[String]) -> Result<CliCommand
                 parse_f64_flag("--min-score", raw.clone())?;
                 parsed.min_score = Some(raw);
             }
-            _ if arg.starts_with('-') => bail!("unknown sessions mcp-incidents option: {arg}"),
+            _ if arg.starts_with('-') => bail!("unknown sessions mcpincidents option: {arg}"),
             _ if parsed.mcp_server.is_none() => parsed.mcp_server = Some(arg),
-            _ => bail!("unexpected sessions mcp-incidents argument: {arg}"),
+            _ => bail!("unexpected sessions mcpincidents argument: {arg}"),
         }
     }
     Ok(CliCommand::Sessions(SessionsCommand::McpIncidents(parsed)))
@@ -73,11 +73,11 @@ pub(crate) fn parse_sessions_mcp_investigate(args: &[String]) -> Result<CliComma
                 )?)
             }
             _ if arg.starts_with('-') => {
-                bail!("unknown sessions mcp-investigate option: {arg}")
+                bail!("unknown sessions mcpinvestigate option: {arg}")
             }
             // Bare positional binds to the target (server/tool/name).
             _ if parsed.target.is_none() => parsed.target = Some(arg),
-            _ => bail!("unexpected sessions mcp-investigate argument: {arg}"),
+            _ => bail!("unexpected sessions mcpinvestigate argument: {arg}"),
         }
     }
     Ok(CliCommand::Sessions(SessionsCommand::McpInvestigate(

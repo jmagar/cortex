@@ -19,12 +19,33 @@ pub(crate) async fn run_shell_index(mode: &CliMode, args: ShellIndexArgs) -> Res
 
 pub(crate) async fn run_shell_atuin_index(mode: &CliMode, args: ShellAtuinIndexArgs) -> Result<()> {
     let CliMode::Local(service) = mode else {
-        bail!("shell user atuin-index is local-only; run without --http/--server/--token");
+        bail!("shell user atuinindex is local-only; run without --http/--server/--token");
     };
-    let result = service
-        .import_atuin_history(PathBuf::from(args.path))
-        .await?;
-    print_import_result("shell user atuin-index", &result, args.json)
+    let path = args
+        .path
+        .map(PathBuf::from)
+        .unwrap_or_else(atuin_history_path);
+    let result = service.import_atuin_history(path).await?;
+    print_import_result("shell user atuinindex", &result, args.json)
+}
+
+fn atuin_history_path() -> PathBuf {
+    resolve_atuin_history_path(
+        std::env::var_os("ATUIN_DB_PATH").map(PathBuf::from),
+        std::env::var_os("XDG_DATA_HOME").map(PathBuf::from),
+        std::env::var_os("HOME").map(PathBuf::from),
+    )
+}
+
+fn resolve_atuin_history_path(
+    override_path: Option<PathBuf>,
+    xdg_data_home: Option<PathBuf>,
+    home: Option<PathBuf>,
+) -> PathBuf {
+    override_path
+        .or_else(|| xdg_data_home.map(|path| path.join("atuin/history.db")))
+        .or_else(|| home.map(|path| path.join(".local/share/atuin/history.db")))
+        .unwrap_or_else(|| PathBuf::from("history.db"))
 }
 
 pub(crate) async fn run_shell_agent_index_local(

@@ -29,7 +29,7 @@ fn parse_state_fleet_and_clock_skew() {
         other => panic!("unexpected command: {other:?}"),
     }
 
-    let clock = parse_state(&strings(&["clock-skew", "--limit", "10", "--json"])).unwrap();
+    let clock = parse_state(&strings(&["clockskew", "--limit", "10", "--json"])).unwrap();
     match clock {
         CliCommand::State(StateCommand::ClockSkew(args)) => {
             assert_eq!(args.limit, Some(10));

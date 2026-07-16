@@ -2440,6 +2440,23 @@ async fn compare_returns_200_with_token() {
 }
 
 #[tokio::test]
+async fn mcp_session_routes_and_incident_narrowing_have_rest_parity() {
+    let (state, _pool, _dir) = test_state(Some("secret".into()));
+    let app = test_router(state);
+
+    for path in [
+        "/api/sessions/skill-investigate?incident_id=skill-inc-1",
+        "/api/sessions/mcp-events?limit=1",
+        "/api/sessions/mcp-incidents?limit=1",
+        "/api/sessions/mcp-investigate?mcp_server=labby&limit=1",
+        "/api/sessions/hook-investigate?incident_id=hook-inc-1",
+    ] {
+        let (status, value) = get_json(app.clone(), path, Some("secret")).await;
+        assert_eq!(status, axum::http::StatusCode::OK, "{path}: {value}");
+    }
+}
+
+#[tokio::test]
 async fn apps_returns_200_with_token() {
     let (state, _pool, _dir) = test_state(Some("secret".into()));
     let app = test_router(state);
@@ -2742,14 +2759,14 @@ async fn compose_doctor_unready_returns_structured_projection() {
 // ─── /api/host-state ────────────────────────────────────────────────────────
 
 #[tokio::test]
-async fn host_state_returns_400_without_host_id_or_hostname() {
+async fn host_state_defaults_to_freshest_host_and_returns_null_when_empty() {
     let (state, _pool, _dir) = test_state(Some("secret".into()));
     let app = test_router(state);
     let (status, value) = get_json(app, "/api/host-state", Some("secret")).await;
-    assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
+    assert_eq!(status, axum::http::StatusCode::OK);
     assert!(
-        value.get("error").is_some(),
-        "missing error message: {value}"
+        value.is_null(),
+        "expected an empty host-state response: {value}"
     );
 }
 

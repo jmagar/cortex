@@ -71,18 +71,18 @@ pub(crate) fn parse_sessions_incident_context(args: &[String]) -> Result<CliComm
     while let Some(arg) = flags.next() {
         match arg.as_str() {
             "--json" => parsed.json = true,
-            "--since" => parsed.since = norm_time(flags.value("--since")?)?,
-            "--until" => parsed.until = norm_time(flags.value("--until")?)?,
+            "--since" => parsed.since = Some(norm_time(flags.value("--since")?)?),
+            "--until" => parsed.until = Some(norm_time(flags.value("--until")?)?),
             "--host" => parsed.host = Some(flags.value("--host")?),
             "--app" => parsed.app = Some(flags.value("--app")?),
             "--query" => parsed.query = Some(flags.value("--query")?),
             "--severity-min" => parsed.severity_min = Some(flags.value("--severity-min")?),
             "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
             _ if arg.starts_with("--since=") => {
-                parsed.since = norm_time(value_after_equals(arg, "--since")?)?
+                parsed.since = Some(norm_time(value_after_equals(arg, "--since")?)?)
             }
             _ if arg.starts_with("--until=") => {
-                parsed.until = norm_time(value_after_equals(arg, "--until")?)?
+                parsed.until = Some(norm_time(value_after_equals(arg, "--until")?)?)
             }
             _ if arg.starts_with("--host=") => {
                 parsed.host = Some(value_after_equals(arg, "--host")?)
@@ -100,15 +100,10 @@ pub(crate) fn parse_sessions_incident_context(args: &[String]) -> Result<CliComm
                     value_after_equals(arg, "--limit")?,
                 )?)
             }
-            _ if arg.starts_with('-') => bail!("unknown sessions incident-context option: {arg}"),
-            _ => bail!("unexpected positional argument for ai incident-context: {arg}"),
+            _ if arg.starts_with('-') => bail!("unknown sessions incidentcontext option: {arg}"),
+            _ if parsed.query.is_none() => parsed.query = Some(arg),
+            _ => bail!("unexpected sessions incidentcontext argument: {arg}"),
         }
-    }
-    if parsed.since.is_empty() {
-        bail!("sessions incident-context requires --since");
-    }
-    if parsed.until.is_empty() {
-        bail!("sessions incident-context requires --until");
     }
     Ok(CliCommand::Sessions(SessionsCommand::IncidentContext(
         parsed,
@@ -390,7 +385,7 @@ pub(crate) fn parse_sessions_llm_invocations(args: &[String]) -> Result<CliComma
                     value_after_equals(arg, "--limit")?,
                 )?)
             }
-            _ => bail!("unknown flag for sessions llm-invocations: {arg}"),
+            _ => bail!("unknown flag for sessions llminvocations: {arg}"),
         }
     }
     Ok(CliCommand::Sessions(SessionsCommand::LlmInvocations(
@@ -398,7 +393,7 @@ pub(crate) fn parse_sessions_llm_invocations(args: &[String]) -> Result<CliComma
     )))
 }
 
-/// `cortex sessions skill-assess <skill>` — low-level alias for `cortex
+/// `cortex sessions skillassess <skill>` — low-level alias for `cortex
 /// assess skill`. Delegates flag parsing to the canonical `assess skill`
 /// parser (`parse_assess_skill_from`) so the two entry points never drift,
 /// then rewraps the result as `SessionsCommand::SkillAssess` instead of

@@ -267,7 +267,8 @@ pub struct AiWatchStatusReport {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct IncidentRequest {
-    pub around: String,
+    /// Incident anchor timestamp. Defaults to now.
+    pub around: Option<String>,
     pub minutes: Option<u32>,
     pub service: Option<String>,
     pub host: Option<String>,
@@ -347,7 +348,7 @@ pub struct HostStateRequest {
     pub limit: Option<u32>,
 }
 
-pub type HostStateResponse = db::HeartbeatHostState;
+pub type HostStateResponse = Option<db::HeartbeatHostState>;
 
 // ── fleet_state ───────────────────────────────────────────────────────────
 
@@ -392,8 +393,8 @@ pub struct FleetStateResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CorrelateStateRequest {
-    /// Required ISO-8601 reference timestamp.
-    pub reference_time: String,
+    /// ISO-8601 reference timestamp. Defaults to now.
+    pub reference_time: Option<String>,
     /// Window in minutes before and after `reference_time`. Defaults to 10,
     /// capped at 120.
     pub window_minutes: Option<u32>,

@@ -385,7 +385,10 @@ pub(crate) fn file_tail_line_to_entry(
     line: &str,
     now: &str,
 ) -> LogBatchEntry {
-    let hostname = source.hostname.clone().unwrap_or_else(local_hostname);
+    let hostname = source
+        .hostname
+        .clone()
+        .unwrap_or_else(|| super::models::derived_source_hostname(&source.id));
     let source_hostname = source_identity_component(&hostname);
     let path_basename = std::path::Path::new(&source.path)
         .file_name()
@@ -450,13 +453,6 @@ pub(crate) async fn tail_file_once_for_test(
 
 fn now_iso() -> String {
     chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
-}
-
-fn local_hostname() -> String {
-    std::env::var("HOSTNAME")
-        .ok()
-        .filter(|host| !host.trim().is_empty())
-        .unwrap_or_else(|| "localhost".to_string())
 }
 
 fn source_identity_component(hostname: &str) -> String {

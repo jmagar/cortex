@@ -43,9 +43,7 @@ impl FleetStateArgs {
 impl CorrelateStateArgs {
     pub(crate) fn into_request(self) -> Result<CorrelateStateRequest> {
         Ok(CorrelateStateRequest {
-            reference_time: self
-                .reference_time
-                .ok_or_else(|| anyhow::anyhow!("--reference-time is required"))?,
+            reference_time: self.reference_time,
             window_minutes: self.window_minutes,
             host: self.host,
             severity_min: self.severity_min,
@@ -125,6 +123,10 @@ pub(crate) async fn run_host_state(mode: &CliMode, args: HostStateArgs) -> Resul
     if json {
         return print_json(&response);
     }
+    let Some(response) = response else {
+        println!("No heartbeat state is available.");
+        return Ok(());
+    };
     println!(
         "host_id={} hostname={} samples={}{}",
         response.host_id,

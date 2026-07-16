@@ -26,7 +26,7 @@ fn parses_shell_index() {
 fn parses_shell_atuin_index() {
     let args = vec![
         "user".to_string(),
-        "atuin-index".to_string(),
+        "atuinindex".to_string(),
         "--path".to_string(),
         "/tmp/atuin/history.db".to_string(),
         "--json".to_string(),
@@ -36,7 +36,26 @@ fn parses_shell_atuin_index() {
 
     match command {
         ShellCommand::User(ShellUserCommand::AtuinIndex(args)) => {
-            assert_eq!(args.path, "/tmp/atuin/history.db");
+            assert_eq!(args.path.as_deref(), Some("/tmp/atuin/history.db"));
+            assert!(args.json);
+        }
+        other => panic!("unexpected command: {other:?}"),
+    }
+}
+
+#[test]
+fn parses_shell_atuin_index_without_path() {
+    let args = vec![
+        "user".to_string(),
+        "atuinindex".to_string(),
+        "--json".to_string(),
+    ];
+
+    let command = parse_shell_command(&args).unwrap();
+
+    match command {
+        ShellCommand::User(ShellUserCommand::AtuinIndex(args)) => {
+            assert_eq!(args.path, None);
             assert!(args.json);
         }
         other => panic!("unexpected command: {other:?}"),
@@ -88,21 +107,10 @@ fn parses_shell_agent_index_with_server_and_token() {
 }
 
 #[test]
-fn parses_legacy_agent_command_ingest_spool_as_shell_agent_index() {
-    let args = vec![
-        "ingest-spool".to_string(),
-        "--path".to_string(),
-        "/tmp/commands.jsonl".to_string(),
-    ];
-
-    let command = parse_shell_agent_command_legacy(&args).unwrap();
-
-    match command {
-        ShellAgentCommand::Index(args) => {
-            assert_eq!(args.path, "/tmp/commands.jsonl");
-        }
-        other => panic!("unexpected command: {other:?}"),
-    }
+fn rejects_legacy_agent_command_ingestspool_alias() {
+    let args = vec!["ingestspool".to_string()];
+    let err = parse_shell_agent_command(&args).unwrap_err().to_string();
+    assert!(err.contains("unknown shell agent subcommand"), "{err}");
 }
 
 #[test]

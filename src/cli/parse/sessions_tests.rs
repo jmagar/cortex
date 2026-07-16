@@ -1,6 +1,15 @@
 use super::*;
 
 #[test]
+fn sessions_add_accepts_a_positional_file() {
+    let command = parse_sessions_command(&["add".into(), "/tmp/session.jsonl".into()]);
+    assert!(
+        command.is_ok(),
+        "positional sessions add failed: {command:?}"
+    );
+}
+
+#[test]
 fn parse_sessions_search_requires_query() {
     let args = strings(&["--project", "/repo"]);
 
@@ -36,7 +45,7 @@ fn parse_sessions_blocks_accepts_limit_and_detail() {
 
 #[test]
 fn parse_sessions_dispatches_status_and_smoke_watch_output_flags() {
-    let status = parse_sessions_command(&strings(&["watch-status", "--json"])).unwrap();
+    let status = parse_sessions_command(&strings(&["watchstatus", "--json"])).unwrap();
     match status {
         crate::cli::CliCommand::Sessions(crate::cli::SessionsCommand::WatchStatus(args)) => {
             assert!(args.json);
@@ -44,7 +53,7 @@ fn parse_sessions_dispatches_status_and_smoke_watch_output_flags() {
         other => panic!("unexpected command: {other:?}"),
     }
 
-    let smoke = parse_sessions_command(&strings(&["smoke-watch", "--json"])).unwrap();
+    let smoke = parse_sessions_command(&strings(&["smokewatch", "--json"])).unwrap();
     match smoke {
         crate::cli::CliCommand::Sessions(crate::cli::SessionsCommand::SmokeWatch(args)) => {
             assert!(args.json);
@@ -271,14 +280,13 @@ fn parse_sessions_reports_errors_for_missing_required_or_unexpected_args() {
             "context",
             parse_sessions_context as fn(&[String]) -> anyhow::Result<crate::cli::CliCommand>,
             vec!["--tool=Edit"],
-            "requires --project",
+            "requires PROJECT",
         ),
-        ("add", parse_sessions_add, vec!["--json"], "requires --file"),
         (
-            "prune",
-            parse_sessions_prune_checkpoints,
-            vec!["--dry-run"],
-            "requires --missing",
+            "add",
+            parse_sessions_add,
+            vec!["--json"],
+            "requires a file path",
         ),
     ] {
         let err = parser(&strings(&args)).unwrap_err().to_string();
@@ -287,6 +295,8 @@ fn parse_sessions_reports_errors_for_missing_required_or_unexpected_args() {
             "{subcommand} expected {expected:?}, got {err:?}"
         );
     }
+
+    assert!(parse_sessions_prune_checkpoints(&strings(&["--dry-run"])).is_ok());
 
     for (parser, args, expected) in [
         (
@@ -370,7 +380,7 @@ fn parses_sessions_skills_list_with_project_filter() {
 
 #[test]
 fn skill_investigate_binds_bare_positional_to_skill() {
-    let cmd = parse_sessions_command(&strings(&["skill-investigate", "lavra:lavra-plan"])).unwrap();
+    let cmd = parse_sessions_command(&strings(&["skillinvestigate", "lavra:lavra-plan"])).unwrap();
     match cmd {
         crate::cli::CliCommand::Sessions(crate::cli::SessionsCommand::SkillInvestigate(args)) => {
             assert_eq!(args.skill.as_deref(), Some("lavra:lavra-plan"));
@@ -383,7 +393,7 @@ fn skill_investigate_binds_bare_positional_to_skill() {
 #[test]
 fn skill_investigate_accepts_since_and_tool_flags_with_positional() {
     let cmd = parse_sessions_command(&strings(&[
-        "skill-investigate",
+        "skillinvestigate",
         "lavra:lavra-plan",
         "--since",
         "7d",
@@ -404,7 +414,7 @@ fn skill_investigate_accepts_since_and_tool_flags_with_positional() {
 #[test]
 fn skill_investigate_incident_id_flag_overrides_but_does_not_require_positional() {
     let cmd = parse_sessions_command(&strings(&[
-        "skill-investigate",
+        "skillinvestigate",
         "--incident-id",
         "skill-inc-deadbeef",
     ]))
@@ -420,8 +430,7 @@ fn skill_investigate_incident_id_flag_overrides_but_does_not_require_positional(
 
 #[test]
 fn skill_investigate_plugin_flag_for_plugin_level_investigation() {
-    let cmd =
-        parse_sessions_command(&strings(&["skill-investigate", "--plugin", "lavra"])).unwrap();
+    let cmd = parse_sessions_command(&strings(&["skillinvestigate", "--plugin", "lavra"])).unwrap();
     match cmd {
         crate::cli::CliCommand::Sessions(crate::cli::SessionsCommand::SkillInvestigate(args)) => {
             assert_eq!(args.plugin.as_deref(), Some("lavra"));
@@ -434,7 +443,7 @@ fn skill_investigate_plugin_flag_for_plugin_level_investigation() {
 #[test]
 fn skill_investigate_all_and_limit_flags() {
     let cmd = parse_sessions_command(&strings(&[
-        "skill-investigate",
+        "skillinvestigate",
         "lavra:lavra-plan",
         "--all",
         "--limit",
@@ -453,7 +462,7 @@ fn skill_investigate_all_and_limit_flags() {
 #[test]
 fn skill_incidents_accepts_skill_and_min_score_flags() {
     let cmd = parse_sessions_command(&strings(&[
-        "skill-incidents",
+        "skillincidents",
         "--skill",
         "lavra:lavra-plan",
         "--min-score",
@@ -472,7 +481,7 @@ fn skill_incidents_accepts_skill_and_min_score_flags() {
 #[test]
 fn skill_incidents_accepts_repeated_signal_flags() {
     let cmd = parse_sessions_command(&strings(&[
-        "skill-incidents",
+        "skillincidents",
         "--signal",
         "tool_failure_after_skill",
         "--signal",
@@ -490,5 +499,26 @@ fn skill_incidents_accepts_repeated_signal_flags() {
             );
         }
         other => panic!("expected SkillIncidents, got {other:?}"),
+    }
+}
+
+#[test]
+fn hook_commands_bind_bare_hook_names() {
+    let incidents = parse_sessions_command(&strings(&["hookincidents", "format-on-save"]))
+        .expect("hook incident list parses");
+    match incidents {
+        crate::cli::CliCommand::Sessions(crate::cli::SessionsCommand::HookIncidents(args)) => {
+            assert_eq!(args.hook_name.as_deref(), Some("format-on-save"));
+        }
+        other => panic!("expected HookIncidents, got {other:?}"),
+    }
+
+    let investigate = parse_sessions_command(&strings(&["hookinvestigate", "format-on-save"]))
+        .expect("hook investigation parses");
+    match investigate {
+        crate::cli::CliCommand::Sessions(crate::cli::SessionsCommand::HookInvestigate(args)) => {
+            assert_eq!(args.hook_name.as_deref(), Some("format-on-save"));
+        }
+        other => panic!("expected HookInvestigate, got {other:?}"),
     }
 }

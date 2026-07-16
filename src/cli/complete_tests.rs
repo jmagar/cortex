@@ -48,6 +48,260 @@ fn completes_flags_for_action() {
 }
 
 #[test]
+fn completes_every_nested_command_with_single_word_tokens() {
+    for (parent, children) in COMMAND_CHILDREN {
+        assert!(
+            parent.split_whitespace().all(|token| !token.contains('-')),
+            "hyphenated command token in catalog path {parent}"
+        );
+        assert!(
+            children.iter().all(|token| !token.contains('-')),
+            "hyphenated child command under {parent}: {children:?}"
+        );
+    }
+    for path in ["sessions", "state", "ingest", "setup", "db"] {
+        let out = complete(&["subcommands".into(), path.into()]).unwrap();
+        assert!(!out.is_empty(), "missing nested completions for {path}");
+        assert!(
+            out.iter().all(|value| !value.contains('-')),
+            "hyphenated nested completion under {path}: {out:?}"
+        );
+    }
+    let sessions = complete(&["subcommands".into(), "sessions".into()]).unwrap();
+    assert!(sessions.contains(&"skillinvestigate".to_string()));
+    assert!(sessions.contains(&"mcpevents".to_string()));
+}
+
+#[test]
+fn nested_paths_resolve_shared_action_flags() {
+    let out = complete(&["flags".into(), "state host".into()]).unwrap();
+    assert!(out.iter().any(|line| line.starts_with("--host\t")));
+}
+
+#[test]
+fn flags_resolve_from_longest_leaf_after_positionals_and_options() {
+    let nested = complete(&[
+        "flags".into(),
+        "sessions".into(),
+        "hookinvestigate".into(),
+        "format-on-save".into(),
+        "--since".into(),
+        "1h".into(),
+    ])
+    .unwrap();
+    assert!(nested.iter().any(|line| line.starts_with("--hook-event\t")));
+    assert!(nested.iter().any(|line| line.starts_with("--all\t")));
+
+    let top_level = complete(&[
+        "flags".into(),
+        "search".into(),
+        "disk".into(),
+        "full".into(),
+        "--host".into(),
+        "dookie".into(),
+    ])
+    .unwrap();
+    assert!(top_level.iter().any(|line| line.starts_with("--since\t")));
+}
+
+#[test]
+fn resolved_leaf_does_not_offer_subcommands_after_arguments() {
+    let out = complete(&[
+        "subcommands".into(),
+        "sessions".into(),
+        "mcpinvestigate".into(),
+        "labby".into(),
+        "--since".into(),
+        "1h".into(),
+    ])
+    .unwrap();
+    assert!(out.is_empty());
+}
+
+#[test]
+fn refreshed_event_leaves_expose_exact_parser_flags() {
+    use std::collections::BTreeSet;
+
+    let cases: &[(&str, &[&str])] = &[
+        (
+            "sessions skills",
+            &[
+                "--skill",
+                "--plugin",
+                "--tool",
+                "--project",
+                "--session-id",
+                "--host",
+                "--since",
+                "--until",
+                "--limit",
+                "--json",
+            ],
+        ),
+        (
+            "sessions skillincidents",
+            &[
+                "--skill",
+                "--plugin",
+                "--tool",
+                "--project",
+                "--session-id",
+                "--hostname",
+                "--since",
+                "--until",
+                "--limit",
+                "--window-minutes",
+                "--signal",
+                "--min-score",
+                "--json",
+            ],
+        ),
+        (
+            "sessions skillinvestigate",
+            &[
+                "--incident-id",
+                "--plugin",
+                "--tool",
+                "--project",
+                "--since",
+                "--until",
+                "--limit",
+                "--window-minutes",
+                "--correlation-window-minutes",
+                "--all",
+                "--json",
+            ],
+        ),
+        (
+            "sessions mcpevents",
+            &[
+                "--tool-name",
+                "--mcp-server",
+                "--mcp-tool",
+                "--tool",
+                "--project",
+                "--session-id",
+                "--host",
+                "--error-only",
+                "--since",
+                "--until",
+                "--limit",
+                "--json",
+            ],
+        ),
+        (
+            "sessions mcpincidents",
+            &[
+                "--mcp-server",
+                "--mcp-tool",
+                "--tool-name",
+                "--tool",
+                "--project",
+                "--session-id",
+                "--hostname",
+                "--since",
+                "--until",
+                "--limit",
+                "--window-minutes",
+                "--signal",
+                "--min-score",
+                "--json",
+            ],
+        ),
+        (
+            "sessions mcpinvestigate",
+            &[
+                "--incident-id",
+                "--mcp-server",
+                "--mcp-tool",
+                "--tool-name",
+                "--tool",
+                "--project",
+                "--since",
+                "--until",
+                "--limit",
+                "--window-minutes",
+                "--correlation-window-minutes",
+                "--all",
+                "--json",
+            ],
+        ),
+        (
+            "sessions hookevents",
+            &[
+                "--hook-event",
+                "--hook",
+                "--hook-source",
+                "--status",
+                "--evidence-kind",
+                "--tool",
+                "--project",
+                "--session-id",
+                "--host",
+                "--since",
+                "--until",
+                "--limit",
+                "--json",
+            ],
+        ),
+        (
+            "sessions hookincidents",
+            &[
+                "--hook-event",
+                "--hook",
+                "--hook-source",
+                "--tool",
+                "--project",
+                "--session-id",
+                "--hostname",
+                "--evidence-kind",
+                "--since",
+                "--until",
+                "--limit",
+                "--window-minutes",
+                "--signal",
+                "--min-score",
+                "--json",
+            ],
+        ),
+        (
+            "sessions hookinvestigate",
+            &[
+                "--incident-id",
+                "--hook-event",
+                "--hook",
+                "--hook-source",
+                "--tool",
+                "--project",
+                "--since",
+                "--until",
+                "--limit",
+                "--window-minutes",
+                "--correlation-window-minutes",
+                "--all",
+                "--json",
+            ],
+        ),
+    ];
+
+    for (path, expected) in cases {
+        let actual: BTreeSet<_> = complete(&["flags".into(), (*path).into()])
+            .unwrap()
+            .into_iter()
+            .map(|line| line.split('\t').next().unwrap().to_string())
+            .collect();
+        let expected: BTreeSet<_> = expected.iter().map(|flag| (*flag).to_string()).collect();
+        assert_eq!(actual, expected, "flag metadata drift for {path}");
+    }
+}
+
+#[test]
+fn completion_does_not_advertise_deferred_syslog_test() {
+    let out = complete(&["subcommands".into(), "ingest syslog".into()]).unwrap();
+    assert_eq!(out, vec!["status"]);
+}
+
+#[test]
 fn completes_static_enum_values_for_severity() {
     let out = complete(&["value".into(), "--severity".into()]).unwrap();
     assert!(out.iter().any(|l| l == "err"));

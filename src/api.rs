@@ -1,7 +1,7 @@
 //! Always-on non-MCP REST API (`/api/*`) for the log intelligence core —
 //! the default transport for the CLI since v0.26 (`CORTEX_USE_HTTP=true`).
 //!
-//! 58 routes mirroring the MCP action surface one-for-one (see
+//! REST routes mirroring the MCP action surface one-for-one (see
 //! `docs/api.md` for the endpoint matrix). Every route requires the
 //! `CORTEX_API_TOKEN` bearer; route mounting fails at startup when the token
 //! is absent, so the surface is never silently open.
@@ -30,18 +30,20 @@ use tower_http::cors::CorsLayer;
 use crate::app::{
     AbuseSearchRequest, AckErrorRequest, AiCheckpointsRequest, AiCorrelateLimitPolicy,
     AiCorrelateRequest, AiHookIncidentRequest, AiHookInvestigateRequest, AiIncidentRequest,
-    AiInvestigateRequest, AiLimitPolicy, AiParseErrorsRequest, AiPruneCheckpointsRequest,
-    AiSkillIncidentRequest, AiSkillInvestigateRequest, AnomaliesRequest, ClockSkewRequest,
-    CompareRequest, ContextRequest, CorrelateEventsRequest, CorrelateStateRequest, CortexService,
-    DbBackupRequest, DbCheckpointRequest, DbIntegrityRequest, DbVacuumRequest, FileTailRequest,
-    FilterLogsRequest, FleetStateRequest, GetErrorsRequest, GetLogRequest, GraphAroundRequest,
+    AiInvestigateRequest, AiLimitPolicy, AiMcpIncidentRequest, AiMcpInvestigateRequest,
+    AiParseErrorsRequest, AiPruneCheckpointsRequest, AiSkillIncidentRequest,
+    AiSkillInvestigateRequest, AnomaliesRequest, ClockSkewRequest, CompareRequest, ContextRequest,
+    CorrelateEventsRequest, CorrelateStateRequest, CortexService, DbBackupRequest,
+    DbCheckpointRequest, DbIntegrityRequest, DbVacuumRequest, FileTailRequest, FilterLogsRequest,
+    FleetStateRequest, GetErrorsRequest, GetLogRequest, GraphAroundRequest,
     GraphEntityLookupRequest, GraphEvidenceLookupRequest, GraphExplainRequest, HostStateRequest,
     IncidentContextRequest, IngestRateRequest, ListAiProjectsRequest, ListAiToolsRequest,
-    ListAppsRequest, ListHookEventsRequest, ListSessionsRequest, ListSkillEventsRequest,
-    ListSourceIpsRequest, LlmInvocationsRequest, NotificationsRecentRequest, PatternsRequest,
-    ProjectContextRequest, RequestActor, SearchLogsRequest, SearchSessionsRequest, ServiceError,
-    SilentHostsRequest, SimilarIncidentsRequest, TailLogsRequest, TimelineRequest,
-    TopicCorrelateRequest, UnackErrorRequest, UnaddressedErrorsRequest, UsageBlocksRequest,
+    ListAppsRequest, ListHookEventsRequest, ListMcpEventsRequest, ListSessionsRequest,
+    ListSkillEventsRequest, ListSourceIpsRequest, LlmInvocationsRequest,
+    NotificationsRecentRequest, PatternsRequest, ProjectContextRequest, RequestActor,
+    SearchLogsRequest, SearchSessionsRequest, ServiceError, SilentHostsRequest,
+    SimilarIncidentsRequest, TailLogsRequest, TimelineRequest, TopicCorrelateRequest,
+    UnackErrorRequest, UnaddressedErrorsRequest, UsageBlocksRequest,
 };
 use crate::config::{ApiConfig, NotificationsConfig};
 use crate::mcp::{AuthPolicy, build_auth_layer};
@@ -256,7 +258,7 @@ pub fn router(state: ApiState) -> anyhow::Result<Router> {
         .route("/api/notifications/recent", get(notifications_recent))
         .route("/api/notifications/test", post(notifications_test))
         .route("/api/file-tails", post(file_tails))
-        // --- surface parity gap closure (12 new routes) ---
+        // --- surface parity routes ---
         .route("/api/silent-hosts", get(silent_hosts))
         .route("/api/clock-skew", get(clock_skew))
         .route("/api/anomalies", get(anomalies))
@@ -274,6 +276,9 @@ pub fn router(state: ApiState) -> anyhow::Result<Router> {
         .route("/api/sessions/skills", get(ai_skills))
         .route("/api/sessions/skill-incidents", get(ai_skill_incidents))
         .route("/api/sessions/skill-investigate", get(ai_skill_investigate))
+        .route("/api/sessions/mcp-events", get(ai_mcp_events))
+        .route("/api/sessions/mcp-incidents", get(ai_mcp_incidents))
+        .route("/api/sessions/mcp-investigate", get(ai_mcp_investigate))
         .route("/api/sessions/hooks", get(ai_hooks))
         .route("/api/sessions/hook-incidents", get(ai_hook_incidents))
         .route("/api/sessions/hook-investigate", get(ai_hook_investigate))
@@ -999,10 +1004,10 @@ async fn anomalies(
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct CompareQuery {
-    a_from: String,
-    a_to: String,
-    b_from: String,
-    b_to: String,
+    a_from: Option<String>,
+    a_to: Option<String>,
+    b_from: Option<String>,
+    b_to: Option<String>,
 }
 
 async fn compare(
@@ -1085,8 +1090,8 @@ async fn similar_incidents(
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct IncidentContextQuery {
-    since: String,
-    until: String,
+    since: Option<String>,
+    until: Option<String>,
     host: Option<String>,
     app: Option<String>,
     query: Option<String>,
@@ -1263,6 +1268,7 @@ async fn ai_skill_incidents(
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct AiSkillInvestigateQuery {
+    incident_id: Option<String>,
     skill: Option<String>,
     plugin: Option<String>,
     tool: Option<String>,
@@ -1282,7 +1288,7 @@ async fn ai_skill_investigate(
         state
             .service
             .investigate_ai_skill_incidents(AiSkillInvestigateRequest {
-                incident_id: None,
+                incident_id: q.incident_id,
                 skill: q.skill,
                 plugin: q.plugin,
                 tool: q.tool,
@@ -1295,6 +1301,27 @@ async fn ai_skill_investigate(
             })
             .await,
     )
+}
+
+async fn ai_mcp_events(
+    State(state): State<ApiState>,
+    Query(q): Query<ListMcpEventsRequest>,
+) -> impl IntoResponse {
+    respond(state.service.list_mcp_events(q).await)
+}
+
+async fn ai_mcp_incidents(
+    State(state): State<ApiState>,
+    serde_qs::axum::QsQuery(q): serde_qs::axum::QsQuery<AiMcpIncidentRequest>,
+) -> impl IntoResponse {
+    respond(state.service.list_ai_mcp_incidents(q).await)
+}
+
+async fn ai_mcp_investigate(
+    State(state): State<ApiState>,
+    Query(q): Query<AiMcpInvestigateRequest>,
+) -> impl IntoResponse {
+    respond(state.service.investigate_ai_mcp_incidents(q).await)
 }
 
 /// Hook incidents — mirrors `AiSkillIncidentsQuery`/`ai_skill_incidents`
@@ -1349,6 +1376,7 @@ async fn ai_hook_incidents(
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct AiHookInvestigateQuery {
+    incident_id: Option<String>,
     hook_event: Option<String>,
     hook_name: Option<String>,
     hook_source: Option<String>,
@@ -1369,7 +1397,7 @@ async fn ai_hook_investigate(
         state
             .service
             .investigate_ai_hook_incidents(AiHookInvestigateRequest {
-                incident_id: None,
+                incident_id: q.incident_id,
                 hook_event: q.hook_event,
                 hook_name: q.hook_name,
                 hook_source: q.hook_source,

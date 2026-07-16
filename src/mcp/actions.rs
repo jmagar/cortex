@@ -9,7 +9,12 @@
 //! Now there is one metadata table: [`ACTION_SPECS`]. The schema, scope gates,
 //! help text, and action metadata are computed from it.
 
-use super::action_flags::{COMMON_LOG_FLAGS, Defaults, FlagSpec, TOPIC_CORRELATE_FLAGS};
+use super::action_flags::{
+    COMMON_LOG_FLAGS, Defaults, FlagSpec, HOOK_EVENTS_FLAGS, HOOK_INCIDENT_FLAGS,
+    HOOK_INVESTIGATE_FLAGS, HOST_STATE_FLAGS, MCP_EVENTS_FLAGS, MCP_INCIDENT_FLAGS,
+    MCP_INVESTIGATE_FLAGS, SKILL_EVENTS_FLAGS, SKILL_INCIDENT_FLAGS, SKILL_INVESTIGATE_FLAGS,
+    TOPIC_CORRELATE_FLAGS,
+};
 
 /// The scope required to invoke a given action.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -235,7 +240,10 @@ pub(super) const ACTION_SPECS: &[ActionSpec] = &[
         Cheap,
         GetErrors,
         flags: COMMON_LOG_FLAGS,
-        examples: &["cortex errors", "cortex errors --since 6h --limit 50"],
+        examples: &[
+            "cortex analysis errors",
+            "cortex analysis errors --since 6h --limit 50"
+        ],
         positional: None,
         defaults: Defaults { limit: None, since: Some("1h") }
     ),
@@ -261,8 +269,8 @@ pub(super) const ACTION_SPECS: &[ActionSpec] = &[
         "Fetch latest bounded heartbeat state for a host",
         Moderate,
         HostState,
-        flags: &[],
-        examples: &["cortex host-state dookie", "cortex host-state dookie --since 30m"],
+        flags: HOST_STATE_FLAGS,
+        examples: &["cortex state host", "cortex state host dookie --since 30m"],
         positional: Some("--host"),
         defaults: Defaults::new()
     ),
@@ -276,19 +284,19 @@ pub(super) const ACTION_SPECS: &[ActionSpec] = &[
     action_spec!(
         "correlate",
         Read,
-        "Correlate events across hosts/services; without reference_time, derives it from an AI-session search over query",
+        "Correlate events around now, an explicit reference_time, or an AI-session query anchor",
         Moderate,
         CorrelateEvents,
         flags: &[],
         examples: &[
-            "cortex correlate events --reference-time 2026-06-16T04:00:00Z --window-minutes 15",
+            "cortex correlate events 2026-06-16T04:00:00Z --window-minutes 15",
             "cortex correlate events --query \"qbittorrent keeps dying\""
         ]
     ),
     action_spec!(
         "correlate_state",
         Read,
-        "Correlate logs with heartbeat summaries around a reference time",
+        "Correlate logs with heartbeat summaries around now or a reference time",
         Expensive,
         CorrelateState
     ),
@@ -430,7 +438,9 @@ pub(super) const ACTION_SPECS: &[ActionSpec] = &[
         Expensive,
         Patterns,
         flags: &[],
-        examples: &["cortex patterns --limit 20"]
+        examples: &["cortex analysis patterns --limit 20"],
+        positional: None,
+        defaults: Defaults { limit: None, since: Some("24h") }
     ),
     action_spec!(
         "context",
@@ -471,7 +481,7 @@ pub(super) const ACTION_SPECS: &[ActionSpec] = &[
     action_spec!(
         "compare",
         Read,
-        "Compare log patterns between time windows",
+        "Compare the latest hour with the prior hour, or two explicit time windows",
         Expensive,
         Compare
     ),
@@ -513,7 +523,7 @@ pub(super) const ACTION_SPECS: &[ActionSpec] = &[
     action_spec!(
         "incident_context",
         Read,
-        "Full context for an incident",
+        "Full context for the last hour or an explicit incident window",
         Moderate,
         IncidentContext
     ),
@@ -530,7 +540,7 @@ pub(super) const ACTION_SPECS: &[ActionSpec] = &[
         "List extracted AI skill-invocation events",
         Cheap,
         SkillEvents,
-        flags: &[],
+        flags: SKILL_EVENTS_FLAGS,
         examples: &[
             "cortex sessions skills --project cortex --limit 20",
             "cortex sessions skills --skill cortex-troubleshoot --since 1h",
@@ -542,10 +552,10 @@ pub(super) const ACTION_SPECS: &[ActionSpec] = &[
         "List detected skill-usage incidents (negative signals after a skill loaded)",
         Moderate,
         SkillIncidents,
-        flags: &[],
+        flags: SKILL_INCIDENT_FLAGS,
         examples: &[
-            "cortex sessions skill-incidents --skill lavra:lavra-plan --since 7d",
-            "cortex sessions skill-incidents --plugin lavra --min-score 35",
+            "cortex sessions skillincidents --skill lavra:lavra-plan --since 7d",
+            "cortex sessions skillincidents --plugin lavra --min-score 35",
         ]
     ),
     action_spec!(
@@ -554,12 +564,12 @@ pub(super) const ACTION_SPECS: &[ActionSpec] = &[
         "Deep-dive investigation of a skill-usage incident, skill-first",
         Expensive,
         SkillInvestigate,
-        flags: &[],
+        flags: SKILL_INVESTIGATE_FLAGS,
         examples: &[
-            "cortex sessions skill-investigate lavra:lavra-plan",
-            "cortex sessions skill-investigate lavra:lavra-plan --since 7d",
-            "cortex sessions skill-investigate lavra:lavra-plan --tool codex --project /home/jmagar/workspace/cortex",
-            "cortex sessions skill-investigate --plugin lavra --all --limit 5",
+            "cortex sessions skillinvestigate lavra:lavra-plan",
+            "cortex sessions skillinvestigate lavra:lavra-plan --since 7d",
+            "cortex sessions skillinvestigate lavra:lavra-plan --tool codex --project /home/jmagar/workspace/cortex",
+            "cortex sessions skillinvestigate --plugin lavra --all --limit 5",
         ],
         positional: Some("--skill"),
         defaults: Defaults::new()
@@ -570,10 +580,10 @@ pub(super) const ACTION_SPECS: &[ActionSpec] = &[
         "List extracted AI MCP tool-call events",
         Cheap,
         McpEvents,
-        flags: &[],
+        flags: MCP_EVENTS_FLAGS,
         examples: &[
-            "cortex sessions mcp-events --project cortex --limit 20",
-            "cortex sessions mcp-events --mcp-server labby --since 1h",
+            "cortex sessions mcpevents --project cortex --limit 20",
+            "cortex sessions mcpevents --mcp-server labby --since 1h",
         ]
     ),
     action_spec!(
@@ -582,10 +592,10 @@ pub(super) const ACTION_SPECS: &[ActionSpec] = &[
         "List detected MCP-usage incidents (negative signals after a tool call)",
         Moderate,
         McpIncidents,
-        flags: &[],
+        flags: MCP_INCIDENT_FLAGS,
         examples: &[
-            "cortex sessions mcp-incidents --mcp-server labby --since 7d",
-            "cortex sessions mcp-incidents --mcp-tool search --min-score 35",
+            "cortex sessions mcpincidents --mcp-server labby --since 7d",
+            "cortex sessions mcpincidents --mcp-tool search --min-score 35",
         ]
     ),
     action_spec!(
@@ -594,12 +604,12 @@ pub(super) const ACTION_SPECS: &[ActionSpec] = &[
         "Deep-dive investigation of an MCP-usage incident, server/tool-first",
         Expensive,
         McpInvestigate,
-        flags: &[],
+        flags: MCP_INVESTIGATE_FLAGS,
         examples: &[
-            "cortex sessions mcp-investigate labby",
-            "cortex sessions mcp-investigate labby --since 7d",
-            "cortex sessions mcp-investigate labby --tool codex --project /home/jmagar/workspace/cortex",
-            "cortex sessions mcp-investigate --mcp-tool search --all --limit 5",
+            "cortex sessions mcpinvestigate labby",
+            "cortex sessions mcpinvestigate labby --since 7d",
+            "cortex sessions mcpinvestigate labby --tool codex --project /home/jmagar/workspace/cortex",
+            "cortex sessions mcpinvestigate --mcp-tool search --all --limit 5",
         ],
         positional: Some("--mcp-server"),
         defaults: Defaults::new()
@@ -610,10 +620,10 @@ pub(super) const ACTION_SPECS: &[ActionSpec] = &[
         "List extracted/collected AI hook events (runtime execution and config inventory)",
         Cheap,
         HookEvents,
-        flags: &[],
+        flags: HOOK_EVENTS_FLAGS,
         examples: &[
-            "cortex sessions hook-events --hook format-on-save --since 1h",
-            "cortex sessions hook-events --evidence-kind runtime_transcript",
+            "cortex sessions hookevents --hook format-on-save --since 1h",
+            "cortex sessions hookevents --evidence-kind runtime_transcript",
         ]
     ),
     action_spec!(
@@ -622,10 +632,10 @@ pub(super) const ACTION_SPECS: &[ActionSpec] = &[
         "List detected hook-usage incidents (failures, timeouts, and other negative signals)",
         Moderate,
         HookIncidents,
-        flags: &[],
+        flags: HOOK_INCIDENT_FLAGS,
         examples: &[
-            "cortex sessions hook-incidents --hook format-on-save --since 7d",
-            "cortex sessions hook-incidents --hook-event PostToolUse --min-score 35",
+            "cortex sessions hookincidents --hook format-on-save --since 7d",
+            "cortex sessions hookincidents --hook-event PostToolUse --min-score 35",
         ]
     ),
     action_spec!(
@@ -634,11 +644,11 @@ pub(super) const ACTION_SPECS: &[ActionSpec] = &[
         "Deep-dive investigation of a hook-usage incident, hook-first",
         Expensive,
         HookInvestigate,
-        flags: &[],
+        flags: HOOK_INVESTIGATE_FLAGS,
         examples: &[
-            "cortex sessions hook-investigate format-on-save",
-            "cortex sessions hook-investigate format-on-save --since 7d",
-            "cortex sessions hook-investigate --hook-event PostToolUse --all --limit 5",
+            "cortex sessions hookinvestigate format-on-save",
+            "cortex sessions hookinvestigate format-on-save --since 7d",
+            "cortex sessions hookinvestigate --hook-event PostToolUse --all --limit 5",
         ],
         positional: Some("--hook"),
         defaults: Defaults::new()

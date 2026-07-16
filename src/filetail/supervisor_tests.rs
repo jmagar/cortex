@@ -52,6 +52,20 @@ fn file_tail_line_to_entry_sets_expected_envelope() {
     assert_eq!(metadata["path_basename"], "access.log");
 }
 
+#[test]
+fn file_tail_line_to_entry_never_uses_runtime_hostname_for_legacy_sources() {
+    let mut source = source("swag-access", "/tmp/access.log", "swag-access");
+    source.hostname = None;
+
+    let entry = file_tail_line_to_entry(&source, "legacy registry row", "2026-07-16T20:00:00Z");
+
+    assert_eq!(entry.hostname, "file-tail-swag-access");
+    assert_eq!(
+        entry.source_ip,
+        "file-tail://file-tail-swag-access/swag-access"
+    );
+}
+
 #[tokio::test]
 async fn reconcile_restarts_task_when_source_definition_changes() {
     let temp = tempfile::tempdir().unwrap();

@@ -27,6 +27,7 @@ pub struct SkillBackfillResult {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ListSkillEventsRequest {
     pub skill: Option<String>,
     pub plugin: Option<String>,
@@ -34,7 +35,9 @@ pub struct ListSkillEventsRequest {
     pub project: Option<String>,
     pub session_id: Option<String>,
     pub hostname: Option<String>,
+    #[serde(alias = "since")]
     pub from: Option<String>,
+    #[serde(alias = "until")]
     pub to: Option<String>,
     pub limit: Option<u32>,
 }

@@ -20,9 +20,8 @@
 
 use anyhow::{Result, bail};
 use cortex::app::{
-    CorrelateEventsRequest, FileTailAddRequest, FileTailOp, FileTailRequest, FileTailResponse,
-    FilterLogsRequest, GetErrorsRequest, IncidentRequest, ListSessionsRequest, SearchLogsRequest,
-    TailLogsRequest,
+    CorrelateEventsRequest, FileTailOp, FileTailRequest, FileTailResponse, FilterLogsRequest,
+    GetErrorsRequest, IncidentRequest, ListSessionsRequest, SearchLogsRequest, TailLogsRequest,
 };
 use std::future::Future;
 
@@ -113,7 +112,7 @@ impl FilterArgs {
 impl IncidentArgs {
     pub(crate) fn into_request(self) -> IncidentRequest {
         IncidentRequest {
-            around: self.around,
+            around: (!self.around.is_empty()).then_some(self.around),
             minutes: self.minutes,
             service: self.service,
             host: self.host,
@@ -347,18 +346,19 @@ pub(crate) async fn run_file_tail(mode: &CliMode, command: FileTailCommand) -> R
     let (req, json) = match command {
         FileTailCommand::List(args) => (FileTailRequest::list(), args.json),
         FileTailCommand::Status(args) => (FileTailRequest::status(), args.json),
-        FileTailCommand::Add(args) => (
-            FileTailRequest::add(FileTailAddRequest {
+        FileTailCommand::Add(args) => {
+            let req = FileTailRequest {
+                op: FileTailOp::Add,
                 id: args.id,
-                path: args.path,
+                path: Some(args.path),
                 tag: args.tag,
                 host: args.host,
                 facility: args.facility,
                 severity: args.severity,
                 start_at_end: Some(args.start_at_end),
-            }),
-            args.json,
-        ),
+            };
+            (req, args.json)
+        }
         FileTailCommand::Remove(args) => id_request(FileTailOp::Remove, args),
         FileTailCommand::Enable(args) => id_request(FileTailOp::Enable, args),
         FileTailCommand::Disable(args) => id_request(FileTailOp::Disable, args),
@@ -419,13 +419,14 @@ pub(crate) use super::dispatch_db::{
 };
 pub(crate) use super::dispatch_sessions::{
     run_ai_abuse, run_ai_add, run_ai_assess, run_ai_blocks, run_ai_checkpoints, run_ai_context,
-    run_ai_correlate, run_ai_doctor, run_ai_errors, run_ai_hook_events, run_ai_hooks_backfill,
-    run_ai_incident_context, run_ai_incidents, run_ai_index, run_ai_investigate,
-    run_ai_llm_invocations, run_ai_projects, run_ai_prune_checkpoints, run_ai_search,
-    run_ai_similar_incidents, run_ai_skill_incidents, run_ai_skill_investigate, run_ai_skills,
-    run_ai_skills_backfill, run_ai_smoke_watch, run_ai_tools, run_assess_abuse, run_assess_hooks,
-    run_assess_mcp, run_assess_skill, run_mcp_events, run_mcp_events_backfill, run_mcp_incidents,
-    run_mcp_investigate, run_sessions_watch, run_sessions_watch_status,
+    run_ai_correlate, run_ai_doctor, run_ai_errors, run_ai_hook_events, run_ai_hook_incidents,
+    run_ai_hook_investigate, run_ai_hooks_backfill, run_ai_incident_context, run_ai_incidents,
+    run_ai_index, run_ai_investigate, run_ai_llm_invocations, run_ai_projects,
+    run_ai_prune_checkpoints, run_ai_search, run_ai_similar_incidents, run_ai_skill_incidents,
+    run_ai_skill_investigate, run_ai_skills, run_ai_skills_backfill, run_ai_smoke_watch,
+    run_ai_tools, run_assess_abuse, run_assess_hooks, run_assess_mcp, run_assess_skill,
+    run_mcp_events, run_mcp_events_backfill, run_mcp_incidents, run_mcp_investigate,
+    run_sessions_watch, run_sessions_watch_status,
 };
 
 #[cfg(test)]

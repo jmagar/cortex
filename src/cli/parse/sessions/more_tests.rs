@@ -42,14 +42,12 @@ fn parse_sessions_similar_accepts_all_filters() {
 }
 
 #[test]
-fn parse_sessions_incident_context_requires_from_and_to() {
-    let args = strings(&["--since", "2026-01-01T00:00:00Z"]);
-
-    let err = parse_sessions_incident_context(&args)
-        .unwrap_err()
-        .to_string();
-
-    assert!(err.contains("requires --until"));
+fn parse_sessions_incident_context_accepts_shared_default_window() {
+    let command = parse_sessions_incident_context(&[]).unwrap();
+    assert!(matches!(
+        command,
+        crate::cli::CliCommand::Sessions(crate::cli::SessionsCommand::IncidentContext(_))
+    ));
 }
 
 #[test]
@@ -68,8 +66,8 @@ fn parse_sessions_incident_context_accepts_full_filter_set() {
 
     match command {
         crate::cli::CliCommand::Sessions(crate::cli::SessionsCommand::IncidentContext(args)) => {
-            assert_eq!(args.since, "2026-01-01T00:00:00+00:00");
-            assert_eq!(args.until, "2026-01-01T00:10:00+00:00");
+            assert_eq!(args.since.as_deref(), Some("2026-01-01T00:00:00+00:00"));
+            assert_eq!(args.until.as_deref(), Some("2026-01-01T00:10:00+00:00"));
             assert_eq!(args.query.as_deref(), Some("panic"));
             assert_eq!(args.limit, Some(12));
             assert!(args.json);
@@ -222,8 +220,9 @@ fn parse_sessions_more_reports_required_query_and_unexpected_argument_errors() {
                 "--since=2026-01-01T00:00:00Z",
                 "--until=2026-01-01T00:10:00Z",
                 "extra",
+                "second",
             ],
-            "unexpected positional argument",
+            "unexpected sessions incidentcontext argument",
         ),
         (
             parse_sessions_incidents,
@@ -282,14 +281,14 @@ fn parse_sessions_llm_invocations_rejects_unknown_flag() {
     let err = parse_sessions_llm_invocations(&strings(&["--bogus"]))
         .unwrap_err()
         .to_string();
-    assert!(err.contains("unknown flag for sessions llm-invocations"));
+    assert!(err.contains("unknown flag for sessions llminvocations"));
 }
 
 #[test]
 fn parse_sessions_skill_assess_forwards_positional_skill() {
     let cmd = crate::cli::CliCommand::parse(vec![
         "sessions".to_string(),
-        "skill-assess".to_string(),
+        "skillassess".to_string(),
         "frustration-assessment".to_string(),
     ])
     .unwrap();

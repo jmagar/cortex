@@ -1085,7 +1085,7 @@ async fn run_ai_smoke_watch_http_bails_with_inline_message() {
         .expect_err("must bail in http mode");
     assert_eq!(
         err.to_string(),
-        "sessions smoke-watch writes synthetic transcript to host fs; omit --http"
+        "sessions smokewatch writes synthetic transcript to host fs; omit --http"
     );
 }
 
@@ -1097,7 +1097,7 @@ async fn run_sessions_watch_status_http_bails_with_inline_message() {
         .expect_err("must bail in http mode");
     assert_eq!(
         err.to_string(),
-        "sessions watch-status shells out to systemctl on host; omit --http"
+        "sessions watchstatus shells out to systemctl on host; omit --http"
     );
 }
 

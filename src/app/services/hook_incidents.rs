@@ -105,7 +105,7 @@ impl CortexService {
             let suggested_filters = vec![
                 "widen --since (e.g. --since 30d)".to_string(),
                 "drop --hook and list all hook incidents".to_string(),
-                "run `cortex sessions hook-events` with no filters to see what hooks have events"
+                "run `cortex sessions hookevents` with no filters to see what hooks have events"
                     .to_string(),
             ];
             return Ok(AiHookInvestigateResponse {

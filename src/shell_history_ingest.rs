@@ -2,9 +2,9 @@
 //! of pre-parsed zsh/bash extended-history or atuin records forwarded by a
 //! satellite host's `cortex agent` (see `agent::shell_history`) and inserts
 //! them into this server's own log store via `db::insert_logs_batch`, the
-//! same path `cortex shell user index`/`shell user atuin-index` use locally.
+//! same path `cortex ingest shell user index`/`atuinindex` use locally.
 //!
-//! Local `cortex shell user index`/`shell user atuin-index` have no forward
+//! Local `cortex ingest shell user index`/`atuinindex` have no forward
 //! mode at all — this endpoint exists so a host's own interactive command
 //! history reaches wherever the shared cortex server actually lives, the
 //! same way syslog/Docker/heartbeat/AI-transcript/agent-command data does.

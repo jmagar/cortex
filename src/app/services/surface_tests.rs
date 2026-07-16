@@ -26,28 +26,25 @@ async fn assert_heavy_limited<T: std::fmt::Debug>(result: ServiceResult<T>) {
 }
 
 #[tokio::test]
-async fn state_host_preserves_existing_validation() {
+async fn state_host_without_live_heartbeats_returns_empty_state() {
     let (service, _pool, _dir) = test_service();
 
-    let err = service
+    let response = service
         .state(StateRequest::Host(HostStateRequest::default()))
         .await
-        .unwrap_err();
+        .unwrap();
 
-    assert!(
-        matches!(err, ServiceError::InvalidInput(ref message) if message == "host_state requires host_id or host"),
-        "unexpected error: {err:?}"
-    );
+    assert!(matches!(response, StateResponse::Host(state) if state.is_none()));
 }
 
 #[tokio::test]
-async fn correlate_state_preserves_required_reference_time_validation() {
+async fn correlate_state_uses_shared_reference_time_default() {
     let (service, _pool, _dir) = test_service();
 
     let err = service
         .correlate_domain(CorrelateRequest::State(
             crate::app::models::CorrelateStateRequest {
-                reference_time: String::new(),
+                reference_time: None,
                 window_minutes: None,
                 host: None,
                 severity_min: None,
@@ -55,12 +52,10 @@ async fn correlate_state_preserves_required_reference_time_validation() {
             },
         ))
         .await
-        .unwrap_err();
+        .unwrap();
 
-    assert!(
-        matches!(err, ServiceError::InvalidInput(ref message) if message == "correlate_state requires reference_time"),
-        "unexpected error: {err:?}"
-    );
+    assert!(!err.window.from.is_empty());
+    assert!(!err.window.to.is_empty());
 }
 
 #[tokio::test]
@@ -108,7 +103,7 @@ async fn analysis_incident_preserves_mutually_exclusive_host_service_validation(
 
     let err = service
         .analysis(AnalysisRequest::Incident(IncidentRequest {
-            around: "2026-01-01T00:00:00Z".into(),
+            around: Some("2026-01-01T00:00:00Z".into()),
             minutes: None,
             host: Some("dookie".into()),
             service: Some("cortex.service".into()),

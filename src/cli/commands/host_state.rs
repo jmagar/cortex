@@ -1,7 +1,7 @@
-//! Parse function for `cortex host-state`.
+//! Parse function for `cortex state host`.
 //!
 //! Surface parity (cxih.4): exposes the `host_state` MCP action and
-//! `GET /api/host-state` REST route as a top-level CLI subcommand.
+//! `GET /api/host-state` REST route through the nested CLI command.
 
 use anyhow::{Result, bail};
 
@@ -28,13 +28,13 @@ pub(crate) fn parse_host_state_args(args: &[String]) -> Result<HostStateArgs> {
             bail!(
                 "{}",
                 super::super::suggest::unknown_option(
-                    "host-state",
+                    "state host",
                     &arg,
                     &["--json", "--host-id", "--host", "--since", "--limit"],
                 )
             );
         } else {
-            // A bare positional binds to --host (e.g. `cortex host-state dookie`).
+            // A bare positional binds to --host (e.g. `cortex state host dookie`).
             positionals.push(arg);
         }
     }
@@ -43,11 +43,6 @@ pub(crate) fn parse_host_state_args(args: &[String]) -> Result<HostStateArgs> {
             bail!("--host and a positional host are mutually exclusive");
         }
         parsed.host = Some(host);
-    }
-    if parsed.host_id.is_none() && parsed.host.is_none() {
-        bail!(
-            "state host requires --host-id ID or --host HOST\n\nUsage: cortex state host [--host-id ID] [--host HOST] [--since TIME] [--limit N] [--json]"
-        );
     }
     Ok(parsed)
 }

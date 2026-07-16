@@ -291,7 +291,7 @@ plan (`docs/superpowers/plans/2026-05-21-surface-parity.md`).
 | `cortex hosts sources [--limit N] [--offset N]` | both | local SQLite / REST `/api/source-ips` | `source_ips` |
 | `cortex timeline [--bucket ...] [--group-by ...] [filters]` | both | local SQLite / REST `/api/timeline` | `timeline` |
 | `cortex analysis patterns [filters] [--scan-limit N] [--top-n N]` | both | local SQLite / REST `/api/patterns` | `patterns` |
-| `cortex stats ingest-rate [--by-host]` | both | local SQLite / REST `/api/ingest-rate` | `ingest_rate` |
+| `cortex stats ingestrate [--by-host]` | both | local SQLite / REST `/api/ingest-rate` | `ingest_rate` |
 | `cortex alerts signatures [--include-acknowledged] [--limit N]` | both | local SQLite / REST `/api/errors/unaddressed` | `unaddressed_errors` |
 | `cortex alerts signatures ack HASH [--notes TEXT]` | both | local SQLite / REST `/api/errors/ack` | `ack_error` |
 | `cortex alerts signatures unack HASH [--reason TEXT]` | both | local SQLite / REST `/api/errors/unack` | `unack_error` |

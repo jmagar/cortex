@@ -42,26 +42,28 @@ const SESSIONS_SUBCOMMANDS: &[&str] = &[
     "watch",
     "checkpoints",
     "errors",
-    "prune-checkpoints",
+    "prunecheckpoints",
     "doctor",
-    "watch-status",
-    "smoke-watch",
+    "watchstatus",
+    "smokewatch",
     "similar",
-    "incident-context",
+    "incidentcontext",
     "incidents",
     "investigate",
     "assess",
-    "llm-invocations",
+    "llminvocations",
     "skills",
-    "skill-incidents",
-    "skill-investigate",
-    "skill-assess",
-    "mcp-events",
-    "mcp-incidents",
-    "mcp-investigate",
-    "mcp-assess",
-    "hook-events",
-    "hooks-backfill",
+    "skillincidents",
+    "skillinvestigate",
+    "skillassess",
+    "mcpevents",
+    "mcpincidents",
+    "mcpinvestigate",
+    "mcpassess",
+    "hookevents",
+    "hookincidents",
+    "hookinvestigate",
+    "hooksbackfill",
 ];
 
 pub(crate) fn parse_sessions_command(args: &[String]) -> Result<CliCommand> {
@@ -84,30 +86,32 @@ pub(crate) fn parse_sessions_command(args: &[String]) -> Result<CliCommand> {
         "watch" => parse_sessions_watch(rest),
         "checkpoints" => parse_sessions_checkpoints(rest),
         "errors" => parse_sessions_errors(rest),
-        "prune-checkpoints" => parse_sessions_prune_checkpoints(rest),
+        "prunecheckpoints" => parse_sessions_prune_checkpoints(rest),
         "doctor" => parse_sessions_doctor(rest),
-        "watch-status" => Ok(CliCommand::Sessions(SessionsCommand::WatchStatus(
-            parse_output_args("sessions watch-status", rest)?,
+        "watchstatus" => Ok(CliCommand::Sessions(SessionsCommand::WatchStatus(
+            parse_output_args("sessions watchstatus", rest)?,
         ))),
-        "smoke-watch" => Ok(CliCommand::Sessions(SessionsCommand::SmokeWatch(
-            parse_output_args("sessions smoke-watch", rest)?,
+        "smokewatch" => Ok(CliCommand::Sessions(SessionsCommand::SmokeWatch(
+            parse_output_args("sessions smokewatch", rest)?,
         ))),
         "similar" => parse_sessions_similar(rest),
-        "incident-context" => parse_sessions_incident_context(rest),
+        "incidentcontext" => parse_sessions_incident_context(rest),
         "incidents" => parse_sessions_incidents(rest),
         "investigate" => parse_sessions_investigate(rest),
         "assess" => parse_sessions_assess(rest),
-        "llm-invocations" => parse_sessions_llm_invocations(rest),
+        "llminvocations" => parse_sessions_llm_invocations(rest),
         "skills" => self::skills::parse_sessions_skills(rest),
-        "skill-incidents" => parse_sessions_skill_incidents(rest),
-        "skill-investigate" => parse_sessions_skill_investigate(rest),
-        "skill-assess" => parse_sessions_skill_assess(rest),
-        "mcp-events" => parse_sessions_mcp_events(rest),
-        "mcp-incidents" => parse_sessions_mcp_incidents(rest),
-        "mcp-investigate" => parse_sessions_mcp_investigate(rest),
-        "mcp-assess" => parse_sessions_mcp_assess(rest),
-        "hook-events" => self::hooks::parse_sessions_hook_events(rest),
-        "hooks-backfill" => self::hooks::parse_sessions_hooks_backfill(rest),
+        "skillincidents" => parse_sessions_skill_incidents(rest),
+        "skillinvestigate" => parse_sessions_skill_investigate(rest),
+        "skillassess" => parse_sessions_skill_assess(rest),
+        "mcpevents" => parse_sessions_mcp_events(rest),
+        "mcpincidents" => parse_sessions_mcp_incidents(rest),
+        "mcpinvestigate" => parse_sessions_mcp_investigate(rest),
+        "mcpassess" => parse_sessions_mcp_assess(rest),
+        "hookevents" => self::hooks::parse_sessions_hook_events(rest),
+        "hookincidents" => self::hooks::parse_sessions_hook_incidents(rest),
+        "hookinvestigate" => self::hooks::parse_sessions_hook_investigate(rest),
+        "hooksbackfill" => self::hooks::parse_sessions_hooks_backfill(rest),
         _ => bail!(
             "{}",
             super::suggest::unknown_command(
@@ -387,7 +391,7 @@ pub(crate) fn parse_sessions_context(args: &[String]) -> Result<CliCommand> {
         }
     }
     if parsed.project.is_empty() {
-        bail!("sessions context requires --project <PATH>");
+        bail!("sessions context requires PROJECT");
     }
     Ok(CliCommand::Sessions(SessionsCommand::Context(parsed)))
 }

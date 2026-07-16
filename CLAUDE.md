@@ -200,7 +200,7 @@ CORTEX_API_TOKEN=your-api-token         # REQUIRED at startup — /api/* is alwa
 
 # Managed file-tail sources
 # Stored in the parent directory of CORTEX_DB_PATH as file-tails.json.
-# Manage with: cortex ingest file-tail list|status|add|remove|enable|disable
+# Manage with: cortex ingest filetail list|status|add|remove|enable|disable
 
 # Legacy central pull Docker ingestion compatibility mode (disabled by default)
 # Current deployments use the host-local cortex agent, which streams Docker logs
@@ -405,6 +405,6 @@ calendar reminder to rotate it.
 
 ## Plugin setup hooks
 
-Plugin setup is owned by the binary. Keep `scripts/plugin-setup.sh` as a thin adapter that maps `CLAUDE_PLUGIN_OPTION_*` values to environment variables, prepares appdata, ensures `cortex` is on `PATH`, and then calls `cortex setup plugin-hook "$@"`.
+Plugin setup is owned by the binary. Keep `scripts/plugin-setup.sh` as a thin adapter that maps `CLAUDE_PLUGIN_OPTION_*` values to environment variables, prepares appdata, ensures `cortex` is on `PATH`, and then calls `cortex setup pluginhook "$@"`.
 
-`cortex setup check` is read-only, `cortex setup repair` is idempotent, and `cortex setup plugin-hook --no-repair` is audit mode. Do not add Docker Compose, systemd, or service bootstrap logic back into the hook script.
+`cortex setup check` is read-only, `cortex setup repair` is idempotent, and `cortex setup pluginhook --no-repair` is audit mode. Do not add Docker Compose, systemd, or service bootstrap logic back into the hook script.

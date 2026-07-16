@@ -46,7 +46,7 @@ pub async fn run_debug_wrapper_setup(action: DebugWrapperAction) -> io::Result<S
             phases.push(check_file_phase(
                 "debug-wrapper",
                 &wrapper_path,
-                "run cortex setup debug-wrapper install",
+                "run cortex setup debugwrapper install",
             ));
             phases.push(check_debug_wrapper_content_phase(&wrapper_path, &repo_path));
         }
@@ -102,7 +102,7 @@ pub async fn run_debug_compose_setup(action: DebugComposeAction) -> io::Result<S
             phases.push(check_file_phase(
                 "debug-compose",
                 &override_path,
-                "run cortex setup debug-compose install",
+                "run cortex setup debugcompose install",
             ));
             phases.push(check_debug_compose_content_phase(
                 &override_path,
