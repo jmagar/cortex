@@ -275,7 +275,7 @@ fn command_plan(paths: &[String], categories: &Categories, full: bool) -> Vec<Pl
     if full || categories.rust {
         plan.push(PlanStep {
             name: "module-size",
-            command: "bash scripts/check-rust-module-size.sh --limit 500 src/cli.rs src/cli",
+            command: "bash scripts/check-rust-module-size.sh --limit 500",
         });
         plan.push(PlanStep {
             name: "clippy",

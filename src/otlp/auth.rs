@@ -1,8 +1,8 @@
 //! OTLP request authorization: bearer-token gate, unauthorized-response
 //! shaping, and rate-limited unauthorized-attempt logging.
 
-use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::num::NonZeroUsize;
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
@@ -13,6 +13,7 @@ use axum::{
     },
     response::{IntoResponse, Json},
 };
+use lru::LruCache;
 use serde_json::json;
 use sha2::{Digest, Sha256};
 
@@ -49,8 +50,16 @@ pub(super) struct UnauthorizedDiagnostics {
     pub(super) user_agent: String,
 }
 
-static UNAUTHORIZED_WARNINGS: LazyLock<Mutex<HashMap<String, Instant>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
+// LRU-bounded (not scan-evicted): a flooding attacker generating >MAX_KEYS
+// distinct fingerprints per interval can still evict older entries, but each
+// *new* distinct key is always recorded and warned on — eviction never
+// permanently wedges the table the way a "drop only if stale" scan can.
+static UNAUTHORIZED_WARNINGS: LazyLock<Mutex<LruCache<String, Instant>>> = LazyLock::new(|| {
+    Mutex::new(LruCache::new(
+        NonZeroUsize::new(UNAUTHORIZED_WARNING_MAX_KEYS)
+            .expect("UNAUTHORIZED_WARNING_MAX_KEYS > 0"),
+    ))
+});
 
 const UNAUTHORIZED_WARNING_INTERVAL: Duration = Duration::from_secs(60);
 const UNAUTHORIZED_WARNING_MAX_KEYS: usize = 1024;
@@ -65,13 +74,7 @@ pub(super) fn should_warn_unauthorized(
     let Ok(mut warnings) = UNAUTHORIZED_WARNINGS.lock() else {
         return true;
     };
-    record_unauthorized_warning(
-        &mut warnings,
-        key,
-        now,
-        UNAUTHORIZED_WARNING_INTERVAL,
-        UNAUTHORIZED_WARNING_MAX_KEYS,
-    )
+    record_unauthorized_warning(&mut warnings, key, now, UNAUTHORIZED_WARNING_INTERVAL)
 }
 
 fn unauthorized_warning_key(peer: &SocketAddr, diagnostics: &UnauthorizedDiagnostics) -> String {
@@ -85,22 +88,15 @@ fn unauthorized_warning_key(peer: &SocketAddr, diagnostics: &UnauthorizedDiagnos
 }
 
 fn record_unauthorized_warning(
-    warnings: &mut HashMap<String, Instant>,
+    warnings: &mut LruCache<String, Instant>,
     key: String,
     now: Instant,
     interval: Duration,
-    max_keys: usize,
 ) -> bool {
     match warnings.get(&key).copied() {
         Some(last) if now.duration_since(last) < interval => false,
         _ => {
-            if warnings.len() >= max_keys {
-                warnings.retain(|_, last| now.duration_since(*last) < interval);
-            }
-            if !warnings.contains_key(&key) && warnings.len() >= max_keys {
-                return false;
-            }
-            warnings.insert(key, now);
+            warnings.put(key, now);
             true
         }
     }

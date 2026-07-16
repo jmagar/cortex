@@ -104,9 +104,13 @@ fn unauthorized_diagnostics_handles_missing_auth() {
     assert_eq!(diagnostics.user_agent, "unknown");
 }
 
+fn test_lru(cap: usize) -> LruCache<String, Instant> {
+    LruCache::new(NonZeroUsize::new(cap).unwrap())
+}
+
 #[test]
 fn unauthorized_warning_rate_limit_suppresses_repeats_per_key() {
-    let mut warnings = std::collections::HashMap::new();
+    let mut warnings = test_lru(1024);
     let now = std::time::Instant::now();
     let interval = std::time::Duration::from_secs(60);
     let key = "100.88.16.79|bearer|abcdef123456|otel".to_string();
@@ -115,28 +119,32 @@ fn unauthorized_warning_rate_limit_suppresses_repeats_per_key() {
         &mut warnings,
         key.clone(),
         now,
-        interval,
-        1024
+        interval
     ));
     assert!(!record_unauthorized_warning(
         &mut warnings,
         key.clone(),
         now + std::time::Duration::from_secs(30),
         interval,
-        1024
     ));
     assert!(record_unauthorized_warning(
         &mut warnings,
         key,
         now + interval,
         interval,
-        1024
     ));
 }
 
+// Regression test for syslog-mcp-zy9bs: the old scan-based eviction
+// (`retain` entries newer than `interval`) never dropped fresh entries, so
+// once an attacker filled the cap with distinct fingerprints inside one
+// interval, EVERY subsequent distinct key -- including a real, different
+// attacker -- was silently suppressed until the flooded entries aged out.
+// LRU eviction guarantees the newest distinct key is always recorded and
+// warned on, at the cost of evicting the least-recently-seen entry.
 #[test]
-fn unauthorized_warning_rate_limit_hard_caps_recent_unique_keys() {
-    let mut warnings = std::collections::HashMap::new();
+fn unauthorized_warning_rate_limit_evicts_oldest_key_when_at_capacity() {
+    let mut warnings = test_lru(4);
     let now = std::time::Instant::now();
     let interval = std::time::Duration::from_secs(60);
 
@@ -146,17 +154,19 @@ fn unauthorized_warning_rate_limit_hard_caps_recent_unique_keys() {
             format!("key-{i}"),
             now,
             interval,
-            4
         ));
     }
-    assert!(!record_unauthorized_warning(
+    // A 5th distinct key at capacity still warns -- it is never silently
+    // dropped -- and evicts the least-recently-used entry (key-0) to do so.
+    assert!(record_unauthorized_warning(
         &mut warnings,
         "key-4".to_string(),
         now,
         interval,
-        4
     ));
     assert_eq!(warnings.len(), 4);
+    assert!(warnings.peek("key-0").is_none());
+    assert!(warnings.peek("key-4").is_some());
 }
 
 #[test]

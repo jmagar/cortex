@@ -3,10 +3,12 @@
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::sync::{LazyLock, Mutex};
+use std::time::{Duration, Instant};
 
 use opentelemetry_proto::tonic::{
     collector::logs::v1::ExportLogsServiceRequest,
-    common::v1::{AnyValue, any_value::Value as AnyValueKind},
+    common::v1::{AnyValue, KeyValue, any_value::Value as AnyValueKind},
 };
 
 use crate::db::LogBatchEntry;
@@ -29,12 +31,7 @@ pub(super) fn build_entries(
         let resource_attrs: HashMap<&str, &AnyValue> = resource_logs
             .resource
             .as_ref()
-            .map(|r| {
-                r.attributes
-                    .iter()
-                    .filter_map(|kv| kv.value.as_ref().map(|v| (kv.key.as_str(), v)))
-                    .collect()
-            })
+            .map(|r| collect_attrs(&r.attributes))
             .unwrap_or_default();
         let hostname = resource_attrs
             .get("host.name")
@@ -49,11 +46,7 @@ pub(super) fn build_entries(
 
         for scope_logs in &resource_logs.scope_logs {
             for log in &scope_logs.log_records {
-                let log_attrs: HashMap<&str, &AnyValue> = log
-                    .attributes
-                    .iter()
-                    .filter_map(|kv| kv.value.as_ref().map(|v| (kv.key.as_str(), v)))
-                    .collect();
+                let log_attrs: HashMap<&str, &AnyValue> = collect_attrs(&log.attributes);
 
                 let ai_session_id = log_attrs
                     .get("session.id")
@@ -127,6 +120,36 @@ pub(super) fn build_entries(
     out
 }
 
+/// Collect an OTLP attribute list into a key → value map, dropping entries
+/// [`attr_key`] can't resolve. Shared by the resource- and log-level
+/// attribute sites in [`build_entries`].
+fn collect_attrs(kvs: &[KeyValue]) -> HashMap<&str, &AnyValue> {
+    kvs.iter()
+        .filter_map(|kv| {
+            let key = attr_key(kv)?;
+            kv.value.as_ref().map(|v| (key, v))
+        })
+        .collect()
+}
+
+/// Resolve an OTLP `KeyValue`'s attribute key, skipping entries that rely on
+/// string-table-indexed keys (`key_strindex != 0`, an experimental OTLP dedup
+/// encoding cortex doesn't implement). Per the wire format, `key_strindex`
+/// takes precedence over `key` whenever it's set (nonzero), even if `key` is
+/// also non-empty -- including the entry under a resolved-looking key would
+/// use stale/wrong data, and including it under an empty key would silently
+/// collide distinct attributes onto the same "" slot (last-one-wins); skip
+/// it explicitly instead. `key_strindex == 0` means "not indexed" per the
+/// wire format, so a genuinely empty attribute key is still passed through
+/// unchanged.
+fn attr_key(kv: &KeyValue) -> Option<&str> {
+    if kv.key_strindex != 0 {
+        warn_key_strindex_rate_limited(kv.key_strindex);
+        return None;
+    }
+    Some(kv.key.as_str())
+}
+
 fn attrs_to_json(attrs: &HashMap<&str, &AnyValue>) -> serde_json::Value {
     attrs_to_metadata_object(
         attrs
@@ -147,9 +170,93 @@ fn any_value_to_json(v: &AnyValue) -> serde_json::Value {
         Some(AnyValueKind::ArrayValue(arr)) => serde_json::json!({"array_len": arr.values.len()}),
         Some(AnyValueKind::KvlistValue(kv)) => serde_json::json!({"kvlist_len": kv.values.len()}),
         Some(AnyValueKind::StringValueStrindex(idx)) => {
+            warn_value_strindex_rate_limited(*idx);
             serde_json::json!({"string_table_index": idx})
         }
         None => serde_json::Value::Null,
+    }
+}
+
+// `key_strindex`/`StringValueStrindex` are experimental OTLP wire features
+// primarily intended for the Profiling signal (per upstream .proto
+// comments); seeing either on the Logs endpoint indicates a non-conformant
+// or misconfigured producer. Each gets its own independent rate-limited
+// warning below -- they're distinct diagnostic signals (a dropped attribute
+// key vs. an opaque placeholder value) that can occur independently, so
+// sharing one gate would let one suppress visibility into the other. Both
+// are rate-limited by signal type, not by sender (unlike `otlp::auth`'s
+// per-attacker UNAUTHORIZED_WARNINGS) -- there is no useful per-sender key
+// here, just "have we already flagged this recently". Sharing the pure gate
+// function (not the state) is enough: no per-sender cardinality to bound,
+// so a plain `Option<Instant>` cell suffices for each.
+static LAST_KEY_STRINDEX_WARNING: LazyLock<Mutex<Option<Instant>>> =
+    LazyLock::new(|| Mutex::new(None));
+static LAST_VALUE_STRINDEX_WARNING: LazyLock<Mutex<Option<Instant>>> =
+    LazyLock::new(|| Mutex::new(None));
+
+const STRING_TABLE_INDEX_WARNING_INTERVAL: Duration = Duration::from_secs(60);
+
+fn warn_key_strindex_rate_limited(key_strindex: i32) {
+    // Fail closed (skip the warning) on a poisoned lock: unlike
+    // otlp::auth's UNAUTHORIZED_WARNINGS, this gate protects a diagnostic-
+    // only signal, not a security-relevant one, so there's nothing lost by
+    // staying quiet until the next successful lock.
+    let Ok(mut last) = LAST_KEY_STRINDEX_WARNING.lock() else {
+        return;
+    };
+    if record_string_table_index_warning(
+        &mut last,
+        Instant::now(),
+        STRING_TABLE_INDEX_WARNING_INTERVAL,
+    ) {
+        tracing::warn!(
+            key_strindex,
+            "OTLP KeyValue.key_strindex seen on /v1/logs -- this wire feature \
+             is intended for the Profiling signal; the producer may be \
+             non-conformant or misconfigured. The attribute is dropped \
+             (cortex cannot resolve a string-table index to a real key)."
+        );
+    }
+}
+
+fn warn_value_strindex_rate_limited(string_table_index: i32) {
+    // Fail closed -- see warn_key_strindex_rate_limited's comment.
+    let Ok(mut last) = LAST_VALUE_STRINDEX_WARNING.lock() else {
+        return;
+    };
+    if record_string_table_index_warning(
+        &mut last,
+        Instant::now(),
+        STRING_TABLE_INDEX_WARNING_INTERVAL,
+    ) {
+        tracing::warn!(
+            string_table_index,
+            "OTLP AnyValue::StringValueStrindex seen on /v1/logs -- this wire \
+             feature is intended for the Profiling signal; the producer may \
+             be non-conformant or misconfigured"
+        );
+    }
+}
+
+/// Pure interval gate shared by the two rate-limited warnings above: `true`
+/// (and updates `last`) once the cooldown has elapsed; `false` while still
+/// within it. Each caller owns its own `last` cell -- this only holds the
+/// gating logic, not the state, so it stays usable for both an unkeyed
+/// single-flag gate (here) and a keyed one (`otlp::auth`'s
+/// `record_unauthorized_warning` reimplements the same match arms against a
+/// `LruCache` instead, since that gate needs per-sender cardinality this one
+/// doesn't).
+fn record_string_table_index_warning(
+    last: &mut Option<Instant>,
+    now: Instant,
+    interval: Duration,
+) -> bool {
+    match *last {
+        Some(prev) if now.duration_since(prev) < interval => false,
+        _ => {
+            *last = Some(now);
+            true
+        }
     }
 }
 
@@ -215,7 +322,10 @@ fn any_value_to_string(v: &AnyValue) -> Option<String> {
         AnyValueKind::BytesValue(b) => Some(format!("[{} bytes]", b.len())),
         AnyValueKind::ArrayValue(arr) => Some(format!("[array len={}]", arr.values.len())),
         AnyValueKind::KvlistValue(kv) => Some(format!("[kvlist len={}]", kv.values.len())),
-        AnyValueKind::StringValueStrindex(idx) => Some(format!("[string_table_index={idx}]")),
+        AnyValueKind::StringValueStrindex(idx) => {
+            warn_value_strindex_rate_limited(*idx);
+            Some(format!("[string_table_index={idx}]"))
+        }
     }
 }
 
