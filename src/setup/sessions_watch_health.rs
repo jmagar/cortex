@@ -100,7 +100,7 @@ pub(crate) async fn run_sessions_watch_health_check_and_notify(
 fn doctor_service_unit(cortex_bin: &Path) -> io::Result<String> {
     let cortex_bin = setup_path_value(cortex_bin)?;
     Ok(format!(
-        "[Unit]\nDescription=cortex sessions-watch periodic health check\nDocumentation=https://github.com/jmagar/cortex\n\n[Service]\nType=oneshot\nExecStart={cortex_bin} setup sessions-watch-health-check --json\nUMask=0077\nNoNewPrivileges=true\nPrivateTmp=true\nProtectSystem=strict\nProtectHome=read-only\n\n[Install]\nWantedBy=default.target\n"
+        "[Unit]\nDescription=cortex sessions-watch periodic health check\nDocumentation=https://github.com/jmagar/cortex\n\n[Service]\nType=oneshot\nExecStart={cortex_bin} setup sessionshealth --json\nUMask=0077\nNoNewPrivileges=true\nPrivateTmp=true\nProtectSystem=strict\nProtectHome=read-only\n\n[Install]\nWantedBy=default.target\n"
     ))
 }
 
@@ -140,7 +140,7 @@ fn install_health_check_timer_files(
 
 /// Verify the installed doctor timer/service files match the expected
 /// generated content. Mirrors `check_ai_watch_service_content_phase` for the
-/// sibling watch service — without this, `cortex setup sessions-watch-service
+/// sibling watch service — without this, `cortex setup sessionswatch
 /// check`/`cortex setup doctor` could report healthy while the alerting
 /// mechanism itself is silently missing or stale, reintroducing a milder
 /// version of the blind spot this feature exists to close.
@@ -193,12 +193,12 @@ pub(super) fn check_doctor_timer_phases(systemd_dir: &Path, cortex_bin: &Path) -
         check_file_phase(
             "sessions-watch-doctor-service",
             &systemd_dir.join("cortex-sessions-watch-doctor.service"),
-            "run cortex setup sessions-watch-service install",
+            "run cortex setup sessionswatch install",
         ),
         check_file_phase(
             "sessions-watch-doctor-timer",
             &systemd_dir.join("cortex-sessions-watch-doctor.timer"),
-            "run cortex setup sessions-watch-service install",
+            "run cortex setup sessionswatch install",
         ),
         check_doctor_service_content_phase(systemd_dir, cortex_bin),
         systemctl_user_required_named_phase(

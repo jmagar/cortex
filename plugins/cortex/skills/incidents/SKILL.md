@@ -70,7 +70,7 @@ from step 1 as the `query` when following up on a specific signature.
 ### 5. Pull full context around a window
 
 `cortex action=incident_context since=<ISO> until=<ISO> [host=...] [app=...] [query=...] [severity_min=...] [limit=N]`
-(CLI: `cortex sessions incident-context --since <ISO> --until <ISO> [--host H] [--app A] [--query Q] [--severity-min S] [--limit N]`)
+(CLI: `cortex sessions incidentcontext --since <ISO> --until <ISO> [--host H] [--app A] [--query Q] [--severity-min S] [--limit N]`)
 
 Both `since` and `until` are **required** — there is no incident-id concept
 that threads automatically from the earlier steps into this one. Build the

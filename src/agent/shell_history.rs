@@ -2,7 +2,7 @@
 //! atuin) to the central cortex server via `POST /v1/shell-history` — one
 //! more supervised stream inside `cortex agent`.
 //!
-//! Local `cortex shell user index`/`shell user atuin-index` have zero
+//! Local `cortex ingest shell user index`/`atuinindex` have zero
 //! forward capability (they only ever write to whatever local SQLite file
 //! the process itself has open) — this is a real gap for the same reason
 //! AI-transcript and agent-command forwarding were: a host's shell activity

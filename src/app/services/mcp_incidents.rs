@@ -106,7 +106,7 @@ impl CortexService {
             let suggested_filters = vec![
                 "widen --since (e.g. --since 30d)".to_string(),
                 "drop --mcp-tool and filter by --mcp-server only".to_string(),
-                "run `cortex sessions mcp-incidents` with no filters to see what MCP servers \
+                "run `cortex sessions mcpincidents` with no filters to see what MCP servers \
                  have events"
                     .to_string(),
             ];

@@ -13,7 +13,15 @@ _cortex() {
     return
   fi
 
-  local action=${words[2]}
+  local -a prior
+  prior=("${words[2,CURRENT-1]}")
+
+  # Complete nested command paths before offering flags.
+  candidates=("${(@f)$(cortex __complete subcommands "${prior[@]}" 2>/dev/null)}")
+  if (( ${#candidates} )); then
+    _describe -t subcommands 'cortex subcommand' candidates
+    return
+  fi
 
   # After a flag that takes a value, complete the value (live hosts/apps/etc.).
   if [[ $prev == --* || $prev == -[a-z] ]]; then
@@ -26,7 +34,7 @@ _cortex() {
   fi
 
   # Otherwise complete this command's flags.
-  candidates=("${(@f)$(cortex __complete flags $action 2>/dev/null)}")
+  candidates=("${(@f)$(cortex __complete flags "${prior[@]}" 2>/dev/null)}")
   _describe -t flags 'flag' candidates
 }
 _cortex "$@"

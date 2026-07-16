@@ -92,6 +92,8 @@ async fn topic_resolves_project_and_builds_timeline() {
 
     let req = TopicCorrelateRequest {
         topic: "axon".to_string(),
+        since: Some("2026-01-01T00:00:00Z".into()),
+        until: Some("2026-01-01T01:00:00Z".into()),
         ..Default::default()
     };
     let resp = svc.topic_correlate(req).await.unwrap();
@@ -165,6 +167,8 @@ async fn topic_source_kind_filter_restricts_timeline() {
 
     let req = TopicCorrelateRequest {
         topic: "dookie".to_string(),
+        since: Some("2026-01-01T00:00:00Z".into()),
+        until: Some("2026-01-01T01:00:00Z".into()),
         source_kinds: Some(vec!["syslog-udp".to_string()]),
         ..Default::default()
     };
@@ -186,6 +190,8 @@ async fn topic_source_kind_accepts_string_form() {
 
     let req: TopicCorrelateRequest = serde_json::from_value(serde_json::json!({
         "topic": "dookie",
+        "since": "2026-01-01T00:00:00Z",
+        "until": "2026-01-01T01:00:00Z",
         "source_kinds": "syslog-udp"
     }))
     .unwrap();
@@ -283,6 +289,8 @@ async fn topic_plex_uses_service_instance_without_host_wide_fanout() {
     let resp = svc
         .topic_correlate(TopicCorrelateRequest {
             topic: "plex".to_string(),
+            since: Some("2026-01-01T00:00:00Z".into()),
+            until: Some("2026-01-01T01:00:00Z".into()),
             limit: Some(10),
             ..Default::default()
         })
@@ -368,4 +376,41 @@ async fn topic_service_instance_fallback_to_host_context_is_explicit() {
         );
         assert_eq!(row.resolver_status.as_deref(), Some("degraded"));
     }
+}
+
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn topic_defaults_since_to_one_hour_before_until() {
+    let _guard = crate::db::graph::GRAPH_TEST_LOCK.lock();
+    let (svc, pool, _dir) = test_service();
+    let mut older = syslog("2026-01-01T00:30:00Z", "dookie", "cortex");
+    older.message = "outside default window".into();
+    older.raw = older.message.clone();
+    let mut recent = syslog("2026-01-01T01:30:00Z", "dookie", "cortex");
+    recent.message = "inside default window".into();
+    recent.raw = recent.message.clone();
+    insert_logs_batch(&pool, &[older, recent]).unwrap();
+    crate::db::graph::refresh_graph_projection(&pool).unwrap();
+
+    let response = svc
+        .topic_correlate(TopicCorrelateRequest {
+            topic: "dookie".into(),
+            until: Some("2026-01-01T02:00:00Z".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    assert!(
+        response
+            .timeline
+            .iter()
+            .any(|row| row.message == "inside default window")
+    );
+    assert!(
+        response
+            .timeline
+            .iter()
+            .all(|row| row.message != "outside default window")
+    );
 }

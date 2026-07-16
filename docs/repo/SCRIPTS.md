@@ -19,7 +19,7 @@ Scripts used for maintenance, hooks, and testing.
 | Script | Purpose | Trigger |
 | --- | --- | --- |
 | `plugins/cortex/hooks/hooks.json` | Claude Code lifecycle hook configuration | Claude Code lifecycle |
-| `scripts/plugin-setup.sh` | Manual legacy adapter that delegates to `cortex setup plugin-hook` | Manual repair / compatibility |
+| `scripts/plugin-setup.sh` | Manual legacy adapter that delegates to `cortex setup pluginhook` | Manual repair / compatibility |
 | `scripts/block-env-commits.sh` | Blocks env credential commits when installed as a pre-commit hook | Git pre-commit |
 
 

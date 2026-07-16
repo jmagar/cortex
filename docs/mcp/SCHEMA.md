@@ -157,9 +157,9 @@ See [CORRELATION.md](CORRELATION.md) for the full behavior matrix.
 | `ai_correlate` | `project`, `tool`, `session_id`, `ai_query`, `log_query`, `hostname`, `source_ip`, `app_name`, `from`, `to`, `window_minutes`, `severity_min`, `limit`, `events_per_anchor` |
 | `abuse_investigate` | `project`, `tool`, `from`, `to`, `limit`, `window_minutes`, `correlation_window_minutes`, `terms` |
 | `similar_incidents` | `query`, `hostname`, `app_name`, `severity_min`, `from`, `to`, `window_minutes`, `limit` |
-| `incident_context` | `from`, `to`, `hostname`, `app_name`, `severity_min`, `limit`; `query` is accepted by the request shape but intentionally ignored in v1 |
+| `incident_context` | `from`, `to`, `hostname`, `app_name`, `query`, `severity_min`, `limit`; `query` applies FTS5 filtering to returned error logs |
 | `graph` | `mode=entity|around|explain|evidence`; entity/around/explain require exactly one target lookup strategy (`entity_id`, `entity_type` + `key`, or `alias_type` + `alias_key`); `around` accepts `depth=1` only; `explain` accepts `depth=1..3`; `evidence` requires `evidence_id`; optional `limit`, `evidence_sample_limit`, `payload_budget` |
-| `file_tails` | `op` is required and enumerated as `list`, `add`, `remove`, `enable`, `disable`, or `status`; add requires `id`, `path`, `tag`, and `hostname`; remove/enable/disable require `id`; optional `facility`, `severity`, `start_at_end` |
+| `file_tails` | `op` is required and enumerated as `list`, `add`, `remove`, `enable`, `disable`, or `status`; add requires only `path`, derives `id` and `tag` from the file name, and derives omitted `host` as stable synthetic owner `file-tail-<id>`; remove/enable/disable require `id`; optional `facility`, `severity`, `start_at_end` |
 
 ## Validation
 

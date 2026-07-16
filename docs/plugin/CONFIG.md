@@ -38,7 +38,7 @@ installer:
 
 ```text
 plugin userConfig
-  --> bin/cortex setup plugin-hook exports CORTEX_* overrides
+  --> bin/cortex setup pluginhook exports CORTEX_* overrides
     --> cortex setup repair (same engine as cortex setup deploy local)
       --> ~/.cortex/.env + ~/.cortex/compose/docker-compose.yml
         --> Docker Compose cortex container

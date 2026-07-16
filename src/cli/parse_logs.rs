@@ -1,6 +1,6 @@
 use anyhow::{Result, bail};
 
-use super::argdefaults::{effective_limit, effective_since, positional_value};
+use super::argdefaults::positional_value;
 use super::parse_common::{FlagCursor, parse_output_args, parse_u32_flag, value_after_equals};
 use super::{
     CliCommand, CorrelateArgs, FilterArgs, HostsCommand, IncidentArgs, IngestRateArgs,
@@ -90,7 +90,6 @@ pub(crate) fn parse_search(args: &[String]) -> Result<CliCommand> {
     if parsed.grep.as_deref().is_some_and(|g| g.trim().is_empty()) {
         bail!("--grep requires non-empty text");
     }
-    parsed.limit = effective_limit("search", parsed.limit);
     Ok(CliCommand::Search(parsed))
 }
 
@@ -238,7 +237,6 @@ pub(crate) fn parse_tail(args: &[String]) -> Result<CliCommand> {
         }
         parsed.host = Some(host);
     }
-    parsed.n = effective_limit("tail", parsed.n);
     Ok(CliCommand::Tail(parsed))
 }
 
@@ -266,8 +264,6 @@ pub(crate) fn parse_errors(args: &[String]) -> Result<CliCommand> {
             _ => bail!("unknown errors option: {arg}"),
         }
     }
-    // Default to a recent window (last hour) when the user gives no --since.
-    parsed.since = effective_since("errors", parsed.since)?;
     Ok(CliCommand::Errors(parsed))
 }
 
@@ -369,11 +365,9 @@ pub(crate) fn parse_incident(args: &[String]) -> Result<CliCommand> {
                 )?)
             }
             _ if arg.starts_with('-') => bail!("unknown incident option: {arg}"),
+            _ if parsed.around.is_empty() => parsed.around = norm_time(arg)?,
             _ => bail!("unexpected incident argument: {arg}"),
         }
-    }
-    if parsed.around.is_empty() {
-        bail!("incident requires --around <RFC3339>");
     }
     Ok(CliCommand::Incident(parsed))
 }
@@ -443,9 +437,6 @@ or omit --reference-time and pass --query \"<text>\" to derive it from a matchin
             }
             _ => bail!("unexpected correlate argument: {arg}"),
         }
-    }
-    if parsed.reference_time.is_none() && parsed.query.is_none() {
-        bail!("correlate requires --reference-time <RFC3339> or --query <text>");
     }
     Ok(CliCommand::Correlate(parsed))
 }
@@ -545,7 +536,7 @@ pub(crate) fn parse_ingest_rate_args(args: &[String]) -> Result<IngestRateArgs> 
         match arg.as_str() {
             "--json" => parsed.json = true,
             "--by-host" => parsed.by_host = true,
-            _ => bail!("unknown ingest-rate option: {arg}"),
+            _ => bail!("unknown ingestrate option: {arg}"),
         }
     }
     Ok(parsed)

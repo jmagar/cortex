@@ -141,7 +141,7 @@ fn mode_parse_accepts_setup_namespace() {
     assert!(matches!(
         Mode::parse(vec![
             "setup".into(),
-            "plugin-hook".into(),
+            "pluginhook".into(),
             "--no-repair".into(),
             "--json".into()
         ])
@@ -155,11 +155,28 @@ fn mode_parse_accepts_setup_namespace() {
 }
 
 #[test]
+fn mode_parse_accepts_one_word_setup_commands() {
+    for name in [
+        "sessionstimer",
+        "sessionswatch",
+        "heartbeatagent",
+        "debugwrapper",
+        "debugcompose",
+    ] {
+        assert!(
+            Mode::parse(vec!["setup".into(), name.into(), "check".into()]).is_ok(),
+            "setup {name} should parse"
+        );
+    }
+    assert!(Mode::parse(vec!["setup".into(), "sessionshealth".into()]).is_ok());
+}
+
+#[test]
 fn mode_parse_accepts_sessions_index_timer_setup_namespace() {
     assert!(matches!(
         Mode::parse(vec![
             "setup".into(),
-            "sessions-index-timer".into(),
+            "sessionstimer".into(),
             "install".into(),
             "--json".into()
         ])
@@ -173,7 +190,7 @@ fn mode_parse_accepts_sessions_watch_service_setup_namespace() {
     assert!(matches!(
         Mode::parse(vec![
             "setup".into(),
-            "sessions-watch-service".into(),
+            "sessionswatch".into(),
             "install".into(),
             "--json".into()
         ])
@@ -236,7 +253,7 @@ fn mode_parse_accepts_heartbeat_agent_setup_namespace() {
     assert!(matches!(
         Mode::parse(vec![
             "setup".into(),
-            "heartbeat-agent".into(),
+            "heartbeatagent".into(),
             "install".into(),
             "--json".into()
         ])
@@ -301,18 +318,7 @@ fn mode_parse_accepts_command_ingest_namespace() {
         .unwrap(),
         Mode::Cli(_)
     ));
-    assert!(matches!(
-        Mode::parse(vec![
-            "ingest".into(),
-            "agent-command".into(),
-            "ingest-spool".into(),
-            "--path".into(),
-            "/tmp/spool.jsonl".into(),
-            "--json".into()
-        ])
-        .unwrap(),
-        Mode::Cli(_)
-    ));
+    assert!(Mode::parse(vec!["ingest".into(), "agent-command".into()]).is_err());
 }
 
 #[test]
@@ -360,7 +366,7 @@ fn mode_parse_accepts_debug_wrapper_setup_namespace() {
     assert!(matches!(
         Mode::parse(vec![
             "setup".into(),
-            "debug-wrapper".into(),
+            "debugwrapper".into(),
             "check".into(),
             "--json".into()
         ])
@@ -374,7 +380,7 @@ fn mode_parse_accepts_debug_compose_setup_namespace() {
     assert!(matches!(
         Mode::parse(vec![
             "setup".into(),
-            "debug-compose".into(),
+            "debugcompose".into(),
             "check".into(),
             "--json".into()
         ])
@@ -767,28 +773,28 @@ fn mode_parse_rejects_update_server_binary_flag() {
 fn mode_parse_setup_subcommands_default_to_check_and_parse_remove() {
     let cases = [
         (
-            vec!["setup", "sessions-index-timer", "--json"],
-            "sessions-index-timer check",
+            vec!["setup", "sessionstimer", "--json"],
+            "sessionstimer check",
         ),
         (
-            vec!["setup", "sessions-watch-service", "remove", "--json"],
-            "sessions-watch-service remove",
+            vec!["setup", "sessionswatch", "remove", "--json"],
+            "sessionswatch remove",
         ),
         (
             vec!["setup", "shell", "agent", "remove", "--json"],
             "shell agent remove",
         ),
         (
-            vec!["setup", "heartbeat-agent", "remove", "--json"],
-            "heartbeat-agent remove",
+            vec!["setup", "heartbeatagent", "remove", "--json"],
+            "heartbeatagent remove",
         ),
         (
-            vec!["setup", "debug-wrapper", "remove", "--json"],
-            "debug-wrapper remove",
+            vec!["setup", "debugwrapper", "remove", "--json"],
+            "debugwrapper remove",
         ),
         (
-            vec!["setup", "debug-compose", "remove", "--json"],
-            "debug-compose remove",
+            vec!["setup", "debugcompose", "remove", "--json"],
+            "debugcompose remove",
         ),
     ];
 
@@ -805,7 +811,7 @@ fn mode_parse_setup_subcommands_default_to_check_and_parse_remove() {
 fn mode_parse_rejects_duplicate_sessions_watch_service_actions() {
     let err = Mode::parse(vec![
         "setup".into(),
-        "sessions-watch-service".into(),
+        "sessionswatch".into(),
         "install".into(),
         "remove".into(),
     ])
@@ -813,7 +819,7 @@ fn mode_parse_rejects_duplicate_sessions_watch_service_actions() {
 
     assert!(
         err.to_string()
-            .contains("sessions-watch-service action specified more than once")
+            .contains("sessionswatch action specified more than once")
     );
 }
 
@@ -919,15 +925,15 @@ fn parse_setup_command_accepts_main_modes_and_rejects_bad_args() {
     assert!(err.contains("unknown setup argument"));
 
     let err =
-        super::parse_setup_command(&["debug-wrapper".into(), "install".into(), "remove".into()])
+        super::parse_setup_command(&["debugwrapper".into(), "install".into(), "remove".into()])
             .unwrap_err()
             .to_string();
-    assert!(err.contains("debug-wrapper action specified more than once"));
+    assert!(err.contains("debugwrapper action specified more than once"));
 
-    let err = super::parse_setup_command(&["debug-compose".into(), "--bad".into()])
+    let err = super::parse_setup_command(&["debugcompose".into(), "--bad".into()])
         .unwrap_err()
         .to_string();
-    assert!(err.contains("unknown debug-compose argument"));
+    assert!(err.contains("unknown debugcompose argument"));
 }
 
 #[test]
@@ -1128,7 +1134,7 @@ fn mode_parse_accepts_new_surface_parity_subcommands() {
     // later bail.
     let cases: &[&[&str]] = &[
         &["hosts", "silent"],
-        &["state", "clock-skew"],
+        &["state", "clockskew"],
         &["analysis", "anomalies"],
         &["analysis", "compare"],
         &["apps"],

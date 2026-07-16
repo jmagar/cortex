@@ -30,7 +30,7 @@ pub(crate) fn parse_assess(args: &[String]) -> Result<CliCommand> {
     }
 }
 
-/// `pub(crate)` (not private) because `cortex sessions skill-assess`
+/// `pub(crate)` (not private) because `cortex sessions skillassess`
 /// forwards to this directly so the two entry points never drift on flag
 /// parsing.
 pub(crate) fn parse_assess_skill_from(args: &[String]) -> Result<CliCommand> {
@@ -147,7 +147,7 @@ pub(crate) fn parse_assess_abuse(args: &[String]) -> Result<CliCommand> {
     Ok(CliCommand::Assess(AssessCommand::Abuse(parsed)))
 }
 
-/// `pub(crate)` (not private) because `cortex sessions mcp-assess` forwards
+/// `pub(crate)` (not private) because `cortex sessions mcpassess` forwards
 /// to this directly so the two entry points never drift on flag parsing,
 /// mirroring `parse_assess_skill_from`.
 pub(crate) fn parse_assess_mcp_from(args: &[String]) -> Result<CliCommand> {

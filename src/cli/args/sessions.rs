@@ -28,6 +28,8 @@ pub(crate) enum SessionsCommand {
     SkillIncidents(SessionsSkillIncidentsArgs),
     SkillInvestigate(SessionsSkillInvestigateArgs),
     HookEvents(SessionsHookEventsListArgs),
+    HookIncidents(SessionsHookIncidentsArgs),
+    HookInvestigate(SessionsHookInvestigateArgs),
     HooksBackfill(SessionsHooksBackfillArgs),
     /// Low-level alias for `cortex assess skill` — forwards to the exact
     /// same dispatch function (`dispatch::run_assess_skill`) so the two
@@ -188,6 +190,42 @@ pub(crate) struct SessionsHookEventsListArgs {
     pub since: Option<String>,
     pub until: Option<String>,
     pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct SessionsHookIncidentsArgs {
+    pub json: bool,
+    pub hook_event: Option<String>,
+    pub hook_name: Option<String>,
+    pub hook_source: Option<String>,
+    pub tool: Option<String>,
+    pub project: Option<String>,
+    pub session_id: Option<String>,
+    pub hostname: Option<String>,
+    pub evidence_kind: Option<String>,
+    pub since: Option<String>,
+    pub until: Option<String>,
+    pub limit: Option<u32>,
+    pub window_minutes: Option<u32>,
+    pub signals: Vec<String>,
+    pub min_score: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct SessionsHookInvestigateArgs {
+    pub hook_name: Option<String>,
+    pub hook_event: Option<String>,
+    pub hook_source: Option<String>,
+    pub incident_id: Option<String>,
+    pub tool: Option<String>,
+    pub project: Option<String>,
+    pub since: Option<String>,
+    pub until: Option<String>,
+    pub limit: Option<u32>,
+    pub window_minutes: Option<u32>,
+    pub correlation_window_minutes: Option<u32>,
+    pub all: bool,
+    pub json: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -371,8 +409,8 @@ pub(crate) struct SessionsSimilarArgs {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct SessionsIncidentContextArgs {
-    pub since: String,
-    pub until: String,
+    pub since: Option<String>,
+    pub until: Option<String>,
     pub host: Option<String>,
     pub app: Option<String>,
     pub query: Option<String>,
@@ -427,7 +465,7 @@ pub(crate) struct SessionsAssessArgs {
     pub dry_run: bool,
 }
 
-/// `cortex sessions llm-invocations` — list recent LLM invocation audit
+/// `cortex sessions llminvocations` — list recent LLM invocation audit
 /// records (concurrency/rate-limit/circuit-breaker denials included).
 /// Admin-scoped: in `CliMode::Http`, requires `CORTEX_API_ADMIN_TOKEN` to be
 /// set client-side (see `get_json_with_admin` in `http_client.rs`).

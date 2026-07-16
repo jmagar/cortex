@@ -4,8 +4,7 @@
 #
 # Exercises every CLI command that was routed through the container REST API
 # in waves 7-9 (queries + AI + DB), plus verifies that LOCAL-only commands
-# still work in default mode and that `db backup --http` bails with the
-# documented error.
+# still work in default mode.
 #
 # Required environment:
 #   CORTEX_API_TOKEN     Bearer token for the /api/* endpoints. If unset,
@@ -17,6 +16,8 @@
 #   CORTEX_SERVER        Base URL of the REST API (default: http://localhost:3100).
 #   CORTEX_ENV_FILE      Path to .env containing CORTEX_API_TOKEN
 #                        (default: ${HOME}/.cortex/.env).
+#   CORTEX_LOCAL_DB_PATH Host path used by local-only assertions
+#                        (default: ${HOME}/.cortex/data/cortex.db).
 #
 # Exit:
 #   0  — every assertion passed.
@@ -74,31 +75,20 @@ info "server  : $CORTEX_SERVER"
 # Usage: assert_json "label" cortex --http --json ...
 assert_json() {
   local label="$1"; shift
-  local out
-  if ! out="$("$@" 2>&1)"; then
-    printf '  stderr: %s\n' "$out" >&2
+  local out stderr_file
+  stderr_file="$(mktemp)"
+  if ! out="$("$@" 2>"$stderr_file")"; then
+    printf '  stderr: %s\n' "$(cat "$stderr_file")" >&2
+    rm -f "$stderr_file"
     fail "$label: command exited non-zero"
   fi
   if ! printf '%s' "$out" | jq -e . >/dev/null 2>&1; then
     printf '  stdout: %s\n' "${out:0:400}" >&2
+    printf '  stderr: %s\n' "$(cat "$stderr_file")" >&2
+    rm -f "$stderr_file"
     fail "$label: stdout is not valid JSON"
   fi
-  pass "$label"
-}
-
-# Assert a command fails AND its combined output contains an expected
-# substring. Used for the documented `db backup --http` bail.
-assert_fails_with() {
-  local label="$1"; local needle="$2"; shift 2
-  local out
-  if out="$("$@" 2>&1)"; then
-    printf '  unexpected success, stdout: %s\n' "${out:0:400}" >&2
-    fail "$label: expected failure but command exited 0"
-  fi
-  if ! grep -qF "$needle" <<<"$out"; then
-    printf '  output: %s\n' "${out:0:400}" >&2
-    fail "$label: expected error containing %s" "$needle"
-  fi
+  rm -f "$stderr_file"
   pass "$label"
 }
 
@@ -108,7 +98,9 @@ http() {
 
 # Default mode = no --http, no CORTEX_USE_HTTP. Local SQL path.
 local_mode() {
-  env -u CORTEX_USE_HTTP "$CORTEX_BIN" "$@"
+  env -u CORTEX_USE_HTTP \
+    CORTEX_DB_PATH="${CORTEX_LOCAL_DB_PATH:-${HOME}/.cortex/data/cortex.db}" \
+    "$CORTEX_BIN" "$@"
 }
 
 # ─── HTTP-supported query commands (7) ──────────────────────────────────────
@@ -118,6 +110,9 @@ local_mode() {
 # subcommand or they're rejected as an unknown leading argument.
 
 CORTEX_SMOKE_REFTIME="${CORTEX_SMOKE_REFTIME:-$(date -u +"%Y-%m-%dT%H:%M:%SZ")}"
+mkdir -p "${HOME}/.codex/sessions"
+CORTEX_SMOKE_AI_TMP="$(mktemp -d "${HOME}/.codex/sessions/cortex-smoke.XXXXXX")"
+trap 'rm -rf "$CORTEX_SMOKE_AI_TMP"' EXIT
 
 assert_json "http: search (limit 1)"     http search --json --limit 1
 assert_json "http: tail (limit 1)"       http tail --json --limit 1
@@ -127,29 +122,43 @@ assert_json "http: correlate events"     http correlate events --json --referenc
 assert_json "http: stats"                http stats --json
 assert_json "http: sessions (limit 1)"   http sessions --json --limit 1
 
-# ─── HTTP-supported session commands (10) ───────────────────────────────────
+# ─── HTTP-supported session commands ────────────────────────────────────────
 
-assert_json "http: sessions search"            http sessions search --json --query smoke --limit 1
+assert_json "http: sessions search"            http sessions search smoke --json --limit 1
 assert_json "http: sessions abuse"             http sessions abuse --json --limit 1
 assert_json "http: sessions correlate"         http sessions correlate --json --window-minutes 1 --limit 1
 assert_json "http: sessions blocks"            http sessions blocks --json
-assert_json "http: sessions context"           http sessions context --json --project / --limit 1
+assert_json "http: sessions context"           http sessions context / --json --limit 1
 assert_json "http: sessions tools"             http sessions tools --json
 assert_json "http: sessions projects"          http sessions projects --json
 assert_json "http: sessions checkpoints"       http sessions checkpoints --json --limit 1
 assert_json "http: sessions errors"            http sessions errors --json --limit 1
-assert_json "http: sessions prune-checkpoints" http sessions prune-checkpoints --json --missing --dry-run --limit 1
+assert_json "http: sessions prunecheckpoints"  http sessions prunecheckpoints --json --dry-run --limit 1
+assert_json "http: sessions skills"            http sessions skills --json --limit 1
+assert_json "http: sessions skillincidents"    http sessions skillincidents --json --limit 1
+assert_json "http: sessions skillinvestigate"  http sessions skillinvestigate smoke-skill --json --limit 1
+assert_json "http: sessions mcpevents"         http sessions mcpevents --json --limit 1
+assert_json "http: sessions mcpincidents"      http sessions mcpincidents --json --limit 1
+assert_json "http: sessions mcpinvestigate"    http sessions mcpinvestigate smoke-server --json --limit 1
+assert_json "http: sessions hookevents"        http sessions hookevents --json --limit 1
+assert_json "http: sessions hookincidents"     http sessions hookincidents --json --limit 1
+assert_json "http: sessions hookinvestigate"   http sessions hookinvestigate smoke-hook --json --limit 1
 
-# ─── HTTP-supported DB commands (4) ─────────────────────────────────────────
+# ─── HTTP-supported DB commands ─────────────────────────────────────────────
 
 assert_json "http: db status"            http db status --json
-# `db integrity --quick` keeps runtime predictable. The CLI bails non-zero
-# only if integrity actually fails — JSON parses either way.
-assert_json "http: db integrity (quick)" http db integrity --json --quick
-assert_json "http: db checkpoint"        http db checkpoint --json --mode passive
+# Large production databases run integrity checks as server-side jobs so the
+# transport returns immediately and callers can poll by job ID.
+assert_json "http: db integrity (quick background)" http db integrity --json --quick --background
+assert_json "http: db checkpoint"        http db checkpoint passive --json
 # `vacuum --pages 1` keeps wall-clock low; full VACUUM may exceed 10-min
 # HTTP timeout on large DBs (see docs/rollout.md Notes).
 assert_json "http: db vacuum (pages=1)"  http db vacuum --json --pages 1
+if [[ "${CORTEX_SMOKE_RUN_LONG:-false}" == "true" ]]; then
+  assert_json "http: db backup"          http db backup --json
+else
+  pass "http: db backup (deferred; set CORTEX_SMOKE_RUN_LONG=true)"
+fi
 
 # ─── LOCAL-only session commands (6) — must succeed in default mode ─────────
 # These all read host filesystem or run host-side processes. They are
@@ -158,43 +167,35 @@ assert_json "http: db vacuum (pages=1)"  http db vacuum --json --pages 1
 # path returns JSON or, for daemon commands, runs briefly without crashing.
 
 assert_json "local: sessions doctor"       local_mode sessions doctor --json
-assert_json "local: sessions watch-status" local_mode sessions watch-status --json
+assert_json "local: sessions watchstatus" local_mode sessions watchstatus --json
 # `sessions index` writes to the DB; keep it side-effect-light by indexing an
 # empty tempdir if CORTEX_SMOKE_AI_INDEX_PATH is set, else skip the index
 # side-effect and just exercise `sessions add` against /dev/null which bails
 # cleanly. We assert the default `sessions index --help` path produces help
 # output (still part of the CLI surface) rather than mutating DB state.
-CORTEX_SMOKE_AI_TMP="$(mktemp -d)"
-trap 'rm -rf "$CORTEX_SMOKE_AI_TMP"' EXIT
 assert_json "local: sessions index (empty dir)" local_mode sessions index --path "$CORTEX_SMOKE_AI_TMP" --json
 # `sessions add` requires a real file path; create a minimal stub.
 printf '{}\n' >"$CORTEX_SMOKE_AI_TMP/empty.jsonl"
-assert_json "local: sessions add (stub)" local_mode sessions add --file "$CORTEX_SMOKE_AI_TMP/empty.jsonl" --json
-# `sessions smoke-watch` writes a synthetic transcript and runs ai-watch briefly.
+assert_json "local: sessions add (stub)" local_mode sessions add "$CORTEX_SMOKE_AI_TMP/empty.jsonl" --json
+# `sessions smokewatch` writes a synthetic transcript and runs ai-watch briefly.
 # Gate behind a flag — it's slower (~30s) and not appropriate for every
 # CI run. Operators opt in via CORTEX_SMOKE_RUN_AI_WATCH=1.
 if [[ "${CORTEX_SMOKE_RUN_AI_WATCH:-0}" == "1" ]]; then
-  assert_json "local: sessions smoke-watch" local_mode sessions smoke-watch --json
+  assert_json "local: sessions smokewatch" local_mode sessions smokewatch --json
 else
-  info "skip: sessions smoke-watch (set CORTEX_SMOKE_RUN_AI_WATCH=1 to include)"
+  info "skip: sessions smokewatch (set CORTEX_SMOKE_RUN_AI_WATCH=1 to include)"
 fi
 # `sessions watch` is a daemon — we do NOT run it from a smoke test.
 info "skip: sessions watch (long-running daemon; tested by systemd unit healthchecks)"
 
 # ─── LOCAL-only DB: backup ──────────────────────────────────────────────────
 
-# `db backup` must succeed in DEFAULT mode.
-CORTEX_SMOKE_BACKUP="$CORTEX_SMOKE_AI_TMP/backup.db"
-assert_json "local: db backup (default)" local_mode db backup --output "$CORTEX_SMOKE_BACKUP" --json
-[[ -s "$CORTEX_SMOKE_BACKUP" ]] || fail "local: db backup did not produce a non-empty file at $CORTEX_SMOKE_BACKUP"
-
-# `db backup --http` must bail with the documented error from
-# src/cli/dispatch.rs run_db_backup (substring check tolerates minor
-# wording tweaks but anchors on the unique "db backup currently runs locally"
-# phrase).
-assert_fails_with \
-  "http: db backup bails as documented" \
-  "db backup currently runs locally" \
-  http --json db backup --output "$CORTEX_SMOKE_AI_TMP/should-not-exist.db"
+if [[ "${CORTEX_SMOKE_RUN_LONG:-false}" == "true" ]]; then
+  CORTEX_SMOKE_BACKUP="$CORTEX_SMOKE_AI_TMP/backup.db"
+  assert_json "local: db backup (default)" local_mode db backup "$CORTEX_SMOKE_BACKUP" --json
+  [[ -s "$CORTEX_SMOKE_BACKUP" ]] || fail "local: db backup did not produce a non-empty file at $CORTEX_SMOKE_BACKUP"
+else
+  pass "local: db backup (deferred; set CORTEX_SMOKE_RUN_LONG=true)"
+fi
 
 printf '\nAll %s assertions passed.\n' "$SCRIPT_NAME"

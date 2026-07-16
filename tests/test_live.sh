@@ -993,7 +993,7 @@ phase_cli_parity() {
     "hosts sources --limit 3|hosts sources --limit 3"
     "timeline --bucket hour|timeline --bucket hour"
     "analysis patterns --top-n 5|analysis patterns --top-n 5"
-    "stats ingest-rate|stats ingest-rate"
+    "stats ingestrate|stats ingestrate"
     "alerts signatures --limit 5|alerts signatures --limit 5"
     "alerts notifications --limit 5|alerts notifications --limit 5"
   )

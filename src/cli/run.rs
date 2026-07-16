@@ -146,6 +146,12 @@ pub(crate) async fn run(mode: CliMode, command: CliCommand) -> Result<()> {
             super::SessionsCommand::HookEvents(args) => {
                 dispatch::run_ai_hook_events(&mode, args).await
             }
+            super::SessionsCommand::HookIncidents(args) => {
+                dispatch::run_ai_hook_incidents(&mode, args).await
+            }
+            super::SessionsCommand::HookInvestigate(args) => {
+                dispatch::run_ai_hook_investigate(&mode, args).await
+            }
             super::SessionsCommand::HooksBackfill(args) => {
                 dispatch::run_ai_hooks_backfill(&mode, args).await
             }

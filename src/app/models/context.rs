@@ -253,10 +253,10 @@ impl From<db::AnomalyEntry> for AnomalyEntry {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CompareRequest {
-    pub a_from: String,
-    pub a_to: String,
-    pub b_from: String,
-    pub b_to: String,
+    pub a_from: Option<String>,
+    pub a_to: Option<String>,
+    pub b_from: Option<String>,
+    pub b_to: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

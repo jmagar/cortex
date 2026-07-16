@@ -33,7 +33,7 @@ async fn shell_import_commands_are_local_only() {
     let atuin_err = run_shell_atuin_index(
         &mode,
         ShellAtuinIndexArgs {
-            path: "/tmp/atuin.db".to_string(),
+            path: Some("/tmp/atuin.db".to_string()),
             json: true,
         },
     )
@@ -42,7 +42,27 @@ async fn shell_import_commands_are_local_only() {
     assert!(
         atuin_err
             .to_string()
-            .contains("shell user atuin-index is local-only")
+            .contains("shell user atuinindex is local-only")
+    );
+}
+
+#[test]
+fn atuin_history_path_uses_standard_and_override_locations() {
+    assert_eq!(
+        resolve_atuin_history_path(
+            Some(PathBuf::from("/tmp/custom-atuin.db")),
+            Some(PathBuf::from("/tmp/xdg")),
+            Some(PathBuf::from("/tmp/home")),
+        ),
+        PathBuf::from("/tmp/custom-atuin.db")
+    );
+    assert_eq!(
+        resolve_atuin_history_path(
+            None,
+            Some(PathBuf::from("/tmp/xdg")),
+            Some(PathBuf::from("/tmp/home")),
+        ),
+        PathBuf::from("/tmp/xdg/atuin/history.db")
     );
 }
 

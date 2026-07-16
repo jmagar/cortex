@@ -129,12 +129,12 @@ pub async fn run_sessions_watch_service_setup(
             phases.push(check_file_phase(
                 "sessions-watch-env",
                 &watch_env_path,
-                "run cortex setup sessions-watch-service install",
+                "run cortex setup sessionswatch install",
             ));
             phases.push(check_file_phase(
                 "sessions-watch-service",
                 &service_path,
-                "run cortex setup sessions-watch-service install",
+                "run cortex setup sessionswatch install",
             ));
             phases.push(check_ai_watch_service_content_phase(
                 &watch_env_path,

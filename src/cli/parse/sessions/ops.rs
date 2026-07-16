@@ -38,11 +38,12 @@ pub(crate) fn parse_sessions_add(args: &[String]) -> Result<CliCommand> {
             "--file" => parsed.file = flags.value("--file")?,
             "--force" => parsed.force = true,
             _ if arg.starts_with("--file=") => parsed.file = value_after_equals(arg, "--file")?,
+            _ if !arg.starts_with('-') && parsed.file.is_empty() => parsed.file = arg,
             _ => bail!("unknown sessions add option: {arg}"),
         }
     }
     if parsed.file.is_empty() {
-        bail!("sessions add requires --file <PATH>");
+        bail!("sessions add requires a file path");
     }
     Ok(CliCommand::Sessions(SessionsCommand::Add(parsed)))
 }
@@ -137,7 +138,10 @@ pub(crate) fn parse_sessions_errors(args: &[String]) -> Result<CliCommand> {
 }
 
 pub(crate) fn parse_sessions_prune_checkpoints(args: &[String]) -> Result<CliCommand> {
-    let mut parsed = SessionsPruneCheckpointsArgs::default();
+    let mut parsed = SessionsPruneCheckpointsArgs {
+        missing_only: true,
+        ..Default::default()
+    };
     let mut flags = FlagCursor::new(args);
     while let Some(arg) = flags.next() {
         match arg.as_str() {
@@ -151,11 +155,8 @@ pub(crate) fn parse_sessions_prune_checkpoints(args: &[String]) -> Result<CliCom
                     value_after_equals(arg, "--limit")?,
                 )?)
             }
-            _ => bail!("unknown sessions prune-checkpoints option: {arg}"),
+            _ => bail!("unknown sessions prunecheckpoints option: {arg}"),
         }
-    }
-    if !parsed.missing_only {
-        bail!("sessions prune-checkpoints requires --missing");
     }
     Ok(CliCommand::Sessions(SessionsCommand::PruneCheckpoints(
         parsed,

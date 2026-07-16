@@ -8,14 +8,16 @@ use super::models::FileTailSource;
 #[derive(Debug)]
 pub(crate) struct FileTailRegistry {
     path: PathBuf,
-    lock: Mutex<()>,
+    state_lock: Mutex<()>,
+    mutation_lock: Mutex<()>,
 }
 
 impl FileTailRegistry {
     pub(crate) fn new(path: PathBuf) -> Self {
         Self {
             path,
-            lock: Mutex::new(()),
+            state_lock: Mutex::new(()),
+            mutation_lock: Mutex::new(()),
         }
     }
 
@@ -27,20 +29,21 @@ impl FileTailRegistry {
     }
 
     pub(crate) fn list(&self) -> Result<Vec<FileTailSource>> {
-        let _guard = self.lock.lock();
+        let _guard = self.state_lock.lock();
         self.read_locked()
     }
 
     pub(crate) fn get(&self, id: &str) -> Result<Option<FileTailSource>> {
-        let _guard = self.lock.lock();
+        let _guard = self.state_lock.lock();
         Ok(self
             .read_locked()?
             .into_iter()
             .find(|source| source.id == id))
     }
 
+    #[cfg(test)]
     pub(crate) fn upsert(&self, source: FileTailSource) -> Result<()> {
-        let _guard = self.lock.lock();
+        let _guard = self.state_lock.lock();
         let mut sources = self.read_locked()?;
         sources.retain(|existing| existing.id != source.id);
         sources.push(source);
@@ -48,8 +51,46 @@ impl FileTailRegistry {
         self.write_locked(&sources)
     }
 
+    pub(crate) fn insert_if_absent(&self, source: FileTailSource) -> Result<()> {
+        let _guard = self.state_lock.lock();
+        let mut sources = self.read_locked()?;
+        if sources.iter().any(|existing| existing.id == source.id) {
+            anyhow::bail!("file tail source already exists: {}", source.id);
+        }
+        sources.push(source);
+        sources.sort_by(|a, b| a.id.cmp(&b.id));
+        self.write_locked(&sources)
+    }
+
+    pub(crate) fn mutate_with_reconcile<M, R>(&self, mutate: M, reconcile: R) -> Result<()>
+    where
+        M: FnOnce(&Self) -> Result<()>,
+        R: FnOnce() -> Result<()>,
+    {
+        let _mutation_guard = self.mutation_lock.lock();
+        let before = self.list()?;
+        mutate(self)?;
+
+        if let Err(reconcile_error) = reconcile() {
+            let rollback = {
+                let _state_guard = self.state_lock.lock();
+                self.restore_locked(before)
+            };
+            return match rollback {
+                Ok(()) => Err(anyhow::anyhow!(
+                    "file-tail reconcile failed; registry mutation rolled back: {reconcile_error}"
+                )),
+                Err(rollback_error) => Err(anyhow::anyhow!(
+                    "file-tail reconcile failed: {reconcile_error}; registry rollback failed: {rollback_error}"
+                )),
+            };
+        }
+
+        Ok(())
+    }
+
     pub(crate) fn remove(&self, id: &str) -> Result<()> {
-        let _guard = self.lock.lock();
+        let _guard = self.state_lock.lock();
         let mut sources = self.read_locked()?;
         let before = sources.len();
         sources.retain(|existing| existing.id != id);
@@ -60,7 +101,7 @@ impl FileTailRegistry {
     }
 
     pub(crate) fn set_enabled(&self, id: &str, enabled: bool, now: &str) -> Result<()> {
-        let _guard = self.lock.lock();
+        let _guard = self.state_lock.lock();
         let mut sources = self.read_locked()?;
         let source = sources
             .iter_mut()
@@ -79,7 +120,7 @@ impl FileTailRegistry {
         offset: u64,
         now: &str,
     ) -> Result<()> {
-        let _guard = self.lock.lock();
+        let _guard = self.state_lock.lock();
         let mut sources = self.read_locked()?;
         let source = sources
             .iter_mut()
@@ -112,5 +153,30 @@ impl FileTailRegistry {
         std::fs::rename(&tmp, &self.path)
             .with_context(|| format!("replace {}", self.path.display()))?;
         Ok(())
+    }
+
+    fn restore_locked(&self, mut before: Vec<FileTailSource>) -> Result<()> {
+        let current = self.read_locked()?;
+        for source in &mut before {
+            let Some(live) = current.iter().find(|live| live.id == source.id) else {
+                continue;
+            };
+            let checkpoint_changed = (
+                live.checkpoint_dev,
+                live.checkpoint_ino,
+                live.checkpoint_offset,
+            ) != (
+                source.checkpoint_dev,
+                source.checkpoint_ino,
+                source.checkpoint_offset,
+            );
+            if checkpoint_changed {
+                source.checkpoint_dev = live.checkpoint_dev;
+                source.checkpoint_ino = live.checkpoint_ino;
+                source.checkpoint_offset = live.checkpoint_offset;
+                source.updated_at.clone_from(&live.updated_at);
+            }
+        }
+        self.write_locked(&before)
     }
 }

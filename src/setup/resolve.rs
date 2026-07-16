@@ -57,7 +57,7 @@ pub fn cortex_home_dir() -> io::Result<PathBuf> {
 }
 
 /// Default agent-command spool path (`~/.local/state/cortex/agent-command.jsonl`),
-/// matching what `cortex setup shell-agent install` wires the wrapper script
+/// matching what `cortex setup shell agent install` wires the wrapper script
 /// to write to. Used as the default for `cortex heartbeat agent
 /// --agent-command-forward`'s spool source.
 pub fn default_agent_command_spool_path() -> io::Result<PathBuf> {

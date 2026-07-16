@@ -12,6 +12,7 @@ mod debug_wrapper;
 mod doctor;
 mod firstrun;
 mod heartbeat_agent;
+mod managed_units;
 mod resolve;
 mod sessions_index;
 mod sessions_watch;
@@ -41,9 +42,11 @@ pub(crate) use debug_wrapper::{
 };
 #[cfg(test)]
 pub(crate) use firstrun::{
-    cleanup_legacy_systemd, command_phase, ensure_env_file, ensure_network_phase, filesystem_phase,
-    health_phase, run_compose_phase, write_compose_assets, write_env,
+    command_phase, ensure_env_file, ensure_network_phase, filesystem_phase, health_phase,
+    run_compose_phase, write_compose_assets, write_env,
 };
+#[cfg(test)]
+pub(crate) use managed_units::{cleanup_legacy_systemd, rewrite_stale_managed_unit_commands};
 #[cfg(test)]
 pub(crate) use sessions_index::{ai_index_script, ai_index_service_unit, ai_index_timer_unit};
 #[cfg(test)]

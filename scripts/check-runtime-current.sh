@@ -146,9 +146,18 @@ realpath_or_echo() {
   fi
 }
 
+git_common_dir() {
+  local path
+  path="$(git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+  if [[ -n "$path" ]]; then
+    realpath_or_echo "$path"
+  fi
+}
+
 check_docker() {
   local cid running_image image local_image repo_digests repo_version container_version label_compose_dir
-  local canonical_compose_dir canonical_default_dir
+  local canonical_compose_dir canonical_default_dir canonical_repo_dir
+  local compose_git_dir repo_git_dir
   status_line mode docker
 
   if [[ -d "$COMPOSE_DIR" ]]; then
@@ -170,6 +179,9 @@ check_docker() {
   status_line compose_dir "$COMPOSE_DIR"
   canonical_compose_dir="$(realpath_or_echo "$COMPOSE_DIR")"
   canonical_default_dir="$(realpath_or_echo "$DEFAULT_COMPOSE_DIR")"
+  canonical_repo_dir="$(realpath_or_echo "$REPO_DIR")"
+  compose_git_dir="$(git_common_dir "$COMPOSE_DIR")"
+  repo_git_dir="$(git_common_dir "$REPO_DIR")"
 
   # Resolve the deploy env file now that COMPOSE_DIR is final (it may have been
   # rewritten from the container's compose project-dir label above).
@@ -181,9 +193,12 @@ check_docker() {
   image="$(compose_image)"
   [[ -n "$image" ]] || image="$(docker inspect "$cid" --format '{{.Config.Image}}')"
 
-  # Dev images are built from the repo working dir, not ~/.cortex/compose — allow automatically.
+  # Checkout-built development images use Compose's generated image name. A
+  # live Compose owner may be a sibling worktree, so recognize checkouts that
+  # share this repository's Git common directory as well as explicit dev tags.
+  # Image-ID and binary-version equality are still enforced below.
   local is_local_image="false"
-  if [[ "$image" == "cortex:dev" || "$image" == "cortex:local-debug" ]]; then
+  if [[ "$canonical_compose_dir" == "$canonical_repo_dir" || ( -n "$repo_git_dir" && "$compose_git_dir" == "$repo_git_dir" ) || "$image" == "cortex:dev" || "$image" == "cortex:local-debug" ]]; then
     is_local_image="true"
   fi
   if [[ "$ALLOW_LEGACY" != "true" && "$is_local_image" != "true" && "$canonical_compose_dir" != "$canonical_default_dir" ]]; then
@@ -192,7 +207,7 @@ check_docker() {
     return 1
   fi
 
-  if [[ "$ALLOW_LOCAL_IMAGE" != "true" && "$image" != ghcr.io/jmagar/cortex:* && "$image" != "cortex:local-debug" && "$image" != "cortex:dev" ]]; then
+  if [[ "$ALLOW_LOCAL_IMAGE" != "true" && "$is_local_image" != "true" && "$image" != ghcr.io/jmagar/cortex:* ]]; then
     echo "FAIL: running container uses unsupported image: $image"
     echo "fix: use ghcr.io/jmagar/cortex:<version>, cortex:local-debug, or rerun with --allow-local-image for an intentional custom deployment"
     return 1

@@ -12,6 +12,8 @@ impl CortexService {
     }
 
     pub async fn search_logs(&self, req: SearchLogsRequest) -> ServiceResult<SearchLogsResponse> {
+        let mut req = req;
+        req.limit.get_or_insert(50);
         let query = req.query.clone();
         let params = search_request_to_params(req)?;
         let params = SearchParams { query, ..params };
@@ -37,9 +39,26 @@ impl CortexService {
                 db::HeartbeatHostLookup::Hostname(hostname)
             }
             _ => {
-                return Err(ServiceError::InvalidInput(
-                    "host_state requires host_id or host".into(),
-                ));
+                let host_id = self
+                    .run_db("host_state.freshest", |pool| {
+                        let conn = pool.get()?;
+                        let mut stmt = conn.prepare(
+                            "SELECT host_id \
+                             FROM host_heartbeats \
+                             ORDER BY sampled_at DESC, received_at DESC, id DESC \
+                             LIMIT 1",
+                        )?;
+                        let mut rows = stmt.query([])?;
+                        Ok(rows
+                            .next()?
+                            .map(|row| row.get::<_, String>(0))
+                            .transpose()?)
+                    })
+                    .await?;
+                let Some(host_id) = host_id else {
+                    return Ok(None);
+                };
+                db::HeartbeatHostLookup::HostId(host_id)
             }
         };
         let limit = req.limit.unwrap_or(1).clamp(1, 100) as usize;
@@ -54,6 +73,7 @@ impl CortexService {
             })
         })
         .await
+        .map(Some)
         .map_err(|error| match error {
             ServiceError::Internal(error) if error.to_string() == "not_found" => {
                 ServiceError::NotFound("host_state host not found".into())
@@ -153,12 +173,10 @@ impl CortexService {
         &self,
         req: CorrelateStateRequest,
     ) -> ServiceResult<CorrelateStateResponse> {
-        let reference_time = req.reference_time.trim().to_owned();
-        if reference_time.is_empty() {
-            return Err(ServiceError::InvalidInput(
-                "correlate_state requires reference_time".into(),
-            ));
-        }
+        let reference_time = req
+            .reference_time
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| chrono::Utc::now().to_rfc3339());
         let ref_dt = parse_required_timestamp(&reference_time, "reference_time")
             .map_err(|_| ServiceError::InvalidInput("invalid reference_time format".into()))?;
 
@@ -319,8 +337,24 @@ impl CortexService {
     }
 
     pub async fn get_errors(&self, req: GetErrorsRequest) -> ServiceResult<GetErrorsResponse> {
-        let from = parse_optional_timestamp(req.since.as_deref(), "since")?;
-        let to = parse_optional_timestamp(req.until.as_deref(), "until")?;
+        let until_dt = req
+            .until
+            .as_deref()
+            .map(|until| parse_required_timestamp(until, "until"))
+            .transpose()?;
+        let to = until_dt.map(rfc3339_z);
+        // Apply the documented last-hour default when the caller omits `since`.
+        // Anchor the 1-hour window to `until` (until - 1h) when one is provided
+        // so an `--until`-only request stays bounded to a real window instead of
+        // falling back to the epoch in `get_error_summary` and scanning every
+        // retained warning+ row; otherwise anchor to the current time.
+        let from = match req.since.as_deref() {
+            Some(since) => Some(rfc3339_z(parse_required_timestamp(since, "since")?)),
+            None => {
+                let anchor = until_dt.unwrap_or_else(chrono::Utc::now);
+                Some(rfc3339_z(anchor - chrono::Duration::hours(1)))
+            }
+        };
         let group_by_app = match req.group_by.as_deref() {
             None => false,
             Some("app_name") | Some("app") => true,
@@ -353,3 +387,7 @@ impl CortexService {
         })
     }
 }
+
+#[cfg(test)]
+#[path = "logs_tests.rs"]
+mod logs_tests;

@@ -70,6 +70,7 @@ mod ai_indexing;
 mod analytics;
 mod assessment;
 mod compose;
+mod correlate_events;
 mod domains;
 mod error_detection;
 mod file_tails;

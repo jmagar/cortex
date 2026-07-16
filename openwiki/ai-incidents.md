@@ -253,21 +253,21 @@ Bounded, idempotent, single-flight backfill catches up on events ingested before
 ### CLI Commands
 | Command | Purpose |
 |---------|---------|
-| `cortex skill-events` | List skill events |
-| `cortex skill-incidents` | List skill incidents |
-| `cortex skill-investigate <skill>` | Investigate a skill incident |
+| `cortex sessions skills` | List skill events |
+| `cortex sessions skillincidents` | List skill incidents |
+| `cortex sessions skillinvestigate <skill>` | Investigate a skill incident |
 | `cortex assess skill <skill>` | LLM assessment of skill incidents |
 | `cortex sessions skills` | Parser for skill events output |
-| `cortex sessions skills-backfill` | Run skill backfill |
-| `cortex mcp-events` | List MCP events |
-| `cortex mcp-incidents` | List MCP incidents |
-| `cortex mcp-investigate <server-or-tool>` | Investigate an MCP incident |
+| `cortex sessions skills backfill` | Run skill backfill |
+| `cortex sessions mcpevents` | List MCP events |
+| `cortex sessions mcpincidents` | List MCP incidents |
+| `cortex sessions mcpinvestigate <server-or-tool>` | Investigate an MCP incident |
 | `cortex assess mcp <server-or-tool>` | LLM assessment of MCP incidents |
-| `cortex sessions mcp-events` | Parser for MCP events output |
-| `cortex sessions mcp-backfill` | Run MCP backfill |
-| `cortex hook-events` | List hook events |
-| `cortex hook-incidents` | List hook incidents |
-| `cortex hook-investigate <hook>` | Investigate a hook incident |
+| `cortex sessions mcpevents` | Parser for MCP events output |
+| `cortex sessions mcpevents backfill` | Run MCP backfill |
+| `cortex sessions hookevents` | List hook events |
+| `cortex sessions hookincidents` | List hook incidents |
+| `cortex sessions hookinvestigate <hook>` | Investigate a hook incident |
 | `cortex assess hooks` | LLM assessment of hook incidents |
 
 ## Data Models

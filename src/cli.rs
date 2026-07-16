@@ -17,11 +17,12 @@ pub(crate) use args::{
     NotifyTestArgs, OutputArgs, PatternsArgs, PluginHookArgs, SearchArgs, ServiceLogsArgs,
     SessionsAbuseArgs, SessionsAddArgs, SessionsArgs, SessionsAssessArgs, SessionsBlocksArgs,
     SessionsCheckpointsArgs, SessionsCommand, SessionsContextArgs, SessionsCorrelateArgs,
-    SessionsDoctorArgs, SessionsErrorsArgs, SessionsHookEventsListArgs, SessionsHooksBackfillArgs,
-    SessionsIncidentContextArgs, SessionsIncidentsArgs, SessionsIndexArgs, SessionsInvestigateArgs,
-    SessionsListArgs, SessionsLlmInvocationsArgs, SessionsMcpEventsBackfillArgs,
-    SessionsMcpEventsListArgs, SessionsMcpIncidentsArgs, SessionsMcpInvestigateArgs,
-    SessionsOutputDetail, SessionsPruneCheckpointsArgs, SessionsSearchArgs, SessionsSimilarArgs,
+    SessionsDoctorArgs, SessionsErrorsArgs, SessionsHookEventsListArgs, SessionsHookIncidentsArgs,
+    SessionsHookInvestigateArgs, SessionsHooksBackfillArgs, SessionsIncidentContextArgs,
+    SessionsIncidentsArgs, SessionsIndexArgs, SessionsInvestigateArgs, SessionsListArgs,
+    SessionsLlmInvocationsArgs, SessionsMcpEventsBackfillArgs, SessionsMcpEventsListArgs,
+    SessionsMcpIncidentsArgs, SessionsMcpInvestigateArgs, SessionsOutputDetail,
+    SessionsPruneCheckpointsArgs, SessionsSearchArgs, SessionsSimilarArgs,
     SessionsSkillIncidentsArgs, SessionsSkillInvestigateArgs, SessionsSkillsBackfillArgs,
     SessionsSkillsListArgs, SessionsWatchArgs, SetupArgs, SetupCommand, ShellAgentCommand,
     ShellAgentIndexArgs, ShellAgentWrapArgs, ShellAtuinIndexArgs, ShellCommand, ShellIndexArgs,
@@ -82,8 +83,39 @@ impl CliCommand {
     }
 }
 
-// ── Registry facade: CLI command names (hyphenated) ↔ ACTION_SPECS metadata
-// (MCP action names are underscored). Used by completion + discoverability help.
+// ── Registry facade: CLI paths ↔ ACTION_SPECS metadata. Used by completion
+// and discoverability help while MCP action names remain stable wire contracts.
+
+fn registry_action_key(cli_command: &str) -> String {
+    match cli_command {
+        "state host" => "host_state".into(),
+        "state fleet" => "fleet_state".into(),
+        "state clockskew" => "clock_skew".into(),
+        "stats ingestrate" => "ingest_rate".into(),
+        "correlate events" => "correlate".into(),
+        "correlate state" => "correlate_state".into(),
+        "correlate topic" => "topic_correlate".into(),
+        "analysis errors" => "errors".into(),
+        "analysis incident" => "incident_context".into(),
+        "analysis patterns" => "patterns".into(),
+        "analysis anomalies" => "anomalies".into(),
+        "analysis compare" => "compare".into(),
+        "sessions incidentcontext" => "incident_context".into(),
+        "sessions llminvocations" => "llm_invocations".into(),
+        "sessions skills" => "skill_events".into(),
+        "sessions skillincidents" => "skill_incidents".into(),
+        "sessions skillinvestigate" => "skill_investigate".into(),
+        "sessions mcpevents" => "mcp_events".into(),
+        "sessions mcpincidents" => "mcp_incidents".into(),
+        "sessions mcpinvestigate" => "mcp_investigate".into(),
+        "sessions hookevents" => "hook_events".into(),
+        "sessions hookincidents" => "hook_incidents".into(),
+        "sessions hookinvestigate" => "hook_investigate".into(),
+        "sessions hooksbackfill" => "hook_events".into(),
+        "ingest filetail" => "file_tails".into(),
+        other => other.replace([' ', '-'], "_"),
+    }
+}
 
 /// All CLI command names paired with their one-line description (empty when the
 /// command has no `ACTION_SPECS` entry, e.g. grouping commands like `sessions`).
@@ -99,23 +131,18 @@ pub(crate) fn registry_actions() -> Vec<(&'static str, &'static str)> {
 
 /// Canonical flag metadata for a CLI command (empty slice when none).
 pub(crate) fn registry_flags(cli_command: &str) -> &'static [cortex::mcp::FlagSpec] {
-    cortex::mcp::flags_for(&cli_command.replace('-', "_")).unwrap_or(&[])
+    cortex::mcp::flags_for(&registry_action_key(cli_command)).unwrap_or(&[])
 }
 
 /// Copy-paste examples for a CLI command (empty slice when none).
 pub(crate) fn registry_examples(cli_command: &str) -> &'static [&'static str] {
-    cortex::mcp::examples_for(&cli_command.replace('-', "_")).unwrap_or(&[])
+    cortex::mcp::examples_for(&registry_action_key(cli_command)).unwrap_or(&[])
 }
 
 /// Canonical flag a bare positional binds to for a CLI command (`None` = the
 /// command takes no positional).
 pub(crate) fn registry_positional(cli_command: &str) -> Option<&'static str> {
-    cortex::mcp::positional_for(&cli_command.replace('-', "_"))
-}
-
-/// Zero-flag defaults for a CLI command (empty defaults when none).
-pub(crate) fn registry_defaults(cli_command: &str) -> cortex::mcp::Defaults {
-    cortex::mcp::defaults_for(&cli_command.replace('-', "_"))
+    cortex::mcp::positional_for(&registry_action_key(cli_command))
 }
 
 /// `cortex __complete <ctx> ...` — print shell-completion candidates to stdout.
@@ -264,8 +291,8 @@ struct IngestDockerSource {
 }
 
 pub(crate) async fn run_ingest_syslog_status(args: OutputArgs) -> Result<()> {
-    let runtime = cortex::runtime::RuntimeCore::load_query_only().await?;
-    let receiver = &runtime.config.receiver;
+    let config = cortex::config::Config::load_for_inspection()?;
+    let receiver = &config.receiver;
     let status = IngestSyslogStatus {
         bind_addr: receiver.bind_addr(),
         host: receiver.host.clone(),
@@ -286,8 +313,8 @@ pub(crate) async fn run_ingest_syslog_status(args: OutputArgs) -> Result<()> {
 }
 
 pub(crate) async fn run_ingest_docker_status(args: OutputArgs) -> Result<()> {
-    let runtime = cortex::runtime::RuntimeCore::load_query_only().await?;
-    let docker = &runtime.config.docker_ingest;
+    let config = cortex::config::Config::load_for_inspection()?;
+    let docker = &config.docker_ingest;
     let status = IngestDockerStatus {
         legacy_central_pull_enabled: docker.enabled,
         configured_sources: docker.hosts.len(),
@@ -315,9 +342,8 @@ pub(crate) async fn run_ingest_docker_status(args: OutputArgs) -> Result<()> {
 }
 
 pub(crate) async fn run_ingest_docker_sources(args: OutputArgs) -> Result<()> {
-    let runtime = cortex::runtime::RuntimeCore::load_query_only().await?;
-    let sources = runtime
-        .config
+    let config = cortex::config::Config::load_for_inspection()?;
+    let sources = config
         .docker_ingest
         .hosts
         .iter()

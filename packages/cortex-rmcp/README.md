@@ -199,9 +199,9 @@ The CLI mirrors the same service layer used by MCP and REST:
 ```bash
 cortex stats
 cortex status
-cortex search --query "error" --limit 20
+cortex search "error" --limit 20
 cortex ingest inventory refresh --json
-cortex ingest file-tail list
+cortex ingest filetail list
 cortex setup repair
 cortex serve mcp
 cortex mcp
@@ -845,9 +845,9 @@ For real-time local Claude/Codex/Gemini transcript ingestion, install the host-l
 watch service:
 
 ```bash
-cortex setup sessions-watch-service install
-cortex setup sessions-watch-service check
-cortex setup sessions-watch-service remove
+cortex setup sessionswatch install
+cortex setup sessionswatch check
+cortex setup sessionswatch remove
 ```
 
 The watcher runs outside Docker because it needs host access to
@@ -874,9 +874,9 @@ run at the same time without conflict; they only read the transcript files, neve
 The optional polling fallback is still available:
 
 ```bash
-cortex setup sessions-index-timer install
-cortex setup sessions-index-timer check
-cortex setup sessions-index-timer remove
+cortex setup sessionstimer install
+cortex setup sessionstimer check
+cortex setup sessionstimer remove
 ```
 
 Both helpers are deliberately not inside the Docker container. Docker Compose
@@ -899,14 +899,14 @@ separate table:
 cortex ingest shell user index --path ~/.zsh_history --shell zsh
 cortex setup shell agent install
 export CLAUDE_CODE_SHELL_PREFIX="$HOME/.local/bin/cortex-agent-command-wrapper"
-cortex ingest shell agent index --path ~/.local/state/cortex/agent-command.jsonl
+cortex ingest shell agent index ~/.local/state/cortex/agent-command.jsonl
 ```
 
 `cortex ingest shell agent index` also accepts `--server URL`/`--token TOKEN`
 to forward the spool to a remote Cortex's `POST /v1/agent-commands` endpoint
 instead of writing to the local database — the spool is only truncated after
-a successful forward. The legacy grammar `cortex ingest agent-command
-{ingest-spool|wrap}` is still accepted as a deprecated alias.
+a successful forward. Removed spellings fail with canonical replacement
+guidance; there are no compatibility aliases.
 
 `cortex ingest shell user index` imports zsh extended history lines with timestamps and
 durations as `source_kind="shell-history"` rows. Plain untimestamped history is
@@ -990,7 +990,7 @@ cortex setup repair   # repair env/assets and restart the Docker stack
 cortex setup deploy preflight       # deployment preflight using setup assets
 cortex setup deploy local           # local Compose deploy/reconcile command
 cortex setup deploy local --dry-run # run the deploy preflight without mutating Docker
-cortex setup sessions-watch-service install  # host-local real-time transcript watcher
+cortex setup sessionswatch install  # host-local real-time transcript watcher
 cortex doctor binary  # check host/container binary freshness
 ```
 
@@ -1171,7 +1171,7 @@ Cortex can tail local files directly without rsyslog `imfile` drop-ins. In
 Docker, mount the host log tree read-only at `/file-tail-root` with
 `CORTEX_FILE_TAIL_LOG_VOLUME` and register paths inside that mount. Sources are
 stored next to the SQLite database in `file-tails.json`, managed through
-`cortex ingest file-tail ...`, REST `POST /api/file-tails` (requires
+`cortex ingest filetail ...`, REST `POST /api/file-tails` (requires
 `Authorization: Bearer $CORTEX_API_TOKEN` plus
 `X-Cortex-Admin-Token: $CORTEX_API_ADMIN_TOKEN`), or MCP action `file_tails`,
 and emitted as `source_kind="file-tail"` rows. Row metadata includes
@@ -1179,27 +1179,23 @@ and emitted as `source_kind="file-tail"` rows. Row metadata includes
 The documented safe default is to keep managed tails inside `/file-tail-root`.
 Set `CORTEX_FILE_TAIL_ALLOWED_ROOTS` explicitly only when an operator has
 mounted and reviewed broader read-only roots such as `/var/log` or `/logs`.
+The Compose service also adds `CORTEX_FILE_TAIL_GROUP` (default `adm`) as a
+supplementary group so the non-root `cortex` process can read common
+group-owned logs such as `/var/log/auth.log`; set it to a numeric gid if your
+host uses a different log-reader group.
 
 ```bash
-cortex ingest file-tail add --id swag-access \
-  --path /file-tail-root/swag/log/nginx/access.log \
-  --tag swag-access --host squirts --facility local4
-cortex ingest file-tail add --id swag-error \
-  --path /file-tail-root/swag/log/nginx/error.log \
-  --tag swag-error --host squirts --facility local4 --severity warning
-cortex ingest file-tail add --id fail2ban \
-  --path /file-tail-root/swag/log/fail2ban/fail2ban.log \
-  --tag fail2ban --host squirts --facility local5
-cortex ingest file-tail add --id authelia \
-  --path /file-tail-root/authelia/logs/authelia.log \
-  --tag authelia --host squirts --facility local5
-cortex ingest file-tail add --id adguard-query \
-  --path /file-tail-root/adguard/var/data/querylog.json \
-  --tag adguard-query --host squirts --facility local6
+cortex ingest filetail add /file-tail-root/swag/log/nginx/access.log
+cortex ingest filetail add /file-tail-root/swag/log/nginx/error.log --severity warning
+cortex ingest filetail add /file-tail-root/swag/log/fail2ban/fail2ban.log --facility local5
+cortex ingest filetail add /file-tail-root/authelia/logs/authelia.log --facility local5
+cortex ingest filetail add /file-tail-root/adguard/var/data/querylog.json --facility local6
 ```
 
-The default starts at EOF. Add `--from-start` only when you intentionally want
-to backfill the current file contents. After startup, Cortex checkpoints
+The file name supplies the default id and tag, the runtime supplies the default
+hostname, and tailing starts at EOF. Add overrides only when needed. Use
+`--from-start` only when you intentionally want to backfill the current file
+contents. After startup, Cortex checkpoints
 `dev`/`inode`/offset in `file-tails.json`, resumes from that cursor, and
 reopens files on rename/create rotation or truncation. Lines are bounded by
 `CORTEX_MAX_MESSAGE_SIZE`; oversized records are truncated before enqueue.
@@ -1351,7 +1347,7 @@ cortex graph around host tootie --limit 25
 cortex graph explain host tootie --depth 2
 cortex stats --json
 cortex db integrity            # run PRAGMA integrity_check
-cortex db checkpoint --mode full
+cortex db checkpoint full
 cortex db vacuum --pages 1000
 cortex compose pull            # pull image for resolved Compose project
 cortex compose up              # run docker compose up -d for resolved service
@@ -1362,7 +1358,7 @@ cortex compose logs cortex --tail 20  # bounded logs for one service
 # Surface parity (2026-05-22) — each has a matching REST route documented below
 cortex hosts sources --limit 50
 cortex hosts silent --silent-minutes 60
-cortex state clock-skew     --since 2026-05-20T00:00:00Z
+cortex state clockskew     --since 2026-05-20T00:00:00Z
 cortex analysis anomalies   --recent-minutes 30 --baseline-minutes 720
 cortex analysis compare     --a-from 2026-05-20T00:00:00Z --a-to 2026-05-20T23:59:59Z \
                             --b-from 2026-05-21T00:00:00Z --b-to 2026-05-21T23:59:59Z
@@ -1447,20 +1443,22 @@ real structured runtime event shape is confirmed.
 Related commands:
 - `cortex sessions assess <incident_id>` — abuse-incident assessment by
   explicit incident id (no auto-pick).
-- `cortex sessions skill-assess <skill>` — same as `cortex assess skill`.
-- `cortex sessions skill-investigate <skill>` — deterministic-only
+- `cortex sessions skillassess <skill>` — same as `cortex assess skill`.
+- `cortex sessions skillinvestigate <skill>` — deterministic-only
   skill-incident evidence command (no LLM step, ever); use this to inspect
   evidence before deciding whether to spend an `assess skill` call.
-- `cortex sessions mcp-assess <server-or-tool>` — same as `cortex assess mcp`.
-- `cortex sessions mcp-investigate <server-or-tool>` — deterministic-only
+- `cortex sessions mcpassess <server-or-tool>` — same as `cortex assess mcp`.
+- `cortex sessions mcpinvestigate <server-or-tool>` — deterministic-only
   MCP-incident evidence command (no LLM step, ever); use this to inspect
   evidence before deciding whether to spend an `assess mcp` call.
-- `cortex sessions mcp-events` / `cortex sessions mcp-incidents` — list raw
+- `cortex sessions mcpevents` / `cortex sessions mcpincidents` — list raw
   MCP tool-call events / grouped incident candidates without an evidence
   bundle.
-- `cortex sessions hook-events [--hook NAME] [--hook-event EVENT]` —
+- `cortex sessions hookevents [--hook NAME] [--hook-event EVENT]` —
   list raw `ai_hook_events` rows (runtime + config inventory).
-- `cortex sessions hooks-backfill [--since TIME] [--dry-run]` — bounded,
+- `cortex sessions hookincidents [HOOK]` / `cortex sessions hookinvestigate HOOK` —
+  list and investigate negative signals around hook execution.
+- `cortex sessions hooksbackfill [--since TIME] [--dry-run]` — bounded,
   idempotent backfill of Claude runtime hook events from existing
   transcript history (config-inventory rows are not backfilled — they are
   a point-in-time host read via `--collect-config`).
@@ -1623,9 +1621,9 @@ The heartbeat agent is a small host-local loop (the same `cortex` binary) that c
 Install it as a user systemd service on each fleet host:
 
 ```bash
-cortex setup heartbeat-agent install   # write + enable the systemd unit
-cortex setup heartbeat-agent check     # inspect unit/env state
-cortex setup heartbeat-agent remove    # remove the unit
+cortex setup heartbeatagent install   # write + enable the systemd unit
+cortex setup heartbeatagent check     # inspect unit/env state
+cortex setup heartbeatagent remove    # remove the unit
 cortex heartbeat agent --once --emit   # one-shot foreground run for debugging
 ```
 

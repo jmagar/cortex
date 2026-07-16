@@ -357,9 +357,7 @@ fn tail_logs_sql(
     let mut idx = 1;
 
     if let Some(h) = hostname {
-        sql.push_str(&format!(" AND hostname = ?{idx}"));
-        bindings.push(rusqlite::types::Value::Text(h.to_string()));
-        idx += 1;
+        append_host_selector(&mut sql, &mut bindings, &mut idx, "hostname", h);
     }
     if let Some(source_ip) = source_ip {
         sql.push_str(&format!(" AND source_ip = ?{idx}"));
@@ -500,9 +498,10 @@ pub(crate) fn canonical_host_keys(
 ///    `host` row exists — we never invent a merge that could mask a distinct
 ///    machine.
 ///
-/// Ambiguous self-identifiers (`localhost`, the empty hostname, `host:user`
-/// forms with no dot) are left untouched: resolving those to a real machine
-/// needs the network-verified `source_ip`, which is a deferred follow-up.
+/// Blank hostnames are excluded because they cannot be selected or correlated.
+/// Other ambiguous self-identifiers (`localhost`, `host:user` forms with no
+/// dot) are left untouched: resolving those to a real machine needs the
+/// network-verified `source_ip`, which is a deferred follow-up.
 /// Merged rows sum `log_count`, take the earliest `first_seen` and latest
 /// `last_seen`, and display the canonical (lowercased) name.
 fn dedupe_hosts(rows: Vec<HostEntry>) -> Vec<HostEntry> {
@@ -516,6 +515,9 @@ fn dedupe_hosts(rows: Vec<HostEntry>) -> Vec<HostEntry> {
             .get(&entry.hostname)
             .cloned()
             .unwrap_or_else(|| case_fold_host(&entry.hostname));
+        if canonical.is_empty() {
+            continue;
+        }
         match merged.get_mut(&canonical) {
             Some(acc) => {
                 acc.log_count += entry.log_count;
@@ -1146,8 +1148,8 @@ pub fn search_ai_sessions(
 ) -> Result<SearchAiSessionsResult> {
     validate_fts_query(&params.query)?;
 
-    let conn = pool.get()?;
     let limit = params.limit.unwrap_or(20).clamp(1, 100) as usize;
+    let conn = pool.get()?;
     let (sql, bindings) = search_ai_sessions_sql(params, limit);
 
     let mut stmt = conn.prepare(&sql)?;
@@ -1186,25 +1188,14 @@ fn search_ai_sessions_sql(
     params: &SearchAiSessionsParams,
     limit: usize,
 ) -> (String, Vec<rusqlite::types::Value>) {
-    let mut sql = String::from(
-        "WITH candidates AS (
-            SELECT l.ai_project,
-                   l.ai_tool,
-                   l.ai_session_id,
-                   l.hostname,
-                   l.timestamp,
-                   l.message
-            FROM logs_fts
-            JOIN logs l ON l.id = logs_fts.rowid
-            WHERE logs_fts MATCH ?1",
-    );
-    push_required_ai_filters(&mut sql, "l");
+    let mut filters = String::new();
+    push_required_ai_filters(&mut filters, "l");
     let mut query_params = SqlParams::new(2);
     query_params
         .bindings
         .push(rusqlite::types::Value::Text(params.query.clone()));
     push_ai_scope_filters(
-        &mut sql,
+        &mut filters,
         &mut query_params,
         "l",
         &params.ai_project,
@@ -1214,69 +1205,131 @@ fn search_ai_sessions_sql(
     );
     if let Some(hostname) = &params.host {
         let idx = query_params.push_text(hostname.clone());
-        sql.push_str(&format!(" AND l.hostname = ?{idx}"));
+        filters.push_str(&format!(" AND l.hostname = ?{idx}"));
     }
     if let Some(app_name) = &params.app {
         let idx = query_params.push_text(app_name.clone());
-        sql.push_str(&format!(" AND l.app_name = ?{idx}"));
+        filters.push_str(&format!(" AND l.app_name = ?{idx}"));
     }
-    sql.push_str(&format!(
-        " ORDER BY logs_fts.rowid DESC
-           LIMIT {}
-         ),
-         grouped AS (
-            SELECT ai_project,
-                   ai_tool,
-                   ai_session_id,
-                   hostname,
-                   MIN(timestamp) AS first_seen,
-                   MAX(timestamp) AS last_seen,
-                   COUNT(*) AS match_count,
-                   (
-                       SELECT c2.message
-                       FROM candidates c2
-                       WHERE c2.ai_project = c.ai_project
-                         AND c2.ai_tool = c.ai_tool
-                         AND c2.ai_session_id = c.ai_session_id
-                         AND c2.hostname = c.hostname
-                       ORDER BY c2.timestamp DESC
-                       LIMIT 1
-                   ) AS best_snippet
-            FROM candidates c
-            GROUP BY ai_project, ai_tool, ai_session_id, hostname
-         ),
-         event_counts AS (
+    let sql = format!(
+        "WITH candidates AS MATERIALIZED (
             SELECT l.ai_project,
                    l.ai_tool,
                    l.ai_session_id,
                    l.hostname,
+                   l.timestamp,
+                   l.message
+            FROM logs_fts
+            JOIN logs l ON l.id = logs_fts.rowid
+            WHERE logs_fts MATCH ?1{filters}
+            ORDER BY logs_fts.rowid DESC
+            LIMIT {}
+         ),
+         bounded_candidates AS MATERIALIZED (
+            SELECT * FROM candidates
+            LIMIT {CANDIDATE_CAP}
+         ),
+         grouped AS MATERIALIZED (
+            SELECT ai_project,
+                   ai_tool,
+                   ai_session_id,
+                   hostname,
+                   COUNT(*) AS match_count,
+                   MIN(timestamp) AS first_match,
+                   MAX(timestamp) AS latest_match
+            FROM bounded_candidates c
+            GROUP BY ai_project, ai_tool, ai_session_id, hostname
+         ),
+         selected AS MATERIALIZED (
+            SELECT *
+            FROM grouped
+            ORDER BY latest_match DESC
+            LIMIT {limit}
+         ),
+         rollup_meta AS MATERIALIZED (
+            SELECT COALESCE(MAX(source_max_id), 0) AS source_max_id
+            FROM ai_session_rollup_meta
+         ),
+         tail_stats AS MATERIALIZED (
+            SELECT l.ai_project,
+                   l.ai_tool,
+                   l.ai_session_id,
+                   l.hostname,
+                   MIN(l.timestamp) AS first_seen,
+                   MAX(l.timestamp) AS last_seen,
                    COUNT(*) AS event_count
-            FROM logs l
-            JOIN grouped g
+            FROM selected g
+            CROSS JOIN rollup_meta meta
+            JOIN logs l INDEXED BY idx_logs_ai_session_host_time
               ON g.ai_project = l.ai_project
              AND g.ai_tool = l.ai_tool
              AND g.ai_session_id = l.ai_session_id
              AND g.hostname = l.hostname
+             AND l.id > meta.source_max_id
+            WHERE l.ai_project IS NOT NULL
+              AND l.ai_tool IS NOT NULL
+              AND l.ai_session_id IS NOT NULL
             GROUP BY l.ai_project, l.ai_tool, l.ai_session_id, l.hostname
+         ),
+         totals AS MATERIALIZED (
+            SELECT COUNT(*) AS total_candidates,
+                   COALESCE(SUM(match_count), 0) AS raw_candidate_count
+            FROM (
+                SELECT COUNT(*) AS match_count
+                FROM candidates
+                GROUP BY ai_project, ai_tool, ai_session_id, hostname
+            ) filtered_sessions
          )
          SELECT g.ai_project, g.ai_tool, g.ai_session_id, g.hostname,
-                g.first_seen,
-                g.last_seen,
-                COALESCE(ec.event_count, 0) AS event_count,
+                COALESCE(CASE
+                    WHEN rollup.first_seen IS NULL THEN tail.first_seen
+                    WHEN tail.first_seen IS NULL THEN rollup.first_seen
+                    ELSE MIN(rollup.first_seen, tail.first_seen)
+                END, g.first_match) AS first_seen,
+                COALESCE(CASE
+                    WHEN rollup.last_seen IS NULL THEN tail.last_seen
+                    WHEN tail.last_seen IS NULL THEN rollup.last_seen
+                    ELSE MAX(rollup.last_seen, tail.last_seen)
+                END, g.latest_match) AS last_seen,
+                CASE
+                    WHEN rollup.event_count IS NULL AND tail.event_count IS NULL
+                        THEN g.match_count
+                    ELSE COALESCE(rollup.event_count, 0) + COALESCE(tail.event_count, 0)
+                END AS event_count,
                 g.match_count,
-                g.best_snippet,
-                COUNT(*) OVER() AS total_candidates,
-                (SELECT COUNT(*) FROM candidates) AS raw_candidate_count
-         FROM grouped g
-         LEFT JOIN event_counts ec
-           ON ec.ai_project = g.ai_project
-          AND ec.ai_tool = g.ai_tool
-          AND ec.ai_session_id = g.ai_session_id
-          AND ec.hostname = g.hostname
-         ORDER BY g.last_seen DESC
+                (
+                    SELECT c2.message
+                    FROM bounded_candidates c2
+                    WHERE c2.ai_project = g.ai_project
+                      AND c2.ai_tool = g.ai_tool
+                      AND c2.ai_session_id = g.ai_session_id
+                      AND c2.hostname = g.hostname
+                    ORDER BY c2.timestamp DESC
+                    LIMIT 1
+                ) AS best_snippet,
+                totals.total_candidates,
+                totals.raw_candidate_count
+         FROM selected g
+         LEFT JOIN ai_session_rollup rollup
+           ON rollup.ai_project = g.ai_project
+          AND rollup.ai_tool = g.ai_tool
+          AND rollup.ai_session_id = g.ai_session_id
+          AND rollup.hostname = g.hostname
+         LEFT JOIN tail_stats tail
+           ON tail.ai_project = g.ai_project
+          AND tail.ai_tool = g.ai_tool
+          AND tail.ai_session_id = g.ai_session_id
+          AND tail.hostname = g.hostname
+         CROSS JOIN totals
+         -- Rank by match recency (latest matching row), not the full-session
+         -- last_seen computed above: a session with an old match but newer
+         -- non-matching activity must not jump ahead of more recent matches.
+         -- This mirrors `selected`'s own `latest_match DESC` pre-selection and
+         -- the pre-refactor match-recency ordering.
+         ORDER BY g.latest_match DESC
          LIMIT {limit}",
         CANDIDATE_CAP + 1
-    ));
+    );
     (sql, query_params.bindings)
 }
 
@@ -2031,7 +2084,6 @@ const DEFAULT_AI_ABUSE_TERMS: &[&str] = &[
 ];
 
 pub fn search_ai_abuse(pool: &DbPool, params: &AiAbuseParams) -> Result<AiAbuseResult> {
-    let conn = pool.get()?;
     let limit = params.limit.unwrap_or(20).clamp(1, 100) as usize;
     let before = params.before.unwrap_or(2).min(20);
     let after = params.after.unwrap_or(2).min(20);
@@ -2039,6 +2091,7 @@ pub fn search_ai_abuse(pool: &DbPool, params: &AiAbuseParams) -> Result<AiAbuseR
     if terms.len() > 16 {
         anyhow::bail!("Too many abuse terms ({}); maximum is 16", terms.len());
     }
+    let conn = pool.get()?;
     const CANDIDATE_CAP: usize = 10_000;
 
     let mut sql = String::from(
@@ -2250,12 +2303,12 @@ fn truncate_to_limit<T>(values: &mut Vec<T>, limit: usize) -> bool {
 pub fn search_ai_incidents(pool: &DbPool, params: &AiIncidentParams) -> Result<AiIncidentResult> {
     use std::collections::HashMap;
 
-    let conn = pool.get()?;
     let limit = params.limit.unwrap_or(20).clamp(1, 100) as usize;
     let window_secs = i64::from(params.window_minutes.unwrap_or(10).clamp(1, 120)) * 60;
     let terms = normalized_abuse_terms(&params.terms);
     const CANDIDATE_CAP: usize = 10_000;
 
+    let conn = pool.get()?;
     let (sql, bindings) = ai_incident_anchor_sql(params, &terms, CANDIDATE_CAP);
 
     // Fetch candidate abuse anchor rows (same FTS path as search_ai_abuse,
@@ -2963,9 +3016,7 @@ fn append_filters(
     params: &SearchParams,
 ) {
     if let Some(ref h) = params.host {
-        sql.push_str(&format!(" AND l.hostname = ?{}", *idx));
-        bindings.push(rusqlite::types::Value::Text(h.clone()));
-        *idx += 1;
+        append_host_selector(sql, bindings, idx, "l.hostname", h);
     }
     if let Some(ref source_ip) = params.source {
         sql.push_str(&format!(" AND l.source_ip = ?{}", *idx));
@@ -3083,6 +3134,41 @@ fn append_filters(
     }
 }
 
+/// Append an indexed hostname selector that accepts the canonical names
+/// returned by [`list_hosts`]. Normalization is confined to the tiny `hosts`
+/// aggregate table; the outer log lookup still uses exact stored values and
+/// can probe the existing hostname indexes.
+fn append_host_selector(
+    sql: &mut String,
+    bindings: &mut Vec<rusqlite::types::Value>,
+    idx: &mut usize,
+    column: &str,
+    hostname: &str,
+) {
+    let param = format!("?{}", *idx);
+    let normalized_param = format!("lower(rtrim(trim({param}), '.'))");
+    let normalized_host = "lower(rtrim(trim(h.hostname), '.'))";
+    let normalized_bare = "lower(rtrim(trim(bare.hostname), '.'))";
+    sql.push_str(&format!(
+        " AND {column} IN (
+             SELECT h.hostname
+             FROM hosts h
+             WHERE {normalized_host} = {normalized_param}
+                OR (
+                    {normalized_host} LIKE {normalized_param} || '.%'
+                    AND EXISTS (
+                        SELECT 1
+                        FROM hosts bare
+                        WHERE {normalized_bare} = {normalized_param}
+                          AND instr({normalized_bare}, '.') = 0
+                    )
+                )
+         )"
+    ));
+    bindings.push(rusqlite::types::Value::Text(hostname.to_string()));
+    *idx += 1;
+}
+
 fn prefix_upper_bound(prefix: &str) -> Option<String> {
     let mut bytes = prefix.as_bytes().to_vec();
     for idx in (0..bytes.len()).rev() {
@@ -3175,7 +3261,7 @@ pub fn similar_incidents_clusters(
     // Build the FTS5 + optional filter query.
     // Exclude AI transcript rows so clusters contain only system logs.
     let mut sql = String::from(
-        "WITH hits AS (
+        "WITH hits AS MATERIALIZED (
             SELECT l.id, l.timestamp, l.hostname, l.app_name, l.severity, l.message
             FROM logs_fts
             JOIN logs l ON l.id = logs_fts.rowid
@@ -3228,7 +3314,7 @@ pub fn similar_incidents_clusters(
     }
 
     sql.push_str(&format!(
-        " ORDER BY logs_fts.rowid DESC LIMIT {SIMILAR_INCIDENT_FTS_CANDIDATE_CAP}
+        " ORDER BY l.id DESC LIMIT {SIMILAR_INCIDENT_FTS_CANDIDATE_CAP}
         ),
         bucketed AS (
             SELECT
@@ -3457,6 +3543,9 @@ pub fn incident_context_summary(
 ) -> Result<IncidentContextResult> {
     let conn = pool.get()?;
     let limit = params.limit.unwrap_or(50).clamp(1, 200) as usize;
+    if let Some(query) = params.query.as_deref() {
+        validate_fts_query(query)?;
+    }
 
     // Resolve severity threshold. Default to "warning" (numeric 4).
     let severity_threshold = params
@@ -3570,6 +3659,11 @@ pub fn incident_context_summary(
         .bindings
         .push(rusqlite::types::Value::Text(params.until.clone()));
 
+    let query_idx = params
+        .query
+        .as_ref()
+        .map(|query| err_params.push_text(query.clone()));
+
     let sev_placeholders: Vec<String> = error_severities
         .iter()
         .map(|s| {
@@ -3578,28 +3672,35 @@ pub fn incident_context_summary(
         })
         .collect();
 
-    let mut err_sql = format!(
-        "SELECT id, timestamp, hostname, facility, severity,
-                app_name, process_id, message, received_at, source_ip,
-                ai_tool, ai_project, ai_session_id, ai_transcript_path, metadata_json
-         FROM logs
-         INDEXED BY idx_logs_timestamp
-         WHERE timestamp BETWEEN ?1 AND ?2
-           AND severity IN ({})
-           AND (ai_project IS NULL OR ai_project = '')",
+    let mut err_sql = format!("SELECT {FTS_SELECT_COLS} ");
+    match query_idx {
+        Some(idx) => err_sql.push_str(&format!(
+            "FROM logs_fts
+             JOIN logs l ON l.id = logs_fts.rowid
+             WHERE logs_fts MATCH ?{idx}
+               AND l.timestamp BETWEEN ?1 AND ?2"
+        )),
+        None => err_sql.push_str(
+            "FROM logs l INDEXED BY idx_logs_timestamp
+             WHERE l.timestamp BETWEEN ?1 AND ?2",
+        ),
+    }
+    err_sql.push_str(&format!(
+        " AND l.severity IN ({})
+          AND (l.ai_project IS NULL OR l.ai_project = '')",
         sev_placeholders.join(", ")
-    );
+    ));
 
     if let Some(hostname) = &params.host {
         let idx = err_params.push_text(hostname.clone());
-        err_sql.push_str(&format!(" AND hostname = ?{idx}"));
+        err_sql.push_str(&format!(" AND l.hostname = ?{idx}"));
     }
     if let Some(app_name) = &params.app {
         let idx = err_params.push_text(app_name.clone());
-        err_sql.push_str(&format!(" AND app_name = ?{idx}"));
+        err_sql.push_str(&format!(" AND l.app_name = ?{idx}"));
     }
     // Query limit+1 rows so we can detect true truncation.
-    err_sql.push_str(&format!(" ORDER BY timestamp DESC LIMIT {}", limit + 1));
+    err_sql.push_str(&format!(" ORDER BY l.timestamp DESC LIMIT {}", limit + 1));
 
     let mut err_stmt = conn.prepare(&err_sql).map_err(|e| {
         tracing::error!(error = %e, "incident_context error_logs prepare failed");

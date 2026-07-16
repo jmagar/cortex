@@ -148,8 +148,8 @@ docker compose logs -f cortex
 cortex search "error" --since 1h
 
 # AI incident investigation
-cortex skill-incidents --limit 5
-cortex skill-investigate <skill_name>
+cortex sessions skillincidents --limit 5
+cortex sessions skillinvestigate <skill_name>
 
 # LLM assessment (CLI-only, guarded)
 cortex assess skill <skill_name> --since 7d

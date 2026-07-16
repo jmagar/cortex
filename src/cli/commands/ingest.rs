@@ -6,22 +6,14 @@ use super::super::args::{CliCommand, IngestCommand, OutputArgs};
 
 pub(crate) fn parse_ingest(args: &[String]) -> Result<CliCommand> {
     let (domain, rest) = args.split_first().ok_or_else(|| {
-        anyhow!("ingest requires a subcommand (shell|inventory|file-tail|syslog|docker)")
+        anyhow!("ingest requires a subcommand (shell|inventory|filetail|syslog|docker)")
     })?;
     let command = match domain.as_str() {
         "shell" => {
             IngestCommand::Shell(super::super::parse_command_log::parse_shell_command(rest)?)
         }
-        // Back-compat: pre-restructure grammar `ingest agent-command {ingest-spool|wrap}`.
-        // Keep accepting this until every deployed wrapper/timer has been
-        // regenerated via `cortex setup shell agent install` (see bead
-        // syslog-mcp-4n4a6, which this alias exists specifically to prevent
-        // recurring).
-        "agent-command" => IngestCommand::Shell(super::super::ShellCommand::Agent(
-            super::super::parse_command_log::parse_shell_agent_command_legacy(rest)?,
-        )),
         "inventory" => IngestCommand::Inventory(parse_inventory_command(rest)?),
-        "file-tail" => IngestCommand::FileTail(super::file_tails::parse_file_tail_command(rest)?),
+        "filetail" => IngestCommand::FileTail(super::file_tails::parse_file_tail_command(rest)?),
         "syslog" => parse_syslog(rest)?,
         "docker" => parse_docker(rest)?,
         _ => bail!(
@@ -29,7 +21,7 @@ pub(crate) fn parse_ingest(args: &[String]) -> Result<CliCommand> {
             super::super::suggest::unknown_command(
                 "ingest subcommand",
                 domain,
-                &["shell", "inventory", "file-tail", "syslog", "docker"],
+                &["shell", "inventory", "filetail", "syslog", "docker"],
             )
         ),
     };

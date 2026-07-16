@@ -55,17 +55,17 @@ pub async fn run_sessions_index_timer_setup(
             phases.push(check_file_phase(
                 "sessions-index-bin",
                 &bin_path,
-                "run cortex setup sessions-index-timer install",
+                "run cortex setup sessionstimer install",
             ));
             phases.push(check_file_phase(
                 "sessions-index-service",
                 &service_path,
-                "run cortex setup sessions-index-timer install",
+                "run cortex setup sessionstimer install",
             ));
             phases.push(check_file_phase(
                 "sessions-index-timer",
                 &timer_path,
-                "run cortex setup sessions-index-timer install",
+                "run cortex setup sessionstimer install",
             ));
             phases.push(systemctl_user_phase(&[
                 "is-enabled",

@@ -8,7 +8,7 @@
 use super::*;
 
 #[test]
-fn correlate_state_requires_reference_fields() {
+fn correlate_state_preserves_optional_reference_for_shared_default() {
     let correlate = CorrelateStateArgs {
         reference_time: Some("2026-06-13T00:00:00Z".to_string()),
         window_minutes: Some(10),
@@ -19,11 +19,20 @@ fn correlate_state_requires_reference_fields() {
     }
     .into_request()
     .unwrap();
-    assert_eq!(correlate.reference_time, "2026-06-13T00:00:00Z");
+    assert_eq!(
+        correlate.reference_time.as_deref(),
+        Some("2026-06-13T00:00:00Z")
+    );
     assert_eq!(correlate.host.as_deref(), Some("host-a"));
     assert_eq!(correlate.limit, Some(25));
 
-    assert!(CorrelateStateArgs::default().into_request().is_err());
+    assert!(
+        CorrelateStateArgs::default()
+            .into_request()
+            .unwrap()
+            .reference_time
+            .is_none()
+    );
 }
 
 #[test]

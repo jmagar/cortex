@@ -60,6 +60,26 @@ fn every_catalog_entry_is_in_exactly_one_section() {
 }
 
 #[test]
+fn documented_command_tokens_are_single_words() {
+    for doc in CATALOG {
+        assert!(
+            !doc.name.contains('-'),
+            "hyphenated command root: {}",
+            doc.name
+        );
+    }
+    for doc in NESTED_CATALOG {
+        assert!(
+            doc.path
+                .split_whitespace()
+                .all(|token| !token.contains('-')),
+            "hyphenated command path: {}",
+            doc.path
+        );
+    }
+}
+
+#[test]
 fn every_section_name_is_a_real_command() {
     for (section, names) in SECTIONS {
         for name in *names {
@@ -120,9 +140,9 @@ fn nested_help_shows_subcommand_specific_usage() {
         "got: {out}"
     );
 
-    let out = render_command("ingest file-tail", false).expect("ingest file-tail is known");
+    let out = render_command("ingest filetail", false).expect("ingest filetail is known");
     assert!(
-        out.contains("cortex ingest file-tail add --id ID"),
+        out.contains("cortex ingest filetail add PATH"),
         "got: {out}"
     );
     assert!(out.contains("--from-start"), "got: {out}");

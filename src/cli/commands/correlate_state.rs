@@ -1,7 +1,7 @@
-//! Parse function for `cortex correlate-state`.
+//! Parse function for `cortex correlate state`.
 //!
 //! Surface parity (cxih.4): exposes the `correlate_state` MCP action and
-//! `GET /api/correlate-state` REST route as a top-level CLI subcommand.
+//! `GET /api/correlate-state` REST route through the nested CLI command.
 
 use anyhow::{Result, bail};
 
@@ -24,8 +24,10 @@ pub(crate) fn parse_correlate_state(args: &[String]) -> Result<CliCommand> {
             parsed.severity_min = Some(v);
         } else if let Some(v) = flags.match_value(&arg, "--limit")? {
             parsed.limit = Some(parse_u32_flag("--limit", v)?);
+        } else if !arg.starts_with('-') && parsed.reference_time.is_none() {
+            parsed.reference_time = Some(norm_time(arg)?);
         } else {
-            bail!("unknown correlate-state option: {arg}");
+            bail!("unknown correlate state option: {arg}");
         }
     }
     Ok(CliCommand::CorrelateState(parsed))

@@ -104,8 +104,8 @@ pub struct FileTailResponse {
 impl FileTailSource {
     pub(crate) fn from_add(req: FileTailAddRequest, now: &str) -> Result<Self, String> {
         validate_id(&req.id)?;
-        if req.path.is_empty() || req.tag.is_empty() || req.host.is_none() {
-            return Err("file_tails op=add requires id, path, tag, and host".into());
+        if req.path.is_empty() || req.tag.is_empty() {
+            return Err("file_tails op=add requires path".into());
         }
         if let Some(facility) = req.facility.as_deref() {
             validate_facility(facility)?;
@@ -121,11 +121,10 @@ impl FileTailSource {
             .transpose()?
             .unwrap_or_else(|| "info".to_string());
 
-        let hostname = req
-            .host
-            .as_deref()
-            .ok_or_else(|| "file_tails op=add requires id, path, tag, and host".to_string())
-            .and_then(normalize_hostname)?;
+        let hostname = match req.host.as_deref() {
+            Some(hostname) => normalize_hostname(hostname)?,
+            None => derived_source_hostname(&req.id),
+        };
 
         Ok(Self {
             id: req.id,
@@ -250,32 +249,89 @@ impl FileTailRequest {
     }
 
     pub(crate) fn into_add(self) -> Result<FileTailAddRequest, String> {
-        let id = self
-            .id
-            .ok_or_else(|| "file_tails op=add requires id, path, tag, and host".to_string())?;
-        validate_id(&id)?;
         let path = self
             .path
-            .ok_or_else(|| "file_tails op=add requires id, path, tag, and host".to_string())?;
-        let tag = self
-            .tag
-            .ok_or_else(|| "file_tails op=add requires id, path, tag, and host".to_string())?;
-        let hostname = self
-            .host
-            .ok_or_else(|| "file_tails op=add requires id, path, tag, and host".to_string())?;
-        if path.is_empty() || tag.is_empty() || hostname.trim().is_empty() {
-            return Err("file_tails op=add requires id, path, tag, and host".into());
+            .ok_or_else(|| "file_tails op=add requires path".to_string())?;
+        if path.trim().is_empty() {
+            return Err("file_tails op=add requires path".into());
         }
+        let derived = derive_identity(&path)?;
+        let id = self.id.unwrap_or_else(|| derived.clone());
+        validate_id(&id)?;
+        let tag = self.tag.unwrap_or(derived);
+        if tag.trim().is_empty() {
+            return Err("file_tails tag must not be empty".into());
+        }
+        let host = Some(self.host.unwrap_or_else(|| derived_source_hostname(&id)));
         Ok(FileTailAddRequest {
             id,
             path,
             tag,
-            host: Some(hostname),
+            host,
             facility: self.facility,
             severity: self.severity,
             start_at_end: self.start_at_end,
         })
     }
+}
+
+pub(crate) fn derived_source_hostname(id: &str) -> String {
+    const PREFIX: &str = "file-tail-";
+    const HASH_LEN: usize = 17;
+
+    let normalized = id
+        .trim()
+        .bytes()
+        .map(|byte| {
+            if byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-') {
+                byte.to_ascii_lowercase() as char
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>();
+    let core = normalized.trim_matches(['.', '_', '-']);
+    let hash = fnv1a64(id.as_bytes());
+    if core.is_empty() {
+        return format!("{PREFIX}source-{hash:016x}");
+    }
+
+    let max_core_len = 255 - PREFIX.len();
+    if core.len() <= max_core_len {
+        return format!("{PREFIX}{core}");
+    }
+
+    let keep = max_core_len - HASH_LEN;
+    format!("{PREFIX}{}-{hash:016x}", &core[..keep])
+}
+
+fn fnv1a64(bytes: &[u8]) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
+}
+
+fn derive_identity(path: &str) -> Result<String, String> {
+    let stem = std::path::Path::new(path)
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| "file_tails path must have a UTF-8 file name".to_string())?;
+    let mut identity = String::with_capacity(stem.len());
+    for ch in stem.chars() {
+        if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-') {
+            identity.push(ch.to_ascii_lowercase());
+        } else if !identity.ends_with('-') {
+            identity.push('-');
+        }
+    }
+    let identity = identity.trim_matches(['.', '_', '-']).to_string();
+    if identity.is_empty() {
+        return Err("file_tails could not derive an id from path; provide id explicitly".into());
+    }
+    Ok(identity)
 }
 
 fn normalize_severity(severity: Option<&str>) -> Option<String> {

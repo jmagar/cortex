@@ -884,6 +884,13 @@ impl Default for DockerIngestConfig {
 }
 
 impl Config {
+    /// Load config for commands that inspect settings without opening runtime
+    /// resources. Values are parsed and validated normally, but an explicit
+    /// database path is not required to exist on this host.
+    pub fn load_for_inspection() -> anyhow::Result<Self> {
+        Self::load_inner(false, false)
+    }
+
     /// Load config for stdio / query-only mode.
     ///
     /// Identical to [`Config::load`] but skips the non-loopback bind safety
@@ -892,14 +899,14 @@ impl Config {
     /// configurations like `mcp.host = "0.0.0.0"` that are valid for the HTTP
     /// server but harmless in stdio mode.
     pub fn load_for_stdio() -> anyhow::Result<Self> {
-        Self::load_inner(false)
+        Self::load_inner(false, true)
     }
 
     pub fn load() -> anyhow::Result<Self> {
-        Self::load_inner(true)
+        Self::load_inner(true, true)
     }
 
-    fn load_inner(check_bind: bool) -> anyhow::Result<Self> {
+    fn load_inner(check_bind: bool, check_db_path: bool) -> anyhow::Result<Self> {
         // 1. Start with defaults
         let mut config = Config::default();
 
@@ -969,7 +976,7 @@ impl Config {
         // where the variable is set to a host filesystem path that was never
         // bind-mounted into the container, producing a cryptic "Permission denied"
         // error deep in SQLite pool initialisation.
-        if std::env::var_os("CORTEX_DB_PATH").is_some() {
+        if check_db_path && std::env::var_os("CORTEX_DB_PATH").is_some() {
             if let Some(parent) = config.storage.db_path.parent() {
                 if !parent.as_os_str().is_empty() && !parent.exists() {
                     anyhow::bail!(
