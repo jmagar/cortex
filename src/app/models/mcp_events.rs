@@ -20,6 +20,7 @@ pub struct McpBackfillResult {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ListMcpEventsRequest {
     pub tool_name: Option<String>,
     pub mcp_server: Option<String>,

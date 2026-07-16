@@ -101,7 +101,7 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                 },
                 "host": {
                     "type": "string",
-                    "description": "For action=search, filter, tail, correlate, ai_correlate, apps, sessions, timeline, patterns, context, similar_incidents, or incident_context: exact hostname filter (use action=hosts to enumerate). For action=host_state: resolve a host by unique hostname when host_id is omitted. For action=correlate_state: optional host filter accepting a host_id or a unique hostname; when omitted, a bounded cross-host plan is used over all hosts with heartbeats in the window. For action=map mode=host_services or service_dependencies: target host. For action=file_tails op=add: required source host assigned to tailed lines."
+                    "description": "For action=search, filter, tail, correlate, ai_correlate, apps, sessions, timeline, patterns, context, similar_incidents, or incident_context: exact hostname filter (use action=hosts to enumerate). For action=host_state: resolve a host by unique hostname; when host and host_id are omitted, the freshest host is selected. For action=correlate_state: optional host filter accepting a host_id or a unique hostname; when omitted, a bounded cross-host plan is used over all hosts with heartbeats in the window. For action=map mode=host_services or service_dependencies: target host. For action=file_tails op=add: optional source host assigned to tailed lines; the runtime hostname is used when omitted."
                 },
                 "domain": {
                     "type": "string",
@@ -219,7 +219,7 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                 },
                 "until": {
                     "type": "string",
-                    "description": "For action=search, filter, sessions, search_sessions, abuse, abuse_incidents, abuse_investigate, ai_correlate, usage_blocks, list_ai_tools, list_ai_projects, errors, timeline, patterns, apps, similar_incidents: end of time range as ISO 8601/RFC3339. Required for incident_context. For action=timeline: a bucket-sized default lookback bounds the query when since/until are omitted (no full-history scan). Strongly recommended for patterns — omitting since/until causes a full-history scan."
+                    "description": "For action=search, filter, sessions, search_sessions, abuse, abuse_incidents, abuse_investigate, ai_correlate, usage_blocks, list_ai_tools, list_ai_projects, errors, timeline, patterns, apps, similar_incidents, or incident_context: end of time range as ISO 8601/RFC3339. For incident_context, defaults to now. For action=timeline: a bucket-sized default lookback bounds the query when since/until are omitted."
                 },
                 "status": {
                     "type": "string",
@@ -227,7 +227,7 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                 },
                 "limit": {
                     "type": "integer",
-                    "description": "For action=search or filter: max results, default 100, max 1000. For action=errors: max summary rows, max 100. For action=sessions: max results, default 100, max 1000. For action=search_sessions: max grouped results, default 20, max 100 and returns total_candidates, candidate_rows, candidate_cap, candidate_window_truncated, and truncated. For action=abuse: max matches, default 20, max 100, each with same-session context. For action=abuse_incidents: max incidents, default 20, max 100; response includes total_incidents, candidate_rows, truncated. For action=abuse_investigate: max incidents to expand into evidence bundles, default 3, max 10. For action=ai_correlate: max AI anchors, default 10, max 50. For action=usage_blocks: max 5-hour usage buckets, default 1000, max 1000. For action=project_context: recent representative entries, default 5, max 20 with 256-char message snippets and recent_entries_truncated. For action=list_ai_tools/list_ai_projects: inventory results are capped at 100/200 and include total/truncated metadata. For action=correlate: max total events, default 500, max 999 for timestamp correlation; with topic, max timeline entries, default 200, max 1000. For action=topic_correlate: max timeline entries, default 200, max 1000; response includes truncated (log timeline cut off) and graph_walk_truncated (service-topic graph walk hit its entity cap) as independent signals. For action=correlate_state: max log rows per host, default 100, max 500. For action=host_state: max heartbeat samples, default 1, max 100. For action=patterns: alias for top_n, default 20, max 200. For action=clock_skew: max host rows, max 100. For action=apps: page size, default 500, max 5000; use with offset to paginate; response includes total count of all matching apps. For action=source_ips: page size, default 500, max 5000; use with offset to page through all results. For action=similar_incidents: max incident clusters, default 10, max 50. For action=incident_context: max error log rows, default 50, max 200. For action=graph: alias candidate or relationship cap; entity lookup default 20 max 100, around default 100 max 500. For action=llm_invocations: max audit rows, default 50, max 500."
+                    "description": "For action=search: max results, default 50, max 1000. For action=filter: max results, default 100, max 1000. For action=errors: max summary rows, max 100. For action=sessions: max results, default 100, max 1000. For action=search_sessions: max grouped results, default 20, max 100 and returns total_candidates, candidate_rows, candidate_cap, candidate_window_truncated, and truncated. For action=abuse: max matches, default 20, max 100, each with same-session context. For action=abuse_incidents: max incidents, default 20, max 100; response includes total_incidents, candidate_rows, truncated. For action=abuse_investigate: max incidents to expand into evidence bundles, default 3, max 10. For action=ai_correlate: max AI anchors, default 10, max 50. For action=usage_blocks: max 5-hour usage buckets, default 1000, max 1000. For action=project_context: recent representative entries, default 5, max 20. For action=correlate: max total events, default 500, max 999. For action=topic_correlate: max timeline entries, default 200, max 1000. For action=correlate_state: max log rows per host, default 100, max 500. For action=host_state: max heartbeat samples, default 1, max 100. For action=patterns: alias for top_n, default 20, max 200. For action=clock_skew: max host rows, max 100. For action=apps or source_ips: page size, default 500, max 5000. For action=similar_incidents: max incident clusters, default 10, max 50. For action=incident_context: max error log rows, default 50, max 200. For action=graph: alias candidate or relationship cap. For action=llm_invocations: max audit rows, default 50, max 500."
                 },
                 "answer_limit": {
                     "type": "integer",
@@ -277,7 +277,7 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                 },
                 "reference_time": {
                     "type": "string",
-                    "description": "For action=correlate_state: required center timestamp for the correlation window as ISO 8601/RFC3339. For action=correlate: center timestamp, or omit and pass query to derive it from the top matching AI-transcript session."
+                    "description": "For action=correlate_state or correlate: center timestamp for the correlation window as ISO 8601/RFC3339. Defaults to now; action=correlate can instead pass query to derive an anchor from the top matching AI-transcript session."
                 },
                 "window_minutes": {
                     "type": "integer",
@@ -368,7 +368,7 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                 },
                 "since": {
                     "type": "string",
-                    "description": "For action=search, filter, sessions, search_sessions, abuse, abuse_incidents, abuse_investigate, ai_correlate, usage_blocks, list_ai_tools, list_ai_projects, errors, timeline, patterns, apps, similar_incidents: start of time range as ISO 8601/RFC3339. Required for incident_context. For action=timeline: when both since and until are omitted, a bucket-sized default lookback window applies (≈7 days for hour, 30 for day, longer for week/month) — no full-history scan. Strongly recommended for patterns — omitting since/until causes a full-history scan. For action=clock_skew: sample entries with received_at >= since; use `limit` to cap returned host rows. For action=host_state: only include heartbeat samples with sampled_at >= this timestamp. For action=notifications_recent or llm_invocations: lower time bound (started_at >= since for llm_invocations)."
+                    "description": "For action=search, filter, sessions, search_sessions, abuse, abuse_incidents, abuse_investigate, ai_correlate, usage_blocks, list_ai_tools, list_ai_projects, errors, timeline, patterns, apps, similar_incidents, or incident_context: start of time range as ISO 8601/RFC3339. Defaults to one hour ago for errors and incident_context, and 24 hours ago for patterns when both bounds are omitted. Timeline applies a bucket-sized default lookback. For action=clock_skew or host_state: lower sample bound. For action=notifications_recent or llm_invocations: lower time bound."
                 },
                 "recent_minutes": {
                     "type": "integer",
@@ -380,7 +380,7 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                 },
                 "a_from": {
                     "type": "string",
-                    "description": "For action=compare: first range start as ISO 8601/RFC3339."
+                    "description": "For action=compare: first range start as ISO 8601/RFC3339. Omit all four range fields to compare the prior hour with the latest hour."
                 },
                 "a_to": {
                     "type": "string",

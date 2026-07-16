@@ -224,7 +224,7 @@ Manually purge logs older than N days (overrides `CORTEX_RETENTION_DAYS`).
 1. Check listener health: `cortex status` or `GET /health/full`
 2. Check firewall: Ensure UDP/TCP 1514 is open
 3. Check syslog sender: Verify rsyslog/syslog-ng config
-4. Check rate: `cortex ingest-rate` for throughput
+4. Check rate: `cortex stats ingestrate` for throughput
 
 #### High queue depth
 - Cause: Ingest faster than write throughput

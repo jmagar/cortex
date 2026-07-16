@@ -133,7 +133,7 @@ fn run_plugin_hook(args: PluginHookArgs) -> Result<()> {
 
     // Keep the user's terminal copy in ~/.local/bin fresh each session.
     if let Err(e) = install_self() {
-        eprintln!("cortex setup plugin-hook: self-install skipped: {e}");
+        eprintln!("cortex setup pluginhook: self-install skipped: {e}");
     }
     let check = setup_report(SetupMode::Check)?;
     let repair = if check.has_errors && !args.no_repair {
@@ -163,7 +163,7 @@ fn run_plugin_hook(args: PluginHookArgs) -> Result<()> {
     print_plugin_hook_report(&report, args.json)?;
     if matches!(report.exit_policy, PluginHookExitPolicy::BlockingFailure) {
         bail!(
-            "cortex setup plugin-hook completed with blocking failed phases: {}",
+            "cortex setup pluginhook completed with blocking failed phases: {}",
             report.blocking_failures.join(", ")
         );
     }

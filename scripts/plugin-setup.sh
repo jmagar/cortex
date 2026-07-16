@@ -148,7 +148,7 @@ main() {
     return 0
   fi
 
-  "${cortex_bin}" setup plugin-hook "$@"
+  "${cortex_bin}" setup pluginhook "$@"
 }
 
 main "$@"

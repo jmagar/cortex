@@ -108,7 +108,7 @@ impl CortexService {
             let suggested_filters = vec![
                 "widen --since (e.g. --since 30d)".to_string(),
                 "drop --plugin and filter by --skill only".to_string(),
-                "run `cortex sessions skill-incidents` with no filters to see what skills have \
+                "run `cortex sessions skillincidents` with no filters to see what skills have \
                  events"
                     .to_string(),
             ];

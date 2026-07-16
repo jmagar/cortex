@@ -68,8 +68,8 @@ cortex exposes its functionality through three surfaces that share a common serv
 62 routes across several categories:
 - **Log queries**: `/api/logs/search`, `/api/logs/tail`, `/api/logs/filter`, `/api/logs/context`
 - **AI sessions**: `/api/sessions`, `/api/sessions/search`
-- **Incidents**: `/api/skill-incidents`, `/api/mcp-incidents`, `/api/hook-incidents`
-- **Investigation**: `/api/skill-investigate`, `/api/mcp-investigate`, `/api/hook-investigate`
+- **Incidents**: `/api/sessions/skill-incidents`, `/api/sessions/mcp-incidents`, `/api/sessions/hook-incidents`
+- **Investigation**: `/api/sessions/skill-investigate`, `/api/sessions/mcp-investigate`, `/api/sessions/hook-investigate`
 - **Analytics**: `/api/stats`, `/api/timeline`, `/api/errors`, `/api/patterns`
 - **Inventory**: `/api/hosts`, `/api/apps`, `/api/source-ips`
 - **Admin**: `/api/errors/ack`, `/api/errors/unack`, `/api/notifications/test`
@@ -95,8 +95,8 @@ cortex exposes its functionality through three surfaces that share a common serv
 Organized by domain:
 - **Log queries**: `cortex search`, `cortex tail`, `cortex filter`, `cortex context`
 - **AI sessions**: `cortex sessions`, `cortex search-sessions`
-- **Incidents**: `cortex skill-incidents`, `cortex mcp-incidents`, `cortex hook-incidents`
-- **Investigation**: `cortex skill-investigate`, `cortex mcp-investigate`, `cortex hook-investigate`
+- **Incidents**: `cortex sessions skillincidents`, `cortex sessions mcpincidents`, `cortex sessions hookincidents`
+- **Investigation**: `cortex sessions skillinvestigate`, `cortex sessions mcpinvestigate`, `cortex sessions hookinvestigate`
 - **Assessment**: `cortex assess skill`, `cortex assess mcp`, `cortex assess hooks`
 - **Analytics**: `cortex stats`, `cortex timeline`, `cortex errors`
 - **Inventory**: `cortex hosts`, `cortex apps`, `cortex sources`

@@ -28,32 +28,3 @@ fn bind_positional_errors_when_more_than_one_given() {
         .to_string();
     assert!(err.contains("at most one"), "{err}");
 }
-
-#[test]
-fn apply_default_limit_only_when_unset() {
-    assert_eq!(effective_limit("tail", None), Some(50)); // default applied
-    assert_eq!(effective_limit("tail", Some(5)), Some(5)); // user wins
-    assert_eq!(effective_limit("status", None), None); // no default
-}
-
-#[test]
-fn effective_since_resolves_default_window_to_absolute() {
-    // errors defaults to a 1h window; absent a user value we get an absolute
-    // RFC3339 timestamp (normalised to +00:00 by the time parser).
-    let resolved = effective_since("errors", None)
-        .unwrap()
-        .expect("default applied");
-    assert!(resolved.ends_with("+00:00"), "{resolved}");
-}
-
-#[test]
-fn effective_since_user_value_wins() {
-    let user = Some("2026-01-01T00:00:00+00:00".to_string());
-    assert_eq!(effective_since("errors", user.clone()).unwrap(), user);
-}
-
-#[test]
-fn effective_since_none_when_no_default() {
-    // tail has no since default.
-    assert_eq!(effective_since("tail", None).unwrap(), None);
-}

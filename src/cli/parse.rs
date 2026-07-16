@@ -164,13 +164,13 @@ fn parse_correlate_domain(args: &[String]) -> Result<CliCommand> {
 
 fn parse_stats_domain(args: &[String]) -> Result<CliCommand> {
     match args.first().map(String::as_str) {
-        Some("ingest-rate") => Ok(CliCommand::Stats(StatsCommand::IngestRate(
+        Some("ingestrate") => Ok(CliCommand::Stats(StatsCommand::IngestRate(
             parse_ingest_rate_args(&args[1..])?,
         ))),
         Some("summary") => parse_stats(&args[1..]),
         Some(other) if !other.starts_with('-') => bail!(
             "{}",
-            suggest::unknown_command("stats subcommand", other, &["summary", "ingest-rate"])
+            suggest::unknown_command("stats subcommand", other, &["summary", "ingestrate"])
         ),
         _ => parse_stats(args),
     }

@@ -3,10 +3,11 @@ use super::dispatch::http_or_cancel;
 use anyhow::{Result, bail};
 use cortex::app::{
     AbuseSearchRequest, AiAssessRequest, AiCheckpointsRequest, AiCorrelateRequest,
-    AiIncidentRequest, AiInvestigateRequest, AiParseErrorsRequest, AiPruneCheckpointsRequest,
-    HookAssessRequest, IncidentContextRequest, ListAiProjectsRequest, ListAiToolsRequest,
-    ListHookEventsRequest, McpAssessRequest, ProjectContextRequest, SearchSessionsRequest,
-    SimilarIncidentsRequest, SkillAssessRequest, UsageBlocksRequest,
+    AiHookIncidentRequest, AiHookInvestigateRequest, AiIncidentRequest, AiInvestigateRequest,
+    AiParseErrorsRequest, AiPruneCheckpointsRequest, HookAssessRequest, IncidentContextRequest,
+    ListAiProjectsRequest, ListAiToolsRequest, ListHookEventsRequest, McpAssessRequest,
+    ProjectContextRequest, SearchSessionsRequest, SimilarIncidentsRequest, SkillAssessRequest,
+    UsageBlocksRequest,
 };
 use std::io::Write;
 
@@ -18,6 +19,9 @@ use super::output::logs::{
     UsageBlocksPrintOptions, print_abuse_search_response, print_ai_correlate_response,
     print_ai_projects_response, print_ai_tools_response, print_project_context_response,
     print_search_sessions_response, print_usage_blocks_response_with_options,
+};
+use super::output::sessions::hook_incidents::{
+    print_ai_hook_incidents_response, print_ai_hook_investigate_response,
 };
 use super::output::sessions::mcp_incidents::{
     print_ai_mcp_incidents_response, print_ai_mcp_investigate_response,
@@ -40,12 +44,13 @@ use super::{
     AssessAbuseArgs, AssessHooksArgs, AssessMcpArgs, AssessSkillArgs, CliMode, OutputArgs,
     SessionsAbuseArgs, SessionsAddArgs, SessionsAssessArgs, SessionsBlocksArgs,
     SessionsCheckpointsArgs, SessionsContextArgs, SessionsCorrelateArgs, SessionsDoctorArgs,
-    SessionsErrorsArgs, SessionsIncidentContextArgs, SessionsIncidentsArgs, SessionsIndexArgs,
-    SessionsInvestigateArgs, SessionsListArgs, SessionsLlmInvocationsArgs,
-    SessionsMcpEventsBackfillArgs, SessionsMcpEventsListArgs, SessionsMcpIncidentsArgs,
-    SessionsMcpInvestigateArgs, SessionsPruneCheckpointsArgs, SessionsSearchArgs,
-    SessionsSimilarArgs, SessionsSkillIncidentsArgs, SessionsSkillInvestigateArgs,
-    SessionsSkillsBackfillArgs, SessionsSkillsListArgs, SessionsWatchArgs,
+    SessionsErrorsArgs, SessionsHookIncidentsArgs, SessionsHookInvestigateArgs,
+    SessionsIncidentContextArgs, SessionsIncidentsArgs, SessionsIndexArgs, SessionsInvestigateArgs,
+    SessionsListArgs, SessionsLlmInvocationsArgs, SessionsMcpEventsBackfillArgs,
+    SessionsMcpEventsListArgs, SessionsMcpIncidentsArgs, SessionsMcpInvestigateArgs,
+    SessionsPruneCheckpointsArgs, SessionsSearchArgs, SessionsSimilarArgs,
+    SessionsSkillIncidentsArgs, SessionsSkillInvestigateArgs, SessionsSkillsBackfillArgs,
+    SessionsSkillsListArgs, SessionsWatchArgs,
 };
 
 // ─── AI Arg → Request conversions (bead 0p8r.8) ─────────────────────────────
@@ -377,7 +382,7 @@ pub(crate) async fn run_mcp_events_backfill(
     args: SessionsMcpEventsBackfillArgs,
 ) -> Result<()> {
     let service = match mode {
-        CliMode::Http(_) => bail!("sessions mcp-events backfill runs local DB scans; omit --http"),
+        CliMode::Http(_) => bail!("sessions mcpevents backfill runs local DB scans; omit --http"),
         CliMode::Local(service) => service,
     };
     let response = service
@@ -418,11 +423,10 @@ pub(crate) async fn run_mcp_events(mode: &CliMode, args: SessionsMcpEventsListAr
         to: args.until,
         limit: args.limit,
     };
-    let service = match mode {
-        CliMode::Http(_) => bail!("sessions mcp-events runs against the local DB; omit --http"),
-        CliMode::Local(service) => service,
+    let response = match mode {
+        CliMode::Local(service) => service.list_mcp_events(req).await?,
+        CliMode::Http(client) => http_or_cancel(client.mcp_events(&req)).await?,
     };
-    let response = service.list_mcp_events(req).await?;
     print_mcp_events_response(&response, json)
 }
 
@@ -452,12 +456,95 @@ pub(crate) async fn run_ai_hook_events(
     print_hook_events_response(&response, json)
 }
 
+impl SessionsHookIncidentsArgs {
+    fn into_request(self) -> AiHookIncidentRequest {
+        AiHookIncidentRequest {
+            hook_event: self.hook_event,
+            hook_name: self.hook_name,
+            hook_source: self.hook_source,
+            tool: self.tool,
+            project: self.project,
+            session_id: self.session_id,
+            hostname: self.hostname,
+            evidence_kind: self.evidence_kind,
+            since: self.since,
+            until: self.until,
+            limit: self.limit,
+            window_minutes: self.window_minutes,
+            signals: self.signals,
+            min_score: self.min_score.map(|value| {
+                value
+                    .parse::<f64>()
+                    .expect("min_score validated at CLI-parse time")
+            }),
+        }
+    }
+}
+
+impl SessionsHookInvestigateArgs {
+    fn into_request(self) -> AiHookInvestigateRequest {
+        AiHookInvestigateRequest {
+            incident_id: self.incident_id,
+            hook_event: self.hook_event,
+            hook_name: self.hook_name,
+            hook_source: self.hook_source,
+            tool: self.tool,
+            project: self.project,
+            since: self.since,
+            until: self.until,
+            limit: if self.all {
+                self.limit.or(Some(3))
+            } else {
+                self.limit.or(Some(1))
+            },
+            window_minutes: self.window_minutes,
+            correlation_window_minutes: self.correlation_window_minutes,
+        }
+    }
+}
+
+pub(crate) async fn run_ai_hook_incidents(
+    mode: &CliMode,
+    args: SessionsHookIncidentsArgs,
+) -> Result<()> {
+    let json = args.json;
+    let req = args.into_request();
+    let response = match mode {
+        CliMode::Local(service) => service.list_ai_hook_incidents(req).await?,
+        CliMode::Http(client) => http_or_cancel(client.ai_hook_incidents(&req)).await?,
+    };
+    print_ai_hook_incidents_response(&response, json)
+}
+
+pub(crate) async fn run_ai_hook_investigate(
+    mode: &CliMode,
+    args: SessionsHookInvestigateArgs,
+) -> Result<()> {
+    let json = args.json;
+    if args.hook_name.is_none()
+        && args.hook_event.is_none()
+        && args.hook_source.is_none()
+        && args.incident_id.is_none()
+    {
+        bail!(
+            "sessions hookinvestigate requires a hook name (positional), --hook-event, \
+             --hook-source, or --incident-id"
+        );
+    }
+    let req = args.into_request();
+    let response = match mode {
+        CliMode::Local(service) => service.investigate_ai_hook_incidents(req).await?,
+        CliMode::Http(client) => http_or_cancel(client.ai_hook_investigate(&req)).await?,
+    };
+    print_ai_hook_investigate_response(&response, json)
+}
+
 pub(crate) async fn run_ai_hooks_backfill(
     mode: &CliMode,
     args: super::SessionsHooksBackfillArgs,
 ) -> Result<()> {
     let service = match mode {
-        CliMode::Http(_) => bail!("sessions hooks-backfill runs local DB scans; omit --http"),
+        CliMode::Http(_) => bail!("sessions hooksbackfill runs local DB scans; omit --http"),
         CliMode::Local(service) => service,
     };
     let response = service
@@ -520,7 +607,7 @@ pub(crate) async fn run_ai_doctor(mode: &CliMode, args: SessionsDoctorArgs) -> R
 pub(crate) async fn run_ai_smoke_watch(mode: &CliMode, args: OutputArgs) -> Result<()> {
     let service = match mode {
         CliMode::Http(_) => {
-            bail!("sessions smoke-watch writes synthetic transcript to host fs; omit --http")
+            bail!("sessions smokewatch writes synthetic transcript to host fs; omit --http")
         }
         CliMode::Local(service) => service,
     };
@@ -534,7 +621,7 @@ pub(crate) async fn run_ai_smoke_watch(mode: &CliMode, args: OutputArgs) -> Resu
 
 pub(crate) async fn run_sessions_watch_status(mode: &CliMode, args: OutputArgs) -> Result<()> {
     if matches!(mode, CliMode::Http(_)) {
-        bail!("sessions watch-status shells out to systemctl on host; omit --http");
+        bail!("sessions watchstatus shells out to systemctl on host; omit --http");
     }
     let CliMode::Local(service) = mode else {
         unreachable!("http mode returned above");
@@ -710,8 +797,8 @@ pub(crate) async fn run_ai_skill_investigate(
     let json = args.json;
     if args.skill.is_none() && args.plugin.is_none() && args.incident_id.is_none() {
         bail!(
-            "sessions skill-investigate requires a skill name (positional), --plugin, or \
-             --incident-id, e.g. `cortex sessions skill-investigate lavra:lavra-plan`"
+            "sessions skillinvestigate requires a skill name (positional), --plugin, or \
+             --incident-id, e.g. `cortex sessions skillinvestigate lavra:lavra-plan`"
         );
     }
     let req = args.into_request();
@@ -789,11 +876,10 @@ pub(crate) async fn run_mcp_incidents(
 ) -> Result<()> {
     let json = args.json;
     let req = args.into_request();
-    let service = match mode {
-        CliMode::Http(_) => bail!("sessions mcp-incidents runs against the local DB; omit --http"),
-        CliMode::Local(service) => service,
+    let response = match mode {
+        CliMode::Local(service) => service.list_ai_mcp_incidents(req).await?,
+        CliMode::Http(client) => http_or_cancel(client.ai_mcp_incidents(&req)).await?,
     };
-    let response = service.list_ai_mcp_incidents(req).await?;
     print_ai_mcp_incidents_response(&response, json)
 }
 
@@ -809,18 +895,15 @@ pub(crate) async fn run_mcp_investigate(
         && args.incident_id.is_none()
     {
         bail!(
-            "sessions mcp-investigate requires an mcp server/tool (positional), --mcp-server, \
-             --mcp-tool, --tool-name, or --incident-id, e.g. `cortex sessions mcp-investigate labby`"
+            "sessions mcpinvestigate requires an mcp server/tool (positional), --mcp-server, \
+             --mcp-tool, --tool-name, or --incident-id, e.g. `cortex sessions mcpinvestigate labby`"
         );
     }
     let req = args.into_request();
-    let service = match mode {
-        CliMode::Http(_) => {
-            bail!("sessions mcp-investigate runs against the local DB; omit --http")
-        }
-        CliMode::Local(service) => service,
+    let response = match mode {
+        CliMode::Local(service) => service.investigate_ai_mcp_incidents(req).await?,
+        CliMode::Http(client) => http_or_cancel(client.ai_mcp_investigate(&req)).await?,
     };
-    let response = service.investigate_ai_mcp_incidents(req).await?;
     print_ai_mcp_investigate_response(&response, json)
 }
 
@@ -934,7 +1017,7 @@ impl SessionsLlmInvocationsArgs {
     }
 }
 
-/// `cortex sessions llm-invocations` — list recent LLM invocation audit
+/// `cortex sessions llminvocations` — list recent LLM invocation audit
 /// records (concurrency/rate-limit/circuit-breaker denials included).
 ///
 /// Admin-scoped: exposes operational kill-switch/circuit-breaker state, not

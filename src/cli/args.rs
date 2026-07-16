@@ -16,11 +16,12 @@ pub(crate) use assess::{
 pub(crate) use sessions::{
     SessionsAbuseArgs, SessionsAddArgs, SessionsAssessArgs, SessionsBlocksArgs,
     SessionsCheckpointsArgs, SessionsCommand, SessionsContextArgs, SessionsCorrelateArgs,
-    SessionsDoctorArgs, SessionsErrorsArgs, SessionsHookEventsListArgs, SessionsHooksBackfillArgs,
-    SessionsIncidentContextArgs, SessionsIncidentsArgs, SessionsIndexArgs, SessionsInvestigateArgs,
-    SessionsListArgs, SessionsLlmInvocationsArgs, SessionsMcpEventsBackfillArgs,
-    SessionsMcpEventsListArgs, SessionsMcpIncidentsArgs, SessionsMcpInvestigateArgs,
-    SessionsOutputDetail, SessionsPruneCheckpointsArgs, SessionsSearchArgs, SessionsSimilarArgs,
+    SessionsDoctorArgs, SessionsErrorsArgs, SessionsHookEventsListArgs, SessionsHookIncidentsArgs,
+    SessionsHookInvestigateArgs, SessionsHooksBackfillArgs, SessionsIncidentContextArgs,
+    SessionsIncidentsArgs, SessionsIndexArgs, SessionsInvestigateArgs, SessionsListArgs,
+    SessionsLlmInvocationsArgs, SessionsMcpEventsBackfillArgs, SessionsMcpEventsListArgs,
+    SessionsMcpIncidentsArgs, SessionsMcpInvestigateArgs, SessionsOutputDetail,
+    SessionsPruneCheckpointsArgs, SessionsSearchArgs, SessionsSimilarArgs,
     SessionsSkillIncidentsArgs, SessionsSkillInvestigateArgs, SessionsSkillsBackfillArgs,
     SessionsSkillsListArgs, SessionsWatchArgs,
 };
@@ -118,9 +119,9 @@ pub(crate) struct FileTailIdArgs {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct FileTailAddArgs {
-    pub id: String,
+    pub id: Option<String>,
     pub path: String,
-    pub tag: String,
+    pub tag: Option<String>,
     pub host: Option<String>,
     pub facility: Option<String>,
     pub severity: Option<String>,

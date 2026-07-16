@@ -7,13 +7,11 @@ description: "This skill should be used after running cortex assess hooks [--hoo
 
 ## Trigger
 
-Use this skill after `cortex assess hooks [--hook <name>]` (or the
-underlying `hook_investigate` MCP action — there is no `cortex sessions
-hook-investigate` CLI subcommand the way there is for skills/mcp; `cortex
-sessions hook-events`/`hooks-backfill` only cover raw event listing and
-backfill, not incident evidence) produces a bounded `HookIncidentEvidence`
-bundle for one hook incident. Do **not** re-scan the full log database
-unless the user explicitly asks for more evidence.
+Use this skill after `cortex assess hooks [--hook <name>]`, `cortex sessions
+hookinvestigate HOOK`, or the underlying `hook_investigate` MCP action produces
+a bounded `HookIncidentEvidence` bundle for one hook incident. Do **not**
+re-scan the full log database unless the user explicitly asks for more
+evidence.
 
 ## Input
 

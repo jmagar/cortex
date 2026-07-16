@@ -1029,20 +1029,20 @@ async fn map_action_findings_public_route_without_target_is_low_confidence() {
 }
 
 #[tokio::test]
-async fn correlate_state_action_requires_reference_time() {
+async fn correlate_state_action_defaults_reference_time_to_now() {
     let h = TestHarness::new();
-    let err = execute_tool(
+    let value = execute_tool(
         &h.state,
         "cortex",
         json!({"action": "correlate_state"}),
         None,
     )
     .await
-    .unwrap_err();
-    assert!(
-        err.to_string().contains("reference_time"),
-        "expected reference_time validation error, got: {err}"
-    );
+    .unwrap();
+    assert_eq!(value["hosts"], json!([]));
+    assert_eq!(value["truncated"], false);
+    assert!(value["window"]["from"].is_string());
+    assert!(value["window"]["to"].is_string());
 }
 
 #[tokio::test]

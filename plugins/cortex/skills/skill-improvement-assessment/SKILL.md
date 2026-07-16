@@ -1,6 +1,6 @@
 ---
 name: skill-improvement-assessment
-description: "This skill should be used after running cortex assess skill <skill> (or the cortex sessions skill-investigate pipeline that produces PR 3's SkillIncidentEvidence) to analyze whether a Claude Code/Codex/Gemini skill performed well. Use when the user asks to assess skill quality, evaluate why a skill failed or underperformed, propose SKILL.md doc changes, or follow up on skill incident evidence."
+description: "This skill should be used after running cortex assess skill <skill> (or the cortex sessions skillinvestigate pipeline that produces PR 3's SkillIncidentEvidence) to analyze whether a Claude Code/Codex/Gemini skill performed well. Use when the user asks to assess skill quality, evaluate why a skill failed or underperformed, propose SKILL.md doc changes, or follow up on skill incident evidence."
 ---
 
 # Cortex Skill Improvement Assessment
@@ -8,7 +8,7 @@ description: "This skill should be used after running cortex assess skill <skill
 ## Trigger
 
 Use this skill after `cortex assess skill <skill>` (or the underlying
-`cortex sessions skill-investigate <skill>` command) produces a bounded
+`cortex sessions skillinvestigate <skill>` command) produces a bounded
 `SkillIncidentEvidence` bundle for one skill incident. Do **not** re-scan
 the full log database unless the user explicitly asks for more evidence.
 

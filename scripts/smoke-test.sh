@@ -566,6 +566,12 @@ print('ok')
 " 2>&1)
 assert_eq "hosts: all records have required fields and log_count > 0" "$HOSTS_VALID" "ok"
 
+TEST_HOST=$(printf '%s\n' "$HOSTS" | python3 -c "
+import sys, json
+hosts = json.load(sys.stdin).get('hosts') or []
+print('${SEED_HOST}' if ${SKIP_SEED} == 0 else hosts[0]['hostname'])
+" 2>/dev/null || true)
+
 if [[ "$SKIP_SEED" -eq 0 ]]; then
     # Verify the seeded host actually appears by name
     SEED_HOST_FOUND=$(printf '%s\n' "$HOSTS" | python3 -c "
@@ -596,7 +602,7 @@ print('ok')
 " 2>/dev/null || echo "error")
 assert_eq "map: response structure valid" "$MAP_VALID" "ok"
 
-MAP_FINDINGS=$(mcp_call map "mode=findings" "finding_limit=5" "evidence_per_finding=1" "finding_types=collector_health" 2>&1)
+MAP_FINDINGS=$(mcp_call map "mode=findings" "finding_limit=5" "evidence_per_finding=1" 'finding_types=["collector_health"]' 2>&1)
 assert_no_error "map findings: no error" "$MAP_FINDINGS"
 
 MAP_FINDINGS_VALID=$(printf '%s\n' "$MAP_FINDINGS" | python3 -c "
@@ -624,7 +630,12 @@ echo ""
 echo "Action: sessions"
 # Use a time-windowed query so smoke data seeded directly into SQLite is read
 # live instead of through a periodically refreshed session rollup.
-SESSIONS=$(mcp_call sessions "limit=10" "since=1970-01-01T00:00:00Z" 2>&1)
+if [[ "$AI_SEEDED" -eq 1 ]]; then
+    SESSIONS=$(mcp_call sessions "limit=10" "since=1970-01-01T00:00:00Z" 2>&1)
+else
+    SESSIONS=$(mcp_call sessions "limit=10" 2>&1)
+    AI_SMOKE_QUERY='"cortex"'
+fi
 assert_no_error "sessions: no error" "$SESSIONS"
 
 SESSIONS_VALID=$(printf '%s\n' "$SESSIONS" | python3 -c "
@@ -849,24 +860,24 @@ fi
 echo ""
 echo "Action: search"
 
-# FTS5 keyword search — results must actually contain the query term
+# FTS5 keyword search. A match can come from any indexed field, so message-only
+# substring assertions belong to the seeded marker checks below.
 SEARCH=$(mcp_call search "query=authentication" "limit=50" 2>&1)
 assert_no_error "search(query=authentication): no error" "$SEARCH"
-SEARCH_COUNT=$(printf '%s\n' "$SEARCH" | python3 -c "import sys,json; print(json.load(sys.stdin)['count'])" 2>/dev/null || echo "0")
-assert_gte "search(query=authentication): returns >= 1 result" "$SEARCH_COUNT" 1
-SEARCH_MATCH=$(printf '%s\n' "$SEARCH" | python3 -c "
+SEARCH_VALID=$(printf '%s\n' "$SEARCH" | python3 -c "
 import sys, json
-for l in json.load(sys.stdin)['logs']:
-    if 'authentication' not in (l.get('message') or '').lower():
-        print(f'result missing query term: {l[\"message\"][:80]}'); sys.exit(0)
+d = json.load(sys.stdin)
+assert isinstance(d.get('logs'), list), 'logs missing or not a list'
+assert isinstance(d.get('count'), int), 'count missing or not an integer'
 print('ok')
 " 2>/dev/null || echo "error")
-assert_eq "search(query=authentication): all results contain query term" "$SEARCH_MATCH" "ok"
+assert_eq "search(query=authentication): response structure valid" "$SEARCH_VALID" "ok"
 
 # Phrase search
 SEARCH_PHRASE=$(mcp_call search 'query="authentication failure"' "limit=10" 2>&1)
 assert_no_error "search(phrase): no error" "$SEARCH_PHRASE"
-PHRASE_MATCH=$(printf '%s\n' "$SEARCH_PHRASE" | python3 -c "
+if [[ "$SKIP_SEED" -eq 0 ]]; then
+    PHRASE_MATCH=$(printf '%s\n' "$SEARCH_PHRASE" | python3 -c "
 import sys, json
 logs = json.load(sys.stdin)['logs']
 assert logs, 'phrase search returned no results'
@@ -875,7 +886,8 @@ for l in logs:
         print(f'phrase not found in: {l[\"message\"][:80]}'); sys.exit(0)
 print('ok')
 " 2>/dev/null || echo "error")
-assert_eq "search(phrase): results contain exact phrase" "$PHRASE_MATCH" "ok"
+    assert_eq "search(phrase): seeded results contain exact phrase" "$PHRASE_MATCH" "ok"
+fi
 
 if [[ "$SKIP_SEED" -eq 0 ]]; then
     # host= filter: should return only that host's logs
@@ -933,17 +945,17 @@ assert_eq "search(limit=0): returns 0 results" "$ZERO_COUNT" "0"
 # ── filter ───────────────────────────────────────────────────────────────────
 echo ""
 echo "Action: filter"
-FILTER_HOST=$(mcp_call filter "host=${SEED_HOST}" "limit=50" 2>&1)
+FILTER_HOST=$(mcp_call filter "host=${TEST_HOST}" "limit=50" 2>&1)
 assert_no_error "filter(hostname): no error" "$FILTER_HOST"
 FILTER_HOST_VALID=$(printf '%s\n' "$FILTER_HOST" | python3 -c "
 import sys, json
 logs = json.load(sys.stdin)['logs']
-assert logs, 'filter returned no logs for seeded host'
-wrong = [l['hostname'] for l in logs if l['hostname'] != '${SEED_HOST}']
+assert logs, 'filter returned no logs for selected host'
+wrong = [l['hostname'] for l in logs if l['hostname'] != '${TEST_HOST}']
 assert not wrong, f'filter leaked other hosts: {wrong}'
 print('ok')
 " 2>/dev/null || echo "error")
-assert_eq "filter(hostname): only returns logs for '$SEED_HOST'" "$FILTER_HOST_VALID" "ok"
+assert_eq "filter(hostname): only returns logs for '$TEST_HOST'" "$FILTER_HOST_VALID" "ok"
 
 # ── errors ────────────────────────────────────────────────────────────────────
 echo ""
@@ -974,7 +986,9 @@ print('ok' if not info_rows else f'info/debug/notice leaked: {info_rows}')
 assert_eq "errors: info/debug/notice levels absent from summary" "$INFO_IN_ERRORS" "ok"
 
 ERRORS_COUNT=$(printf '%s\n' "$ERRORS_OUT" | python3 -c "import sys,json; print(len(json.load(sys.stdin)['summary']))" 2>/dev/null || echo "0")
-assert_gte "errors: at least 1 error group" "$ERRORS_COUNT" 1
+if [[ "$SKIP_SEED" -eq 0 ]]; then
+    assert_gte "errors: at least 1 seeded error group" "$ERRORS_COUNT" 1
+fi
 
 if [[ "$SKIP_SEED" -eq 0 ]]; then
     # Seeded host must appear with err, crit, and warning entries
@@ -1022,7 +1036,9 @@ CORRELATE_WINDOW=$(json_get "$CORRELATE" "['window_minutes']")
 assert_eq "correlate: window_minutes echoed back as 30" "$CORRELATE_WINDOW" "30"
 
 CORRELATE_EVENTS=$(printf '%s\n' "$CORRELATE" | python3 -c "import sys,json; print(json.load(sys.stdin)['total_events'])" 2>/dev/null || echo "0")
-assert_gte "correlate: found events in 30-minute window" "$CORRELATE_EVENTS" 1
+if [[ "$SKIP_SEED" -eq 0 ]]; then
+    assert_gte "correlate: found seeded events in 30-minute window" "$CORRELATE_EVENTS" 1
+fi
 
 if [[ "$SKIP_SEED" -eq 0 ]]; then
     SEED_IN_CORRELATE=$(printf '%s\n' "$CORRELATE" | python3 -c "
@@ -1033,9 +1049,17 @@ print('ok' if '${SEED_HOST}' in hosts else f'missing (got {hosts})')
     assert_eq "correlate: seeded host '$SEED_HOST' appears in window" "$SEED_IN_CORRELATE" "ok"
 fi
 
-# Missing required arg must return an error
+# Omitting reference_time now derives a useful default from recent activity.
 CORRELATE_NO_REF=$(mcp_call correlate 2>&1 || true)
-assert_is_error "correlate(missing reference_time): returns error" "$CORRELATE_NO_REF"
+assert_no_error "correlate(default reference_time): no error" "$CORRELATE_NO_REF"
+CORRELATE_DEFAULT_VALID=$(printf '%s\n' "$CORRELATE_NO_REF" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+assert d.get('reference_time'), 'reference_time missing'
+assert isinstance(d.get('hosts'), list), 'hosts not a list'
+print('ok')
+" 2>/dev/null || echo "error")
+assert_eq "correlate(default reference_time): response structure valid" "$CORRELATE_DEFAULT_VALID" "ok"
 
 # ── compose diagnostics ───────────────────────────────────────────────────────
 echo ""
@@ -1272,17 +1296,9 @@ echo ""
 echo "CLI: positionals + defaults"
 if CLI_BIN="$(resolve_cortex_bin)"; then
     # `cortex tail dookie` — bare positional binds to --host; default n=50.
-    CLI_TAIL_HOST="${SEED_HOST:-$(mcp_call hosts 2>/dev/null | python3 -c '
-import sys, json
-d = json.load(sys.stdin)
-hostnames = d.get("hostnames") or []
-if not hostnames:
-    hosts = d.get("hosts") or []
-    hostnames = [h.get("hostname") for h in hosts if isinstance(h, dict) and h.get("hostname")]
-print(hostnames[0] if hostnames else "")
-' 2>/dev/null)}"
+    CLI_TAIL_HOST="$TEST_HOST"
     if [[ -n "$CLI_TAIL_HOST" ]]; then
-        if "$CLI_BIN" tail "$CLI_TAIL_HOST" -n 1 >/dev/null 2>&1; then
+        if CORTEX_URL="${MCP_URL%/mcp}" "$CLI_BIN" tail "$CLI_TAIL_HOST" -n 1 >/dev/null 2>&1; then
             pass "cli: tail positional host (cortex tail $CLI_TAIL_HOST -n 1)"
         else
             fail "cli: tail positional host (cortex tail $CLI_TAIL_HOST -n 1)"
@@ -1292,7 +1308,7 @@ print(hostnames[0] if hostnames else "")
     fi
 
     # `cortex analysis errors` — no flags; default 1h window applied.
-    if "$CLI_BIN" analysis errors >/dev/null 2>&1; then
+    if CORTEX_URL="${MCP_URL%/mcp}" "$CLI_BIN" analysis errors >/dev/null 2>&1; then
         pass "cli: errors default window (cortex analysis errors)"
     else
         fail "cli: errors default window (cortex analysis errors)"

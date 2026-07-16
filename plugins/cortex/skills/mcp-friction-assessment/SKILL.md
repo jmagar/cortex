@@ -1,6 +1,6 @@
 ---
 name: mcp-friction-assessment
-description: "This skill should be used after running cortex assess mcp <tool-or-server> (or the underlying cortex sessions mcp-investigate pipeline that produces McpIncidentEvidence) to analyze why an MCP tool or server call failed, misfired, or confused the agent. Use when the user asks to assess MCP tool reliability, evaluate why a tool call failed or was misused, propose tool-doc or server-config changes, or follow up on MCP incident evidence."
+description: "This skill should be used after running cortex assess mcp <tool-or-server> (or the underlying cortex sessions mcpinvestigate pipeline that produces McpIncidentEvidence) to analyze why an MCP tool or server call failed, misfired, or confused the agent. Use when the user asks to assess MCP tool reliability, evaluate why a tool call failed or was misused, propose tool-doc or server-config changes, or follow up on MCP incident evidence."
 ---
 
 # Cortex MCP Friction Assessment
@@ -8,7 +8,7 @@ description: "This skill should be used after running cortex assess mcp <tool-or
 ## Trigger
 
 Use this skill after `cortex assess mcp <tool-or-server>` (or the
-underlying `cortex sessions mcp-investigate` command) produces a bounded
+underlying `cortex sessions mcpinvestigate` command) produces a bounded
 `McpIncidentEvidence` bundle for one MCP incident. Do **not** re-scan the
 full log database unless the user explicitly asks for more evidence.
 

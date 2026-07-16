@@ -47,6 +47,13 @@ fn path_with_prepended(dir: &std::path::Path) -> std::ffi::OsString {
     std::env::join_paths(paths).unwrap()
 }
 
+#[test]
+fn doctor_service_unit_uses_canonical_one_word_command() {
+    let unit = doctor_service_unit(std::path::Path::new("/usr/bin/cortex")).unwrap();
+    assert!(unit.contains("ExecStart=/usr/bin/cortex setup sessionshealth --json"));
+    assert!(!unit.contains("sessions-watch-health-check"));
+}
+
 #[cfg(unix)]
 #[test]
 #[serial]

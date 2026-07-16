@@ -7,17 +7,17 @@ use super::super::args::{CliCommand, StateCommand};
 pub(crate) fn parse_state(args: &[String]) -> Result<CliCommand> {
     let (subcommand, rest) = args
         .split_first()
-        .ok_or_else(|| anyhow!("state requires a subcommand (host|fleet|clock-skew)"))?;
+        .ok_or_else(|| anyhow!("state requires a subcommand (host|fleet|clockskew)"))?;
     match subcommand.as_str() {
         "host" => parse_state_host(rest),
         "fleet" => parse_state_fleet(rest),
-        "clock-skew" => parse_state_clock_skew(rest),
+        "clockskew" => parse_state_clock_skew(rest),
         _ => bail!(
             "{}",
             super::super::suggest::unknown_command(
                 "state subcommand",
                 subcommand,
-                &["host", "fleet", "clock-skew"],
+                &["host", "fleet", "clockskew"],
             )
         ),
     }

@@ -613,7 +613,7 @@ fn correlate_state_request_query_omits_none_options() {
     use cortex::app::CorrelateStateRequest;
 
     let req = CorrelateStateRequest {
-        reference_time: "2026-05-25T00:00:00Z".into(),
+        reference_time: Some("2026-05-25T00:00:00Z".into()),
         window_minutes: Some(15),
         host: Some("tootie".into()),
         severity_min: None,
@@ -706,8 +706,8 @@ async fn incident_context_round_trips_typed_response() {
         .await;
 
     let req = IncidentContextRequest {
-        since: "2026-05-01T00:00:00Z".into(),
-        until: "2026-05-01T01:00:00Z".into(),
+        since: Some("2026-05-01T00:00:00Z".into()),
+        until: Some("2026-05-01T01:00:00Z".into()),
         ..Default::default()
     };
     let resp = client
@@ -748,6 +748,141 @@ async fn hook_events_round_trips_canonical_sessions_hooks_route() {
         .expect("hook events wrapper should succeed");
     assert_eq!(resp.total, 0);
     assert!(resp.events.is_empty());
+}
+
+#[tokio::test]
+async fn hook_investigate_preserves_incident_id_over_http() {
+    use cortex::app::AiHookInvestigateRequest;
+
+    let (server, client) = start_mock_with_client().await;
+    Mock::given(method("GET"))
+        .and(path("/api/sessions/hook-investigate"))
+        .and(header("authorization", "Bearer test-value"))
+        .and(query_param("incident_id", "hook-inc-123"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "evidence": [],
+            "total_incidents": 0,
+            "truncated": false,
+            "other_matching_incidents": [],
+            "no_incident_low_severity_summary": false,
+            "no_data": true,
+            "suggested_filters": [],
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let response = client
+        .ai_hook_investigate(&AiHookInvestigateRequest {
+            incident_id: Some("hook-inc-123".into()),
+            ..Default::default()
+        })
+        .await
+        .expect("hook investigate wrapper should succeed");
+    assert!(response.no_data);
+}
+
+#[tokio::test]
+async fn mcp_read_surfaces_and_skill_incident_id_round_trip_over_http() {
+    use cortex::app::{
+        AiMcpIncidentRequest, AiMcpInvestigateRequest, AiSkillInvestigateRequest,
+        ListMcpEventsRequest,
+    };
+
+    let (server, client) = start_mock_with_client().await;
+    let incident_response = serde_json::json!({
+        "incidents": [],
+        "total_incidents": 0,
+        "candidate_event_rows": 0,
+        "candidate_cap": 0,
+        "candidate_window_truncated": false,
+        "truncated": false,
+    });
+    let investigate_response = serde_json::json!({
+        "evidence": [],
+        "total_incidents": 0,
+        "truncated": false,
+        "other_matching_incidents": [],
+        "no_incident_low_severity_summary": false,
+        "no_data": true,
+        "suggested_filters": [],
+    });
+
+    Mock::given(method("GET"))
+        .and(path("/api/sessions/mcp-events"))
+        .and(query_param("limit", "2"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "total": 0,
+            "truncated": false,
+            "events": [],
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/sessions/mcp-incidents"))
+        .and(query_param("mcp_server", "labby"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(incident_response))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/sessions/mcp-investigate"))
+        .and(query_param("incident_id", "mcp-inc-1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(investigate_response.clone()))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/sessions/skill-investigate"))
+        .and(query_param("incident_id", "skill-inc-1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(investigate_response))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    assert_eq!(
+        client
+            .mcp_events(&ListMcpEventsRequest {
+                limit: Some(2),
+                ..Default::default()
+            })
+            .await
+            .unwrap()
+            .total,
+        0
+    );
+    assert_eq!(
+        client
+            .ai_mcp_incidents(&AiMcpIncidentRequest {
+                mcp_server: Some("labby".into()),
+                ..Default::default()
+            })
+            .await
+            .unwrap()
+            .total_incidents,
+        0
+    );
+    assert!(
+        client
+            .ai_mcp_investigate(&AiMcpInvestigateRequest {
+                incident_id: Some("mcp-inc-1".into()),
+                ..Default::default()
+            })
+            .await
+            .unwrap()
+            .no_data
+    );
+    assert!(
+        client
+            .ai_skill_investigate(&AiSkillInvestigateRequest {
+                incident_id: Some("skill-inc-1".into()),
+                ..Default::default()
+            })
+            .await
+            .unwrap()
+            .no_data
+    );
 }
 
 // ─── Env var guard ──────────────────────────────────────────────────────────

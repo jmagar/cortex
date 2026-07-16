@@ -279,7 +279,7 @@ esac
     assert!(log.contains("CORTEX_AGENT_DOCKER='true'"));
     assert!(log.contains("CORTEX_AGENT_JOURNALD='true'"));
     assert!(log.contains("CORTEX_SYSLOG_TARGET='cortex.example.test:1514'"));
-    assert!(log.contains("~/.local/bin/cortex setup heartbeat-agent install"));
+    assert!(log.contains("~/.local/bin/cortex setup heartbeatagent install"));
 }
 
 #[test]
@@ -449,7 +449,7 @@ fn deploy_agent_redacts_secret_envs_from_failure_detail() {
         r#"#!/bin/sh
 case "$*" in
   *"/etc/unraid-version"*) printf 'no\n'; exit 0 ;;
-  *"setup heartbeat-agent install"*) exit 42 ;;
+  *"setup heartbeatagent install"*) exit 42 ;;
   *) exit 0 ;;
 esac
 "#,

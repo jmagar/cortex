@@ -1,10 +1,12 @@
 use anyhow::{Result, bail};
 
 use super::super::super::parse_common::{
-    FlagCursor, norm_time, parse_positive_u64_flag, parse_u32_flag, value_after_equals,
+    FlagCursor, norm_time, parse_f64_flag, parse_positive_u64_flag, parse_u32_flag,
+    value_after_equals,
 };
 use super::super::super::{
-    CliCommand, SessionsCommand, SessionsHookEventsListArgs, SessionsHooksBackfillArgs,
+    CliCommand, SessionsCommand, SessionsHookEventsListArgs, SessionsHookIncidentsArgs,
+    SessionsHookInvestigateArgs, SessionsHooksBackfillArgs,
 };
 
 pub(crate) fn parse_sessions_hook_events(args: &[String]) -> Result<CliCommand> {
@@ -67,7 +69,7 @@ pub(crate) fn parse_sessions_hook_events(args: &[String]) -> Result<CliCommand> 
             other => bail!(
                 "{}",
                 super::super::super::suggest::unknown_option(
-                    "sessions hook-events",
+                    "sessions hookevents",
                     other,
                     &[
                         "--json",
@@ -89,6 +91,81 @@ pub(crate) fn parse_sessions_hook_events(args: &[String]) -> Result<CliCommand> 
         }
     }
     Ok(CliCommand::Sessions(SessionsCommand::HookEvents(parsed)))
+}
+
+pub(crate) fn parse_sessions_hook_incidents(args: &[String]) -> Result<CliCommand> {
+    let mut parsed = SessionsHookIncidentsArgs::default();
+    let mut flags = FlagCursor::new(args);
+    while let Some(arg) = flags.next() {
+        match arg.as_str() {
+            "--json" => parsed.json = true,
+            "--hook-event" => parsed.hook_event = Some(flags.value("--hook-event")?),
+            "--hook" => parsed.hook_name = Some(flags.value("--hook")?),
+            "--hook-source" => parsed.hook_source = Some(flags.value("--hook-source")?),
+            "--tool" => parsed.tool = Some(flags.value("--tool")?),
+            "--project" => parsed.project = Some(flags.value("--project")?),
+            "--session-id" => parsed.session_id = Some(flags.value("--session-id")?),
+            "--hostname" => parsed.hostname = Some(flags.value("--hostname")?),
+            "--evidence-kind" => parsed.evidence_kind = Some(flags.value("--evidence-kind")?),
+            "--since" => parsed.since = Some(norm_time(flags.value("--since")?)?),
+            "--until" => parsed.until = Some(norm_time(flags.value("--until")?)?),
+            "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
+            "--window-minutes" => {
+                parsed.window_minutes = Some(parse_u32_flag(
+                    "--window-minutes",
+                    flags.value("--window-minutes")?,
+                )?)
+            }
+            "--signal" => parsed.signals.push(flags.value("--signal")?),
+            "--min-score" => {
+                let raw = flags.value("--min-score")?;
+                parse_f64_flag("--min-score", raw.clone())?;
+                parsed.min_score = Some(raw);
+            }
+            _ if arg.starts_with('-') => bail!("unknown sessions hookincidents option: {arg}"),
+            _ if parsed.hook_name.is_none() => parsed.hook_name = Some(arg),
+            _ => bail!("unexpected sessions hookincidents argument: {arg}"),
+        }
+    }
+    Ok(CliCommand::Sessions(SessionsCommand::HookIncidents(parsed)))
+}
+
+pub(crate) fn parse_sessions_hook_investigate(args: &[String]) -> Result<CliCommand> {
+    let mut parsed = SessionsHookInvestigateArgs::default();
+    let mut flags = FlagCursor::new(args);
+    while let Some(arg) = flags.next() {
+        match arg.as_str() {
+            "--json" => parsed.json = true,
+            "--all" => parsed.all = true,
+            "--incident-id" => parsed.incident_id = Some(flags.value("--incident-id")?),
+            "--hook-event" => parsed.hook_event = Some(flags.value("--hook-event")?),
+            "--hook" => parsed.hook_name = Some(flags.value("--hook")?),
+            "--hook-source" => parsed.hook_source = Some(flags.value("--hook-source")?),
+            "--tool" => parsed.tool = Some(flags.value("--tool")?),
+            "--project" => parsed.project = Some(flags.value("--project")?),
+            "--since" => parsed.since = Some(norm_time(flags.value("--since")?)?),
+            "--until" => parsed.until = Some(norm_time(flags.value("--until")?)?),
+            "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
+            "--window-minutes" => {
+                parsed.window_minutes = Some(parse_u32_flag(
+                    "--window-minutes",
+                    flags.value("--window-minutes")?,
+                )?)
+            }
+            "--correlation-window-minutes" => {
+                parsed.correlation_window_minutes = Some(parse_u32_flag(
+                    "--correlation-window-minutes",
+                    flags.value("--correlation-window-minutes")?,
+                )?)
+            }
+            _ if arg.starts_with('-') => bail!("unknown sessions hookinvestigate option: {arg}"),
+            _ if parsed.hook_name.is_none() => parsed.hook_name = Some(arg),
+            _ => bail!("unexpected sessions hookinvestigate argument: {arg}"),
+        }
+    }
+    Ok(CliCommand::Sessions(SessionsCommand::HookInvestigate(
+        parsed,
+    )))
 }
 
 pub(crate) fn parse_sessions_hooks_backfill(args: &[String]) -> Result<CliCommand> {
@@ -114,7 +191,7 @@ pub(crate) fn parse_sessions_hooks_backfill(args: &[String]) -> Result<CliComman
             other => bail!(
                 "{}",
                 super::super::super::suggest::unknown_option(
-                    "sessions hooks-backfill",
+                    "sessions hooksbackfill",
                     other,
                     &["--json", "--dry-run", "--since", "--limit"],
                 )

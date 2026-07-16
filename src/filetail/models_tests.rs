@@ -74,13 +74,35 @@ fn file_tail_request_rejects_missing_fields_for_add() {
 
     assert_eq!(
         req.into_add().unwrap_err(),
-        "file_tails op=add requires id, path, tag, and host"
+        "file_tails op=add requires path"
     );
 }
 
 #[test]
-fn add_request_rejects_missing_hostname() {
-    let err = FileTailSource::from_add(
+fn file_tail_request_derives_a_human_friendly_add_from_path() {
+    let req = FileTailRequest {
+        op: FileTailOp::Add,
+        id: None,
+        path: Some("/mnt/appdata/swag/log/nginx/access.log".into()),
+        tag: None,
+        host: None,
+        facility: None,
+        severity: None,
+        start_at_end: None,
+    };
+
+    let add = req.into_add().unwrap();
+    assert_eq!(add.id, "access");
+    assert_eq!(add.tag, "access");
+    assert_eq!(add.host, None);
+
+    let source = FileTailSource::from_add(add, "2026-07-16T12:00:00Z").unwrap();
+    assert_eq!(source.hostname, None);
+}
+
+#[test]
+fn add_request_accepts_missing_hostname() {
+    let source = FileTailSource::from_add(
         FileTailAddRequest {
             id: "swag-access".into(),
             path: "/mnt/appdata/swag/log/nginx/access.log".into(),
@@ -92,9 +114,9 @@ fn add_request_rejects_missing_hostname() {
         },
         "2026-06-11T20:00:00Z",
     )
-    .unwrap_err();
+    .unwrap();
 
-    assert_eq!(err, "file_tails op=add requires id, path, tag, and host");
+    assert_eq!(source.hostname, None);
 }
 
 #[test]

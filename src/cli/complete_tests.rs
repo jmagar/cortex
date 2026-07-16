@@ -48,6 +48,27 @@ fn completes_flags_for_action() {
 }
 
 #[test]
+fn completes_every_nested_command_with_single_word_tokens() {
+    for path in ["sessions", "state", "ingest", "setup", "db"] {
+        let out = complete(&["subcommands".into(), path.into()]).unwrap();
+        assert!(!out.is_empty(), "missing nested completions for {path}");
+        assert!(
+            out.iter().all(|value| !value.contains('-')),
+            "hyphenated nested completion under {path}: {out:?}"
+        );
+    }
+    let sessions = complete(&["subcommands".into(), "sessions".into()]).unwrap();
+    assert!(sessions.contains(&"skillinvestigate".to_string()));
+    assert!(sessions.contains(&"mcpevents".to_string()));
+}
+
+#[test]
+fn nested_paths_resolve_shared_action_flags() {
+    let out = complete(&["flags".into(), "state host".into()]).unwrap();
+    assert!(out.iter().any(|line| line.starts_with("--host\t")));
+}
+
+#[test]
 fn completes_static_enum_values_for_severity() {
     let out = complete(&["value".into(), "--severity".into()]).unwrap();
     assert!(out.iter().any(|l| l == "err"));

@@ -62,8 +62,10 @@ use url::Url;
 
 use cortex::app::{
     AbuseSearchRequest, AbuseSearchResponse, AckErrorRequest, AckErrorResponse,
-    AiCheckpointsRequest, AiCorrelateRequest, AiCorrelateResponse, AiIncidentRequest,
-    AiIncidentResponse, AiInvestigateRequest, AiInvestigateResponse, AiParseErrorsRequest,
+    AiCheckpointsRequest, AiCorrelateRequest, AiCorrelateResponse, AiHookIncidentRequest,
+    AiHookIncidentResponse, AiHookInvestigateRequest, AiHookInvestigateResponse, AiIncidentRequest,
+    AiIncidentResponse, AiInvestigateRequest, AiInvestigateResponse, AiMcpIncidentRequest,
+    AiMcpIncidentResponse, AiMcpInvestigateRequest, AiMcpInvestigateResponse, AiParseErrorsRequest,
     AiPruneCheckpointsRequest, AiSkillIncidentRequest, AiSkillIncidentResponse,
     AiSkillInvestigateRequest, AiSkillInvestigateResponse, AnomaliesRequest, AnomaliesResponse,
     ClockSkewRequest, ClockSkewResponse, CompareRequest, CompareResponse, CorrelateEventsRequest,
@@ -77,14 +79,15 @@ use cortex::app::{
     GraphExplainResponse, HostStateRequest, HostStateResponse, IncidentContextRequest,
     IncidentContextResponse, IngestRateRequest, IngestRateResponse, ListAiProjectsRequest,
     ListAiProjectsResponse, ListAiToolsRequest, ListAiToolsResponse, ListAppsRequest,
-    ListAppsResponse, ListHostsResponse, ListSessionsRequest, ListSessionsResponse,
-    ListSkillEventsRequest, ListSkillEventsResponse, ListSourceIpsRequest, ListSourceIpsResponse,
-    MaintenanceJobStatus, PatternsRequest, PatternsResponse, ProjectContextRequest,
-    ProjectContextResponse, SearchLogsRequest, SearchLogsResponse, SearchSessionsRequest,
-    SearchSessionsResponse, SilentHostsRequest, SilentHostsResponse, SimilarIncidentsRequest,
-    SimilarIncidentsResponse, TailLogsRequest, TimelineRequest, TimelineResponse,
-    TopicCorrelateRequest, TopicCorrelateResponse, UnackErrorRequest, UnackErrorResponse,
-    UnaddressedErrorsRequest, UnaddressedErrorsResponse, UsageBlocksRequest, UsageBlocksResponse,
+    ListAppsResponse, ListHostsResponse, ListMcpEventsRequest, ListMcpEventsResponse,
+    ListSessionsRequest, ListSessionsResponse, ListSkillEventsRequest, ListSkillEventsResponse,
+    ListSourceIpsRequest, ListSourceIpsResponse, MaintenanceJobStatus, PatternsRequest,
+    PatternsResponse, ProjectContextRequest, ProjectContextResponse, SearchLogsRequest,
+    SearchLogsResponse, SearchSessionsRequest, SearchSessionsResponse, SilentHostsRequest,
+    SilentHostsResponse, SimilarIncidentsRequest, SimilarIncidentsResponse, TailLogsRequest,
+    TimelineRequest, TimelineResponse, TopicCorrelateRequest, TopicCorrelateResponse,
+    UnackErrorRequest, UnackErrorResponse, UnaddressedErrorsRequest, UnaddressedErrorsResponse,
+    UsageBlocksRequest, UsageBlocksResponse,
 };
 use cortex::scanner::{CheckpointEntry, ParseErrorEntry, PruneCheckpointsResult};
 
@@ -584,6 +587,26 @@ impl HttpClient {
         self.get_json("/api/sessions/hooks", Some(req)).await
     }
 
+    pub async fn ai_hook_incidents(
+        &self,
+        req: &AiHookIncidentRequest,
+    ) -> Result<AiHookIncidentResponse> {
+        let qs = serde_qs::to_string(req)
+            .context("failed to serialize AiHookIncidentRequest as query string")?;
+        self.get_json_with_raw_query("/api/sessions/hook-incidents", &qs)
+            .await
+    }
+
+    pub async fn ai_hook_investigate(
+        &self,
+        req: &AiHookInvestigateRequest,
+    ) -> Result<AiHookInvestigateResponse> {
+        let qs = serde_qs::to_string(req)
+            .context("failed to serialize AiHookInvestigateRequest as query string")?;
+        self.get_json_with_raw_query("/api/sessions/hook-investigate", &qs)
+            .await
+    }
+
     pub async fn ai_projects(&self, req: &ListAiProjectsRequest) -> Result<ListAiProjectsResponse> {
         self.get_json("/api/sessions/projects", Some(req)).await
     }
@@ -622,6 +645,28 @@ impl HttpClient {
         let qs = serde_qs::to_string(req)
             .context("failed to serialize AiSkillInvestigateRequest as query string")?;
         self.get_json_with_raw_query("/api/sessions/skill-investigate", &qs)
+            .await
+    }
+
+    pub async fn mcp_events(&self, req: &ListMcpEventsRequest) -> Result<ListMcpEventsResponse> {
+        self.get_json("/api/sessions/mcp-events", Some(req)).await
+    }
+
+    pub async fn ai_mcp_incidents(
+        &self,
+        req: &AiMcpIncidentRequest,
+    ) -> Result<AiMcpIncidentResponse> {
+        let qs = serde_qs::to_string(req)
+            .context("failed to serialize AiMcpIncidentRequest as query string")?;
+        self.get_json_with_raw_query("/api/sessions/mcp-incidents", &qs)
+            .await
+    }
+
+    pub async fn ai_mcp_investigate(
+        &self,
+        req: &AiMcpInvestigateRequest,
+    ) -> Result<AiMcpInvestigateResponse> {
+        self.get_json("/api/sessions/mcp-investigate", Some(req))
             .await
     }
 

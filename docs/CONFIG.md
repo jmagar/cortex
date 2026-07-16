@@ -166,44 +166,28 @@ normal API bearer and `X-Cortex-Admin-Token: $CORTEX_API_ADMIN_TOKEN`; MCP
 management requires `cortex:admin`.
 
 ```bash
-cortex ingest file-tail add \
-  --id swag-access \
-  --path /file-tail-root/swag/log/nginx/access.log \
-  --tag swag-access \
-  --host squirts \
+cortex ingest filetail add /file-tail-root/swag/log/nginx/access.log \
   --facility local4
 
-cortex ingest file-tail add \
+cortex ingest filetail add /file-tail-root/swag/log/nginx/error.log \
   --id swag-error \
-  --path /file-tail-root/swag/log/nginx/error.log \
-  --tag swag-error \
-  --host squirts \
   --facility local4 \
   --severity warning
 
-cortex ingest file-tail add \
-  --id fail2ban \
-  --path /file-tail-root/swag/log/fail2ban/fail2ban.log \
-  --tag fail2ban \
-  --host squirts \
+cortex ingest filetail add /file-tail-root/swag/log/fail2ban/fail2ban.log \
   --facility local5
 
-cortex ingest file-tail add \
-  --id authelia \
-  --path /file-tail-root/authelia/logs/authelia.log \
-  --tag authelia \
-  --host squirts \
+cortex ingest filetail add /file-tail-root/authelia/logs/authelia.log \
   --facility local5
 
-cortex ingest file-tail add \
+cortex ingest filetail add /file-tail-root/adguard/var/data/querylog.json \
   --id adguard-query \
-  --path /file-tail-root/adguard/var/data/querylog.json \
-  --tag adguard-query \
-  --host squirts \
   --facility local6
 ```
 
-`--from-start` ingests existing file contents on first open. The default starts
+The source id and tag derive from the lowercased file name, and the host defaults
+to the Cortex runtime host; use `--id`, `--tag`, or `--host` only to override
+those values. `--from-start` ingests existing file contents on first open. The default starts
 at EOF so adding a source does not backfill a large historic log unexpectedly.
 After a source is running, Cortex checkpoints `dev`/`inode`/offset in
 `file-tails.json`, resumes from that cursor on restart, reopens on
@@ -255,7 +239,7 @@ per-action rate limits, a consecutive-failure circuit breaker, a per-invocation
 timeout, prompt/output byte caps, a global + per-action kill switch, and writes
 every invocation attempt — including denials — to the `llm_invocations` audit
 table (see the `llm_invocations` MCP action / `GET /api/sessions/llm-invocations`
-/ `cortex sessions llm-invocations`).
+/ `cortex sessions llminvocations`).
 
 > **Behavior change:** prior to this release, `cortex sessions assess` had no
 > concurrency guard — multiple overlapping invocations ran in parallel. As of

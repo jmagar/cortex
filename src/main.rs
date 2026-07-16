@@ -807,7 +807,7 @@ impl Mode {
             }
             [command, rest @ ..]
                 if command == "setup"
-                    && rest.first().map(String::as_str) != Some("plugin-hook")
+                    && rest.first().map(String::as_str) != Some("pluginhook")
                     && global == cli::GlobalFlags::default() =>
             {
                 Ok(Self::Setup(parse_setup_command(rest)?))
@@ -897,10 +897,10 @@ fn parse_setup_command(args: &[String]) -> Result<SetupCommand> {
     }
     if matches!(
         iter.clone().next().map(String::as_str),
-        Some("sessions-index-timer")
+        Some("sessionstimer")
     ) {
         let _ = iter.next();
-        let (action, json) = parse_setup_subcommand_args("sessions-index-timer", iter)?;
+        let (action, json) = parse_setup_subcommand_args("sessionstimer", iter)?;
         return Ok(SetupCommand {
             kind: SetupCommandKind::SessionsIndexTimer(match action {
                 "install" => cortex::setup::SessionsIndexTimerAction::Install,
@@ -912,10 +912,10 @@ fn parse_setup_command(args: &[String]) -> Result<SetupCommand> {
     }
     if matches!(
         iter.clone().next().map(String::as_str),
-        Some("sessions-watch-service")
+        Some("sessionswatch")
     ) {
         let _ = iter.next();
-        let (action, json) = parse_setup_subcommand_args("sessions-watch-service", iter)?;
+        let (action, json) = parse_setup_subcommand_args("sessionswatch", iter)?;
         return Ok(SetupCommand {
             kind: SetupCommandKind::SessionsWatchService(match action {
                 "install" => cortex::setup::SessionsWatchServiceAction::Install,
@@ -927,12 +927,12 @@ fn parse_setup_command(args: &[String]) -> Result<SetupCommand> {
     }
     if matches!(
         iter.clone().next().map(String::as_str),
-        Some("sessions-watch-health-check")
+        Some("sessionshealth")
     ) {
         let _ = iter.next();
         // No action verb to parse (this subcommand has exactly one fixed
         // action) -- reusing parse_setup_subcommand_args here would silently
-        // accept nonsense like `sessions-watch-health-check install` since
+        // accept nonsense like `sessionshealth install` since
         // that parser treats "install"/"remove"/"check" as valid tokens
         // regardless of subcommand. Parse --json/--help directly instead,
         // matching the `doctor` subcommand's own no-action-verb parsing.
@@ -944,7 +944,7 @@ fn parse_setup_command(args: &[String]) -> Result<SetupCommand> {
                     print_usage();
                     std::process::exit(0);
                 }
-                other => anyhow::bail!("unknown sessions-watch-health-check argument: {other}"),
+                other => anyhow::bail!("unknown sessionshealth argument: {other}"),
             }
         }
         return Ok(SetupCommand {
@@ -989,10 +989,10 @@ fn parse_setup_command(args: &[String]) -> Result<SetupCommand> {
     }
     if matches!(
         iter.clone().next().map(String::as_str),
-        Some("heartbeat-agent")
+        Some("heartbeatagent")
     ) {
         let _ = iter.next();
-        let (action, json) = parse_setup_subcommand_args("heartbeat-agent", iter)?;
+        let (action, json) = parse_setup_subcommand_args("heartbeatagent", iter)?;
         return Ok(SetupCommand {
             kind: SetupCommandKind::HeartbeatAgent(match action {
                 "install" => cortex::setup::HeartbeatAgentAction::Install,
@@ -1004,10 +1004,10 @@ fn parse_setup_command(args: &[String]) -> Result<SetupCommand> {
     }
     if matches!(
         iter.clone().next().map(String::as_str),
-        Some("debug-wrapper")
+        Some("debugwrapper")
     ) {
         let _ = iter.next();
-        let (action, json) = parse_setup_subcommand_args("debug-wrapper", iter)?;
+        let (action, json) = parse_setup_subcommand_args("debugwrapper", iter)?;
         return Ok(SetupCommand {
             kind: SetupCommandKind::DebugWrapper(match action {
                 "install" => cortex::setup::DebugWrapperAction::Install,
@@ -1019,10 +1019,10 @@ fn parse_setup_command(args: &[String]) -> Result<SetupCommand> {
     }
     if matches!(
         iter.clone().next().map(String::as_str),
-        Some("debug-compose")
+        Some("debugcompose")
     ) {
         let _ = iter.next();
-        let (action, json) = parse_setup_subcommand_args("debug-compose", iter)?;
+        let (action, json) = parse_setup_subcommand_args("debugcompose", iter)?;
         return Ok(SetupCommand {
             kind: SetupCommandKind::DebugCompose(match action {
                 "install" => cortex::setup::DebugComposeAction::Install,

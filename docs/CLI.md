@@ -33,14 +33,14 @@ compatibility shims.
 | `cortex topic-correlate ...` | `cortex correlate topic ...` |
 | `cortex host-state ...` | `cortex state host ...` |
 | `cortex fleet-state ...` | `cortex state fleet ...` |
-| `cortex clock-skew ...` | `cortex state clock-skew ...` |
-| `cortex ingest-rate ...` | `cortex stats ingest-rate ...` |
+| `cortex clock-skew ...` | `cortex state clockskew ...` |
+| `cortex ingest-rate ...` | `cortex stats ingestrate ...` |
 | `cortex sig ...` | `cortex alerts signatures ...` |
 | `cortex notify ...` | `cortex alerts notifications ...` |
 | `cortex shell ...` | `cortex ingest shell ...` |
 | `cortex agent-command ...` | `cortex ingest shell agent ...` |
 | `cortex inventory ...` | `cortex ingest inventory ...` |
-| `cortex file-tail ...` | `cortex ingest file-tail ...` |
+| `cortex file-tail ...` | `cortex ingest filetail ...` |
 
 The REST `/api/ai/*` namespace is also intentionally removed; use
 `/api/sessions/*`.
@@ -67,27 +67,28 @@ Ingestion commands group local shell history, agent command spools, the private
 inventory cache, managed file-tail sources, and read-only Docker/syslog ingest
 status checks.
 
-### `cortex ingest file-tail`
+### `cortex ingest filetail`
 
 Manage Cortex-owned file-tail ingest sources. Sources are persisted beside the
 configured database in `file-tails.json` and reconciled by the running
 `cortex serve mcp` process.
 
 ```bash
-cortex ingest file-tail list [--json]
-cortex ingest file-tail status [--json]
-cortex ingest file-tail add --id ID --path PATH --tag TAG --host HOST [--facility FACILITY] [--severity SEVERITY] [--from-start] [--json]
-cortex ingest file-tail remove --id ID [--json]
-cortex ingest file-tail enable --id ID [--json]
-cortex ingest file-tail disable --id ID [--json]
+cortex ingest filetail list [--json]
+cortex ingest filetail status [--json]
+cortex ingest filetail add PATH [--id ID] [--tag TAG] [--host HOST] [--facility FACILITY] [--severity SEVERITY] [--from-start] [--json]
+cortex ingest filetail remove ID [--json]
+cortex ingest filetail enable ID [--json]
+cortex ingest filetail disable ID [--json]
 ```
 
 The command maps to MCP action `file_tails` and REST `POST /api/file-tails`.
 When `--http` or `CORTEX_USE_HTTP=true` is used, set both `CORTEX_API_TOKEN`
 and `CORTEX_API_ADMIN_TOKEN`; the client sends the latter as
 `X-Cortex-Admin-Token`.
-By default `add` starts tailing at EOF; pass `--from-start` to ingest existing
-file contents.
+By default `add` derives `id` and `tag` from the file name, uses the runtime
+hostname, and starts tailing at EOF. Override those values only when needed;
+pass `--from-start` to ingest existing file contents.
 
 ### `cortex ingest syslog`
 
@@ -322,15 +323,15 @@ subprocess, and prints `invocation_id`, `prompt_bytes`,
 `evidence_counts`, and `would_exceed_prompt_limit` instead of an
 assessment.
 
-### `cortex sessions llm-invocations`
+### `cortex sessions llminvocations`
 
 List audit rows recorded by `LlmRunner` for every LLM invocation attempt
 (dry runs, denials, and real Gemini calls alike).
 
 ```bash
-cortex sessions llm-invocations --limit 20
-cortex sessions llm-invocations --action ai_assess --status error --json
-cortex sessions llm-invocations --since 2026-06-01 --json
+cortex sessions llminvocations --limit 20
+cortex sessions llminvocations --action ai_assess --status error --json
+cortex sessions llminvocations --since 2026-06-01 --json
 ```
 
 All flags are optional filters: `--since` (normalized time expression,
@@ -405,15 +406,15 @@ are permanently unrecoverable via this command and need no action. An
 unexpectedly high count on recently-ingested rows suggests the transcript
 source directory moved; verify `ai_transcript_path` still resolves.
 
-### `cortex sessions mcp-events`
+### `cortex sessions mcpevents`
 
 List extracted AI MCP tool-call events (Claude `tool_use`/`tool_result`,
 Codex `function_call`/`function_call_output`), classified via the
 `mcp__<server>__<tool>` naming convention.
 
 ```bash
-cortex sessions mcp-events --project cortex --limit 20
-cortex sessions mcp-events --mcp-server labby --since 1h --json
+cortex sessions mcpevents --project cortex --limit 20
+cortex sessions mcpevents --mcp-server labby --since 1h --json
 ```
 
 All flags are optional filters: `--tool-name`, `--mcp-server`, `--mcp-tool`,
@@ -421,7 +422,7 @@ All flags are optional filters: `--tool-name`, `--mcp-server`, `--mcp-tool`,
 `--until` (normalized time expressions), and `--limit` (defaults to 50,
 clamped to `1..=500`). This is a `cortex:read`-scoped action.
 
-### `cortex sessions mcp-events backfill`
+### `cortex sessions mcpevents backfill`
 
 Chunked, bounded, dry-run-capable backfill of `ai_mcp_events` from existing
 `logs` rows — catches up rows ingested before this phase shipped. Scans the
@@ -429,8 +430,8 @@ Chunked, bounded, dry-run-capable backfill of `ai_mcp_events` from existing
 summary).
 
 ```bash
-cortex sessions mcp-events backfill --since 30d --limit 10000 --dry-run
-cortex sessions mcp-events backfill --limit 50000
+cortex sessions mcpevents backfill --since 30d --limit 10000 --dry-run
+cortex sessions mcpevents backfill --limit 50000
 ```
 
 `--since` (optional, normalized time expression) restricts the scan to
@@ -443,27 +444,47 @@ fails fast with a "already running" error. Local mode only — this is a
 DB-heavy batch job that runs against the local `CortexService`, not
 proxied over HTTP.
 
-### `cortex sessions mcp-incidents`
+### `cortex sessions mcpincidents`
 
 Groups `ai_mcp_events` rows into incident candidates by `(mcp_server,
 mcp_tool, tool, project, session_id, hostname, window_bucket)`.
 
 ```bash
-cortex sessions mcp-incidents --mcp-server labby --since 7d
-cortex sessions mcp-incidents --mcp-tool search --min-score 35 --json
+cortex sessions mcpincidents --mcp-server labby --since 7d
+cortex sessions mcpincidents --mcp-tool search --min-score 35 --json
 ```
 
-### `cortex sessions mcp-investigate`
+### `cortex sessions mcpinvestigate`
 
 Deep-dive investigation of MCP-usage incidents, server/tool-first (mirrors
-`cortex sessions skill-investigate`'s skill-first resolution rule).
+`cortex sessions skillinvestigate`'s skill-first resolution rule).
 
 ```bash
-cortex sessions mcp-investigate labby
-cortex sessions mcp-investigate labby --since 7d --all --limit 5
+cortex sessions mcpinvestigate labby
+cortex sessions mcpinvestigate labby --since 7d --all --limit 5
 ```
 
-### `cortex sessions mcp-assess`
+### `cortex sessions hookincidents`
+
+List hook failures and other negative signals. A bare positional is the hook
+name; omit it to scan all hooks.
+
+```bash
+cortex sessions hookincidents
+cortex sessions hookincidents format-on-save --since 7d
+```
+
+### `cortex sessions hookinvestigate`
+
+Build an evidence bundle for one hook or incident through the same shared
+service used by REST and MCP.
+
+```bash
+cortex sessions hookinvestigate format-on-save
+cortex sessions hookinvestigate --incident-id INCIDENT_ID
+```
+
+### `cortex sessions mcpassess`
 
 Low-level alias for `cortex assess mcp` — see the "Skill, MCP, and abuse
 assessment" section in [README.md](../README.md) for the full flag
@@ -614,13 +635,13 @@ Errors include source path, source kind, line number, timestamp, and a bounded
 scrubbed preview so parser failures can be investigated without opening the
 database directly.
 
-### `cortex sessions prune-checkpoints`
+### `cortex sessions prunecheckpoints`
 
 Remove checkpoints for transcript files that no longer exist.
 
 ```bash
-cortex sessions prune-checkpoints --missing --dry-run
-cortex sessions prune-checkpoints --missing --limit 100
+cortex sessions prunecheckpoints --missing --dry-run
+cortex sessions prunecheckpoints --missing --limit 100
 ```
 
 Pruning is deliberately limited to `--missing` checkpoints. It removes scanner
@@ -645,14 +666,14 @@ Without `--strict-permissions`, this is a report-only command. With
 `--strict-permissions`, it exits non-zero when either transcript root is
 missing, unreadable, unwritable, or owned by another user.
 
-### `cortex sessions watch-status`
+### `cortex sessions watchstatus`
 
 Inspect the supported user-systemd watcher without reading systemd internals by
 hand.
 
 ```bash
-cortex sessions watch-status
-cortex sessions watch-status --json
+cortex sessions watchstatus
+cortex sessions watchstatus --json
 ```
 
 The status command reports `syslog-sessions-watch.service` active/enabled state, main
@@ -660,7 +681,7 @@ PID, ExecStart, and the latest bounded journal lines. It uses the same user bus
 fallback as setup commands, so it still works from shells or tool environments
 that do not export `DBUS_SESSION_BUS_ADDRESS`.
 
-### `cortex sessions smoke-watch`
+### `cortex sessions smokewatch`
 
 Run a bounded live smoke test of the host-local watcher. The command writes a
 temporary Claude transcript under `~/.claude/projects`, waits for the watcher to
@@ -668,8 +689,8 @@ ingest it into the configured database, deletes the temp file, then waits for
 the missing-checkpoint pruner to clear scanner metadata.
 
 ```bash
-cortex sessions smoke-watch
-cortex sessions smoke-watch --json
+cortex sessions smokewatch
+cortex sessions smokewatch --json
 ```
 
 This is a live command. It requires `syslog-sessions-watch.service` to be running and
@@ -682,7 +703,7 @@ Backfill local, human-typed shell history into the main log corpus.
 ```bash
 cortex ingest shell user index --path ~/.zsh_history
 cortex ingest shell user index --path ~/.zsh_history --shell zsh --json
-cortex ingest shell user atuin-index --path ~/.local/share/atuin/history.db --json
+cortex ingest shell user atuinindex --path ~/.local/share/atuin/history.db --json
 ```
 
 The importer currently supports zsh extended history lines in the
@@ -709,9 +730,8 @@ cortex ingest shell agent index --path ~/.local/state/cortex/agent-command.jsonl
 cortex ingest shell agent wrap --spool ~/.local/state/cortex/agent-command.jsonl -- cargo test
 ```
 
-The legacy grammar `cortex ingest agent-command {ingest-spool|wrap}` is still
-accepted as a deprecated alias so already-deployed wrappers/timers keep
-working until `cortex setup shell agent install` is rerun.
+The legacy `cortex ingest agent-command ...` grammar is removed. Use
+`cortex ingest shell agent index|wrap`.
 
 `CLAUDE_CODE_SHELL_PREFIX` is the Claude Code hook point for commands spawned by
 Claude Code, including Bash tool calls, hook commands, and stdio MCP server
@@ -733,15 +753,15 @@ not rescan already-ingested commands. Imported rows use
 and `source_ip` identities shaped like
 `agent-command://<hostname>/<agent>/<session_id>`.
 
-### `cortex setup sessions-watch-service`
+### `cortex setup sessionswatch`
 
 Install, remove, or inspect the supported host-local user-systemd watcher for
 near-real-time transcript ingestion.
 
 ```bash
-cortex setup sessions-watch-service install
-cortex setup sessions-watch-service check --json
-cortex setup sessions-watch-service remove
+cortex setup sessionswatch install
+cortex setup sessionswatch check --json
+cortex setup sessionswatch remove
 ```
 
 Install resolves an absolute `cortex` binary and a concrete SQLite DB path,
@@ -772,15 +792,15 @@ unit content, permission failures, and failed `systemctl enable --now` phases
 remain blocking errors. Installing the watch service disables the older
 `syslog-sessions-index.timer` to avoid duplicate background ingestion loops.
 
-### `cortex setup debug-wrapper`
+### `cortex setup debugwrapper`
 
 Install, remove, or inspect the host-local debug wrapper at
 `~/.local/bin/cortex`.
 
 ```bash
-cortex setup debug-wrapper install
-cortex setup debug-wrapper check --json
-cortex setup debug-wrapper remove
+cortex setup debugwrapper install
+cortex setup debugwrapper check --json
+cortex setup debugwrapper remove
 ```
 
 The wrapper is intentionally machine-local. It `cd`s into the configured repo
@@ -790,15 +810,15 @@ and bearer auth mode on, so regular CLI checks do not accidentally start
 container-log ingestion or OAuth-only config paths. Override the source checkout
 with `CORTEX_REPO=/path/to/cortex cortex ...`.
 
-### `cortex setup debug-compose`
+### `cortex setup debugcompose`
 
 Install, remove, or inspect the local debug Compose override under
 `~/.cortex/compose/docker-compose.override.yml`.
 
 ```bash
-cortex setup debug-compose install
-cortex setup debug-compose check --json
-cortex setup debug-compose remove
+cortex setup debugcompose install
+cortex setup debugcompose check --json
+cortex setup debugcompose remove
 ```
 
 The override is machine-local. It points the canonical Docker Compose project at
@@ -890,22 +910,22 @@ deploy archives it as `<home>/compose/.env.legacy`; `<home>/.env` is the
 canonical runtime env. It is CLI-only, requires an explicit host argument, and
 does not add REST or MCP deploy mutation surfaces.
 
-### `cortex setup sessions-index-timer`
+### `cortex setup sessionstimer`
 
 Install, remove, or inspect the optional host-local user-systemd polling
 fallback that periodically runs `cortex sessions index`.
 
 ```bash
-cortex setup sessions-index-timer install
-cortex setup sessions-index-timer check --json
-cortex setup sessions-index-timer remove
+cortex setup sessionstimer install
+cortex setup sessionstimer check --json
+cortex setup sessionstimer remove
 ```
 
 This helper is intentionally not part of the Docker container. It scans
 host-local transcript roots (`~/.claude/projects`, `~/.codex/sessions`,
 `~/.gemini/tmp`) using a
 host `cortex` binary, then writes to the configured SQLite DB. Prefer
-`cortex setup sessions-watch-service install` for normal use; the watcher install
+`cortex setup sessionswatch install` for normal use; the watcher install
 disables this timer to avoid duplicate background ingestion loops.
 
 ### `cortex doctor binary`
@@ -1285,9 +1305,9 @@ models.
 | `cortex sessions tools` | `cortex` with `action="list_ai_tools"` |
 | `cortex sessions projects` | `cortex` with `action="list_ai_projects"` |
 | `cortex sessions similar` | `cortex` with `action="similar_incidents"` |
-| `cortex sessions incident-context` | `cortex` with `action="incident_context"` |
+| `cortex sessions incidentcontext` | `cortex` with `action="incident_context"` |
 | `cortex sessions skills` | `cortex` with `action="skill_events"` |
-| `cortex sessions mcp-events` | `cortex` with `action="mcp_events"` |
+| `cortex sessions mcpevents` | `cortex` with `action="mcp_events"` |
 | `cortex correlate events` | `cortex` with `action="correlate"` |
 | `cortex state host` | `cortex` with `action="host_state"` |
 | `cortex state fleet` | `cortex` with `action="fleet_state"` |
@@ -1298,9 +1318,9 @@ models.
 | `cortex analysis patterns` | `cortex` with `action="patterns"` |
 | `cortex context` | `cortex` with `action="context"` |
 | `cortex get` | `cortex` with `action="get"` |
-| `cortex stats ingest-rate` | `cortex` with `action="ingest_rate"` |
+| `cortex stats ingestrate` | `cortex` with `action="ingest_rate"` |
 | `cortex hosts silent` | `cortex` with `action="silent_hosts"` |
-| `cortex state clock-skew` | `cortex` with `action="clock_skew"` |
+| `cortex state clockskew` | `cortex` with `action="clock_skew"` |
 | `cortex analysis anomalies` | `cortex` with `action="anomalies"` |
 | `cortex analysis compare` | `cortex` with `action="compare"` |
 | `cortex alerts signatures` | `cortex` with `action="unaddressed_errors"` |

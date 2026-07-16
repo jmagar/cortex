@@ -42,7 +42,7 @@ async fn shell_import_commands_are_local_only() {
     assert!(
         atuin_err
             .to_string()
-            .contains("shell user atuin-index is local-only")
+            .contains("shell user atuinindex is local-only")
     );
 }
 

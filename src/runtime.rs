@@ -194,7 +194,21 @@ impl RuntimeCore {
     pub async fn load_query_only() -> Result<Self> {
         // Use load_for_stdio() to skip the non-loopback bind safety gate —
         // stdio mode never binds an HTTP port so the gate is irrelevant.
-        Self::query_only(Config::load_for_stdio()?).await
+        let config = Config::load_for_stdio()?;
+        for attempt in 0..3 {
+            match Self::query_only(config.clone()).await {
+                Ok(runtime) => return Ok(runtime),
+                Err(error)
+                    if attempt < 2
+                        && (error.to_string().contains("database is locked")
+                            || error.to_string().contains("SQLITE_BUSY")) =>
+                {
+                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        unreachable!("query-only runtime retry loop always returns")
     }
 
     pub async fn for_server(config: Config) -> Result<Self> {

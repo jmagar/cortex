@@ -27,10 +27,55 @@ fn parse_routes_stats() {
 }
 
 #[test]
+fn canonical_command_tokens_are_single_words() {
+    let commands = [
+        vec!["state", "clockskew"],
+        vec!["stats", "ingestrate"],
+        vec!["ingest", "filetail", "list"],
+        vec!["setup", "pluginhook"],
+        vec!["sessions", "prunecheckpoints"],
+        vec!["sessions", "watchstatus"],
+        vec!["sessions", "smokewatch"],
+        vec!["sessions", "incidentcontext"],
+        vec!["sessions", "llminvocations"],
+        vec!["sessions", "skillincidents"],
+        vec!["sessions", "skillinvestigate", "superpowers:test"],
+        vec!["sessions", "skillassess", "superpowers:test", "--no-llm"],
+        vec!["sessions", "mcpevents"],
+        vec!["sessions", "mcpincidents"],
+        vec!["sessions", "mcpinvestigate", "labby.search"],
+        vec!["sessions", "mcpassess", "labby.search", "--no-llm"],
+        vec!["sessions", "hookevents"],
+        vec!["sessions", "hooksbackfill"],
+    ];
+
+    for command in commands {
+        assert!(
+            command.iter().take(2).all(|token| !token.contains('-')),
+            "test fixture contains a hyphenated command token: {command:?}"
+        );
+        let args = command.iter().map(|value| (*value).to_string()).collect();
+        parse_command(args).unwrap_or_else(|err| panic!("{command:?} did not parse: {err}"));
+    }
+}
+
+#[test]
+fn filetail_add_needs_only_a_path() {
+    let command = parse_command(vec![
+        "ingest".into(),
+        "filetail".into(),
+        "add".into(),
+        "/var/log/cortex/access.log".into(),
+    ]);
+
+    assert!(command.is_ok(), "minimal filetail add failed: {command:?}");
+}
+
+#[test]
 fn parses_file_tail_add() {
     let command = parse_command(vec![
         "ingest".into(),
-        "file-tail".into(),
+        "filetail".into(),
         "add".into(),
         "--id".into(),
         "swag-access".into(),
@@ -53,9 +98,9 @@ fn parses_file_tail_add() {
         command,
         CliCommand::Ingest(IngestCommand::FileTail(FileTailCommand::Add(
             FileTailAddArgs {
-                id: "swag-access".into(),
+                id: Some("swag-access".into()),
                 path: "/mnt/appdata/swag/log/nginx/access.log".into(),
-                tag: "swag-access".into(),
+                tag: Some("swag-access".into()),
                 host: Some("squirts".into()),
                 facility: Some("local4".into()),
                 severity: Some("info".into()),
@@ -67,10 +112,10 @@ fn parses_file_tail_add() {
 }
 
 #[test]
-fn file_tail_add_requires_hostname() {
-    let err = parse_command(vec![
+fn filetail_add_accepts_missing_hostname() {
+    let command = parse_command(vec![
         "ingest".into(),
-        "file-tail".into(),
+        "filetail".into(),
         "add".into(),
         "--id".into(),
         "swag-access".into(),
@@ -79,16 +124,19 @@ fn file_tail_add_requires_hostname() {
         "--tag".into(),
         "swag-access".into(),
     ])
-    .unwrap_err();
+    .unwrap();
 
-    assert!(err.to_string().contains("--host"));
+    assert!(matches!(
+        command,
+        CliCommand::Ingest(IngestCommand::FileTail(FileTailCommand::Add(_)))
+    ));
 }
 
 #[test]
 fn parses_file_tail_list() {
     let command = parse_command(vec![
         "ingest".into(),
-        "file-tail".into(),
+        "filetail".into(),
         "list".into(),
         "--json".into(),
     ])
@@ -301,11 +349,11 @@ fn removed_top_level_commands_fail_with_replacement_guidance() {
         ("deploy", "cortex setup deploy"),
         ("host-state", "cortex state host"),
         ("fleet-state", "cortex state fleet"),
-        ("clock-skew", "cortex state clock-skew"),
-        ("ingest-rate", "cortex stats ingest-rate"),
+        ("clock-skew", "cortex state clockskew"),
+        ("ingest-rate", "cortex stats ingestrate"),
         ("sig", "cortex alerts signatures"),
         ("notify", "cortex alerts notifications"),
-        ("file-tail", "cortex ingest file-tail"),
+        ("file-tail", "cortex ingest filetail"),
         ("shell", "cortex ingest shell"),
         ("agent-command", "cortex ingest shell agent"),
         ("inventory", "cortex ingest inventory"),
@@ -338,20 +386,14 @@ fn removed_command_replacements_parse() {
         vec!["compose", "logs", "cortex.service"],
         vec!["state", "host", "dookie"],
         vec!["state", "fleet"],
-        vec!["state", "clock-skew"],
-        vec!["stats", "ingest-rate"],
+        vec!["state", "clockskew"],
+        vec!["stats", "ingestrate"],
         vec!["alerts", "signatures"],
         vec!["alerts", "notifications"],
-        vec!["ingest", "file-tail", "list"],
+        vec!["ingest", "filetail", "list"],
         vec!["ingest", "shell", "user", "index", "--path", "/tmp/history"],
         vec!["ingest", "shell", "agent", "index", "--path", "/tmp/spool"],
-        vec![
-            "ingest",
-            "agent-command",
-            "ingest-spool",
-            "--path",
-            "/tmp/spool",
-        ],
+        vec!["ingest", "shell", "agent", "index", "--path", "/tmp/spool"],
         vec!["ingest", "inventory", "status"],
         vec!["analysis", "errors"],
         vec!["analysis", "incident", "--around", "1h"],
@@ -417,16 +459,13 @@ fn parse_host_state_positional_and_host_flag_are_mutually_exclusive() {
 }
 
 #[test]
-fn parse_host_state_requires_host_selector_with_usage() {
-    let err = parse_command(vec!["state".to_string(), "host".to_string()])
-        .unwrap_err()
-        .to_string();
-
-    assert!(
-        err.contains("requires --host-id ID or --host HOST"),
-        "got: {err}"
-    );
-    assert!(err.contains("Usage: cortex state host"), "got: {err}");
+fn parse_host_state_allows_freshest_host_default() {
+    let command = parse_command(vec!["state".to_string(), "host".to_string()]).unwrap();
+    let CliCommand::State(StateCommand::Host(args)) = command else {
+        panic!("expected host state")
+    };
+    assert!(args.host.is_none());
+    assert!(args.host_id.is_none());
 }
 
 #[test]
@@ -687,7 +726,7 @@ fn parse_correlate_state_rejects_unknown_flag() {
     ])
     .unwrap_err()
     .to_string();
-    assert!(err.contains("unknown correlate-state option"), "got: {err}");
+    assert!(err.contains("unknown correlate state option"), "got: {err}");
 }
 
 #[test]
@@ -727,7 +766,7 @@ fn time_flags_normalize_relative_across_state_admin_and_ai_commands() {
     // clock-skew --since
     let CliCommand::State(StateCommand::ClockSkew(c)) = parse_command(vec![
         "state".into(),
-        "clock-skew".into(),
+        "clockskew".into(),
         "--since".into(),
         "2d".into(),
     ])
@@ -803,18 +842,26 @@ fn time_flags_reject_non_time_values() {
     for cmd in [
         vec!["apps".to_string(), "--since".into(), "notatime".into()],
         vec![
-            "clock-skew".to_string(),
+            "state".to_string(),
+            "clockskew".into(),
             "--since".into(),
             "notatime".into(),
         ],
-        vec!["compare".to_string(), "--a-from".into(), "notatime".into()],
         vec![
-            "correlate-state".to_string(),
+            "analysis".to_string(),
+            "compare".into(),
+            "--a-from".into(),
+            "notatime".into(),
+        ],
+        vec![
+            "correlate".to_string(),
+            "state".into(),
             "--reference-time".into(),
             "notatime".into(),
         ],
         vec![
-            "host-state".to_string(),
+            "state".to_string(),
+            "host".into(),
             "dookie".into(),
             "--since".into(),
             "notatime".into(),

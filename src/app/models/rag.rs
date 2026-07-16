@@ -91,8 +91,10 @@ impl From<db::SimilarIncidentsResult> for SimilarIncidentsResponse {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct IncidentContextRequest {
-    pub since: String,
-    pub until: String,
+    /// Start of the incident window. Defaults to one hour before `until`.
+    pub since: Option<String>,
+    /// End of the incident window. Defaults to now.
+    pub until: Option<String>,
     pub host: Option<String>,
     pub app: Option<String>,
     pub query: Option<String>,

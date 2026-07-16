@@ -364,7 +364,7 @@ fn run_deploy(host: &str, local_binary: &Path, config: &AgentDeployConfig) -> io
     };
     ssh_run(
         host,
-        &format!("{prefix}~/.local/bin/cortex setup heartbeat-agent install"),
+        &format!("{prefix}~/.local/bin/cortex setup heartbeatagent install"),
     )
 }
 

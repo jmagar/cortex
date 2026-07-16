@@ -32,11 +32,11 @@ pub enum ValueKind {
     Time,
 }
 
-/// Zero-flag defaults applied to an action when the user omits them.
+/// Zero-flag defaults advertised for an action when the user omits them.
 ///
 /// Kept deliberately small: the only knobs worth defaulting at the CLI layer
-/// are the result `limit` and the start-of-window `since`. `None` in either
-/// field means "leave it to the server / unbounded" — i.e. no default.
+/// are the result `limit` and the start-of-window `since`. Request handling
+/// still resolves defaults in the shared service layer.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Defaults {
     /// Default `--limit` when the user passes none (`None` = server default).
@@ -103,6 +103,39 @@ pub(super) const COMMON_LOG_FLAGS: &[FlagSpec] = &[
         flag: "--limit",
         short: "-n",
         help: "Max results",
+        value_kind: ValueKind::Text,
+    },
+    FlagSpec {
+        flag: "--json",
+        short: "",
+        help: "JSON output",
+        value_kind: ValueKind::None,
+    },
+];
+
+pub(super) const HOST_STATE_FLAGS: &[FlagSpec] = &[
+    FlagSpec {
+        flag: "--host",
+        short: "",
+        help: "Select a hostname; defaults to the freshest host",
+        value_kind: ValueKind::Host,
+    },
+    FlagSpec {
+        flag: "--host-id",
+        short: "",
+        help: "Select a stable heartbeat host id",
+        value_kind: ValueKind::Text,
+    },
+    FlagSpec {
+        flag: "--since",
+        short: "",
+        help: "Start of window",
+        value_kind: ValueKind::Time,
+    },
+    FlagSpec {
+        flag: "--limit",
+        short: "-n",
+        help: "Maximum heartbeat samples",
         value_kind: ValueKind::Text,
     },
     FlagSpec {

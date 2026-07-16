@@ -166,10 +166,12 @@ fn parse_incident_accepts_window_service_and_json() {
 }
 
 #[test]
-fn parse_correlate_requires_reference_time() {
-    let err = CliCommand::parse(strings(&["correlate", "events", "--limit", "5"])).unwrap_err();
-
-    assert!(err.to_string().contains("reference-time"));
+fn parse_correlate_allows_shared_reference_time_default() {
+    let command = CliCommand::parse(strings(&["correlate", "events", "--limit", "5"])).unwrap();
+    let CliCommand::Correlate(args) = command else {
+        panic!("expected correlate")
+    };
+    assert!(args.reference_time.is_none());
 }
 
 #[test]
@@ -354,13 +356,13 @@ fn parse_sessions_correlate_collects_cross_reference_filters() {
 #[test]
 fn parse_sessions_context_requires_project() {
     let err = CliCommand::parse(strings(&["sessions", "context"])).unwrap_err();
-    assert!(err.to_string().contains("requires --project"));
+    assert!(err.to_string().contains("requires PROJECT"));
 }
 
 #[test]
 fn parse_sessions_add_requires_file() {
     let err = CliCommand::parse(strings(&["sessions", "add"])).unwrap_err();
-    assert!(err.to_string().contains("--file"));
+    assert!(err.to_string().contains("requires a file path"));
 }
 
 #[test]
@@ -474,10 +476,14 @@ fn parse_sessions_errors_collects_limit() {
 }
 
 #[test]
-fn parse_sessions_prune_checkpoints_requires_missing() {
-    let err =
-        CliCommand::parse(strings(&["sessions", "prune-checkpoints", "--dry-run"])).unwrap_err();
-    assert!(err.to_string().contains("--missing"));
+fn parse_sessions_prune_checkpoints_defaults_to_missing_sources() {
+    let parsed =
+        CliCommand::parse(strings(&["sessions", "prunecheckpoints", "--dry-run"])).unwrap();
+    let CliCommand::Sessions(SessionsCommand::PruneCheckpoints(args)) = parsed else {
+        panic!("unexpected command")
+    };
+    assert!(args.missing_only);
+    assert!(args.dry_run);
 }
 
 #[test]
@@ -501,7 +507,7 @@ fn parse_sessions_doctor_accepts_strict_permissions() {
 
 #[test]
 fn parse_sessions_watch_status_accepts_json() {
-    let parsed = CliCommand::parse(strings(&["sessions", "watch-status", "--json"])).unwrap();
+    let parsed = CliCommand::parse(strings(&["sessions", "watchstatus", "--json"])).unwrap();
 
     assert_eq!(
         parsed,
@@ -511,7 +517,7 @@ fn parse_sessions_watch_status_accepts_json() {
 
 #[test]
 fn parse_sessions_smoke_watch_accepts_json() {
-    let parsed = CliCommand::parse(strings(&["sessions", "smoke-watch", "--json"])).unwrap();
+    let parsed = CliCommand::parse(strings(&["sessions", "smokewatch", "--json"])).unwrap();
 
     assert_eq!(
         parsed,
@@ -734,7 +740,7 @@ fn parse_compose_down_collects_yes_and_dry_run() {
 #[test]
 fn parse_setup_plugin_hook_collects_json_and_no_repair() {
     let parsed =
-        CliCommand::parse(strings(&["setup", "plugin-hook", "--json", "--no-repair"])).unwrap();
+        CliCommand::parse(strings(&["setup", "pluginhook", "--json", "--no-repair"])).unwrap();
 
     assert_eq!(
         parsed,
@@ -1528,11 +1534,11 @@ fn parse_old_host_inventory_top_level_commands_are_removed() {
 fn parse_clock_skew_with_since() {
     let cmd = CliCommand::parse(strings(&[
         "state",
-        "clock-skew",
+        "clockskew",
         "--since",
         "2026-05-20T00:00:00Z",
     ]))
-    .expect("parse clock-skew");
+    .expect("parse clockskew");
     match cmd {
         CliCommand::State(StateCommand::ClockSkew(args)) => {
             assert_eq!(args.since.as_deref(), Some("2026-05-20T00:00:00+00:00"));

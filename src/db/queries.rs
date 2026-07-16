@@ -38,6 +38,7 @@ use super::queries_service_instances;
 
 const SEARCH_FTS_CANDIDATE_CAP: usize = 10_000;
 const SIMILAR_INCIDENT_FTS_CANDIDATE_CAP: usize = 5_000;
+const SIMILAR_INCIDENT_LOG_CANDIDATE_CAP: usize = 100_000;
 /// Cap on the FTS match-set materialization in the fast (index-led) search
 /// path. The `id IN (SELECT rowid FROM logs_fts ...)` subquery is
 /// non-correlated, so SQLite materializes the whole match set into an
@@ -357,9 +358,7 @@ fn tail_logs_sql(
     let mut idx = 1;
 
     if let Some(h) = hostname {
-        sql.push_str(&format!(" AND hostname = ?{idx}"));
-        bindings.push(rusqlite::types::Value::Text(h.to_string()));
-        idx += 1;
+        append_host_selector(&mut sql, &mut bindings, &mut idx, "hostname", h);
     }
     if let Some(source_ip) = source_ip {
         sql.push_str(&format!(" AND source_ip = ?{idx}"));
@@ -500,9 +499,10 @@ pub(crate) fn canonical_host_keys(
 ///    `host` row exists — we never invent a merge that could mask a distinct
 ///    machine.
 ///
-/// Ambiguous self-identifiers (`localhost`, the empty hostname, `host:user`
-/// forms with no dot) are left untouched: resolving those to a real machine
-/// needs the network-verified `source_ip`, which is a deferred follow-up.
+/// Blank hostnames are excluded because they cannot be selected or correlated.
+/// Other ambiguous self-identifiers (`localhost`, `host:user` forms with no
+/// dot) are left untouched: resolving those to a real machine needs the
+/// network-verified `source_ip`, which is a deferred follow-up.
 /// Merged rows sum `log_count`, take the earliest `first_seen` and latest
 /// `last_seen`, and display the canonical (lowercased) name.
 fn dedupe_hosts(rows: Vec<HostEntry>) -> Vec<HostEntry> {
@@ -516,6 +516,9 @@ fn dedupe_hosts(rows: Vec<HostEntry>) -> Vec<HostEntry> {
             .get(&entry.hostname)
             .cloned()
             .unwrap_or_else(|| case_fold_host(&entry.hostname));
+        if canonical.is_empty() {
+            continue;
+        }
         match merged.get_mut(&canonical) {
             Some(acc) => {
                 acc.log_count += entry.log_count;
@@ -1146,9 +1149,17 @@ pub fn search_ai_sessions(
 ) -> Result<SearchAiSessionsResult> {
     validate_fts_query(&params.query)?;
 
-    let conn = pool.get()?;
     let limit = params.limit.unwrap_or(20).clamp(1, 100) as usize;
-    let (sql, bindings) = search_ai_sessions_sql(params, limit);
+    let rollup = ai_session_rollup_status(pool)?;
+    let use_rollup = rollup.refreshed_at.is_some();
+    let session_window_truncated =
+        use_rollup && rollup.row_count > SESSION_SEARCH_ROLLUP_CAP as i64;
+    let conn = pool.get()?;
+    let (sql, bindings) = if use_rollup {
+        search_ai_sessions_rollup_sql(params, limit)
+    } else {
+        search_ai_sessions_sql(params, limit)
+    };
 
     let mut stmt = conn.prepare(&sql)?;
     let mut total_candidates = 0usize;
@@ -1174,13 +1185,131 @@ pub fn search_ai_sessions(
         total_candidates,
         candidate_rows: raw_candidate_count.min(CANDIDATE_CAP),
         candidate_cap: CANDIDATE_CAP,
-        candidate_window_truncated: raw_candidate_count > CANDIDATE_CAP,
-        truncated: total_candidates > sessions.len() || raw_candidate_count > CANDIDATE_CAP,
+        candidate_window_truncated: session_window_truncated || raw_candidate_count > CANDIDATE_CAP,
+        truncated: total_candidates > sessions.len()
+            || session_window_truncated
+            || raw_candidate_count > CANDIDATE_CAP,
         sessions,
     })
 }
 
 const CANDIDATE_CAP: usize = 5_000;
+const SESSION_SEARCH_ROLLUP_CAP: usize = 1_000;
+
+fn search_ai_sessions_rollup_sql(
+    params: &SearchAiSessionsParams,
+    limit: usize,
+) -> (String, Vec<rusqlite::types::Value>) {
+    let mut session_filters = String::new();
+    let mut candidate_filters = String::new();
+    let mut bindings = vec![rusqlite::types::Value::Text(params.query.clone())];
+    let mut idx = 2usize;
+
+    if let Some(project) = &params.ai_project {
+        session_filters.push_str(&format!(" AND s.ai_project = ?{idx}"));
+        bindings.push(rusqlite::types::Value::Text(project.clone()));
+        idx += 1;
+    }
+    if let Some(tool) = &params.ai_tool {
+        session_filters.push_str(&format!(" AND s.ai_tool = ?{idx}"));
+        bindings.push(rusqlite::types::Value::Text(tool.clone()));
+        idx += 1;
+    }
+    if let Some(host) = &params.host {
+        session_filters.push_str(&format!(" AND s.hostname = ?{idx}"));
+        bindings.push(rusqlite::types::Value::Text(host.clone()));
+        idx += 1;
+    }
+    if let Some(since) = &params.since {
+        session_filters.push_str(&format!(" AND s.last_seen >= ?{idx}"));
+        candidate_filters.push_str(&format!(" AND l.timestamp >= ?{idx}"));
+        bindings.push(rusqlite::types::Value::Text(since.clone()));
+        idx += 1;
+    }
+    if let Some(until) = &params.until {
+        session_filters.push_str(&format!(" AND s.first_seen <= ?{idx}"));
+        candidate_filters.push_str(&format!(" AND l.timestamp <= ?{idx}"));
+        bindings.push(rusqlite::types::Value::Text(until.clone()));
+        idx += 1;
+    }
+    if let Some(app) = &params.app {
+        candidate_filters.push_str(&format!(" AND l.app_name = ?{idx}"));
+        bindings.push(rusqlite::types::Value::Text(app.clone()));
+    }
+
+    let sql = format!(
+        "WITH session_window AS MATERIALIZED (
+            SELECT s.ai_project, s.ai_tool, s.ai_session_id, s.hostname,
+                   s.first_seen, s.last_seen, s.event_count
+            FROM ai_session_rollup s
+            WHERE 1=1{session_filters}
+            ORDER BY s.last_seen DESC
+            LIMIT {SESSION_SEARCH_ROLLUP_CAP}
+         ),
+         matched AS MATERIALIZED (
+            SELECT s.*
+            FROM session_window s
+            WHERE EXISTS (
+                SELECT 1
+                FROM logs l INDEXED BY idx_logs_ai_session_host_time
+                CROSS JOIN logs_fts
+                WHERE l.ai_project = s.ai_project
+                  AND l.ai_tool = s.ai_tool
+                  AND l.ai_session_id = s.ai_session_id
+                  AND l.hostname = s.hostname
+                  AND logs_fts.rowid = l.id
+                  AND logs_fts MATCH ?1{candidate_filters}
+                LIMIT 1
+            )
+            ORDER BY s.last_seen DESC
+            LIMIT {}
+         ),
+         scored AS MATERIALIZED (
+            SELECT m.ai_project, m.ai_tool, m.ai_session_id, m.hostname,
+                   m.first_seen, m.last_seen, m.event_count,
+                   (
+                       SELECT COUNT(*)
+                       FROM (
+                           SELECT 1
+                           FROM logs l INDEXED BY idx_logs_ai_session_host_time
+                           CROSS JOIN logs_fts
+                           WHERE l.ai_project = m.ai_project
+                             AND l.ai_tool = m.ai_tool
+                             AND l.ai_session_id = m.ai_session_id
+                             AND l.hostname = m.hostname
+                             AND logs_fts.rowid = l.id
+                             AND logs_fts MATCH ?1{candidate_filters}
+                           LIMIT {}
+                       ) bounded_matches
+                   ) AS match_count,
+                   (
+                       SELECT l.message
+                       FROM logs l INDEXED BY idx_logs_ai_session_host_time
+                       CROSS JOIN logs_fts
+                       WHERE l.ai_project = m.ai_project
+                         AND l.ai_tool = m.ai_tool
+                         AND l.ai_session_id = m.ai_session_id
+                         AND l.hostname = m.hostname
+                         AND logs_fts.rowid = l.id
+                         AND logs_fts MATCH ?1{candidate_filters}
+                       ORDER BY l.timestamp DESC
+                       LIMIT 1
+                   ) AS best_snippet
+            FROM matched m
+         )
+         SELECT ai_project, ai_tool, ai_session_id, hostname,
+                first_seen, last_seen, event_count,
+                match_count, best_snippet,
+                COUNT(*) OVER() AS total_candidates,
+                (SELECT COALESCE(SUM(match_count), 0) FROM scored) AS raw_candidate_count
+         FROM scored
+         ORDER BY last_seen DESC
+         LIMIT {limit}",
+        limit + 1,
+        CANDIDATE_CAP + 1
+    );
+    (sql, bindings)
+}
 
 fn search_ai_sessions_sql(
     params: &SearchAiSessionsParams,
@@ -2031,7 +2160,6 @@ const DEFAULT_AI_ABUSE_TERMS: &[&str] = &[
 ];
 
 pub fn search_ai_abuse(pool: &DbPool, params: &AiAbuseParams) -> Result<AiAbuseResult> {
-    let conn = pool.get()?;
     let limit = params.limit.unwrap_or(20).clamp(1, 100) as usize;
     let before = params.before.unwrap_or(2).min(20);
     let after = params.after.unwrap_or(2).min(20);
@@ -2039,6 +2167,7 @@ pub fn search_ai_abuse(pool: &DbPool, params: &AiAbuseParams) -> Result<AiAbuseR
     if terms.len() > 16 {
         anyhow::bail!("Too many abuse terms ({}); maximum is 16", terms.len());
     }
+    let conn = pool.get()?;
     const CANDIDATE_CAP: usize = 10_000;
 
     let mut sql = String::from(
@@ -2250,12 +2379,12 @@ fn truncate_to_limit<T>(values: &mut Vec<T>, limit: usize) -> bool {
 pub fn search_ai_incidents(pool: &DbPool, params: &AiIncidentParams) -> Result<AiIncidentResult> {
     use std::collections::HashMap;
 
-    let conn = pool.get()?;
     let limit = params.limit.unwrap_or(20).clamp(1, 100) as usize;
     let window_secs = i64::from(params.window_minutes.unwrap_or(10).clamp(1, 120)) * 60;
     let terms = normalized_abuse_terms(&params.terms);
     const CANDIDATE_CAP: usize = 10_000;
 
+    let conn = pool.get()?;
     let (sql, bindings) = ai_incident_anchor_sql(params, &terms, CANDIDATE_CAP);
 
     // Fetch candidate abuse anchor rows (same FTS path as search_ai_abuse,
@@ -2963,9 +3092,7 @@ fn append_filters(
     params: &SearchParams,
 ) {
     if let Some(ref h) = params.host {
-        sql.push_str(&format!(" AND l.hostname = ?{}", *idx));
-        bindings.push(rusqlite::types::Value::Text(h.clone()));
-        *idx += 1;
+        append_host_selector(sql, bindings, idx, "l.hostname", h);
     }
     if let Some(ref source_ip) = params.source {
         sql.push_str(&format!(" AND l.source_ip = ?{}", *idx));
@@ -3083,6 +3210,41 @@ fn append_filters(
     }
 }
 
+/// Append an indexed hostname selector that accepts the canonical names
+/// returned by [`list_hosts`]. Normalization is confined to the tiny `hosts`
+/// aggregate table; the outer log lookup still uses exact stored values and
+/// can probe the existing hostname indexes.
+fn append_host_selector(
+    sql: &mut String,
+    bindings: &mut Vec<rusqlite::types::Value>,
+    idx: &mut usize,
+    column: &str,
+    hostname: &str,
+) {
+    let param = format!("?{}", *idx);
+    let normalized_param = format!("lower(rtrim(trim({param}), '.'))");
+    let normalized_host = "lower(rtrim(trim(h.hostname), '.'))";
+    let normalized_bare = "lower(rtrim(trim(bare.hostname), '.'))";
+    sql.push_str(&format!(
+        " AND {column} IN (
+             SELECT h.hostname
+             FROM hosts h
+             WHERE {normalized_host} = {normalized_param}
+                OR (
+                    {normalized_host} LIKE {normalized_param} || '.%'
+                    AND EXISTS (
+                        SELECT 1
+                        FROM hosts bare
+                        WHERE {normalized_bare} = {normalized_param}
+                          AND instr({normalized_bare}, '.') = 0
+                    )
+                )
+         )"
+    ));
+    bindings.push(rusqlite::types::Value::Text(hostname.to_string()));
+    *idx += 1;
+}
+
 fn prefix_upper_bound(prefix: &str) -> Option<String> {
     let mut bytes = prefix.as_bytes().to_vec();
     for idx in (0..bytes.len()).rev() {
@@ -3175,12 +3337,10 @@ pub fn similar_incidents_clusters(
     // Build the FTS5 + optional filter query.
     // Exclude AI transcript rows so clusters contain only system logs.
     let mut sql = String::from(
-        "WITH hits AS (
+        "WITH log_window AS MATERIALIZED (
             SELECT l.id, l.timestamp, l.hostname, l.app_name, l.severity, l.message
-            FROM logs_fts
-            JOIN logs l ON l.id = logs_fts.rowid
-            WHERE logs_fts MATCH ?1
-              AND (l.ai_project IS NULL OR l.ai_project = '')",
+            FROM logs l
+            WHERE (l.ai_project IS NULL OR l.ai_project = '')",
     );
 
     let mut query_params = SqlParams::new(2);
@@ -3228,7 +3388,15 @@ pub fn similar_incidents_clusters(
     }
 
     sql.push_str(&format!(
-        " ORDER BY logs_fts.rowid DESC LIMIT {SIMILAR_INCIDENT_FTS_CANDIDATE_CAP}
+        " ORDER BY l.id DESC LIMIT {SIMILAR_INCIDENT_LOG_CANDIDATE_CAP}
+        ),
+        hits AS MATERIALIZED (
+            SELECT l.id, l.timestamp, l.hostname, l.app_name, l.severity, l.message
+            FROM log_window l
+            CROSS JOIN logs_fts
+            WHERE logs_fts.rowid = l.id
+              AND logs_fts MATCH ?1
+            ORDER BY l.id DESC LIMIT {SIMILAR_INCIDENT_FTS_CANDIDATE_CAP}
         ),
         bucketed AS (
             SELECT

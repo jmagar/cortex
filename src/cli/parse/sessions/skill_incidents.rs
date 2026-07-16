@@ -72,9 +72,9 @@ pub(crate) fn parse_sessions_skill_incidents(args: &[String]) -> Result<CliComma
             _ if arg.starts_with("--min-score=") => {
                 parsed.min_score = Some(value_after_equals(arg, "--min-score")?)
             }
-            _ if arg.starts_with('-') => bail!("unknown sessions skill-incidents option: {arg}"),
+            _ if arg.starts_with('-') => bail!("unknown sessions skillincidents option: {arg}"),
             _ if parsed.skill.is_none() => parsed.skill = Some(arg),
-            _ => bail!("unexpected sessions skill-incidents argument: {arg}"),
+            _ => bail!("unexpected sessions skillincidents argument: {arg}"),
         }
     }
     Ok(CliCommand::Sessions(SessionsCommand::SkillIncidents(
@@ -144,10 +144,10 @@ pub(crate) fn parse_sessions_skill_investigate(args: &[String]) -> Result<CliCom
                     value_after_equals(arg, "--correlation-window-minutes")?,
                 )?)
             }
-            _ if arg.starts_with('-') => bail!("unknown sessions skill-investigate option: {arg}"),
+            _ if arg.starts_with('-') => bail!("unknown sessions skillinvestigate option: {arg}"),
             // Bare positional binds to --skill.
             _ if parsed.skill.is_none() => parsed.skill = Some(arg),
-            _ => bail!("unexpected sessions skill-investigate argument: {arg}"),
+            _ => bail!("unexpected sessions skillinvestigate argument: {arg}"),
         }
     }
     Ok(CliCommand::Sessions(SessionsCommand::SkillInvestigate(

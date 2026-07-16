@@ -57,7 +57,11 @@ impl CortexService {
                     .into(),
             ));
         }
-        let around_dt = parse_required_timestamp(&req.around, "around")?;
+        let around_dt = match req.around.as_deref() {
+            Some(around) => parse_required_timestamp(around, "around")?,
+            None => chrono::Utc::now(),
+        };
+        let around = rfc3339_z(around_dt);
         let window = req.minutes.unwrap_or(5).clamp(1, 120);
         let delta = TimeDelta::try_minutes(i64::from(window))
             .ok_or_else(|| ServiceError::InvalidInput("duration overflow".into()))?;
@@ -140,7 +144,7 @@ impl CortexService {
         }
 
         Ok(IncidentResponse {
-            around: req.around,
+            around,
             window_minutes: window,
             window_from: from,
             window_to: to,

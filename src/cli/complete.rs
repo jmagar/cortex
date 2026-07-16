@@ -3,6 +3,7 @@
 //!
 //! Contexts:
 //! - `actions`            → CLI command names + descriptions
+//! - `subcommands <path>` → canonical one-word children for a command path
 //! - `flags <command>`    → that command's flags + help
 //! - `value <flag>`       → values for a flag: fixed enums + relative-time hints
 //!   inline, or live hostnames/apps/source IDs from the DB (cached ~60s, hard
@@ -28,6 +29,7 @@ pub(crate) fn complete(args: &[String]) -> Result<Vec<String>> {
         .ok_or_else(|| anyhow::anyhow!("completion context required"))?;
     match kind {
         "actions" => Ok(action_candidates()),
+        "subcommands" => Ok(subcommand_candidates(&rest.join(" "))),
         "flags" => Ok(flag_candidates(
             rest.first().map(|s| s.as_str()).unwrap_or(""),
         )),
@@ -36,6 +38,95 @@ pub(crate) fn complete(args: &[String]) -> Result<Vec<String>> {
         )),
         other => bail!("unknown completion context '{other}'"),
     }
+}
+
+fn subcommand_candidates(path: &str) -> Vec<String> {
+    let values: &[&str] = match path {
+        "hosts" => &["sources", "silent"],
+        "sessions" => &[
+            "search",
+            "abuse",
+            "correlate",
+            "blocks",
+            "context",
+            "tools",
+            "projects",
+            "index",
+            "add",
+            "watch",
+            "checkpoints",
+            "errors",
+            "prunecheckpoints",
+            "doctor",
+            "watchstatus",
+            "smokewatch",
+            "similar",
+            "incidentcontext",
+            "incidents",
+            "investigate",
+            "assess",
+            "llminvocations",
+            "skills",
+            "skillincidents",
+            "skillinvestigate",
+            "skillassess",
+            "mcpevents",
+            "mcpincidents",
+            "mcpinvestigate",
+            "mcpassess",
+            "hookevents",
+            "hookincidents",
+            "hookinvestigate",
+            "hooksbackfill",
+        ],
+        "assess" => &["skill", "abuse", "mcp", "hooks"],
+        "analysis" => &["errors", "incident", "patterns", "anomalies", "compare"],
+        "state" => &["host", "fleet", "clockskew"],
+        "ingest" => &["shell", "inventory", "filetail", "syslog", "docker"],
+        "ingest shell" => &["user", "agent"],
+        "ingest shell user" => &["index", "atuinindex"],
+        "ingest shell agent" => &["index", "wrap"],
+        "ingest inventory" => &["refresh", "status"],
+        "ingest filetail" => &["list", "status", "add", "remove", "enable", "disable"],
+        "ingest syslog" => &["status", "test"],
+        "ingest docker" => &["status", "sources"],
+        "alerts" => &["signatures", "notifications"],
+        "alerts signatures" => &["list", "ack", "unack"],
+        "alerts notifications" => &["recent", "test"],
+        "heartbeat" => &["agent"],
+        "correlate" => &["events", "state", "topic"],
+        "stats" => &["summary", "ingestrate"],
+        "compose" => &["status", "doctor", "up", "down", "restart", "pull", "logs"],
+        "setup" => &[
+            "check",
+            "repair",
+            "install",
+            "pluginhook",
+            "sessionstimer",
+            "sessionswatch",
+            "sessionshealth",
+            "shell",
+            "heartbeatagent",
+            "debugwrapper",
+            "debugcompose",
+            "deploy",
+            "doctor",
+        ],
+        "setup shell" => &["agent", "completions"],
+        "setup shell agent" | "setup shell completions" => &["install", "remove", "check"],
+        "setup sessionstimer"
+        | "setup sessionswatch"
+        | "setup heartbeatagent"
+        | "setup debugwrapper"
+        | "setup debugcompose" => &["install", "remove", "check"],
+        "setup deploy" => &["preflight", "local", "remote", "agent"],
+        "db" => &["status", "integrity", "checkpoint", "vacuum", "backup"],
+        "db integrity" => &["status"],
+        "config" => &["get", "set", "unset", "list"],
+        "graph" => &["around", "explain", "evidence", "status", "rebuild"],
+        _ => &[],
+    };
+    values.iter().map(|value| (*value).to_string()).collect()
 }
 
 fn action_candidates() -> Vec<String> {

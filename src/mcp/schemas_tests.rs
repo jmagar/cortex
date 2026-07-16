@@ -341,7 +341,7 @@ fn schema_map_findings_exposes_findings_arguments() {
 }
 
 #[test]
-fn schema_timeline_and_patterns_warn_on_full_history_scan() {
+fn schema_documents_bounded_timeline_and_patterns_defaults() {
     let tools = tool_definitions();
     let props = &tools[0]["inputSchema"]["properties"];
     let from_desc = props["since"]["description"].as_str().unwrap();
@@ -355,10 +355,8 @@ fn schema_timeline_and_patterns_warn_on_full_history_scan() {
             .unwrap()
             .contains("max 10000")
     );
-    assert!(
-        from_desc.contains("full-history scan"),
-        "from/to description must warn that omitting them causes a full-history scan for timeline/patterns"
-    );
+    assert!(from_desc.contains("24 hours ago for patterns"));
+    assert!(from_desc.contains("Timeline applies a bucket-sized default lookback"));
 }
 
 #[test]

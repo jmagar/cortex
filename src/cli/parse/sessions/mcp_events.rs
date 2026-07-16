@@ -31,7 +31,7 @@ fn parse_mcp_events_list(args: &[String]) -> Result<CliCommand> {
             "--since" => parsed.since = Some(norm_time(flags.value("--since")?)?),
             "--until" => parsed.until = Some(norm_time(flags.value("--until")?)?),
             "--limit" => parsed.limit = Some(parse_u32_flag("--limit", flags.value("--limit")?)?),
-            _ => bail!("unknown sessions mcp-events option: {arg}"),
+            _ => bail!("unknown sessions mcpevents option: {arg}"),
         }
     }
     Ok(CliCommand::Sessions(SessionsCommand::McpEvents(parsed)))
@@ -48,7 +48,7 @@ fn parse_mcp_events_backfill(args: &[String]) -> Result<CliCommand> {
             "--limit" => {
                 parsed.limit = Some(parse_positive_u64_flag("--limit", flags.value("--limit")?)?)
             }
-            _ => bail!("unknown sessions mcp-events backfill option: {arg}"),
+            _ => bail!("unknown sessions mcpevents backfill option: {arg}"),
         }
     }
     Ok(CliCommand::Sessions(SessionsCommand::McpEventsBackfill(

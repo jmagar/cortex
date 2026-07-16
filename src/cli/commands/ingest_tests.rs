@@ -49,7 +49,7 @@ fn parse_ingest_shell_user_and_agent_inventory_and_file_tail() {
         ))
     ));
 
-    let file_tail = parse_ingest(&strings(&["file-tail", "list", "--json"])).unwrap();
+    let file_tail = parse_ingest(&strings(&["filetail", "list", "--json"])).unwrap();
     assert!(matches!(
         file_tail,
         CliCommand::Ingest(IngestCommand::FileTail(
@@ -59,16 +59,17 @@ fn parse_ingest_shell_user_and_agent_inventory_and_file_tail() {
 }
 
 #[test]
-fn parse_ingest_accepts_legacy_agent_command_grammar() {
-    let legacy = parse_ingest(&strings(&[
-        "agent-command",
-        "ingest-spool",
+fn parse_ingest_accepts_canonical_agent_index_grammar() {
+    let command = parse_ingest(&strings(&[
+        "shell",
+        "agent",
+        "index",
         "--path",
         "/tmp/spool.jsonl",
     ]))
     .unwrap();
     assert!(matches!(
-        legacy,
+        command,
         CliCommand::Ingest(IngestCommand::Shell(
             super::super::super::ShellCommand::Agent(
                 super::super::super::ShellAgentCommand::Index(_)

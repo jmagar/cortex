@@ -1,7 +1,7 @@
-//! Declarative positional binding + zero-flag defaults, driven by `ACTION_SPECS`.
+//! Declarative positional binding driven by `ACTION_SPECS`.
 //!
 //! These helpers keep the per-action `parse_*` functions free of bespoke
-//! positional / default logic: each parser collects its leftover positional
+//! positional logic: each parser collects its leftover positional
 //! tokens, then asks this module what they mean for the given action. The
 //! action name may be passed in either CLI (`host-state`) or MCP (`host_state`)
 //! form — the registry facade normalises hyphens to underscores.
@@ -32,30 +32,6 @@ pub(crate) fn positional_value(action: &str, positionals: &[String]) -> Result<O
             "expected at most one positional argument, got {}",
             positionals.len()
         ),
-    }
-}
-
-/// The effective `--limit`: the user's value if set, else the action default.
-pub(crate) fn effective_limit(action: &str, user: Option<u32>) -> Option<u32> {
-    user.or_else(|| crate::cli::registry_defaults(action).limit)
-}
-
-/// The effective `--since`: the user's value if set, else the action default
-/// resolved to an absolute RFC3339 string via the shared time parser.
-///
-/// The default is stored as a relative literal (e.g. `"1h"`); we run it through
-/// `parse_time_arg` so callers always receive an absolute timestamp, matching
-/// what an explicit `--since 1h` would have produced.
-pub(crate) fn effective_since(action: &str, user: Option<String>) -> Result<Option<String>> {
-    if let Some(v) = user {
-        return Ok(Some(v));
-    }
-    match crate::cli::registry_defaults(action).since {
-        Some(rel) => Ok(Some(
-            cortex::app::parse_time_arg(rel, chrono::Utc::now())
-                .map_err(|e| anyhow::anyhow!("{e}"))?,
-        )),
-        None => Ok(None),
     }
 }
 

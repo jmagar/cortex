@@ -19,12 +19,12 @@ pub(crate) async fn run_shell_index(mode: &CliMode, args: ShellIndexArgs) -> Res
 
 pub(crate) async fn run_shell_atuin_index(mode: &CliMode, args: ShellAtuinIndexArgs) -> Result<()> {
     let CliMode::Local(service) = mode else {
-        bail!("shell user atuin-index is local-only; run without --http/--server/--token");
+        bail!("shell user atuinindex is local-only; run without --http/--server/--token");
     };
     let result = service
         .import_atuin_history(PathBuf::from(args.path))
         .await?;
-    print_import_result("shell user atuin-index", &result, args.json)
+    print_import_result("shell user atuinindex", &result, args.json)
 }
 
 pub(crate) async fn run_shell_agent_index_local(

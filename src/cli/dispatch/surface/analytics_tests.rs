@@ -53,7 +53,7 @@ fn basic_surface_args_map_to_requests() {
 }
 
 #[test]
-fn compare_requires_reference_fields() {
+fn compare_preserves_optional_reference_fields_for_shared_defaults() {
     let compare = CompareArgs {
         a_from: Some("a1".to_string()),
         a_to: Some("a2".to_string()),
@@ -63,8 +63,10 @@ fn compare_requires_reference_fields() {
     }
     .into_request()
     .unwrap();
-    assert_eq!(compare.a_from, "a1");
-    assert_eq!(compare.b_to, "b2");
+    assert_eq!(compare.a_from.as_deref(), Some("a1"));
+    assert_eq!(compare.b_to.as_deref(), Some("b2"));
 
-    assert!(CompareArgs::default().into_request().is_err());
+    let defaulted = CompareArgs::default().into_request().unwrap();
+    assert!(defaulted.a_from.is_none());
+    assert!(defaulted.b_to.is_none());
 }

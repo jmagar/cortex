@@ -76,12 +76,12 @@ pub async fn run_heartbeat_agent_setup(action: HeartbeatAgentAction) -> io::Resu
             phases.push(check_file_phase(
                 "heartbeat-agent-env",
                 &env_path,
-                "run cortex setup heartbeat-agent install",
+                "run cortex setup heartbeatagent install",
             ));
             phases.push(check_file_phase(
                 "heartbeat-agent-unit",
                 &unit_path,
-                "run cortex setup heartbeat-agent install",
+                "run cortex setup heartbeatagent install",
             ));
             phases.push(check_heartbeat_agent_content(
                 &unit_path,

@@ -237,6 +237,32 @@ fn defaults_are_applied_without_env_vars() {
 
 #[test]
 #[serial]
+fn inspection_load_does_not_require_the_runtime_database_mount() {
+    let missing = std::env::temp_dir()
+        .join("cortex-config-inspection-missing")
+        .join("cortex.db");
+    let _ = std::fs::remove_dir_all(missing.parent().unwrap());
+
+    unsafe { std::env::set_var("CORTEX_DB_PATH", &missing) };
+    let inspection = Config::load_for_inspection();
+    let query = Config::load_for_stdio();
+    unsafe { std::env::remove_var("CORTEX_DB_PATH") };
+
+    assert!(
+        inspection.is_ok(),
+        "inspection should not need the DB mount"
+    );
+    assert!(
+        query
+            .unwrap_err()
+            .to_string()
+            .contains("parent directory does not exist"),
+        "query mode must retain the runtime DB-path guard"
+    );
+}
+
+#[test]
+#[serial]
 fn rejects_invalid_syslog_ingest_env_settings() {
     for (key, expected) in [
         ("CORTEX_MAX_MESSAGE_SIZE", "max_message_size"),

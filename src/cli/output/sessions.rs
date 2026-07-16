@@ -486,6 +486,7 @@ pub(crate) fn ensure_ai_doctor_success(
     Ok(())
 }
 
+pub(crate) mod hook_incidents;
 pub(crate) mod mcp_incidents;
 pub(crate) mod more;
 pub(crate) mod skill_incidents;

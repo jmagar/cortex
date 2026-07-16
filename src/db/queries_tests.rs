@@ -157,6 +157,55 @@ fn tail_logs_limit_is_bound_and_clamped() {
 }
 
 #[test]
+fn host_filters_accept_the_canonical_name_returned_by_list_hosts() {
+    let (pool, _dir) = test_pool();
+    insert_logs_batch(
+        &pool,
+        &[
+            make_entry(
+                "2026-01-01T00:00:01Z",
+                "The-Mothership",
+                "info",
+                "case variant",
+            ),
+            make_entry("2026-01-01T00:00:02Z", "tootie", "info", "short name"),
+            make_entry(
+                "2026-01-01T00:00:03Z",
+                "tootie.example.test",
+                "info",
+                "fqdn variant",
+            ),
+        ],
+    )
+    .unwrap();
+
+    let hosts = list_hosts(&pool).unwrap();
+    assert!(hosts.iter().any(|host| host.hostname == "the-mothership"));
+    assert!(hosts.iter().any(|host| host.hostname == "tootie"));
+
+    let case_rows = tail_logs(&pool, Some("the-mothership"), None, None, None, 10).unwrap();
+    assert_eq!(case_rows.len(), 1);
+    assert_eq!(case_rows[0].hostname, "The-Mothership");
+
+    let alias_rows = tail_logs(&pool, Some("tootie"), None, None, None, 10).unwrap();
+    assert_eq!(alias_rows.len(), 2);
+    assert!(
+        alias_rows
+            .iter()
+            .any(|row| row.hostname == "tootie.example.test")
+    );
+
+    let params = SearchParams {
+        host: Some("the-mothership".to_string()),
+        limit: Some(10),
+        ..Default::default()
+    };
+    let filtered = search_logs(&pool, &params).unwrap();
+    assert_eq!(filtered.len(), 1);
+    assert_eq!(filtered[0].hostname, "The-Mothership");
+}
+
+#[test]
 fn get_error_summary_limit_is_bound_and_min_clamped() {
     let (sql, bindings) = get_error_summary_sql(
         Some("2026-01-01T00:00:00Z"),
@@ -301,8 +350,8 @@ fn search_fts_plan_selection_branches_on_indexed_filter() {
         "intersect plan has no CTE cap"
     );
     assert!(
-        sql.contains("l.hostname = ?2"),
-        "filter applied via append_filters"
+        sql.contains("l.hostname IN (") && sql.contains("FROM hosts h"),
+        "canonical host filter applied via append_filters"
     );
 }
 
@@ -949,6 +998,7 @@ fn search_ai_sessions_query_plan_uses_session_host_time_index() {
         ));
     }
     insert_logs_batch(&pool, &entries).unwrap();
+    refresh_ai_session_rollup(&pool).unwrap();
 
     let params = SearchAiSessionsParams {
         query: "authentication".into(),
@@ -961,9 +1011,21 @@ fn search_ai_sessions_query_plan_uses_session_host_time_index() {
     assert_eq!(result.sessions.len(), 1);
     assert_eq!(result.sessions[0].event_count, 150);
 
-    let (sql, bindings) = search_ai_sessions_sql(&params, 10);
-    assert!(sql.contains("event_counts AS"));
+    let (sql, bindings) = search_ai_sessions_rollup_sql(&params, 10);
+    assert!(sql.contains("scored AS MATERIALIZED"));
     assert!(!sql.contains("FROM logs total"));
+    assert!(
+        sql.contains("EXISTS (") && sql.contains("LIMIT 11"),
+        "rollup search must stop after enough matching sessions"
+    );
+    assert!(
+        sql.contains("LIMIT 1000"),
+        "rollup search must keep the no-match session horizon bounded"
+    );
+    assert!(
+        !sql.contains("ORDER BY l.id DESC"),
+        "rollup search must not globally sort every matching transcript row"
+    );
 
     let conn = pool.get().unwrap();
     let mut stmt = conn.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
@@ -1283,7 +1345,7 @@ fn search_ai_abuse_truncates_only_when_additional_match_exists() {
 }
 
 #[test]
-fn search_ai_incidents_anchor_plan_avoids_temp_order_sort() {
+fn search_ai_incidents_anchor_plan_uses_selective_fts_first() {
     let (pool, _dir) = test_pool();
     insert_logs_batch(
         &pool,
@@ -1297,7 +1359,6 @@ fn search_ai_incidents_anchor_plan_avoids_temp_order_sort() {
         )],
     )
     .unwrap();
-
     let params = AiIncidentParams {
         terms: vec!["tooling".into()],
         limit: Some(1),
@@ -1319,11 +1380,11 @@ fn search_ai_incidents_anchor_plan_avoids_temp_order_sort() {
 
     assert!(
         plan.contains("SCAN logs_fts VIRTUAL TABLE"),
-        "incident anchor query must be driven by FTS so broad terms are capped before log-table work; got:\n{plan}"
+        "incident anchor query must drive from selective FTS terms; got:\n{plan}"
     );
     assert!(
-        !plan.contains("USE TEMP B-TREE"),
-        "incident anchor query must not materialize/sort all FTS matches before LIMIT; got:\n{plan}"
+        plan.contains("SEARCH l USING INTEGER PRIMARY KEY"),
+        "incident anchor query must resolve FTS rowids by the logs primary key; got:\n{plan}"
     );
 }
 
@@ -2811,7 +2872,7 @@ fn dedupe_hosts_keeps_fqdn_when_no_matching_short_name() {
 
 #[test]
 fn dedupe_hosts_leaves_ambiguous_self_identifiers_untouched() {
-    // localhost, empty, and dotless host:user forms are deferred (need source_ip).
+    // localhost and dotless host:user forms are deferred (need source_ip).
     let out = dedupe_hosts(vec![
         host_entry(
             "localhost",
@@ -2832,6 +2893,17 @@ fn dedupe_hosts_leaves_ambiguous_self_identifiers_untouched() {
     assert!(names.contains("dookie"));
     assert!(names.contains("dookie:jmagar")); // colon, no dot → not folded into dookie
     assert_eq!(out.len(), 3);
+}
+
+#[test]
+fn dedupe_hosts_excludes_blank_hostnames() {
+    let out = dedupe_hosts(vec![
+        host_entry("", "2026-06-01T00:00:00Z", "2026-06-10T00:00:00Z", 3),
+        host_entry("   ", "2026-06-01T00:00:00Z", "2026-06-10T00:00:00Z", 4),
+        host_entry("dookie", "2026-06-01T00:00:00Z", "2026-06-11T00:00:00Z", 9),
+    ]);
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0].hostname, "dookie");
 }
 
 #[test]

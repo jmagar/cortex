@@ -2,11 +2,44 @@ use std::sync::Arc;
 
 use serial_test::serial;
 
-use crate::app::UnaddressedErrorsRequest;
+use crate::app::{HostStateRequest, UnaddressedErrorsRequest};
 use crate::config::StorageConfig;
 use crate::db::{DbPool, LogBatchEntry, init_pool, insert_logs_batch};
 
 use super::*;
+
+#[test]
+fn high_volume_analysis_requests_allow_shared_defaults_on_every_transport() {
+    assert!(serde_json::from_value::<CompareRequest>(serde_json::json!({})).is_ok());
+    assert!(serde_json::from_value::<CorrelateStateRequest>(serde_json::json!({})).is_ok());
+    assert!(serde_json::from_value::<IncidentContextRequest>(serde_json::json!({})).is_ok());
+}
+
+#[tokio::test]
+async fn host_state_default_ignores_orphan_latest_rows() {
+    let (service, pool, _dir) = test_service();
+    let conn = pool.get().unwrap();
+    conn.execute(
+        "INSERT INTO host_heartbeats_latest \
+         (host_id, heartbeat_id, hostname, sampled_at, received_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        rusqlite::params![
+            "orphan-host",
+            999_999_i64,
+            "orphan",
+            "2026-01-01T00:00:00Z",
+            "2026-01-01T00:00:00Z"
+        ],
+    )
+    .unwrap();
+    drop(conn);
+
+    let response = service
+        .host_state(HostStateRequest::default())
+        .await
+        .expect("empty authoritative state is a valid response");
+    assert!(response.is_none(), "orphan latest row must be ignored");
+}
 
 /// Env-var guard for tests that must set/restore process env vars.
 /// Mirrors `src/assessment_tests.rs`'s private `EnvGuard` — kept local
@@ -1099,7 +1132,7 @@ async fn incident_returns_ordered_db_events_for_window() {
 
     let response = service
         .incident(IncidentRequest {
-            around: "2026-01-01T00:05:00Z".into(),
+            around: Some("2026-01-01T00:05:00Z".into()),
             minutes: Some(5),
             service: None,
             host: Some("host-a".into()),
@@ -1206,9 +1239,9 @@ async fn correlate_events_derives_reference_time_from_query_when_omitted() {
 }
 
 #[tokio::test]
-async fn correlate_events_errors_without_reference_time_or_query() {
+async fn correlate_events_defaults_to_now_without_reference_time_or_query() {
     let (service, _pool, _dir) = test_service();
-    let err = service
+    let response = service
         .correlate_events(CorrelateEventsRequest {
             reference_time: None,
             window_minutes: None,
@@ -1219,8 +1252,11 @@ async fn correlate_events_errors_without_reference_time_or_query() {
             limit: None,
         })
         .await
-        .unwrap_err();
-    assert!(format!("{err}").contains("reference_time or query"));
+        .unwrap();
+    assert_eq!(response.window_minutes, 5);
+    assert_eq!(response.severity_min, "warning");
+    assert!(response.matched_session.is_none());
+    assert_eq!(response.total_events, 0);
 }
 
 #[tokio::test]
@@ -1342,7 +1378,7 @@ async fn correlate_state_excludes_ai_transcript_rows() {
 
     let response = service
         .correlate_state(CorrelateStateRequest {
-            reference_time: "2026-01-01T00:00:00Z".into(),
+            reference_time: Some("2026-01-01T00:00:00Z".into()),
             window_minutes: None,
             host: None,
             severity_min: None,

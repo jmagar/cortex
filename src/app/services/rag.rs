@@ -173,9 +173,21 @@ impl CortexService {
         &self,
         req: IncidentContextRequest,
     ) -> ServiceResult<IncidentContextResponse> {
-        // Both from and to are required — validate and normalize to rfc3339_z format.
-        let from = rfc3339_z(parse_required_timestamp(&req.since, "since")?);
-        let to = rfc3339_z(parse_required_timestamp(&req.until, "until")?);
+        let to_dt = match req.until.as_deref() {
+            Some(until) => parse_required_timestamp(until, "until")?,
+            None => chrono::Utc::now(),
+        };
+        let from_dt = match req.since.as_deref() {
+            Some(since) => parse_required_timestamp(since, "since")?,
+            None => to_dt - chrono::Duration::hours(1),
+        };
+        if from_dt > to_dt {
+            return Err(ServiceError::InvalidInput(
+                "since must not be later than until".into(),
+            ));
+        }
+        let from = rfc3339_z(from_dt);
+        let to = rfc3339_z(to_dt);
         let result = self
             .run_db("incident_context", move |pool| {
                 db::incident_context_summary(

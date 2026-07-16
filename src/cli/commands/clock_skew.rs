@@ -1,7 +1,7 @@
-//! Parse function for `cortex clock-skew`.
+//! Parse function for `cortex state clockskew`.
 //!
 //! Surface parity (2026-05-22): exposes the `clock_skew` MCP action and
-//! `GET /api/clock-skew` REST route as a top-level CLI subcommand.
+//! `GET /api/clock-skew` REST route through the nested CLI command.
 
 use anyhow::{Result, bail};
 
@@ -19,7 +19,7 @@ pub(crate) fn parse_clock_skew_args(args: &[String]) -> Result<ClockSkewArgs> {
         } else if let Some(v) = flags.match_value(&arg, "--limit")? {
             parsed.limit = Some(parse_u32_flag("--limit", v)?);
         } else {
-            bail!("unknown clock-skew option: {arg}");
+            bail!("unknown clockskew option: {arg}");
         }
     }
     Ok(parsed)

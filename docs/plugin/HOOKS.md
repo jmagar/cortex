@@ -24,9 +24,9 @@ scripts/
 
 Hooks are registered in `plugins/cortex/hooks/hooks.json` and executed by Claude Code at the appropriate lifecycle point.
 
-### SessionStart — cortex setup plugin-hook
+### SessionStart — cortex setup pluginhook
 
-Runs `${CLAUDE_PLUGIN_ROOT}/bin/cortex setup plugin-hook` at the start of
+Runs `${CLAUDE_PLUGIN_ROOT}/bin/cortex setup pluginhook` at the start of
 every Claude Code session.
 
 Responsibilities:
@@ -48,7 +48,7 @@ Responsibilities:
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/bin/cortex setup plugin-hook"
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/cortex setup pluginhook"
           }
         ]
       }
@@ -63,7 +63,7 @@ Run the binary-owned hook outside of Claude Code:
 
 ```bash
 CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$PWD/plugins/cortex}" \
-  "$CLAUDE_PLUGIN_ROOT/bin/cortex" setup plugin-hook
+  "$CLAUDE_PLUGIN_ROOT/bin/cortex" setup pluginhook
 ```
 
 The legacy script remains a thin manual adapter for environments that still
