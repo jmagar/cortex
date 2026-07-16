@@ -48,6 +48,48 @@ fn seed_latest(
     .unwrap();
 }
 
+fn insert_error_log(pool: &db::DbPool, hostname: &str, severity: &str, timestamp: &str) {
+    let conn = pool.get().unwrap();
+    conn.execute(
+        "INSERT INTO logs
+             (timestamp, received_at, hostname, severity, app_name, message, raw, source_ip)
+         VALUES (?1, ?1, ?2, ?3, 'app', 'boom', 'boom', '10.0.0.1:514')",
+        rusqlite::params![timestamp, hostname, severity],
+    )
+    .unwrap();
+}
+
+// Regression: with only `until` supplied (no `since`), the last-hour default
+// must anchor to `until` (until - 1h). A pre-fix build suppressed the default
+// and scanned from the epoch, so the out-of-window row leaked into the summary.
+#[tokio::test]
+async fn get_errors_until_only_bounds_window_to_one_hour_before_until() {
+    let (service, pool, _dir) = test_service();
+    // Two hours before `until` — outside the 1h window, must be excluded.
+    insert_error_log(&pool, "old-host", "err", "2026-01-01T10:00:00Z");
+    // Half an hour before `until` — inside the 1h window, must be included.
+    insert_error_log(&pool, "recent-host", "err", "2026-01-01T11:30:00Z");
+
+    let response = service
+        .get_errors(models::GetErrorsRequest {
+            since: None,
+            until: Some("2026-01-01T12:00:00Z".to_string()),
+            group_by: None,
+            limit: None,
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(
+        response.summary.len(),
+        1,
+        "only the in-window row should be summarized; got {:?}",
+        response.summary
+    );
+    assert_eq!(response.summary[0].hostname, "recent-host");
+    assert_eq!(response.summary[0].count, 1);
+}
+
 #[tokio::test]
 async fn host_state_default_uses_authoritative_freshest_heartbeat() {
     let (service, pool, _dir) = test_service();

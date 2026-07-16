@@ -337,13 +337,24 @@ impl CortexService {
     }
 
     pub async fn get_errors(&self, req: GetErrorsRequest) -> ServiceResult<GetErrorsResponse> {
-        let default_since = (chrono::Utc::now() - chrono::Duration::hours(1)).to_rfc3339();
-        let since = req
-            .since
+        let until_dt = req
+            .until
             .as_deref()
-            .or_else(|| req.until.is_none().then_some(default_since.as_str()));
-        let from = parse_optional_timestamp(since, "since")?;
-        let to = parse_optional_timestamp(req.until.as_deref(), "until")?;
+            .map(|until| parse_required_timestamp(until, "until"))
+            .transpose()?;
+        let to = until_dt.map(rfc3339_z);
+        // Apply the documented last-hour default when the caller omits `since`.
+        // Anchor the 1-hour window to `until` (until - 1h) when one is provided
+        // so an `--until`-only request stays bounded to a real window instead of
+        // falling back to the epoch in `get_error_summary` and scanning every
+        // retained warning+ row; otherwise anchor to the current time.
+        let from = match req.since.as_deref() {
+            Some(since) => Some(rfc3339_z(parse_required_timestamp(since, "since")?)),
+            None => {
+                let anchor = until_dt.unwrap_or_else(chrono::Utc::now);
+                Some(rfc3339_z(anchor - chrono::Duration::hours(1)))
+            }
+        };
         let group_by_app = match req.group_by.as_deref() {
             None => false,
             Some("app_name") | Some("app") => true,
