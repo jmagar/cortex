@@ -94,14 +94,14 @@ fn file_tail_request_derives_a_human_friendly_add_from_path() {
     let add = req.into_add().unwrap();
     assert_eq!(add.id, "access");
     assert_eq!(add.tag, "access");
-    assert_eq!(add.host, None);
+    assert_eq!(add.host.as_deref(), Some("file-tail-access"));
 
     let source = FileTailSource::from_add(add, "2026-07-16T12:00:00Z").unwrap();
-    assert_eq!(source.hostname, None);
+    assert_eq!(source.hostname.as_deref(), Some("file-tail-access"));
 }
 
 #[test]
-fn add_request_accepts_missing_hostname() {
+fn add_request_derives_stable_source_owner_when_hostname_is_missing() {
     let source = FileTailSource::from_add(
         FileTailAddRequest {
             id: "swag-access".into(),
@@ -116,7 +116,16 @@ fn add_request_accepts_missing_hostname() {
     )
     .unwrap();
 
-    assert_eq!(source.hostname, None);
+    assert_eq!(source.hostname.as_deref(), Some("file-tail-swag-access"));
+}
+
+#[test]
+fn legacy_source_owner_derivation_is_ascii_safe_and_bounded() {
+    let hostname = derived_source_hostname(&format!("🔥{}", "x".repeat(300)));
+
+    assert!(hostname.is_ascii());
+    assert!(hostname.len() <= 255);
+    assert!(hostname.starts_with("file-tail-"));
 }
 
 #[test]

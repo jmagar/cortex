@@ -212,6 +212,27 @@ fn parse_unknown_option_errors() {
     assert!(err.to_string().contains("unknown stats option"));
 }
 
+#[test]
+fn refreshed_session_leaves_map_to_canonical_actions() {
+    for (path, action) in [
+        ("sessions skills", "skill_events"),
+        ("sessions skillincidents", "skill_incidents"),
+        ("sessions skillinvestigate", "skill_investigate"),
+        ("sessions mcpevents", "mcp_events"),
+        ("sessions mcpincidents", "mcp_incidents"),
+        ("sessions mcpinvestigate", "mcp_investigate"),
+        ("sessions hookevents", "hook_events"),
+        ("sessions hookincidents", "hook_incidents"),
+        ("sessions hookinvestigate", "hook_investigate"),
+    ] {
+        assert_eq!(
+            registry_action_key(path),
+            action,
+            "action mapping for {path}"
+        );
+    }
+}
+
 #[tokio::test]
 async fn run_compose_rejects_non_compose_commands_before_live_probes() {
     let error = run_compose(CliCommand::Stats(StatsCommand::Summary(

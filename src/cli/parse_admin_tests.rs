@@ -105,6 +105,22 @@ fn db_checkpoint_and_backup_accept_positional_values() {
 }
 
 #[test]
+fn db_checkpoint_rejects_duplicate_mode_inputs() {
+    for args in [
+        &["full", "truncate"][..],
+        &["full", "--mode", "truncate"][..],
+        &["--mode=full", "truncate"][..],
+        &["--mode", "full", "--mode=truncate"][..],
+    ] {
+        let error = parse_db_checkpoint(&strings(args)).unwrap_err().to_string();
+        assert!(
+            error.contains("mode may only be specified once"),
+            "unexpected duplicate-mode error for {args:?}: {error}"
+        );
+    }
+}
+
+#[test]
 fn parse_compose_mutation_marks_down_as_non_interactive() {
     let args = strings(&["--yes", "--dry-run"]);
 

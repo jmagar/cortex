@@ -197,7 +197,7 @@ impl CortexService {
                         until: to,
                         host: req.host,
                         app: req.app,
-                        // req.query accepted but deferred to v2 FTS integration
+                        query: req.query,
                         severity_min: req.severity_min,
                         limit: req.limit,
                     },
@@ -207,3 +207,7 @@ impl CortexService {
         Ok(result.into())
     }
 }
+
+#[cfg(test)]
+#[path = "rag_tests.rs"]
+mod rag_tests;

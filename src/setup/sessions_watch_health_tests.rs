@@ -54,6 +54,23 @@ fn doctor_service_unit_uses_canonical_one_word_command() {
     assert!(!unit.contains("sessions-watch-health-check"));
 }
 
+#[test]
+fn install_rewrites_stale_doctor_service_command() {
+    let dir = tempfile::tempdir().unwrap();
+    let service_path = dir.path().join("cortex-sessions-watch-doctor.service");
+    std::fs::write(
+        &service_path,
+        "[Service]\nExecStart=/usr/bin/cortex setup sessions-watch-health-check --json\n",
+    )
+    .unwrap();
+
+    install_health_check_timer_files(dir.path(), std::path::Path::new("/usr/bin/cortex")).unwrap();
+
+    let rewritten = std::fs::read_to_string(service_path).unwrap();
+    assert!(rewritten.contains("ExecStart=/usr/bin/cortex setup sessionshealth --json"));
+    assert!(!rewritten.contains("sessions-watch-health-check"));
+}
+
 #[cfg(unix)]
 #[test]
 #[serial]

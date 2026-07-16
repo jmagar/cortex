@@ -569,7 +569,7 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                                     "required": ["op"]
                                 },
                                 "then": {
-                                    "required": ["id", "path", "tag", "host"]
+                                    "required": ["path"]
                                 }
                             },
                             {

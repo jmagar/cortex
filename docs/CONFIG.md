@@ -185,9 +185,11 @@ cortex ingest filetail add /file-tail-root/adguard/var/data/querylog.json \
   --facility local6
 ```
 
-The source id and tag derive from the lowercased file name, and the host defaults
-to the Cortex runtime host; use `--id`, `--tag`, or `--host` only to override
-those values. `--from-start` ingests existing file contents on first open. The default starts
+The source id and tag derive from the lowercased file name. With no `--host`,
+the source gets the stable synthetic owner `file-tail-<id>`; Cortex never uses
+the server or container hostname for mounted files. Pass `--host` when the path
+belongs to a real host that should participate in host filters and correlation.
+`--from-start` ingests existing file contents on first open. The default starts
 at EOF so adding a source does not backfill a large historic log unexpectedly.
 After a source is running, Cortex checkpoints `dev`/`inode`/offset in
 `file-tails.json`, resumes from that cursor on restart, reopens on

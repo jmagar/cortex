@@ -21,6 +21,19 @@ fn tool_definitions_include_expected_public_tools() {
 }
 
 #[test]
+fn event_actions_advertise_canonical_mcp_time_bounds() {
+    let properties = &tool_definitions()[0]["inputSchema"]["properties"];
+    assert!(properties.get("since").is_some());
+    assert!(properties.get("until").is_some());
+    assert!(properties.get("from").is_none());
+    assert!(properties.get("to").is_none());
+
+    for action in ["skill_events", "mcp_events", "hook_events"] {
+        assert!(super::actions::action_names().contains(&action));
+    }
+}
+
+#[test]
 fn tool_definition_exposes_agent_cost_metadata() {
     let tools = tool_definitions();
     let metadata = tools[0]["x-cortex-action-metadata"].as_array().unwrap();
@@ -173,9 +186,7 @@ fn schema_includes_file_tails_action() {
     assert!(nested.iter().any(|rule| {
         let required = rule["then"]["required"].as_array().unwrap();
         rule["if"]["properties"]["op"]["const"] == "add"
-            && ["id", "path", "tag", "host"]
-                .iter()
-                .all(|name| required.iter().any(|value| value == name))
+            && required.as_slice() == [serde_json::json!("path")]
     }));
     assert!(nested.iter().any(|rule| {
         rule["if"]["properties"]["op"]["enum"]

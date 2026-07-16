@@ -14,6 +14,29 @@ SERVER="${CORTEX_URL:-http://127.0.0.1:3100}"
 TIMEOUT="${CORTEX_SWEEP_TIMEOUT:-120}"
 BIN_DIR="${CORTEX_SWEEP_BIN_DIR:-}"
 RUN_DEFERRED="${CORTEX_SWEEP_RUN_DEFERRED:-false}"
+HELPER="$ROOT/scripts/live-cli-sweep-helpers.sh"
+INTEGRITY_TIMEOUT="${CORTEX_SWEEP_INTEGRITY_TIMEOUT:-90}"
+INTEGRITY_INTERVAL="${CORTEX_SWEEP_INTEGRITY_INTERVAL:-2}"
+
+export CORTEX_SWEEP_HELPER="$HELPER"
+export CORTEX_SWEEP_INTEGRITY_TIMEOUT="$INTEGRITY_TIMEOUT"
+export CORTEX_SWEEP_INTEGRITY_INTERVAL="$INTEGRITY_INTERVAL"
+
+if ! (
+  set -a
+  if [[ -f "$ENV_FILE" ]]; then
+    # shellcheck source=/dev/null
+    source "$ENV_FILE"
+  fi
+  set +a
+  if [[ -n "$BIN_DIR" ]]; then
+    export PATH="$BIN_DIR:$PATH"
+  fi
+  "$HELPER" preflight "$ROOT" "$SERVER"
+); then
+  echo "live CLI sweep aborted before cases: runtime parity preflight failed" >&2
+  exit 1
+fi
 
 run_case() {
   local name="$1"
@@ -151,7 +174,7 @@ run_case "heartbeat.agent.once.emit" "read" 'cortex heartbeat agent --once --emi
 
 run_case "db.status" "read" "cortex db status --json"
 run_case "db.status.coord" "read" "cortex db status --json --check-coord"
-run_case "db.integrity.quick.background" "admin" "cortex db integrity --json --quick --background"
+run_case "db.integrity.quick.background" "admin" 'started="$(cortex db integrity --json --quick --background)"; "$CORTEX_SWEEP_HELPER" wait-integrity "$started" "$CORTEX_SWEEP_INTEGRITY_TIMEOUT" "$CORTEX_SWEEP_INTEGRITY_INTERVAL"'
 run_case "db.checkpoint.passive" "admin" "cortex db checkpoint passive --json"
 run_case "db.vacuum.incremental" "admin" "cortex db vacuum --json --pages 1"
 if [[ "$RUN_DEFERRED" == "true" ]]; then

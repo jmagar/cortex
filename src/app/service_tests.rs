@@ -2450,7 +2450,7 @@ async fn file_tails_duplicate_add_is_rejected_without_resetting_checkpoint() {
 }
 
 #[tokio::test]
-async fn file_tails_reconcile_failure_reports_committed_mutation() {
+async fn file_tails_reconcile_failure_reports_rolled_back_mutation() {
     let temp = tempfile::tempdir().unwrap();
     let storage = StorageConfig::for_test(temp.path().join("file-tail-test.db"));
     let pool = Arc::new(init_pool(&storage).unwrap());
@@ -2481,10 +2481,10 @@ async fn file_tails_reconcile_failure_reports_committed_mutation() {
         .unwrap_err();
 
     assert!(
-        err.to_string().contains("mutation was committed"),
+        err.to_string().contains("registry mutation rolled back"),
         "unexpected error: {err}"
     );
-    assert!(registry.get("swag-access").unwrap().is_some());
+    assert!(registry.get("swag-access").unwrap().is_none());
 }
 
 #[tokio::test]

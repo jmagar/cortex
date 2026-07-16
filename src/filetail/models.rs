@@ -121,13 +121,16 @@ impl FileTailSource {
             .transpose()?
             .unwrap_or_else(|| "info".to_string());
 
-        let hostname = req.host.as_deref().map(normalize_hostname).transpose()?;
+        let hostname = match req.host.as_deref() {
+            Some(hostname) => normalize_hostname(hostname)?,
+            None => derived_source_hostname(&req.id),
+        };
 
         Ok(Self {
             id: req.id,
             path: req.path,
             tag: req.tag,
-            hostname,
+            hostname: Some(hostname),
             facility: Some(req.facility.unwrap_or_else(|| "local7".to_string())),
             severity,
             start_at_end: req.start_at_end.unwrap_or(true),
@@ -259,16 +262,56 @@ impl FileTailRequest {
         if tag.trim().is_empty() {
             return Err("file_tails tag must not be empty".into());
         }
+        let host = Some(self.host.unwrap_or_else(|| derived_source_hostname(&id)));
         Ok(FileTailAddRequest {
             id,
             path,
             tag,
-            host: self.host,
+            host,
             facility: self.facility,
             severity: self.severity,
             start_at_end: self.start_at_end,
         })
     }
+}
+
+pub(crate) fn derived_source_hostname(id: &str) -> String {
+    const PREFIX: &str = "file-tail-";
+    const HASH_LEN: usize = 17;
+
+    let normalized = id
+        .trim()
+        .bytes()
+        .map(|byte| {
+            if byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-') {
+                byte.to_ascii_lowercase() as char
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>();
+    let core = normalized.trim_matches(['.', '_', '-']);
+    let hash = fnv1a64(id.as_bytes());
+    if core.is_empty() {
+        return format!("{PREFIX}source-{hash:016x}");
+    }
+
+    let max_core_len = 255 - PREFIX.len();
+    if core.len() <= max_core_len {
+        return format!("{PREFIX}{core}");
+    }
+
+    let keep = max_core_len - HASH_LEN;
+    format!("{PREFIX}{}-{hash:016x}", &core[..keep])
+}
+
+fn fnv1a64(bytes: &[u8]) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
 }
 
 fn derive_identity(path: &str) -> Result<String, String> {

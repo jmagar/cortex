@@ -29,10 +29,8 @@ pub(crate) fn complete(args: &[String]) -> Result<Vec<String>> {
         .ok_or_else(|| anyhow::anyhow!("completion context required"))?;
     match kind {
         "actions" => Ok(action_candidates()),
-        "subcommands" => Ok(subcommand_candidates(&rest.join(" "))),
-        "flags" => Ok(flag_candidates(
-            rest.first().map(|s| s.as_str()).unwrap_or(""),
-        )),
+        "subcommands" => Ok(subcommand_candidates(rest)),
+        "flags" => Ok(flag_candidates(rest)),
         "value" => Ok(value_candidates(
             rest.first().map(|s| s.as_str()).unwrap_or(""),
         )),
@@ -40,10 +38,11 @@ pub(crate) fn complete(args: &[String]) -> Result<Vec<String>> {
     }
 }
 
-fn subcommand_candidates(path: &str) -> Vec<String> {
-    let values: &[&str] = match path {
-        "hosts" => &["sources", "silent"],
-        "sessions" => &[
+const COMMAND_CHILDREN: &[(&str, &[&str])] = &[
+    ("hosts", &["sources", "silent"]),
+    (
+        "sessions",
+        &[
             "search",
             "abuse",
             "correlate",
@@ -79,25 +78,40 @@ fn subcommand_candidates(path: &str) -> Vec<String> {
             "hookinvestigate",
             "hooksbackfill",
         ],
-        "assess" => &["skill", "abuse", "mcp", "hooks"],
-        "analysis" => &["errors", "incident", "patterns", "anomalies", "compare"],
-        "state" => &["host", "fleet", "clockskew"],
-        "ingest" => &["shell", "inventory", "filetail", "syslog", "docker"],
-        "ingest shell" => &["user", "agent"],
-        "ingest shell user" => &["index", "atuinindex"],
-        "ingest shell agent" => &["index", "wrap"],
-        "ingest inventory" => &["refresh", "status"],
-        "ingest filetail" => &["list", "status", "add", "remove", "enable", "disable"],
-        "ingest syslog" => &["status", "test"],
-        "ingest docker" => &["status", "sources"],
-        "alerts" => &["signatures", "notifications"],
-        "alerts signatures" => &["list", "ack", "unack"],
-        "alerts notifications" => &["recent", "test"],
-        "heartbeat" => &["agent"],
-        "correlate" => &["events", "state", "topic"],
-        "stats" => &["summary", "ingestrate"],
-        "compose" => &["status", "doctor", "up", "down", "restart", "pull", "logs"],
-        "setup" => &[
+    ),
+    ("assess", &["skill", "abuse", "mcp", "hooks"]),
+    (
+        "analysis",
+        &["errors", "incident", "patterns", "anomalies", "compare"],
+    ),
+    ("state", &["host", "fleet", "clockskew"]),
+    (
+        "ingest",
+        &["shell", "inventory", "filetail", "syslog", "docker"],
+    ),
+    ("ingest shell", &["user", "agent"]),
+    ("ingest shell user", &["index", "atuinindex"]),
+    ("ingest shell agent", &["index", "wrap"]),
+    ("ingest inventory", &["refresh", "status"]),
+    (
+        "ingest filetail",
+        &["list", "status", "add", "remove", "enable", "disable"],
+    ),
+    ("ingest syslog", &["status"]),
+    ("ingest docker", &["status", "sources"]),
+    ("alerts", &["signatures", "notifications"]),
+    ("alerts signatures", &["list", "ack", "unack"]),
+    ("alerts notifications", &["recent", "test"]),
+    ("heartbeat", &["agent"]),
+    ("correlate", &["events", "state", "topic"]),
+    ("stats", &["summary", "ingestrate"]),
+    (
+        "compose",
+        &["status", "doctor", "up", "down", "restart", "pull", "logs"],
+    ),
+    (
+        "setup",
+        &[
             "check",
             "repair",
             "install",
@@ -112,21 +126,72 @@ fn subcommand_candidates(path: &str) -> Vec<String> {
             "deploy",
             "doctor",
         ],
-        "setup shell" => &["agent", "completions"],
-        "setup shell agent" | "setup shell completions" => &["install", "remove", "check"],
-        "setup sessionstimer"
-        | "setup sessionswatch"
-        | "setup heartbeatagent"
-        | "setup debugwrapper"
-        | "setup debugcompose" => &["install", "remove", "check"],
-        "setup deploy" => &["preflight", "local", "remote", "agent"],
-        "db" => &["status", "integrity", "checkpoint", "vacuum", "backup"],
-        "db integrity" => &["status"],
-        "config" => &["get", "set", "unset", "list"],
-        "graph" => &["around", "explain", "evidence", "status", "rebuild"],
-        _ => &[],
+    ),
+    ("setup shell", &["agent", "completions"]),
+    ("setup shell agent", &["install", "remove", "check"]),
+    ("setup shell completions", &["install", "remove", "check"]),
+    ("setup sessionstimer", &["install", "remove", "check"]),
+    ("setup sessionswatch", &["install", "remove", "check"]),
+    ("setup heartbeatagent", &["install", "remove", "check"]),
+    ("setup debugwrapper", &["install", "remove", "check"]),
+    ("setup debugcompose", &["install", "remove", "check"]),
+    ("setup deploy", &["preflight", "local", "remote", "agent"]),
+    (
+        "db",
+        &["status", "integrity", "checkpoint", "vacuum", "backup"],
+    ),
+    ("db integrity", &["status"]),
+    ("config", &["get", "set", "unset", "list"]),
+    (
+        "graph",
+        &["around", "explain", "evidence", "status", "rebuild"],
+    ),
+];
+
+fn command_children(path: &str) -> &'static [&'static str] {
+    COMMAND_CHILDREN
+        .iter()
+        .find_map(|(parent, children)| (*parent == path).then_some(*children))
+        .unwrap_or(&[])
+}
+
+fn completion_words(args: &[String]) -> Vec<&str> {
+    if let [path] = args {
+        path.split_whitespace().collect()
+    } else {
+        args.iter().map(String::as_str).collect()
+    }
+}
+
+/// Resolve only the canonical command prefix. Once a positional or option is
+/// reached, the already-resolved leaf is retained and later words are ignored.
+fn resolve_command_path(args: &[String]) -> String {
+    let words = completion_words(args);
+    let Some(root) = words.first().copied().filter(|word| {
+        crate::cli::registry_actions()
+            .iter()
+            .any(|(candidate, _)| candidate == word)
+    }) else {
+        return String::new();
     };
-    values.iter().map(|value| (*value).to_string()).collect()
+
+    let mut path = root.to_string();
+    for word in words.iter().skip(1) {
+        if command_children(&path).contains(word) {
+            path.push(' ');
+            path.push_str(word);
+        } else {
+            break;
+        }
+    }
+    path
+}
+
+fn subcommand_candidates(args: &[String]) -> Vec<String> {
+    command_children(&resolve_command_path(args))
+        .iter()
+        .map(|value| (*value).to_string())
+        .collect()
 }
 
 fn action_candidates() -> Vec<String> {
@@ -136,9 +201,10 @@ fn action_candidates() -> Vec<String> {
         .collect()
 }
 
-fn flag_candidates(command: &str) -> Vec<String> {
+fn flag_candidates(args: &[String]) -> Vec<String> {
+    let command = resolve_command_path(args);
     let mut out = Vec::new();
-    for f in crate::cli::registry_flags(command) {
+    for f in crate::cli::registry_flags(&command) {
         out.push(format!("{}\t{}", f.flag, f.help));
         if !f.short.is_empty() {
             out.push(format!("{}\t{}", f.short, f.help));
@@ -162,8 +228,8 @@ fn value_candidates(flag: &str) -> Vec<String> {
 /// registry. The canonical vocabulary maps each flag to one kind everywhere,
 /// so the first match is authoritative.
 fn value_kind_for_flag(flag: &str) -> ValueKind {
-    for (command, _) in crate::cli::registry_actions() {
-        for f in crate::cli::registry_flags(command) {
+    for action in cortex::mcp::action_names() {
+        for f in cortex::mcp::flags_for(action).unwrap_or(&[]) {
             if f.flag == flag || (!f.short.is_empty() && f.short == flag) {
                 return f.value_kind;
             }

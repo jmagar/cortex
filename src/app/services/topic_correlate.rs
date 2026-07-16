@@ -10,14 +10,29 @@ use super::*;
 const TOPIC_DEFAULT_LIMIT: u32 = 200;
 /// Default graph traversal depth.
 const TOPIC_DEFAULT_DEPTH: u8 = 2;
+/// Default correlation lookback when the caller omits `since`.
+const TOPIC_DEFAULT_LOOKBACK_HOURS: i64 = 1;
 
 impl CortexService {
     pub async fn topic_correlate(
         &self,
         req: TopicCorrelateRequest,
     ) -> ServiceResult<TopicCorrelateResponse> {
-        let since = parse_optional_timestamp(req.since.as_deref(), "since")?;
-        let until = parse_optional_timestamp(req.until.as_deref(), "until")?;
+        let until_dt = match req.until.as_deref() {
+            Some(until) => parse_required_timestamp(until, "until")?,
+            None => chrono::Utc::now(),
+        };
+        let since_dt = match req.since.as_deref() {
+            Some(since) => parse_required_timestamp(since, "since")?,
+            None => until_dt - chrono::Duration::hours(TOPIC_DEFAULT_LOOKBACK_HOURS),
+        };
+        if since_dt > until_dt {
+            return Err(ServiceError::InvalidInput(
+                "since must not be later than until".into(),
+            ));
+        }
+        let since = Some(rfc3339_z(since_dt));
+        let until = Some(rfc3339_z(until_dt));
 
         // Hard break: legacy nested service identities (`tootie:plex`,
         // `tootie:plex:plex`, `plex/plex/plex`) are rejected before any

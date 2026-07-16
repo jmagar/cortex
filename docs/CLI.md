@@ -86,9 +86,11 @@ The command maps to MCP action `file_tails` and REST `POST /api/file-tails`.
 When `--http` or `CORTEX_USE_HTTP=true` is used, set both `CORTEX_API_TOKEN`
 and `CORTEX_API_ADMIN_TOKEN`; the client sends the latter as
 `X-Cortex-Admin-Token`.
-By default `add` derives `id` and `tag` from the file name, uses the runtime
-hostname, and starts tailing at EOF. Override those values only when needed;
-pass `--from-start` to ingest existing file contents.
+By default `add` derives `id` and `tag` from the file name, assigns the stable
+synthetic owner `file-tail-<id>`, and starts tailing at EOF. Pass `--host` when
+the mounted file belongs to a real host that should participate in host filters
+and correlation; Cortex never substitutes the server or container hostname.
+Pass `--from-start` to ingest existing file contents.
 
 ### `cortex ingest syslog`
 

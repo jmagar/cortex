@@ -20,6 +20,7 @@ pub struct HookBackfillResult {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ListHookEventsRequest {
     pub hook_event: Option<String>,
     pub hook_name: Option<String>,
@@ -30,7 +31,9 @@ pub struct ListHookEventsRequest {
     pub project: Option<String>,
     pub session_id: Option<String>,
     pub hostname: Option<String>,
+    #[serde(alias = "since")]
     pub from: Option<String>,
+    #[serde(alias = "until")]
     pub to: Option<String>,
     pub limit: Option<u32>,
 }

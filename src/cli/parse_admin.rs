@@ -143,23 +143,34 @@ pub(crate) fn parse_db_integrity_status(args: &[String]) -> Result<CliCommand> {
 
 pub(crate) fn parse_db_checkpoint(args: &[String]) -> Result<CliCommand> {
     let mut parsed = DbCheckpointArgs::default();
+    let mut mode = None;
     let mut flags = FlagCursor::new(args);
     while let Some(arg) = flags.next() {
         match arg.as_str() {
             "--json" => parsed.json = true,
-            "--mode" => parsed.mode = flags.value("--mode")?,
-            _ if arg.starts_with("--mode=") => parsed.mode = value_after_equals(arg, "--mode")?,
-            other if !other.starts_with('-') && parsed.mode == "passive" => {
-                parsed.mode = other.to_string()
+            "--mode" => set_checkpoint_mode(&mut mode, flags.value("--mode")?)?,
+            _ if arg.starts_with("--mode=") => {
+                set_checkpoint_mode(&mut mode, value_after_equals(arg, "--mode")?)?
             }
+            other if !other.starts_with('-') => set_checkpoint_mode(&mut mode, other.to_string())?,
             _ => bail!("unknown db checkpoint option: {arg}"),
         }
+    }
+    if let Some(mode) = mode {
+        parsed.mode = mode;
     }
     match parsed.mode.as_str() {
         "passive" | "full" | "restart" | "truncate" => {}
         _ => bail!("--mode must be one of passive, full, restart, truncate"),
     }
     Ok(CliCommand::Db(DbCommand::Checkpoint(parsed)))
+}
+
+fn set_checkpoint_mode(mode: &mut Option<String>, value: String) -> Result<()> {
+    if mode.replace(value).is_some() {
+        bail!("db checkpoint mode may only be specified once");
+    }
+    Ok(())
 }
 
 pub(crate) fn parse_db_vacuum(args: &[String]) -> Result<CliCommand> {

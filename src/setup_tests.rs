@@ -874,6 +874,38 @@ esac
     assert!(!dropin_dir.exists());
 }
 
+#[test]
+fn repair_rewrites_stale_commands_in_managed_systemd_units() {
+    let dir = tempfile::tempdir().unwrap();
+    let systemd_dir = dir.path().join("systemd");
+    std::fs::create_dir_all(&systemd_dir).unwrap();
+    let stale = systemd_dir.join("cortex-sessions-watch-doctor.service");
+    std::fs::write(
+        &stale,
+        "[Service]\nExecStart=/usr/bin/cortex setup sessions-watch-health-check --json\n",
+    )
+    .unwrap();
+    let unrelated = systemd_dir.join("unrelated.service");
+    std::fs::write(
+        &unrelated,
+        "[Service]\nExecStart=/usr/bin/cortex setup sessions-watch-health-check --json\n",
+    )
+    .unwrap();
+
+    let phase = rewrite_stale_managed_unit_commands(&systemd_dir).unwrap();
+
+    assert_eq!(phase.status, SetupStatus::Ok);
+    assert!(phase.detail.contains("rewrote 1 managed unit"));
+    let repaired = std::fs::read_to_string(stale).unwrap();
+    assert!(repaired.contains("setup sessionshealth --json"));
+    assert!(!repaired.contains("sessions-watch-health-check"));
+    assert!(
+        std::fs::read_to_string(unrelated)
+            .unwrap()
+            .contains("sessions-watch-health-check")
+    );
+}
+
 #[cfg(unix)]
 #[test]
 #[serial]

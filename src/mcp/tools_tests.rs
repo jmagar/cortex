@@ -347,6 +347,113 @@ async fn skill_events_action_returns_inserted_rows() {
     assert_eq!(response["events"][0]["skill_name"], "cortex-troubleshoot");
 }
 
+#[test]
+fn event_request_models_accept_mcp_and_rest_time_names_and_reject_unknowns() {
+    let skill: crate::app::ListSkillEventsRequest = action_payload(
+        json!({"action": "skill_events", "since": "t0", "until": "t1"}),
+        "skill_events",
+    )
+    .unwrap();
+    assert_eq!(skill.from.as_deref(), Some("t0"));
+    assert_eq!(skill.to.as_deref(), Some("t1"));
+
+    let mcp: crate::app::ListMcpEventsRequest = action_payload(
+        json!({"action": "mcp_events", "from": "t0", "to": "t1"}),
+        "mcp_events",
+    )
+    .unwrap();
+    assert_eq!(mcp.from.as_deref(), Some("t0"));
+    assert_eq!(mcp.to.as_deref(), Some("t1"));
+
+    let hook: crate::app::ListHookEventsRequest = action_payload(
+        json!({"action": "hook_events", "since": "t0", "until": "t1"}),
+        "hook_events",
+    )
+    .unwrap();
+    assert_eq!(hook.from.as_deref(), Some("t0"));
+    assert_eq!(hook.to.as_deref(), Some("t1"));
+
+    let skill_error = action_payload::<crate::app::ListSkillEventsRequest>(
+        json!({"action": "skill_events", "bogus": true}),
+        "skill_events",
+    )
+    .unwrap_err();
+    assert!(skill_error.to_string().contains("unknown field `bogus`"));
+
+    let hook_error = action_payload::<crate::app::ListHookEventsRequest>(
+        json!({"action": "hook_events", "bogus": true}),
+        "hook_events",
+    )
+    .unwrap_err();
+    assert!(hook_error.to_string().contains("unknown field `bogus`"));
+}
+
+#[tokio::test]
+async fn event_actions_apply_mcp_since_and_until_bounds() {
+    let h = TestHarness::new();
+    let timestamps = [
+        "2026-06-01T00:00:00.000Z",
+        "2026-06-02T00:00:00.000Z",
+        "2026-06-03T00:00:00.000Z",
+    ];
+    let conn = h.pool.get().unwrap();
+
+    for (index, timestamp) in timestamps.iter().enumerate() {
+        conn.execute(
+            "INSERT INTO logs (timestamp, hostname, severity, message, raw, source_ip)
+             VALUES (?1, 'dookie', 'info', ?2, ?2, 'transcript://codex_cortex')",
+            rusqlite::params![timestamp, format!("event-{index}")],
+        )
+        .unwrap();
+        let log_id = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO ai_skill_events
+                (log_id, ai_tool, ai_project, ai_session_id, hostname, timestamp,
+                 skill_name, event_kind, evidence_kind)
+             VALUES (?1, 'codex', 'cortex', 'session-filter', 'dookie', ?2,
+                     'test-skill', 'loaded', 'structured')",
+            rusqlite::params![log_id, timestamp],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO ai_mcp_events
+                (ai_tool, ai_project, ai_session_id, hostname, timestamp, call_id,
+                 tool_name, mcp_server, mcp_tool, event_kind)
+             VALUES ('codex', 'cortex', 'session-filter', 'dookie', ?1, ?2,
+                     'mcp__labby__search', 'labby', 'search', 'call')",
+            rusqlite::params![timestamp, format!("call-{index}")],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO ai_hook_events
+                (ai_tool, ai_project, ai_session_id, hostname, timestamp,
+                 hook_event, hook_name, status, evidence_kind)
+             VALUES ('codex', 'cortex', 'session-filter', 'dookie', ?1,
+                     'PostToolUse', 'format', 'ok', 'runtime_transcript')",
+            rusqlite::params![timestamp],
+        )
+        .unwrap();
+    }
+    drop(conn);
+
+    for action in ["skill_events", "mcp_events", "hook_events"] {
+        let response = execute_tool(
+            &h.state,
+            "cortex",
+            json!({
+                "action": action,
+                "since": "2026-06-02T00:00:00Z",
+                "until": "2026-06-02T23:59:59Z"
+            }),
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(response["total"], 1, "time bounds not applied for {action}");
+        assert_eq!(response["events"][0]["timestamp"], timestamps[1]);
+    }
+}
+
 #[tokio::test]
 async fn fleet_state_action_returns_fleet_snapshot() {
     let h = TestHarness::new();

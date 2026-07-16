@@ -43,11 +43,10 @@ impl CortexService {
                     .run_db("host_state.freshest", |pool| {
                         let conn = pool.get()?;
                         let mut stmt = conn.prepare(
-                            "SELECT latest.host_id \
-                             FROM host_heartbeats_latest AS latest \
-                             INNER JOIN host_heartbeats AS heartbeat \
-                                ON heartbeat.id = latest.heartbeat_id \
-                             ORDER BY latest.sampled_at DESC LIMIT 1",
+                            "SELECT host_id \
+                             FROM host_heartbeats \
+                             ORDER BY sampled_at DESC, received_at DESC, id DESC \
+                             LIMIT 1",
                         )?;
                         let mut rows = stmt.query([])?;
                         Ok(rows
@@ -377,3 +376,7 @@ impl CortexService {
         })
     }
 }
+
+#[cfg(test)]
+#[path = "logs_tests.rs"]
+mod logs_tests;

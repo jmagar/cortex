@@ -1011,20 +1011,19 @@ fn search_ai_sessions_query_plan_uses_session_host_time_index() {
     assert_eq!(result.sessions.len(), 1);
     assert_eq!(result.sessions[0].event_count, 150);
 
-    let (sql, bindings) = search_ai_sessions_rollup_sql(&params, 10);
-    assert!(sql.contains("scored AS MATERIALIZED"));
-    assert!(!sql.contains("FROM logs total"));
+    let (sql, bindings) = search_ai_sessions_sql(&params, 10);
+    assert!(sql.contains("candidates AS MATERIALIZED"));
     assert!(
-        sql.contains("EXISTS (") && sql.contains("LIMIT 11"),
-        "rollup search must stop after enough matching sessions"
+        sql.contains("FROM logs_fts") && sql.contains("WHERE logs_fts MATCH ?1"),
+        "session search candidates must be FTS-first"
     );
     assert!(
-        sql.contains("LIMIT 1000"),
-        "rollup search must keep the no-match session horizon bounded"
+        sql.contains("LIMIT 5000"),
+        "session search must bound filtered matching rows"
     );
     assert!(
-        !sql.contains("ORDER BY l.id DESC"),
-        "rollup search must not globally sort every matching transcript row"
+        !sql.contains("ai_session_rollup"),
+        "search must not use a potentially stale rollup as its candidate source"
     );
 
     let conn = pool.get().unwrap();
@@ -1046,6 +1045,140 @@ fn search_ai_sessions_query_plan_uses_session_host_time_index() {
         plan.contains("idx_logs_ai_session_host_time"),
         "expected AI session event-count plan to use idx_logs_ai_session_host_time, got:\n{plan}"
     );
+}
+
+#[test]
+fn search_ai_sessions_finds_rows_inserted_after_rollup_refresh() {
+    let (pool, _dir) = test_pool();
+    insert_logs_batch(
+        &pool,
+        &[make_ai_entry(
+            "2026-01-01T00:00:00Z",
+            "host-a",
+            "claude",
+            "/tmp/project",
+            "before-refresh",
+            "background transcript event",
+        )],
+    )
+    .unwrap();
+    refresh_ai_session_rollup(&pool).unwrap();
+    insert_logs_batch(
+        &pool,
+        &[make_ai_entry(
+            "2026-01-01T00:01:00Z",
+            "host-a",
+            "claude",
+            "/tmp/project",
+            "after-refresh",
+            "freshneedle appears immediately",
+        )],
+    )
+    .unwrap();
+
+    let result = search_ai_sessions(
+        &pool,
+        &SearchAiSessionsParams {
+            query: "freshneedle".into(),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(result.total_candidates, 1);
+    assert_eq!(result.sessions[0].ai_session_id, "after-refresh");
+    assert!(!result.truncated);
+}
+
+#[test]
+fn search_ai_sessions_finds_selective_match_older_than_newest_thousand_sessions() {
+    let (pool, _dir) = test_pool();
+    let mut entries = vec![make_ai_entry(
+        "2026-01-01T00:00:00Z",
+        "host-a",
+        "claude",
+        "/tmp/project",
+        "historical-match",
+        "historicalneedle remains discoverable",
+    )];
+    for i in 0..1_001 {
+        entries.push(make_ai_entry(
+            "2026-01-02T00:00:00Z",
+            "host-a",
+            "claude",
+            "/tmp/project",
+            &format!("newer-{i}"),
+            "routine newer transcript event",
+        ));
+    }
+    insert_logs_batch(&pool, &entries).unwrap();
+    refresh_ai_session_rollup(&pool).unwrap();
+
+    let result = search_ai_sessions(
+        &pool,
+        &SearchAiSessionsParams {
+            query: "historicalneedle".into(),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(result.total_candidates, 1);
+    assert_eq!(result.candidate_rows, 1);
+    assert_eq!(result.sessions[0].ai_session_id, "historical-match");
+    assert!(!result.candidate_window_truncated);
+    assert!(!result.truncated);
+}
+
+#[test]
+fn search_ai_sessions_metadata_counts_only_filtered_matches() {
+    let (pool, _dir) = test_pool();
+    let mut entries = Vec::new();
+    for i in 0..1_001 {
+        entries.push(make_ai_entry(
+            "2026-01-02T00:00:00Z",
+            "host-a",
+            "claude",
+            "/tmp/unrelated",
+            &format!("unrelated-{i}"),
+            "scopedneedle",
+        ));
+    }
+    entries.push(make_ai_entry(
+        "2026-01-01T00:00:00Z",
+        "host-a",
+        "claude",
+        "/tmp/selected",
+        "selected-a",
+        "scopedneedle",
+    ));
+    entries.push(make_ai_entry(
+        "2026-01-01T00:01:00Z",
+        "host-a",
+        "claude",
+        "/tmp/selected",
+        "selected-b",
+        "scopedneedle",
+    ));
+    insert_logs_batch(&pool, &entries).unwrap();
+    refresh_ai_session_rollup(&pool).unwrap();
+
+    let result = search_ai_sessions(
+        &pool,
+        &SearchAiSessionsParams {
+            query: "scopedneedle".into(),
+            ai_project: Some("/tmp/selected".into()),
+            limit: Some(10),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(result.total_candidates, 2);
+    assert_eq!(result.candidate_rows, 2);
+    assert_eq!(result.sessions.len(), 2);
+    assert!(!result.candidate_window_truncated);
+    assert!(!result.truncated);
 }
 
 #[test]
@@ -2387,6 +2520,59 @@ fn similar_incidents_clusters_filters_by_hostname() {
 }
 
 #[test]
+fn similar_incidents_applies_fts_before_candidate_cap() {
+    let (pool, _dir) = test_pool();
+    insert_logs_batch(
+        &pool,
+        &[make_app_entry(
+            "2024-01-01T00:00:00Z",
+            "web-01",
+            "err",
+            "nginx",
+            "historicalincidentneedle connection refused",
+        )],
+    )
+    .unwrap();
+
+    // Populate exactly the old raw-log candidate cap with newer nonmatches.
+    // A recency cap applied before FTS excludes the historical match above.
+    let conn = pool.get().unwrap();
+    conn.execute_batch(
+        "WITH digits(d) AS (
+             VALUES (0),(1),(2),(3),(4),(5),(6),(7),(8),(9)
+         ),
+         rows(n) AS (
+             SELECT a.d + 10*b.d + 100*c.d + 1000*d.d + 10000*e.d
+             FROM digits a
+             CROSS JOIN digits b
+             CROSS JOIN digits c
+             CROSS JOIN digits d
+             CROSS JOIN digits e
+         )
+         INSERT INTO logs
+             (timestamp, hostname, severity, app_name, message, raw, source_ip)
+         SELECT '2024-01-02T00:00:00Z', 'web-01', 'info', 'nginx',
+                'routine health check', 'routine health check', '10.0.0.1:514'
+         FROM rows;",
+    )
+    .unwrap();
+    drop(conn);
+
+    let result = similar_incidents_clusters(
+        &pool,
+        &SimilarIncidentsParams {
+            query: "historicalincidentneedle".into(),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(result.clusters.len(), 1);
+    assert_eq!(result.clusters[0].window_start, "2024-01-01T00:00:00Z");
+    assert_eq!(result.clusters[0].log_count, 1);
+}
+
+#[test]
 fn incident_context_summary_returns_window_stats() {
     let (pool, _dir) = test_pool();
 
@@ -2413,6 +2599,7 @@ fn incident_context_summary_returns_window_stats() {
         until: "2024-02-01T09:00:00Z".into(),
         host: None,
         app: None,
+        query: None,
         severity_min: Some("err".into()),
         limit: Some(10),
     };
@@ -2437,6 +2624,46 @@ fn incident_context_summary_empty_window_returns_zero() {
     assert_eq!(result.total_logs, 0);
     assert!(result.error_logs.is_empty());
     assert!(result.ai_sessions.is_empty());
+}
+
+#[test]
+fn incident_context_summary_filters_error_logs_by_fts_query() {
+    let (pool, _dir) = test_pool();
+    insert_logs_batch(
+        &pool,
+        &[
+            make_app_entry(
+                "2024-02-01T08:00:00Z",
+                "db-01",
+                "err",
+                "postgres",
+                "shared memory exhausted",
+            ),
+            make_app_entry(
+                "2024-02-01T08:01:00Z",
+                "db-01",
+                "err",
+                "postgres",
+                "connection pool exhausted",
+            ),
+        ],
+    )
+    .unwrap();
+
+    let result = incident_context_summary(
+        &pool,
+        &IncidentContextParams {
+            since: "2024-02-01T07:00:00Z".into(),
+            until: "2024-02-01T09:00:00Z".into(),
+            query: Some("memory".into()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(result.total_logs, 2, "window aggregates remain unfiltered");
+    assert_eq!(result.error_logs.len(), 1);
+    assert_eq!(result.error_logs[0].message, "shared memory exhausted");
 }
 
 #[test]

@@ -30,7 +30,9 @@ pub struct ListMcpEventsRequest {
     pub session_id: Option<String>,
     pub hostname: Option<String>,
     pub is_error: Option<bool>,
+    #[serde(alias = "since")]
     pub from: Option<String>,
+    #[serde(alias = "until")]
     pub to: Option<String>,
     pub limit: Option<u32>,
 }
