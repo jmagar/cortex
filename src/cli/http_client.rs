@@ -581,7 +581,7 @@ impl HttpClient {
         &self,
         req: &cortex::app::ListHookEventsRequest,
     ) -> Result<cortex::app::ListHookEventsResponse> {
-        self.get_json("/api/sessions/hook-events", Some(req)).await
+        self.get_json("/api/sessions/hooks", Some(req)).await
     }
 
     pub async fn ai_projects(&self, req: &ListAiProjectsRequest) -> Result<ListAiProjectsResponse> {
@@ -738,11 +738,13 @@ impl HttpClient {
     }
 
     pub async fn ack_error(&self, req: &AckErrorRequest) -> Result<AckErrorResponse> {
-        self.post_json("/api/errors/ack", req).await
+        self.post_json_with_admin_no_retry("/api/errors/ack", req)
+            .await
     }
 
     pub async fn unack_error(&self, req: &UnackErrorRequest) -> Result<UnackErrorResponse> {
-        self.post_json("/api/errors/unack", req).await
+        self.post_json_with_admin_no_retry("/api/errors/unack", req)
+            .await
     }
 
     /// Recent notification firings. The server returns `Vec<FiringRow>` but
