@@ -1267,6 +1267,64 @@ fn search_ai_sessions_candidate_cap_prefers_newer_rows() {
     assert_eq!(result.sessions[0].ai_project, "/tmp/new");
 }
 
+// Regression: results must be ranked by match recency (latest matching row),
+// not full-session last_seen. `stale-match` matched earlier but kept logging
+// unrelated activity afterward; it must still rank below `recent-match`, whose
+// match is newer. A pre-fix `ORDER BY last_seen DESC` ranked `stale-match`
+// first because its non-matching tail is the newest activity overall.
+#[test]
+fn search_ai_sessions_orders_by_match_recency_not_session_activity() {
+    let (pool, _dir) = test_pool();
+    insert_logs_batch(
+        &pool,
+        &[
+            // Older match, but newest overall activity (non-matching tail).
+            make_ai_entry(
+                "2026-01-01T00:00:00Z",
+                "host-a",
+                "claude",
+                "/tmp/project",
+                "stale-match",
+                "orderneedle historical hit",
+            ),
+            make_ai_entry(
+                "2026-01-03T00:00:00Z",
+                "host-a",
+                "claude",
+                "/tmp/project",
+                "stale-match",
+                "routine unrelated activity",
+            ),
+            // Newer match, no later activity.
+            make_ai_entry(
+                "2026-01-02T00:00:00Z",
+                "host-a",
+                "claude",
+                "/tmp/project",
+                "recent-match",
+                "orderneedle fresh hit",
+            ),
+        ],
+    )
+    .unwrap();
+
+    let result = search_ai_sessions(
+        &pool,
+        &SearchAiSessionsParams {
+            query: "orderneedle".into(),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(result.sessions.len(), 2);
+    assert_eq!(result.sessions[0].ai_session_id, "recent-match");
+    assert_eq!(result.sessions[1].ai_session_id, "stale-match");
+    // The stale session's displayed last_seen still reflects its full-session
+    // tail; only the ordering key changed.
+    assert_eq!(result.sessions[1].last_seen, "2026-01-03T00:00:00Z");
+}
+
 #[test]
 fn search_ai_sessions_zero_limit_clamps_to_one_with_metadata() {
     let (pool, _dir) = test_pool();

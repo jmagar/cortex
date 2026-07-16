@@ -1321,7 +1321,12 @@ fn search_ai_sessions_sql(
           AND tail.ai_session_id = g.ai_session_id
           AND tail.hostname = g.hostname
          CROSS JOIN totals
-         ORDER BY last_seen DESC
+         -- Rank by match recency (latest matching row), not the full-session
+         -- last_seen computed above: a session with an old match but newer
+         -- non-matching activity must not jump ahead of more recent matches.
+         -- This mirrors `selected`'s own `latest_match DESC` pre-selection and
+         -- the pre-refactor match-recency ordering.
+         ORDER BY g.latest_match DESC
          LIMIT {limit}",
         CANDIDATE_CAP + 1
     );
