@@ -513,7 +513,7 @@ pub fn find_graph_entities_by_alias(
     let key = canonical_graph_key(alias_key).unwrap_or_else(|| alias_key.to_string());
     let limit = limit.clamp(1, 500);
     let mut stmt = conn.prepare(
-        "SELECT e.id, e.entity_type, e.canonical_key, e.display_label, e.source_kind,
+        "SELECT DISTINCT e.id, e.entity_type, e.canonical_key, e.display_label, e.source_kind,
                 e.source_id, e.trust_level, e.first_seen_at, e.last_seen_at,
                 a.alias_type, a.alias_key
          FROM graph_entity_aliases a
@@ -2585,6 +2585,17 @@ fn extract_heartbeat_latest(conn: &rusqlite::Connection) -> Result<i64> {
             hostname,
             SOURCE_KIND_HEARTBEAT,
             &heartbeat_id.to_string(),
+            TRUST_VERIFIED,
+            Some(sampled_at),
+            Some(sampled_at),
+        )?;
+        insert_alias(
+            conn,
+            host_id,
+            "hostname",
+            &host_key,
+            hostname,
+            SOURCE_KIND_HEARTBEAT,
             TRUST_VERIFIED,
             Some(sampled_at),
             Some(sampled_at),

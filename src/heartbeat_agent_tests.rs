@@ -72,6 +72,25 @@ async fn fake_collector_emits_valid_v1_payload_defaults() {
 }
 
 #[tokio::test]
+async fn unsupported_platform_emits_complete_host_only_heartbeat() {
+    let collector = HeartbeatCollector::for_platform("windows");
+    let payload = collector
+        .collect(
+            "windows-host".to_string(),
+            1,
+            Duration::from_secs(DEFAULT_INTERVAL_SECS),
+            0,
+            Duration::from_millis(DEFAULT_PROBE_DEADLINE_MS),
+            Duration::from_millis(DEFAULT_COLLECTION_DEADLINE_MS),
+        )
+        .await;
+
+    assert!(!payload.sample.partial);
+    assert!(payload.sample.probe_errors.is_empty());
+    assert!(payload.sample.skipped_probes.is_empty());
+}
+
+#[tokio::test]
 async fn linux_collector_constructs_probe_set_and_collects_core_proc_metrics() {
     let collector = HeartbeatCollector::linux();
     let payload = collector

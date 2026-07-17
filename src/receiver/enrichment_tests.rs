@@ -191,6 +191,36 @@ fn non_authelia_non_adguard_passes_unchanged() {
     assert_eq!(out.app_name.as_deref(), Some("nginx"));
 }
 
+#[test]
+fn structured_warn_token_promotes_loose_syslog_severity() {
+    let cfg = EnrichmentConfig::default();
+    let e = entry(
+        "lab-serve-wrapper.sh",
+        "08:09:22   WARN  node websocket reconnect scheduled  action=ws.reconnect_attempt",
+        "10.1.0.8:46502",
+        "info",
+    );
+
+    let out = enrich_entry(e, &cfg);
+
+    assert_eq!(out.severity, "warning");
+}
+
+#[test]
+fn structured_level_never_demotes_explicit_syslog_severity() {
+    let cfg = EnrichmentConfig::default();
+    let e = entry(
+        "worker",
+        "08:09:22 INFO request failed after retries",
+        "10.1.0.8:46502",
+        "err",
+    );
+
+    let out = enrich_entry(e, &cfg);
+
+    assert_eq!(out.severity, "err");
+}
+
 // ---- secret scrubbing ----
 
 #[test]

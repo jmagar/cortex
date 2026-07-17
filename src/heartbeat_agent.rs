@@ -285,6 +285,9 @@ pub enum ProbeOutput {
     Network(HeartbeatNetwork),
     Processes(HeartbeatProcesses),
     Containers(HeartbeatContainers),
+    /// The target disappeared after discovery (for example an ephemeral veth).
+    /// Expected host churn must not make the entire sample partial.
+    Ignored,
 }
 
 pub trait HeartbeatProbe: Send + Sync {
@@ -343,6 +346,19 @@ impl HeartbeatCollector {
         }
     }
 
+    pub fn for_platform(os: &str) -> Self {
+        if os == "linux" {
+            return Self::linux();
+        }
+        // Current resource probes are Linux-specific. A host-only heartbeat is
+        // more accurate on Windows than reporting unsupported /proc probes as
+        // collection failures.
+        Self {
+            probes: Vec::new(),
+            started: Instant::now(),
+        }
+    }
+
     pub fn with_probes(probes: Vec<Box<dyn HeartbeatProbe>>) -> Self {
         Self {
             probes,
@@ -385,6 +401,7 @@ impl HeartbeatCollector {
                     ProbeOutput::Network(value) if networks.len() < 16 => networks.push(value),
                     ProbeOutput::Processes(value) => processes = Some(value),
                     ProbeOutput::Containers(value) => containers = Some(value),
+                    ProbeOutput::Ignored => {}
                     ProbeOutput::Disk(_) => skipped_probes.push("disk_limit".to_string()),
                     ProbeOutput::Network(_) => skipped_probes.push("network_limit".to_string()),
                 },
@@ -708,7 +725,7 @@ impl HeartbeatProbe for LinuxNetworkProbe {
                 .await
                 .context("read /proc/net/dev")?;
             let Some(counters) = parse_network_interface(&raw, &self.interface)? else {
-                bail!("interface {} not found in /proc/net/dev", self.interface);
+                return Ok(ProbeOutput::Ignored);
             };
             let rates = network_rates(&self.previous, now, counters)?;
             Ok(ProbeOutput::Network(HeartbeatNetwork {
@@ -1329,7 +1346,7 @@ pub async fn run_agent(config: HeartbeatAgentConfig) -> Result<()> {
         tokio::spawn(crate::agent::run_agent_streams(streams));
     }
 
-    let collector = HeartbeatCollector::linux();
+    let collector = HeartbeatCollector::for_platform(std::env::consts::OS);
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
         .build()
@@ -1337,8 +1354,11 @@ pub async fn run_agent(config: HeartbeatAgentConfig) -> Result<()> {
     let mut retry = RetryBuffer::new(config.retry_buffer_limit);
     let mut sequence = chrono::Utc::now().timestamp_millis();
     let mut attempt = 0u32;
+    let mut cadence = tokio::time::interval(config.interval);
+    cadence.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
     loop {
+        cadence.tick().await;
         let mut payload = collector
             .collect(
                 host_id.clone(),
@@ -1408,7 +1428,6 @@ pub async fn run_agent(config: HeartbeatAgentConfig) -> Result<()> {
         }
 
         sequence += 1;
-        tokio::time::sleep(config.interval).await;
     }
 }
 

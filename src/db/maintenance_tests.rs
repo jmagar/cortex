@@ -148,6 +148,41 @@ fn maybe_checkpoint_wal_by_size_runs_when_wal_exceeds_threshold() {
 }
 
 #[test]
+fn threshold_maintenance_truncates_a_fully_checkpointed_wal() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("wal-truncate.db");
+    let mut config = test_storage_config(db_path.clone());
+    config.pool_size = 2;
+    config.wal_mode = true;
+    config.wal_checkpoint_mb = 1;
+    let pool = init_pool(&config).unwrap();
+    {
+        let conn = pool.get().unwrap();
+        conn.execute_batch("CREATE TABLE wal_truncate_probe(id INTEGER PRIMARY KEY, value BLOB);")
+            .unwrap();
+        let payload = vec![b'x'; 64 * 1024];
+        for _ in 0..32 {
+            conn.execute(
+                "INSERT INTO wal_truncate_probe(value) VALUES (?1)",
+                [&payload],
+            )
+            .unwrap();
+        }
+    }
+    let wal_path = sqlite_sidecar_path(&db_path, "wal");
+    let before = std::fs::metadata(&wal_path).unwrap().len();
+    assert!(before > config.wal_checkpoint_threshold_bytes());
+
+    checkpoint_wal_and_incremental_vacuum(&pool, &config).unwrap();
+
+    let after = std::fs::metadata(&wal_path).map(|m| m.len()).unwrap_or(0);
+    assert!(
+        after < before,
+        "fully checkpointed WAL should be truncated below its high-water size: before={before} after={after}"
+    );
+}
+
+#[test]
 fn test_purge_old_logs_removes_old() {
     let (pool, _dir) = test_pool();
     let entries = vec![

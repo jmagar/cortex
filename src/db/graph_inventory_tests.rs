@@ -79,6 +79,90 @@ fn log_entry(message: &str) -> LogBatchEntry {
 }
 
 #[test]
+fn inventory_projection_marks_never_built_graph_ready() {
+    let _guard = graph::GRAPH_TEST_LOCK.lock();
+    let dir = tempfile::tempdir().unwrap();
+    let pool = init_pool(&StorageConfig::for_test(
+        dir.path().join("inventory-graph-status.db"),
+    ))
+    .unwrap();
+
+    assert_eq!(
+        graph::graph_projection_status(&pool)
+            .unwrap()
+            .projection_status,
+        "never_built"
+    );
+
+    project_inventory(&pool, &basic_inventory()).unwrap();
+
+    let status = graph::graph_projection_status(&pool).unwrap();
+    assert_eq!(status.projection_status, "ready");
+    assert!(status.last_completed_at.is_some());
+    assert!(!status.is_degraded);
+}
+
+#[test]
+fn inventory_projection_keeps_heartbeat_only_hosts_resolvable() {
+    let _guard = graph::GRAPH_TEST_LOCK.lock();
+    let dir = tempfile::tempdir().unwrap();
+    let pool = init_pool(&StorageConfig::for_test(
+        dir.path().join("inventory-heartbeat-host.db"),
+    ))
+    .unwrap();
+    let conn = pool.get().unwrap();
+    conn.execute(
+        "INSERT INTO host_heartbeats (
+             host_id, hostname, source_ip, sampled_at, received_at, boot_id,
+             uptime_secs, sequence, collection_ms, partial, agent_version,
+             os, architecture, metadata_json
+         ) VALUES ('host-dookie', 'dookie', '10.1.0.6:1514',
+                   '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 'boot-a',
+                   60, 1, 5, 0, '0.1.0', 'linux', 'x86_64', '{}')",
+        [],
+    )
+    .unwrap();
+    let heartbeat_id = conn.last_insert_rowid();
+    conn.execute(
+        "INSERT INTO host_heartbeats_latest (
+             host_id, heartbeat_id, hostname, sampled_at, received_at,
+             partial, agent_version, os, architecture, metadata_json
+         ) VALUES ('host-dookie', ?1, 'dookie', '2026-01-01T00:00:00Z',
+                   '2026-01-01T00:00:00Z', 0, '0.1.0', 'linux', 'x86_64', '{}')",
+        [heartbeat_id],
+    )
+    .unwrap();
+    drop(conn);
+
+    let inventory =
+        HomelabInventory::empty("inv-test".to_string(), "2026-01-01T00:00:00Z".to_string());
+    project_inventory(&pool, &inventory).unwrap();
+
+    let conn = pool.get().unwrap();
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*) FROM graph_entities
+              WHERE entity_type = 'host' AND canonical_key = 'dookie'"
+        ),
+        1
+    );
+    assert_eq!(
+        count(
+            &conn,
+            "SELECT COUNT(*)
+               FROM graph_entity_aliases a
+               JOIN graph_entities e ON e.id = a.entity_id
+              WHERE e.entity_type = 'host'
+                AND e.canonical_key = 'dookie'
+                AND a.alias_type = 'hostname'
+                AND a.alias_key = 'dookie'"
+        ),
+        1
+    );
+}
+
+#[test]
 fn project_inventory_does_not_hold_write_lock_while_preparing_projection() {
     let _guard = graph::GRAPH_TEST_LOCK.lock();
     let dir = tempfile::tempdir().unwrap();

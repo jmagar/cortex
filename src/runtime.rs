@@ -1084,35 +1084,11 @@ impl RuntimeCore {
                             );
                         }
                     }
-                    match db::maybe_checkpoint_wal_by_size(
-                        &pool,
-                        &storage.db_path,
-                        storage.wal_checkpoint_threshold_bytes(),
-                    ) {
-                        Ok(Some((busy, log_frames, checkpointed_frames))) => {
-                            if db::wal_checkpoint_complete(busy, log_frames, checkpointed_frames) {
-                                tracing::debug!(
-                                    busy,
-                                    log_frames,
-                                    checkpointed_frames,
-                                    "Periodic WAL checkpoint completed"
-                                );
-                            } else {
-                                tracing::warn!(
-                                    busy,
-                                    log_frames,
-                                    checkpointed_frames,
-                                    "Periodic WAL checkpoint incomplete"
-                                );
-                            }
-                        }
-                        Ok(None) => tracing::debug!("Periodic WAL checkpoint skipped"),
-                        Err(e) => {
-                            tracing::warn!(
-                                error = %e,
-                                "Periodic WAL checkpoint skipped (non-fatal)"
-                            );
-                        }
+                    if let Err(error) = db::checkpoint_wal_and_incremental_vacuum(&pool, &storage) {
+                        tracing::warn!(
+                            error = %error,
+                            "Periodic SQLite maintenance skipped (non-fatal)"
+                        );
                     }
                     Ok::<_, anyhow::Error>(outcome)
                 })

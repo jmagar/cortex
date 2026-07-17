@@ -72,6 +72,11 @@ fn apply_projection_plan(
 
     prune_previous_inventory_projection(&tx)?;
 
+    // Heartbeats are the authoritative proof that a fleet host exists. Keep
+    // them resolvable even when an SSH/Docker inventory collector fails and
+    // therefore contributes no InventoryNode for that refresh.
+    project_heartbeat_hosts(&tx)?;
+
     let mut entities = BTreeMap::new();
     for entity in &plan.entities {
         let entity_ref = upsert_entity(
@@ -132,6 +137,61 @@ fn apply_projection_plan(
     update_projection_meta(&tx, &stats)?;
     tx.commit().context("commit inventory graph projection")?;
     Ok(stats)
+}
+
+fn project_heartbeat_hosts(conn: &rusqlite::Connection) -> Result<()> {
+    let rows = {
+        let mut stmt = conn.prepare(
+            "SELECT heartbeat_id, host_id, hostname, sampled_at
+               FROM host_heartbeats_latest
+              ORDER BY hostname ASC",
+        )?;
+        stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    for (heartbeat_id, host_id, hostname, sampled_at) in rows {
+        let Some(key) = canonical(&hostname) else {
+            continue;
+        };
+        let entity = upsert_entity(
+            conn,
+            graph::ENTITY_TYPE_HOST,
+            &key,
+            &hostname,
+            graph::SOURCE_KIND_HEARTBEAT,
+            &heartbeat_id.to_string(),
+            graph::TRUST_VERIFIED,
+            &sampled_at,
+        )?;
+        add_alias(
+            conn,
+            entity.id,
+            "hostname",
+            &key,
+            &hostname,
+            graph::SOURCE_KIND_HEARTBEAT,
+            graph::TRUST_VERIFIED,
+            &sampled_at,
+        )?;
+        add_alias(
+            conn,
+            entity.id,
+            "heartbeat_host_id",
+            &canonical_or_raw(&host_id),
+            &host_id,
+            graph::SOURCE_KIND_HEARTBEAT,
+            graph::TRUST_VERIFIED,
+            &sampled_at,
+        )?;
+    }
+    Ok(())
 }
 
 fn build_projection_plan(inventory: &HomelabInventory) -> InventoryProjectionPlan {

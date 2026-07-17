@@ -65,6 +65,17 @@ pub struct EnrichmentConfig {
 static AUTHELIA_LEVEL: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\blevel=([A-Za-z]+)").expect("static regex"));
 
+/// Common application logger prefix: optional wall-clock timestamp followed by
+/// an uppercase level token. This intentionally does not match arbitrary
+/// `level=...` text in a message body; source-specific formats such as Authelia
+/// retain their dedicated parsers.
+static STRUCTURED_LEVEL_PREFIX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"(?i)^\s*(?:\d{2}:\d{2}:\d{2}(?:\.\d+)?\s+)?(?:\x1b\[[0-9;]*m\s*)?(TRACE|DEBUG|INFO|WARN|WARNING|ERROR|CRITICAL|FATAL)\b",
+    )
+    .expect("static regex")
+});
+
 /// Capture the file="..." metadata from rsyslog imfile records.
 static IMFILE_PATH: LazyLock<Regex> =
     LazyLock::new(|| Regex::new("file=\"([^\"]+\\.(?:jsonl|json))\"").expect("static regex"));
@@ -160,6 +171,10 @@ pub(crate) fn enrich_entry(mut entry: LogBatchEntry, config: &EnrichmentConfig) 
     extract_agent_docker_metadata(&mut entry, config);
     enrich_ai_metadata(&mut entry);
 
+    if let Some(level_severity) = extract_structured_level(&entry.message) {
+        promote_severity(&mut entry.severity, level_severity);
+    }
+
     if matches_app(&entry, "authelia")
         && source_ip_matches(&entry, config.authelia_source_ip.as_deref())
     {
@@ -181,6 +196,38 @@ pub(crate) fn enrich_entry(mut entry: LogBatchEntry, config: &EnrichmentConfig) 
     }
 
     entry
+}
+
+fn extract_structured_level(message: &str) -> Option<&'static str> {
+    let level = STRUCTURED_LEVEL_PREFIX.captures(message)?.get(1)?.as_str();
+    match level.to_ascii_lowercase().as_str() {
+        "trace" | "debug" => Some("debug"),
+        "info" => Some("info"),
+        "warn" | "warning" => Some("warning"),
+        "error" => Some("err"),
+        "critical" | "fatal" => Some("crit"),
+        _ => None,
+    }
+}
+
+fn promote_severity(current: &mut String, candidate: &str) {
+    fn rank(severity: &str) -> u8 {
+        match severity {
+            "emerg" => 0,
+            "alert" => 1,
+            "crit" => 2,
+            "err" | "error" => 3,
+            "warning" | "warn" => 4,
+            "notice" => 5,
+            "info" => 6,
+            "debug" => 7,
+            _ => u8::MAX,
+        }
+    }
+
+    if rank(candidate) < rank(current) {
+        *current = candidate.to_string();
+    }
 }
 
 fn matches_app(entry: &LogBatchEntry, expected: &str) -> bool {
