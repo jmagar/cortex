@@ -168,6 +168,7 @@ CORTEX_MCP_BIND=127.0.0.1           # Compose host publish interface for port 31
 CORTEX_TOKEN=your-secret-token      # optional on loopback; required on non-loopback binds
 CORTEX_ALLOWED_HOSTS=myhost.local   # optional; comma-separated extra Host allowlist
 CORTEX_ALLOWED_ORIGINS=https://app  # optional; comma-separated extra Origin allowlist
+CORTEX_WIDGET_EMBED=false           # opt-in: also embed the query widget (~16 KiB, audience=user) in search/filter/tail/errors tool results, for hosts whose connection path lacks resources/read (e.g. claude.ai connector proxy)
 
 # Storage
 CORTEX_DB_PATH=data/cortex.db
