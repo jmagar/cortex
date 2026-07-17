@@ -45,6 +45,16 @@ fn ssh_args_ignore_newer_config_options_before_loading_config() {
 }
 
 #[test]
+fn ssh_args_allow_busy_hosts_the_full_bounded_probe_window() {
+    let args = SshContext::new(SshOptions::default())
+        .ssh_args("dookie", "true")
+        .unwrap();
+
+    assert!(args.contains(&"ServerAliveInterval=10".to_string()));
+    assert!(args.contains(&"ServerAliveCountMax=3".to_string()));
+}
+
+#[test]
 fn ssh_args_reject_option_like_hosts_and_use_strict_host_keys_by_default() {
     assert!(
         SshContext::new(SshOptions::default())
