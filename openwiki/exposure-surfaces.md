@@ -94,7 +94,7 @@ cortex exposes its functionality through three surfaces that share a common serv
 ### Commands
 Organized by domain:
 - **Log queries**: `cortex search`, `cortex tail`, `cortex filter`, `cortex context`
-- **AI sessions**: `cortex sessions`, `cortex search-sessions`
+- **AI sessions**: `cortex sessions`, `cortex sessions search`
 - **Incidents**: `cortex sessions skillincidents`, `cortex sessions mcpincidents`, `cortex sessions hookincidents`
 - **Investigation**: `cortex sessions skillinvestigate`, `cortex sessions mcpinvestigate`, `cortex sessions hookinvestigate`
 - **Assessment**: `cortex assess skill`, `cortex assess mcp`, `cortex assess hooks`
