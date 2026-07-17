@@ -312,6 +312,41 @@ fn refresh_graph_projection_extracts_ai_heartbeat_and_signature_sources() {
 }
 
 #[test]
+fn alias_lookup_deduplicates_multiple_sources_for_the_same_entity() {
+    let _guard = GRAPH_TEST_LOCK.lock();
+    let dir = tempfile::tempdir().unwrap();
+    let config = test_storage_config(dir.path().join("graph-alias-dedup.db"));
+    let pool = init_pool(&config).unwrap();
+    let conn = pool.get().unwrap();
+    conn.execute(
+        "INSERT INTO graph_entities
+             (entity_type, canonical_key, display_label, source_kind, source_id,
+              trust_level, first_seen_at, last_seen_at)
+         VALUES ('host', 'dookie', 'dookie', 'heartbeat', '42', 'verified',
+                 '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        [],
+    )
+    .unwrap();
+    let entity_id = conn.last_insert_rowid();
+    for source_kind in ["heartbeat", "source_inventory"] {
+        conn.execute(
+            "INSERT INTO graph_entity_aliases
+                 (entity_id, alias_type, alias_key, alias_value, source_kind,
+                  trust_level, first_seen_at, last_seen_at)
+             VALUES (?1, 'hostname', 'dookie', 'dookie', ?2, 'verified',
+                     '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            rusqlite::params![entity_id, source_kind],
+        )
+        .unwrap();
+    }
+    drop(conn);
+
+    let candidates = find_graph_entities_by_alias(&pool, "hostname", "dookie", 20).unwrap();
+    assert_eq!(candidates.len(), 1);
+    assert_eq!(candidates[0].entity.id, entity_id);
+}
+
+#[test]
 fn refresh_graph_projection_removes_deleted_source_log_evidence() {
     let _guard = GRAPH_TEST_LOCK.lock();
     let dir = tempfile::tempdir().unwrap();
