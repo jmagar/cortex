@@ -86,6 +86,14 @@ fn severity_to_notify_type_mapping() {
 }
 
 #[test]
+fn only_silence_rules_are_deduplicated_for_the_full_outage() {
+    assert!(is_once_per_outage_rule("heartbeat_silence"));
+    assert!(is_once_per_outage_rule("stream_silence"));
+    assert!(!is_once_per_outage_rule("oom_kill"));
+    assert!(!is_once_per_outage_rule("unaddressed_error_signature"));
+}
+
+#[test]
 fn signature_ack_check_distinguishes_missing_pending_and_acknowledged() {
     let conn = open_test_db();
     let version = crate::app::error_detection::NORMALIZER_VERSION;
@@ -264,4 +272,77 @@ async fn dispatch_cycle_drops_pending_row_when_no_apprise_urls_exist() {
         })
         .unwrap();
     assert_eq!(firing_count, 0, "drops must not create firing history");
+}
+
+#[tokio::test]
+async fn dispatch_cycle_suppresses_old_firing_for_same_stream_outage() {
+    let dir = tempfile::tempdir().unwrap();
+    let pool = Arc::new(
+        init_pool(&StorageConfig::for_test(
+            dir.path().join("notifications.db"),
+        ))
+        .unwrap(),
+    );
+    let dedup_key = "stream_silence:tootie:agent-docker:2026-07-17T02:43:30.292Z";
+    let conn = pool.get().unwrap();
+    let params = crate::db::notifications::OutboxInsertParams {
+        dedup_key: dedup_key.to_string(),
+        rule_id: "stream_silence".to_string(),
+        severity: "warning".to_string(),
+        hostname: "tootie".to_string(),
+        title: "Silent stream".to_string(),
+        body: "Body".to_string(),
+        apprise_urls_json: "[]".to_string(),
+        next_attempt_at: "2000-01-01T00:00:00.000Z".to_string(),
+    };
+    outbox_insert(&conn, &params).unwrap();
+    let first_id: i64 = conn
+        .query_row(
+            "SELECT id FROM notifications_outbox WHERE dedup_key = ?1",
+            [dedup_key],
+            |row| row.get(0),
+        )
+        .unwrap();
+    outbox_mark_sent(&conn, first_id, Some(200)).unwrap();
+    firings_insert(
+        &conn,
+        FiringInsertParams {
+            outbox_id: first_id,
+            rule_id: "stream_silence",
+            severity: "warning",
+            hostname: "tootie",
+            status_code: Some(200),
+            notes: None,
+            dedup_key,
+        },
+    )
+    .unwrap();
+    conn.execute(
+        "UPDATE notification_firings SET fired_at = '2000-01-01T00:00:00.000Z' WHERE outbox_id = ?1",
+        [first_id],
+    )
+    .unwrap();
+    outbox_insert(&conn, &params).unwrap();
+    drop(conn);
+
+    let dispatched = run_dispatch_cycle(
+        Arc::clone(&pool),
+        Arc::new(Semaphore::new(1)),
+        &AppriseClient::new("http://127.0.0.1:1"),
+        &NotificationsConfig::default(),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(dispatched, 0);
+    let conn = pool.get().unwrap();
+    let (status, reason): (String, Option<String>) = conn
+        .query_row(
+            "SELECT status, last_error FROM notifications_outbox WHERE id != ?1 AND dedup_key = ?2",
+            rusqlite::params![first_id, dedup_key],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(status, "dropped");
+    assert_eq!(reason.as_deref(), Some("dedup_suppressed"));
 }
