@@ -292,3 +292,58 @@ fn ingest_silence_empty_db_does_not_fire() {
 fn ingest_silence_zero_threshold_does_not_fire() {
     assert!(evaluate_ingest_silence("dookie", Some(10_000), 0, "[]").is_none());
 }
+
+#[test]
+fn heartbeat_silence_builds_once_per_outage_dedup_key() {
+    let params = evaluate_heartbeat_silence(
+        "syslog_7014e4ed",
+        "shart",
+        "2026-07-14T18:34:36.613Z",
+        200_000,
+        600,
+        "[\"gotify://x\"]",
+    );
+    assert_eq!(params.rule_id, "heartbeat_silence");
+    assert_eq!(params.severity, "critical");
+    assert_eq!(params.hostname, "shart");
+    assert_eq!(
+        params.dedup_key, "heartbeat_silence:syslog_7014e4ed:2026-07-14T18:34:36.613Z",
+        "host_id plus the stalled heartbeat timestamp key the outage — same outage, same key"
+    );
+    assert!(params.title.contains("shart"));
+    assert!(params.body.contains("2026-07-14T18:34:36.613Z"));
+    assert!(params.body.contains("threshold: 10 min"));
+
+    // A recovery followed by a new outage produces a different key.
+    let next = evaluate_heartbeat_silence(
+        "syslog_7014e4ed",
+        "shart",
+        "2026-07-20T00:00:00.000Z",
+        900,
+        600,
+        "[\"gotify://x\"]",
+    );
+    assert_ne!(params.dedup_key, next.dedup_key);
+}
+
+#[test]
+fn stream_silence_builds_once_per_outage_dedup_key() {
+    let params = evaluate_stream_silence(
+        "tootie",
+        "agent-docker",
+        "2026-07-16T20:00:00.000Z",
+        7200,
+        3600,
+        "[\"gotify://x\"]",
+    );
+    assert_eq!(params.rule_id, "stream_silence");
+    assert_eq!(params.severity, "warning");
+    assert_eq!(params.hostname, "tootie");
+    assert_eq!(
+        params.dedup_key,
+        "stream_silence:tootie:agent-docker:2026-07-16T20:00:00.000Z"
+    );
+    assert!(params.title.contains("agent-docker"));
+    assert!(params.title.contains("tootie"));
+    assert!(params.body.contains("threshold: 60 min"));
+}

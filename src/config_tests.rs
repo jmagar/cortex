@@ -1584,3 +1584,75 @@ fn recovery_db_size_no_adjust_when_max_near_default() {
         "recovery_db_size_mb should stay at default (900) when max is only 2x default (2048)"
     );
 }
+
+#[test]
+fn heartbeat_silence_zero_threshold_rejected_when_enabled() {
+    let mut cfg = NotificationsConfig::default();
+    cfg.evaluators.heartbeat_silence = true;
+    cfg.evaluators.heartbeat_silence_threshold_secs = 0;
+    let err = validate_notifications_config(&cfg).expect_err("zero threshold must fail");
+    assert!(
+        err.to_string().contains("heartbeat_silence_threshold_secs"),
+        "wrong error: {err}"
+    );
+}
+
+#[test]
+fn stream_silence_zero_threshold_rejected_when_enabled() {
+    let mut cfg = NotificationsConfig::default();
+    cfg.evaluators.stream_silence = true;
+    cfg.evaluators.stream_silence_threshold_secs = 0;
+    let err = validate_notifications_config(&cfg).expect_err("zero threshold must fail");
+    assert!(
+        err.to_string().contains("stream_silence_threshold_secs"),
+        "wrong error: {err}"
+    );
+}
+
+#[test]
+fn stream_silence_empty_kinds_rejected_when_enabled() {
+    let mut cfg = NotificationsConfig::default();
+    cfg.evaluators.stream_silence = true;
+    cfg.evaluators.stream_silence_kinds = vec!["  ".to_string()];
+    let err = validate_notifications_config(&cfg).expect_err("blank kinds must fail");
+    assert!(
+        err.to_string().contains("stream_silence_kinds"),
+        "wrong error: {err}"
+    );
+}
+
+#[test]
+fn silence_forget_must_exceed_thresholds() {
+    let mut cfg = NotificationsConfig::default();
+    cfg.evaluators.silence_forget_secs = 3600; // == stream threshold default
+    let err = validate_notifications_config(&cfg).expect_err("forget <= threshold must fail");
+    assert!(
+        err.to_string().contains("silence_forget_secs"),
+        "wrong error: {err}"
+    );
+}
+
+#[test]
+fn silence_rules_disabled_skip_threshold_checks() {
+    let mut cfg = NotificationsConfig::default();
+    cfg.evaluators.heartbeat_silence = false;
+    cfg.evaluators.stream_silence = false;
+    cfg.evaluators.heartbeat_silence_threshold_secs = 0;
+    cfg.evaluators.stream_silence_threshold_secs = 0;
+    cfg.evaluators.silence_forget_secs = 0;
+    assert!(validate_notifications_config(&cfg).is_ok());
+}
+
+#[test]
+fn silence_defaults_pass_validation() {
+    let cfg = NotificationsConfig::default();
+    assert!(validate_notifications_config(&cfg).is_ok());
+    assert_eq!(cfg.evaluators.heartbeat_silence_threshold_secs, 600);
+    assert_eq!(cfg.evaluators.stream_silence_threshold_secs, 3600);
+    assert_eq!(cfg.evaluators.silence_forget_secs, 604_800);
+    assert!(
+        cfg.evaluators
+            .stream_silence_kinds
+            .contains(&"agent-docker".to_string())
+    );
+}
