@@ -1,4 +1,8 @@
-use std::{borrow::Cow, net::Ipv6Addr, sync::Arc};
+use std::{
+    borrow::Cow,
+    net::Ipv6Addr,
+    sync::{Arc, OnceLock},
+};
 
 use lab_auth::AuthContext;
 use rmcp::{
@@ -7,7 +11,7 @@ use rmcp::{
         CallToolRequestParams, CallToolResult, Content, GetPromptRequestParams, GetPromptResult,
         Implementation, ListPromptsResult, ListResourcesResult, ListToolsResult, Meta,
         PaginatedRequestParams, RawResource, ReadResourceRequestParams, ReadResourceResult,
-        Resource, ResourceContents, ServerCapabilities, ServerInfo, Tool,
+        Resource, ResourceContents, Role, ServerCapabilities, ServerInfo, Tool,
     },
     service::RequestContext,
     transport::streamable_http_server::{
@@ -94,7 +98,11 @@ impl ServerHandler for CortexRmcpServer {
                     result_count,
                     "MCP tool execution completed"
                 );
-                tool_result_from_json(result)
+                let mut call_result = tool_result_from_json(result)?;
+                if should_embed_widget(&action, widget_embed_enabled()) {
+                    call_result.content.push(embedded_widget_content());
+                }
+                Ok(call_result)
             }
             // Mirror api.rs::respond(): every ServiceError variant maps to a
             // distinct client-visible class so MCP clients can tell retryable
@@ -400,8 +408,65 @@ fn query_widget_contents() -> ResourceContents {
     .with_mime_type(MCP_APP_HTML_MIME_TYPE)
 }
 
+/// Actions whose successful results additionally carry the query widget as an
+/// embedded resource content block.
+///
+/// MCP Apps hosts normally hydrate the widget by calling `resources/read` on
+/// `_meta.ui.resourceUri`, but some connection paths (notably the claude.ai
+/// connector proxy) expose tools only and report "does not support
+/// resources", leaving a permanent "Rendering widget" placeholder. Embedding
+/// the widget in the tool result gives such hosts an mcp-ui-style fallback
+/// they can render without a resource round-trip.
+const WIDGET_EMBED_ACTIONS: &[&str] = &["search", "filter", "tail", "errors"];
+
+/// Whether `action`'s successful result should carry the embedded widget.
+fn should_embed_widget(action: &str, enabled: bool) -> bool {
+    enabled && WIDGET_EMBED_ACTIONS.contains(&action)
+}
+
+/// Parse the `CORTEX_WIDGET_EMBED` opt-in value. Defaults to `false`: the
+/// widget HTML is ~16 KiB per result, and although the block is annotated
+/// `audience: ["user"]`, hosts that ignore audience annotations would feed it
+/// to the model on every query — so operators enable it deliberately.
+fn parse_widget_embed(raw: Option<&str>) -> bool {
+    raw.map(|value| {
+        matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        )
+    })
+    .unwrap_or(false)
+}
+
+/// Process-lifetime cache of the `CORTEX_WIDGET_EMBED` opt-in.
+fn widget_embed_enabled() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED
+        .get_or_init(|| parse_widget_embed(std::env::var("CORTEX_WIDGET_EMBED").ok().as_deref()))
+}
+
+/// The query widget as an embedded resource content block, annotated
+/// `audience: ["user"]` so audience-aware hosts keep it out of model context.
+fn embedded_widget_content() -> Content {
+    Content::resource(
+        ResourceContents::text(
+            include_str!("ui/query_widget.html"),
+            QUERY_WIDGET_RESOURCE_URI,
+        )
+        .with_mime_type(MCP_APP_HTML_MIME_TYPE),
+    )
+    .with_audience(vec![Role::User])
+}
+
 fn cortex_tool_meta() -> Meta {
     let mut meta = Map::new();
+    // Both formats the MCP Apps SDK tells hosts to check: the flat
+    // `ui/resourceUri` key (ext-apps `RESOURCE_URI_META_KEY`) and the nested
+    // `ui` object. Host generations differ in which one they read.
+    meta.insert(
+        "ui/resourceUri".to_string(),
+        Value::String(QUERY_WIDGET_RESOURCE_URI.to_string()),
+    );
     meta.insert(
         "ui".to_string(),
         serde_json::json!({
