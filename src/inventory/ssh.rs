@@ -12,8 +12,12 @@ use crate::inventory::process::{CommandOutput, run_command};
 
 const SSH_IGNORE_UNKNOWN_OPTIONS: &str = "IgnoreUnknown=WarnWeakCrypto";
 const DEFAULT_CONNECT_TIMEOUT_SECS: u64 = 4;
-const DEFAULT_SERVER_ALIVE_INTERVAL_SECS: u64 = 3;
-const DEFAULT_SERVER_ALIVE_COUNT_MAX: u64 = 1;
+// Inventory commands can legitimately pause while a busy host schedules the
+// remote shell or walks config trees. Three seconds with one missed reply
+// turned transient I/O pressure into false host failures long before the
+// collector's own bounded timeout elapsed.
+const DEFAULT_SERVER_ALIVE_INTERVAL_SECS: u64 = 10;
+const DEFAULT_SERVER_ALIVE_COUNT_MAX: u64 = 3;
 pub const DEFAULT_MAX_CONCURRENT_SSH: usize = 8;
 const DEFAULT_RETRY_ATTEMPTS: usize = 1;
 const DEFAULT_RETRY_INITIAL_BACKOFF_MS: u64 = 250;
