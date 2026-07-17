@@ -1191,10 +1191,25 @@ pub fn maybe_checkpoint_wal_by_size(
     if wal_size < threshold_bytes {
         return Ok(None);
     }
-    db_wal_checkpoint(pool, "passive").map(Some)
+    let passive = db_wal_checkpoint(pool, "passive")?;
+    if wal_checkpoint_complete(passive.0, passive.1, passive.2) {
+        // PASSIVE copies frames into the main database but deliberately keeps
+        // the WAL file at its high-water size. Once every frame is checkpointed,
+        // a bounded TRUNCATE checkpoint can safely release that disk space.
+        let truncate = db_wal_checkpoint(pool, "truncate")?;
+        if !wal_checkpoint_complete(truncate.0, truncate.1, truncate.2) {
+            tracing::warn!(
+                busy = truncate.0,
+                log_frames = truncate.1,
+                checkpointed_frames = truncate.2,
+                "WAL truncate checkpoint incomplete"
+            );
+        }
+    }
+    Ok(Some(passive))
 }
 
-fn checkpoint_wal_and_incremental_vacuum(pool: &DbPool, config: &StorageConfig) -> Result<()> {
+pub fn checkpoint_wal_and_incremental_vacuum(pool: &DbPool, config: &StorageConfig) -> Result<()> {
     match maybe_checkpoint_wal_by_size(
         pool,
         &config.db_path,

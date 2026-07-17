@@ -39,4 +39,11 @@ impl CollectorOutput {
             truncated: false,
         });
     }
+
+    /// Record an informational collector skip without presenting it as a map
+    /// collection error. Optional integrations that have not been configured
+    /// are expected absence, not failed collection attempts.
+    pub fn skip(&mut self, message: impl Into<String>) {
+        self.warnings.push(message.into());
+    }
 }

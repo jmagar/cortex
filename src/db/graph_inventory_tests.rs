@@ -79,6 +79,30 @@ fn log_entry(message: &str) -> LogBatchEntry {
 }
 
 #[test]
+fn inventory_projection_marks_never_built_graph_ready() {
+    let _guard = graph::GRAPH_TEST_LOCK.lock();
+    let dir = tempfile::tempdir().unwrap();
+    let pool = init_pool(&StorageConfig::for_test(
+        dir.path().join("inventory-graph-status.db"),
+    ))
+    .unwrap();
+
+    assert_eq!(
+        graph::graph_projection_status(&pool)
+            .unwrap()
+            .projection_status,
+        "never_built"
+    );
+
+    project_inventory(&pool, &basic_inventory()).unwrap();
+
+    let status = graph::graph_projection_status(&pool).unwrap();
+    assert_eq!(status.projection_status, "ready");
+    assert!(status.last_completed_at.is_some());
+    assert!(!status.is_degraded);
+}
+
+#[test]
 fn project_inventory_does_not_hold_write_lock_while_preparing_projection() {
     let _guard = graph::GRAPH_TEST_LOCK.lock();
     let dir = tempfile::tempdir().unwrap();

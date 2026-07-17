@@ -12,10 +12,7 @@ use crate::inventory::schema::{MediaService, Provenance};
 pub async fn collect(services: &[MediaServiceConfig], timeout: Duration) -> CollectorOutput {
     let mut out = CollectorOutput::new("media_stack");
     if services.is_empty() {
-        out.warn(
-            "config",
-            "no CORTEX_<MEDIA>_URL values set; media stack collection skipped",
-        );
+        out.skip("no CORTEX_<MEDIA>_URL values set; media stack collection skipped");
         return out;
     }
     let Ok(http) = HttpProbe::new(timeout) else {

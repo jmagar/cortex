@@ -1,5 +1,16 @@
 use super::*;
 
+#[tokio::test]
+async fn missing_optional_config_is_not_a_collection_error() {
+    let out = collect(&[], Duration::from_millis(10)).await;
+    assert!(out.errors.is_empty());
+    assert!(
+        out.warnings
+            .iter()
+            .any(|warning| warning.contains("skipped"))
+    );
+}
+
 #[test]
 fn normalizes_media_version() {
     let svc = MediaServiceConfig {

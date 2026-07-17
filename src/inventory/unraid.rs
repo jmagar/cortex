@@ -19,10 +19,7 @@ pub async fn collect(
 ) -> CollectorOutput {
     let mut out = CollectorOutput::new("unraid");
     let (Some(url), Some(api_key)) = (url, api_key) else {
-        out.warn(
-            "config",
-            "CORTEX_UNRAID_URL/API_KEY not set; Unraid collection skipped",
-        );
+        out.skip("CORTEX_UNRAID_URL/API_KEY not set; Unraid collection skipped");
         return out;
     };
     let Ok(http) = HttpProbe::new(timeout) else {
