@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.11.1](https://github.com/jmagar/cortex/compare/v3.11.0...v3.11.1) (2026-07-17)
+
+
+### Fixed
+
+* **notifications:** suppress repeat silence outages ([5e98246](https://github.com/jmagar/cortex/commit/5e982465c489d720192a7046cd599683c4384d39))
+* preserve heartbeat graph resolution ([6eb8c78](https://github.com/jmagar/cortex/commit/6eb8c78c570d0c0e90ff3012009e97736eedda8a))
+* repair storage graph and fleet maintenance ([7a04504](https://github.com/jmagar/cortex/commit/7a04504ba4830a3e46d4f97da29b716b5c04a4e5))
+* tolerate bounded SSH probe stalls ([29ac736](https://github.com/jmagar/cortex/commit/29ac7365272bf2a5bfaf288c9616e3ce2ba69685))
+
 ## [3.11.0](https://github.com/jmagar/cortex/compare/v3.10.0...v3.11.0) (2026-07-17)
 
 
