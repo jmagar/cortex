@@ -24,9 +24,9 @@ use tokio::sync::Semaphore;
 use crate::config::NotificationsConfig;
 use crate::db::DbPool;
 use crate::db::notifications::{
-    FiringInsertParams, backoff_next_attempt_at, firings_insert, firings_recent_dedup_check,
-    outbox_claim_pending, outbox_mark_dead, outbox_mark_dropped, outbox_mark_sent,
-    outbox_schedule_retry,
+    FiringInsertParams, backoff_next_attempt_at, firings_any_dedup_check, firings_insert,
+    firings_recent_dedup_check, outbox_claim_pending, outbox_mark_dead, outbox_mark_dropped,
+    outbox_mark_sent, outbox_schedule_retry,
 };
 use crate::notifications::apprise::{AppriseClient, AppriseError, NotifyType};
 
@@ -134,8 +134,13 @@ pub(crate) async fn run_dispatch_cycle(
             let dedup_key = row.dedup_key.clone();
             let dedup_secs = cfg.dedup_window_secs;
             db_read(&pool, "notif.dedup_check", move |conn| {
-                firings_recent_dedup_check(conn, &rule_id, &hostname, &dedup_key, dedup_secs)
-                    .map_err(anyhow::Error::from)
+                if is_once_per_outage_rule(&rule_id) {
+                    firings_any_dedup_check(conn, &rule_id, &hostname, &dedup_key)
+                        .map_err(anyhow::Error::from)
+                } else {
+                    firings_recent_dedup_check(conn, &rule_id, &hostname, &dedup_key, dedup_secs)
+                        .map_err(anyhow::Error::from)
+                }
             })
             .await?
         };
@@ -416,6 +421,10 @@ fn severity_to_notify_type(severity: &str) -> NotifyType {
         "err" | "error" | "warning" | "warn" => NotifyType::Warning,
         _ => NotifyType::Info,
     }
+}
+
+fn is_once_per_outage_rule(rule_id: &str) -> bool {
+    matches!(rule_id, "heartbeat_silence" | "stream_silence")
 }
 
 /// Spawn the dispatcher task.

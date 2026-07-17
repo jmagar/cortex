@@ -255,6 +255,30 @@ pub fn firings_recent_dedup_check(
     Ok(count > 0)
 }
 
+/// Check whether a firing has ever been recorded for the exact
+/// rule+hostname+dedup_key tuple.
+///
+/// This is used by once-per-outage rules whose dedup key includes the
+/// observation timestamp that identifies the outage. A new observation gets
+/// a new key; an unchanged outage remains suppressed regardless of age.
+pub fn firings_any_dedup_check(
+    conn: &rusqlite::Connection,
+    rule_id: &str,
+    hostname: &str,
+    dedup_key: &str,
+) -> rusqlite::Result<bool> {
+    conn.query_row(
+        "SELECT EXISTS(
+             SELECT 1 FROM notification_firings
+             WHERE rule_id = ?1
+               AND hostname = ?2
+               AND dedup_key = ?3
+         )",
+        params![rule_id, hostname, dedup_key],
+        |row| row.get(0),
+    )
+}
+
 /// Fetch recent firings for a given rule_id (optional) since a given time.
 pub fn firings_recent(
     conn: &rusqlite::Connection,
