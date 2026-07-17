@@ -421,3 +421,64 @@ fn heartbeat_window_summaries_resolves_latest_sample_metrics() {
     assert_eq!(one[0].max_cpu_usage_percent, Some(80.0));
     assert_eq!(one[0].min_mem_available_bytes, Some(2_000));
 }
+
+mod stale_heartbeat_hosts_tests {
+    use rusqlite::Connection;
+
+    fn conn_with_latest(entries: &[(&str, &str, i64)]) -> Connection {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        conn.execute_batch(
+            "CREATE TABLE host_heartbeats_latest (
+                 host_id       TEXT PRIMARY KEY,
+                 heartbeat_id  INTEGER NOT NULL,
+                 hostname      TEXT NOT NULL,
+                 sampled_at    TEXT NOT NULL,
+                 received_at   TEXT NOT NULL,
+                 partial       INTEGER NOT NULL DEFAULT 0,
+                 agent_version TEXT NOT NULL DEFAULT '',
+                 os            TEXT NOT NULL DEFAULT '',
+                 architecture  TEXT NOT NULL DEFAULT '',
+                 metadata_json TEXT
+             );",
+        )
+        .expect("schema");
+        for (host_id, hostname, age_secs) in entries {
+            conn.execute(
+                "INSERT INTO host_heartbeats_latest
+                     (host_id, heartbeat_id, hostname, sampled_at, received_at)
+                 VALUES (?1, 1, ?2,
+                     strftime('%Y-%m-%dT%H:%M:%fZ', 'now', printf('-%d seconds', ?3)),
+                     strftime('%Y-%m-%dT%H:%M:%fZ', 'now', printf('-%d seconds', ?3)))",
+                rusqlite::params![host_id, hostname, age_secs],
+            )
+            .expect("insert");
+        }
+        conn
+    }
+
+    #[test]
+    fn returns_only_hosts_between_threshold_and_forget() {
+        let conn = conn_with_latest(&[
+            ("id-fresh", "dookie", 30),           // current — below threshold
+            ("id-stale", "shart", 1200),          // stale — alertable
+            ("id-ancient", "steamdeck", 700_000), // past forget horizon
+        ]);
+        let stale = crate::db::stale_heartbeat_hosts(&conn, 600, 604_800).expect("query");
+        assert_eq!(
+            stale.len(),
+            1,
+            "only the stale-but-remembered host: {stale:?}"
+        );
+        assert_eq!(stale[0].hostname, "shart");
+        assert_eq!(stale[0].host_id, "id-stale");
+        assert!(stale[0].age_secs > 600 && stale[0].age_secs < 2000);
+        assert!(!stale[0].received_at.is_empty());
+    }
+
+    #[test]
+    fn empty_table_yields_no_hosts() {
+        let conn = conn_with_latest(&[]);
+        let stale = crate::db::stale_heartbeat_hosts(&conn, 600, 604_800).expect("query");
+        assert!(stale.is_empty());
+    }
+}

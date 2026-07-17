@@ -196,6 +196,17 @@ CORTEX_GOOGLE_CLIENT_ID=...         # required when CORTEX_AUTH_MODE=oauth
 CORTEX_GOOGLE_CLIENT_SECRET=...     # required when CORTEX_AUTH_MODE=oauth
 # Paths, TTLs, allowlist → config.toml [mcp.auth] (not env vars). See docs/OAUTH.md.
 
+# Fleet-silence notifications (ride the Apprise pipeline; see also CORTEX_NOTIFICATIONS_*)
+CORTEX_NOTIFICATIONS_HEARTBEAT_SILENCE=true        # notify when a host's newest heartbeat goes stale
+CORTEX_NOTIFICATIONS_HEARTBEAT_SILENCE_SECS=600    # heartbeat age that counts as silent (10 min)
+CORTEX_NOTIFICATIONS_STREAM_SILENCE=true           # notify when a previously-active log stream stops
+CORTEX_NOTIFICATIONS_STREAM_SILENCE_SECS=3600      # stream age that counts as silent (1 h)
+CORTEX_NOTIFICATIONS_STREAM_SILENCE_KINDS=syslog-udp,syslog-tcp,agent-docker,docker-stream,docker-event,file-tail
+CORTEX_NOTIFICATIONS_SILENCE_FORGET_SECS=604800    # outages older than this stop alerting (7 d); must exceed both thresholds
+# Both rules fire ONCE per outage (the stalled last-seen timestamp rides in the dedup key).
+# Expected streams are learned from observation via the stream_last_seen rollup (migration 43),
+# refreshed each evaluator cycle and seeded from a bounded 24h window on first run.
+
 # Non-MCP REST API (always on; gated by its token)
 CORTEX_API_TOKEN=your-api-token         # REQUIRED at startup — /api/* is always mounted
 

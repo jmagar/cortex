@@ -302,6 +302,94 @@ pub fn evaluate_ingest_silence(
     })
 }
 
+/// Evaluate heartbeat silence for one host — the agent-level complement to
+/// `evaluate_ingest_silence` (bead syslog-mcp-5uqus).
+///
+/// Like the other metric rules this takes precomputed inputs: the evaluator
+/// reads stale hosts from `host_heartbeats_latest` (already bounded by
+/// threshold and forget horizon in SQL) and calls this per host.
+///
+/// **Fires once per outage**: `last_heartbeat_at` rides in the dedup key, so
+/// the same outage maps to the same key forever — the dispatcher's firings
+/// dedup then drops re-enqueues. A recovery followed by a new outage changes
+/// `last_heartbeat_at` and produces a fresh key.
+pub fn evaluate_heartbeat_silence(
+    host_id: &str,
+    hostname: &str,
+    last_heartbeat_at: &str,
+    age_secs: u64,
+    threshold_secs: u64,
+    apprise_urls_json: &str,
+) -> OutboxInsertParams {
+    let age_mins = age_secs / 60;
+    let title = escape_for_notification(&format!(
+        "[CRITICAL] cortex agent silent on {hostname}: no heartbeat for {age_mins} min"
+    ));
+    let body = escape_for_notification(&format!(
+        "The cortex agent on **{hostname}** has not delivered a heartbeat for \
+         {age_mins} minutes (threshold: {} min). Last accepted heartbeat: \
+         {last_heartbeat_at}.\n\n\
+         Likely causes: agent process/container down, host offline or \
+         rebooting, or the heartbeat target unreachable from the host. Check \
+         `cortex action=fleet_state` and the agent service on the host.",
+        threshold_secs / 60
+    ));
+    OutboxInsertParams {
+        // Keyed on host_id, not hostname — host_id is the stable identity
+        // (hostnames can collide across agents); the display fields stay
+        // human-readable.
+        dedup_key: format!("heartbeat_silence:{host_id}:{last_heartbeat_at}"),
+        rule_id: "heartbeat_silence".to_string(),
+        severity: "critical".to_string(),
+        hostname: hostname.to_string(),
+        title,
+        body,
+        apprise_urls_json: apprise_urls_json.to_string(),
+        next_attempt_at: backoff_next_attempt_at(0),
+    }
+}
+
+/// Evaluate stream silence for one previously-active log stream.
+///
+/// The evaluator maintains `stream_last_seen` (newest row per hostname +
+/// source kind) and calls this for entries older than the threshold but
+/// inside the forget horizon, restricted to the configured kind allowlist.
+/// Same once-per-outage dedup shape as [`evaluate_heartbeat_silence`]: the
+/// stalled `last_seen_at` value keys the outage.
+pub fn evaluate_stream_silence(
+    hostname: &str,
+    source_kind: &str,
+    last_seen_at: &str,
+    age_secs: u64,
+    threshold_secs: u64,
+    apprise_urls_json: &str,
+) -> OutboxInsertParams {
+    let age_mins = age_secs / 60;
+    let title = escape_for_notification(&format!(
+        "[WARNING] cortex stream silent: {source_kind} from {hostname} stopped {age_mins} min ago"
+    ));
+    let body = escape_for_notification(&format!(
+        "**{hostname}** had been sending `{source_kind}` logs but none have \
+         arrived for {age_mins} minutes (threshold: {} min). Last row: \
+         {last_seen_at}.\n\n\
+         The host is otherwise reachable if its heartbeat is current — check \
+         the specific forwarder (docker socket access, tailed file rotation, \
+         syslog forwarding) on the host. `cortex action=filter` with \
+         host/source_kind narrows it down.",
+        threshold_secs / 60
+    ));
+    OutboxInsertParams {
+        dedup_key: format!("stream_silence:{hostname}:{source_kind}:{last_seen_at}"),
+        rule_id: "stream_silence".to_string(),
+        severity: "warning".to_string(),
+        hostname: hostname.to_string(),
+        title,
+        body,
+        apprise_urls_json: apprise_urls_json.to_string(),
+        next_attempt_at: backoff_next_attempt_at(0),
+    }
+}
+
 #[cfg(test)]
 #[path = "rules_tests.rs"]
 mod tests;

@@ -140,6 +140,48 @@ pub struct HeartbeatMetricSnapshot {
     pub container_unhealthy_count: Option<i64>,
 }
 
+/// A host whose latest accepted heartbeat has gone stale.
+#[derive(Debug, Clone)]
+pub struct StaleHeartbeatHost {
+    pub host_id: String,
+    pub hostname: String,
+    pub received_at: String,
+    pub age_secs: u64,
+}
+
+/// Hosts whose newest heartbeat is older than `threshold_secs` but younger
+/// than `forget_secs` — the heartbeat_silence notification rule's input.
+/// O(hosts) scan of the small `host_heartbeats_latest` cache; the forget
+/// bound keeps decommissioned hosts from staying alert-eligible forever.
+pub fn stale_heartbeat_hosts(
+    conn: &rusqlite::Connection,
+    threshold_secs: u64,
+    forget_secs: u64,
+) -> Result<Vec<StaleHeartbeatHost>> {
+    let age_expr = "CAST(strftime('%s','now') AS INTEGER) - \
+                    CAST(strftime('%s', received_at) AS INTEGER)";
+    // Thresholds are trusted u64 config values, inlined because SQLite does
+    // not allow SELECT aliases in WHERE.
+    let sql = format!(
+        "SELECT host_id, hostname, received_at, {age_expr} AS age_secs
+         FROM host_heartbeats_latest
+         WHERE ({age_expr}) > {threshold_secs} AND ({age_expr}) < {forget_secs}
+         ORDER BY hostname ASC"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(StaleHeartbeatHost {
+                host_id: row.get(0)?,
+                hostname: row.get(1)?,
+                received_at: row.get(2)?,
+                age_secs: row.get::<_, i64>(3)?.max(0) as u64,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
 /// Return all entries from `host_heartbeats_latest`, ordered by hostname.
 ///
 /// This is an O(hosts) full scan of a small cache table — it deliberately

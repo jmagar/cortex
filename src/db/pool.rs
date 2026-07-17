@@ -39,7 +39,7 @@ pub fn write_lock() -> parking_lot::ReentrantMutexGuard<'static, ()> {
     WRITE_LOCK.lock()
 }
 
-pub const KNOWN_SCHEMA_VERSION: i64 = 42;
+pub const KNOWN_SCHEMA_VERSION: i64 = 43;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SchemaVersionInfo {
@@ -2486,6 +2486,27 @@ pub fn init_pool(config: &StorageConfig) -> Result<DbPool> {
              COMMIT;",
         )?;
         tracing::info!("Migration 42: added refuted trust level to graph_entity_aliases");
+    }
+
+    // Migration 43: `stream_last_seen` — one row per (hostname, source_kind),
+    // maintained by the notification evaluator each cycle. Foundation for the
+    // stream_silence rule: alerting needs "newest row per host + source kind"
+    // and the logs table cannot answer that cheaply (source kind lives inside
+    // metadata_json). No backfill here — the evaluator seeds the table from a
+    // bounded window on its first cycle, keeping migration time flat.
+    if !migration_applied(&conn, 43)? {
+        conn.execute_batch(
+            "BEGIN IMMEDIATE;
+             CREATE TABLE IF NOT EXISTS stream_last_seen (
+                 hostname     TEXT NOT NULL,
+                 source_kind  TEXT NOT NULL,
+                 last_seen_at TEXT NOT NULL,
+                 PRIMARY KEY (hostname, source_kind)
+             ) WITHOUT ROWID;
+             INSERT OR IGNORE INTO schema_migrations (version) VALUES (43);
+             COMMIT;",
+        )?;
+        tracing::info!("Migration 43: stream_last_seen rollup for stream-silence alerting");
     }
 
     if table_exists(&conn, "host_heartbeats")? && table_exists(&conn, "host_heartbeats_latest")? {
