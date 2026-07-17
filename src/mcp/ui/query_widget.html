@@ -312,12 +312,117 @@
       });
     }
 
+    // ---- MCP Apps JSON-RPC bridge (SEP-1865) ---------------------------------
+    // Official MCP Apps hosts exchange raw JSON-RPC 2.0 messages with the view
+    // over postMessage: the view opens with a `ui/initialize` request, confirms
+    // with `ui/notifications/initialized`, then calls tools via standard
+    // `tools/call` requests to the parent. Messages carry no envelope, so the
+    // `jsonrpc` field is what separates this protocol from the legacy mcp-ui
+    // listener below (whose messages have `type`/`messageId` and no `jsonrpc`).
+    var rpcSeq = 0;
+    var rpcPending = {};
+    var rpcReady = false;
+
+    window.addEventListener("message", function (event) {
+      if (event.source !== window.parent) return;
+      var m = event.data;
+      if (!m || typeof m !== "object" || m.jsonrpc !== "2.0") return;
+      if (m.id != null && m.method == null) {
+        var pending = rpcPending[m.id];
+        if (!pending) return;
+        delete rpcPending[m.id];
+        if (m.error) {
+          pending.reject(new Error(
+            (m.error.message ? String(m.error.message) : "host error").slice(0, MAX_ERR_LEN)
+          ));
+        } else {
+          pending.resolve(m.result);
+        }
+        return;
+      }
+      if (m.method === "ui/notifications/tool-result") {
+        // Host pushed the result of the tool call that opened this widget —
+        // render it so the view is populated before any manual query.
+        var pushed = m.params && m.params.result ? normalize(m.params.result) : null;
+        if (pushed) render(pushed);
+        return;
+      }
+      if (m.id != null) {
+        // Host-initiated request. Answer what the protocol requires; refuse
+        // the rest explicitly so the host is not left waiting on a timeout.
+        if (m.method === "ping" || m.method === "ui/resource-teardown") {
+          rpcRespond(m.id, {});
+        } else {
+          rpcRespondError(m.id, -32601, "method not found: " + String(m.method).slice(0, 64));
+        }
+      }
+      // Remaining notifications (tool-input, host-context-changed, …) are
+      // intentionally ignored — the widget re-queries on demand.
+    });
+
+    function rpcPost(message) {
+      window.parent.postMessage(message, "*");
+    }
+
+    function rpcRespond(id, result) {
+      rpcPost({ jsonrpc: "2.0", id: id, result: result });
+    }
+
+    function rpcRespondError(id, code, message) {
+      rpcPost({ jsonrpc: "2.0", id: id, error: { code: code, message: message } });
+    }
+
+    function rpcRequest(method, params, timeoutMs, timeoutMessage) {
+      if (window.parent === window) return Promise.reject(new Error("no-bridge"));
+      return new Promise(function (resolve, reject) {
+        var id = "cortex-rpc-" + (++rpcSeq);
+        var timer = setTimeout(function () {
+          delete rpcPending[id];
+          reject(new Error(timeoutMessage || "no-bridge"));
+        }, timeoutMs);
+        rpcPending[id] = {
+          resolve: function (v) { clearTimeout(timer); resolve(v); },
+          reject: function (e) { clearTimeout(timer); reject(e); }
+        };
+        try {
+          rpcPost({ jsonrpc: "2.0", id: id, method: method, params: params });
+        } catch (e) {
+          clearTimeout(timer);
+          delete rpcPending[id];
+          reject(e);
+        }
+      });
+    }
+
+    // Handshake eagerly so the first submit already knows which bridge works.
+    // A host that never answers is fine — the submit path falls back to the
+    // injected-helper and legacy mcp-ui bridges below.
+    if (window.parent !== window) {
+      rpcRequest("ui/initialize", {
+        appInfo: { name: "cortex-query-widget", version: "1.0.0" },
+        appCapabilities: {},
+        protocolVersion: "2025-11-21"
+      }, 3000).then(function () {
+        rpcReady = true;
+        rpcPost({ jsonrpc: "2.0", method: "ui/notifications/initialized", params: {} });
+      }, function () { /* not an MCP Apps JSON-RPC host; fall back on submit */ });
+    }
+
     // ---- Host bridge ---------------------------------------------------------
-    // Primary: OpenAI/MCP Apps injected helper, if the host provides one.
+    // Primary: MCP Apps JSON-RPC bridge, once its handshake has succeeded.
+    // Next: OpenAI-style injected helper, if the host provides one.
     // Fallback: mcp-ui async postMessage protocol (type:"tool" ->
-    // "ui-message-response"). If neither responds, degrade to an unavailable
+    // "ui-message-response"). If none responds, degrade to an unavailable
     // state instead of failing silently.
     function callTool(params) {
+      if (rpcReady) {
+        return rpcRequest(
+          "tools/call",
+          { name: TOOL_NAME, arguments: params },
+          BRIDGE_TIMEOUT_MS,
+          "host bridge timed out"
+        );
+      }
       var host = window.openai;
       if (host && typeof host.callTool === "function") {
         var call;

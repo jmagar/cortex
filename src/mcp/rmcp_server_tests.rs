@@ -343,6 +343,12 @@ async fn rmcp_tools_list_exposes_one_action_tool() {
         tools[0]["_meta"]["ui"]["visibility"],
         json!(["model", "app"])
     );
+    // Modern flat key (ext-apps RESOURCE_URI_META_KEY) must ride alongside
+    // the nested object — host generations differ in which one they read.
+    assert_eq!(
+        tools[0]["_meta"]["ui/resourceUri"],
+        super::QUERY_WIDGET_RESOURCE_URI
+    );
 }
 
 #[tokio::test]
@@ -1537,5 +1543,71 @@ async fn llm_invocations_action_is_denied_for_read_only_scope() {
     assert!(
         msg.contains("requires scope: cortex:admin"),
         "denial message should reference admin scope; got: {msg}"
+    );
+}
+
+#[test]
+fn widget_embed_opt_in_defaults_off() {
+    use super::parse_widget_embed;
+    assert!(!parse_widget_embed(None));
+    assert!(!parse_widget_embed(Some("")));
+    assert!(!parse_widget_embed(Some("0")));
+    assert!(!parse_widget_embed(Some("false")));
+    assert!(!parse_widget_embed(Some("nonsense")));
+    assert!(parse_widget_embed(Some("1")));
+    assert!(parse_widget_embed(Some("true")));
+    assert!(parse_widget_embed(Some(" TRUE ")));
+    assert!(parse_widget_embed(Some("yes")));
+    assert!(parse_widget_embed(Some("on")));
+}
+
+#[test]
+fn widget_embeds_only_for_query_actions_and_only_when_enabled() {
+    use super::should_embed_widget;
+    for action in ["search", "filter", "tail", "errors"] {
+        assert!(
+            should_embed_widget(action, true),
+            "{action} should embed when enabled"
+        );
+        assert!(
+            !should_embed_widget(action, false),
+            "{action} must not embed when disabled"
+        );
+    }
+    for action in ["help", "stats", "get", "ack_error", "hosts", ""] {
+        assert!(
+            !should_embed_widget(action, true),
+            "{action} must never embed"
+        );
+    }
+}
+
+#[test]
+fn embedded_widget_content_matches_resource_declaration() {
+    use rmcp::model::{ResourceContents, Role};
+
+    let content = super::embedded_widget_content();
+    assert_eq!(
+        content.audience(),
+        Some(&vec![Role::User]),
+        "widget block must be user-audience so audience-aware hosts keep it out of model context"
+    );
+    let embedded = content
+        .as_resource()
+        .expect("widget block must be an embedded resource");
+    let ResourceContents::TextResourceContents {
+        uri,
+        mime_type,
+        text,
+        ..
+    } = &embedded.resource
+    else {
+        panic!("widget resource must be text contents");
+    };
+    assert_eq!(uri, super::QUERY_WIDGET_RESOURCE_URI);
+    assert_eq!(mime_type.as_deref(), Some(super::MCP_APP_HTML_MIME_TYPE));
+    assert!(
+        text.contains("data-syslog-query-widget"),
+        "embedded HTML should be the query widget"
     );
 }
