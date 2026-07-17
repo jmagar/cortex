@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.11.0](https://github.com/jmagar/cortex/compare/v3.10.0...v3.11.0) (2026-07-17)
+
+
+### Added
+
+* canonical entity resolution for the investigation graph ([#133](https://github.com/jmagar/cortex/issues/133)) ([ac913c7](https://github.com/jmagar/cortex/commit/ac913c7e09d635e114cfee519e4751b20a38f703))
+* **mcp:** make query widget usable on hosts without resources/read ([#139](https://github.com/jmagar/cortex/issues/139)) ([ff696b9](https://github.com/jmagar/cortex/commit/ff696b9105145d960af4bfc8694821ad78ee982f))
+* **notifications:** heartbeat-silence and stream-silence fleet alerts ([#140](https://github.com/jmagar/cortex/issues/140)) ([8e4ec60](https://github.com/jmagar/cortex/commit/8e4ec6031072505caef2f8a991d9ae25e18f1896))
+
+
+### Fixed
+
+* bump opentelemetry-proto to 0.32 to patch opentelemetry_sdk CVE ([#136](https://github.com/jmagar/cortex/issues/136)) ([1b44d72](https://github.com/jmagar/cortex/commit/1b44d72c3f32f693da7910cbf18611d381dbabb1))
+* OTLP hardening follow-ups from PR [#136](https://github.com/jmagar/cortex/issues/136) review (4 beads) ([#137](https://github.com/jmagar/cortex/issues/137)) ([9b5a6c7](https://github.com/jmagar/cortex/commit/9b5a6c7a98430ff3da5af4a67639d6bf36687e66))
+* remediate live CLI sweep failures ([62d0178](https://github.com/jmagar/cortex/commit/62d0178a956f99507920162b954890bf7c97e6c9))
+* repair live CLI service calls ([7d7f683](https://github.com/jmagar/cortex/commit/7d7f6838652054bf1070b351eb291bafd0a6f288))
+
 ## [3.10.0](https://github.com/jmagar/cortex/compare/v3.9.0...v3.10.0) (2026-07-13)
 
 
