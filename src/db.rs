@@ -27,6 +27,7 @@ mod queries_service_instances;
 mod skill_events;
 mod skill_incident_evidence;
 mod skill_incidents;
+pub(crate) mod stream_health;
 
 pub(crate) use analytics::PATTERN_SCAN_LIMIT_MAX;
 pub use analytics::{
@@ -50,8 +51,9 @@ pub use graph_findings::{
 };
 pub use heartbeat::{
     HeartbeatHostLookup, HeartbeatHostState, HeartbeatLatestEntry, HeartbeatMetricSnapshot,
-    HeartbeatSampleState, HeartbeatStateFlags, HeartbeatWindowSummary, heartbeat_host_state,
-    heartbeat_latest_all, heartbeat_metric_snapshot_batch, heartbeat_window_summaries,
+    HeartbeatSampleState, HeartbeatStateFlags, HeartbeatWindowSummary, StaleHeartbeatHost,
+    heartbeat_host_state, heartbeat_latest_all, heartbeat_metric_snapshot_batch,
+    heartbeat_window_summaries, stale_heartbeat_hosts,
 };
 pub(crate) use hook_events::insert_hook_events_in_tx;
 pub use hook_events::{

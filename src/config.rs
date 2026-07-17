@@ -144,9 +144,47 @@ pub struct NotificationEvaluatorsConfig {
     /// Age of the newest ingested row (seconds) after which ingest is
     /// considered silent. Default: 900 (15 minutes).
     pub ingest_silence_threshold_secs: u64,
+    /// Enable heartbeat-silence detection: fire when a host's latest accepted
+    /// heartbeat is older than `heartbeat_silence_threshold_secs`. Fires once
+    /// per outage — the host's last heartbeat timestamp rides in the dedup
+    /// key, so a continuing outage does not re-page every dedup window.
+    /// Default: true.
+    pub heartbeat_silence: bool,
+    /// Age of a host's newest accepted heartbeat (seconds) after which the
+    /// host is considered silent. Default: 600 (10 minutes).
+    pub heartbeat_silence_threshold_secs: u64,
+    /// Enable stream-silence detection: fire when a previously-active log
+    /// stream (hostname + source kind) stops producing rows for longer than
+    /// `stream_silence_threshold_secs`. Expected streams are learned from
+    /// observation (the `stream_last_seen` rollup), since agents do not
+    /// report their collector configuration. Fires once per outage, like
+    /// `heartbeat_silence`. Default: true.
+    pub stream_silence: bool,
+    /// Age of a stream's newest row (seconds) after which the stream is
+    /// considered silent. Default: 3600 (1 hour).
+    pub stream_silence_threshold_secs: u64,
+    /// Source kinds eligible for stream-silence alerts. Only continuous
+    /// streams belong here — sporadic, activity-driven kinds (transcripts,
+    /// shell history, agent commands) would alert on every quiet afternoon.
+    pub stream_silence_kinds: Vec<String>,
+    /// Outages older than this (seconds) stop alerting, and stream rollup
+    /// entries this stale are pruned — a decommissioned host or stream must
+    /// not stay eligible for paging forever. Shared by heartbeat- and
+    /// stream-silence. Default: 604800 (7 days).
+    pub silence_forget_secs: u64,
     /// How often to run evaluation (seconds). Default: 300 (5 minutes).
     pub evaluator_interval_secs: u64,
 }
+
+/// Default source kinds for stream-silence alerting: the continuous streams.
+pub const DEFAULT_STREAM_SILENCE_KINDS: &[&str] = &[
+    "syslog-udp",
+    "syslog-tcp",
+    "agent-docker",
+    "docker-stream",
+    "docker-event",
+    "file-tail",
+];
 
 impl Default for NotificationEvaluatorsConfig {
     fn default() -> Self {
@@ -159,6 +197,15 @@ impl Default for NotificationEvaluatorsConfig {
             ingest_queue_pressure: true,
             ingest_silence: true,
             ingest_silence_threshold_secs: 900,
+            heartbeat_silence: true,
+            heartbeat_silence_threshold_secs: 600,
+            stream_silence: true,
+            stream_silence_threshold_secs: 3600,
+            stream_silence_kinds: DEFAULT_STREAM_SILENCE_KINDS
+                .iter()
+                .map(|kind| kind.to_string())
+                .collect(),
+            silence_forget_secs: 604_800,
             evaluator_interval_secs: 300,
         }
     }
@@ -1125,6 +1172,36 @@ impl Config {
             "CORTEX_NOTIFICATIONS_APPRISE_URLS",
             &mut config.notifications.apprise_urls,
         );
+        env_override_bool(
+            "CORTEX_NOTIFICATIONS_HEARTBEAT_SILENCE",
+            &mut config.notifications.evaluators.heartbeat_silence,
+        )?;
+        env_override_parse(
+            "CORTEX_NOTIFICATIONS_HEARTBEAT_SILENCE_SECS",
+            &mut config
+                .notifications
+                .evaluators
+                .heartbeat_silence_threshold_secs,
+        )?;
+        env_override_bool(
+            "CORTEX_NOTIFICATIONS_STREAM_SILENCE",
+            &mut config.notifications.evaluators.stream_silence,
+        )?;
+        env_override_parse(
+            "CORTEX_NOTIFICATIONS_STREAM_SILENCE_SECS",
+            &mut config
+                .notifications
+                .evaluators
+                .stream_silence_threshold_secs,
+        )?;
+        env_override_list(
+            "CORTEX_NOTIFICATIONS_STREAM_SILENCE_KINDS",
+            &mut config.notifications.evaluators.stream_silence_kinds,
+        );
+        env_override_parse(
+            "CORTEX_NOTIFICATIONS_SILENCE_FORGET_SECS",
+            &mut config.notifications.evaluators.silence_forget_secs,
+        )?;
 
         env_override_bool(
             "CORTEX_DOCKER_INGEST_ENABLED",
@@ -1813,6 +1890,44 @@ fn validate_notifications_config(cfg: &NotificationsConfig) -> anyhow::Result<()
             "[notifications] ingest_silence_threshold_secs must be > 0 when \
              ingest_silence is enabled"
         );
+    }
+    if cfg.evaluators.heartbeat_silence && cfg.evaluators.heartbeat_silence_threshold_secs == 0 {
+        anyhow::bail!(
+            "[notifications] heartbeat_silence_threshold_secs must be > 0 when \
+             heartbeat_silence is enabled"
+        );
+    }
+    if cfg.evaluators.stream_silence {
+        if cfg.evaluators.stream_silence_threshold_secs == 0 {
+            anyhow::bail!(
+                "[notifications] stream_silence_threshold_secs must be > 0 when \
+                 stream_silence is enabled"
+            );
+        }
+        if cfg
+            .evaluators
+            .stream_silence_kinds
+            .iter()
+            .all(|kind| kind.trim().is_empty())
+        {
+            anyhow::bail!(
+                "[notifications] stream_silence_kinds must not be empty when \
+                 stream_silence is enabled (set stream_silence = false to disable)"
+            );
+        }
+    }
+    if cfg.evaluators.heartbeat_silence || cfg.evaluators.stream_silence {
+        let max_threshold = cfg
+            .evaluators
+            .heartbeat_silence_threshold_secs
+            .max(cfg.evaluators.stream_silence_threshold_secs);
+        if cfg.evaluators.silence_forget_secs <= max_threshold {
+            anyhow::bail!(
+                "[notifications] silence_forget_secs must exceed the silence \
+                 thresholds (forget: {}, max threshold: {max_threshold})",
+                cfg.evaluators.silence_forget_secs
+            );
+        }
     }
     // Trim whitespace before checking emptiness to catch " " entries.
     // Delivery requires BOTH the Apprise API base URL (`apprise_url`, where the

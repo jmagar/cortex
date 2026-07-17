@@ -21,7 +21,8 @@ use crate::config::NotificationsConfig;
 use crate::db::DbPool;
 use crate::notifications::rules::{
     LogRow, evaluate_authelia_mfa_fail, evaluate_container_die_nonzero, evaluate_fail2ban_ban,
-    evaluate_ingest_silence, evaluate_oom_kill,
+    evaluate_heartbeat_silence, evaluate_ingest_silence, evaluate_oom_kill,
+    evaluate_stream_silence,
 };
 
 /// Run one evaluation cycle.
@@ -38,6 +39,58 @@ pub(crate) async fn run_evaluation_cycle(
 ) -> Result<u64> {
     let apprise_urls_json = build_urls_json(&cfg);
     let window_secs = cfg.evaluators.evaluator_interval_secs * 2; // look back 2x interval
+
+    // --- Phase 0: stream rollup maintenance (write — permit held) ------------
+    // Fold the newest row per (hostname, source kind) from the recent window
+    // into `stream_last_seen`, then prune entries past the forget horizon.
+    // Runs BEFORE evaluation so silence checks see the freshest state — a
+    // stream that resumed inside this window must not alert from its stale
+    // rollup entry. On failure the stream rule is skipped for this cycle
+    // rather than evaluated against stale data.
+    let mut stream_rollup_ok = false;
+    if cfg.evaluators.stream_silence {
+        let Ok(_permit) = Arc::clone(&permit_sem).acquire_owned().await else {
+            tracing::error!("evaluator: maintenance semaphore closed, skipping stream rollup");
+            return Ok(0);
+        };
+        let pool_m = Arc::clone(&pool);
+        let forget_secs = cfg.evaluators.silence_forget_secs;
+        let exec_start = Instant::now();
+        let rollup_result = tokio::task::spawn_blocking(move || -> Result<()> {
+            let _permit = _permit;
+            let conn = pool_m.get()?;
+            let window = if crate::db::stream_health::stream_last_seen_is_empty(&conn)? {
+                tracing::info!(
+                    seed_window_secs = crate::db::stream_health::STREAM_SEED_WINDOW_SECS,
+                    "stream_last_seen is empty; seeding from bounded window"
+                );
+                crate::db::stream_health::STREAM_SEED_WINDOW_SECS
+            } else {
+                window_secs
+            };
+            crate::db::stream_health::refresh_stream_last_seen(&conn, window)?;
+            crate::db::stream_health::prune_stream_last_seen(&conn, forget_secs)?;
+            Ok(())
+        })
+        .await;
+        let exec_ms = exec_start.elapsed().as_millis();
+        match rollup_result {
+            Ok(Ok(())) => {
+                stream_rollup_ok = true;
+                if exec_ms > SLOW_DB_MS {
+                    tracing::warn!(op = "notif.stream_rollup", exec_ms, "db op ok");
+                } else {
+                    tracing::debug!(op = "notif.stream_rollup", exec_ms, "db op ok");
+                }
+            }
+            Ok(Err(e)) => {
+                tracing::warn!(op = "notif.stream_rollup", exec_ms, error = %e, "stream rollup failed; skipping stream_silence this cycle");
+            }
+            Err(e) => {
+                tracing::warn!(op = "notif.stream_rollup", exec_ms, error = %e, "stream rollup join error; skipping stream_silence this cycle");
+            }
+        }
+    }
 
     // --- Phase 1: fetch + evaluate (NO permit needed — read-only DB access) ---
     // Paginate in batches of 1,000 rows up to a 50,000 row total cap to avoid
@@ -91,6 +144,49 @@ pub(crate) async fn run_evaluation_cycle(
                     cfg.evaluators.ingest_silence_threshold_secs,
                     &apprise_urls_json,
                 ));
+            }
+
+            // Metric rule: heartbeat silence. O(hosts) scan of the
+            // host_heartbeats_latest cache; threshold and forget bounds are
+            // applied in SQL, so every returned host fires.
+            if cfg.evaluators.heartbeat_silence {
+                let stale = crate::db::stale_heartbeat_hosts(
+                    &conn,
+                    cfg.evaluators.heartbeat_silence_threshold_secs,
+                    cfg.evaluators.silence_forget_secs,
+                )?;
+                for host in stale {
+                    out.push(evaluate_heartbeat_silence(
+                        &host.host_id,
+                        &host.hostname,
+                        &host.received_at,
+                        host.age_secs,
+                        cfg.evaluators.heartbeat_silence_threshold_secs,
+                        &apprise_urls_json,
+                    ));
+                }
+            }
+
+            // Metric rule: stream silence. Reads the rollup phase 0 just
+            // refreshed; skipped when the refresh failed so stale entries
+            // cannot false-positive.
+            if stream_rollup_ok {
+                let silent = crate::db::stream_health::silent_streams(
+                    &conn,
+                    &cfg.evaluators.stream_silence_kinds,
+                    cfg.evaluators.stream_silence_threshold_secs,
+                    cfg.evaluators.silence_forget_secs,
+                )?;
+                for stream in silent {
+                    out.push(evaluate_stream_silence(
+                        &stream.hostname,
+                        &stream.source_kind,
+                        &stream.last_seen_at,
+                        stream.age_secs,
+                        cfg.evaluators.stream_silence_threshold_secs,
+                        &apprise_urls_json,
+                    ));
+                }
             }
             drop(conn);
             Ok(out)
