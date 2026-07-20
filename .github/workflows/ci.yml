@@ -17,7 +17,7 @@ env:
 jobs:
   changes:
     name: Changes
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, unraid]
     outputs:
       all: ${{ steps.classify.outputs.all }}
       docs: ${{ steps.classify.outputs.docs }}
@@ -76,7 +76,7 @@ jobs:
 
   version-sync:
     name: Version Sync
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, unraid]
     needs: [changes]
     if: ${{ needs.changes.outputs.release == 'true' || needs.changes.outputs.skills == 'true' || needs.changes.outputs.rust == 'true' || needs.changes.outputs.workflow == 'true' }}
     steps:
@@ -100,7 +100,7 @@ jobs:
 
   fmt:
     name: Formatting
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, unraid]
     needs: [changes]
     if: ${{ needs.changes.outputs.rust == 'true' }}
     steps:
@@ -115,7 +115,7 @@ jobs:
 
   clippy:
     name: Clippy
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, unraid]
     needs: [changes]
     if: ${{ needs.changes.outputs.rust == 'true' }}
     steps:
@@ -132,7 +132,7 @@ jobs:
 
   test:
     name: Tests
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, unraid]
     needs: [changes]
     if: ${{ needs.changes.outputs.rust == 'true' }}
     steps:
@@ -163,7 +163,7 @@ jobs:
 
   coverage:
     name: Coverage
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, unraid]
     needs: [changes, test]
     if: ${{ needs.changes.outputs.rust == 'true' && needs.test.result == 'success' }}
     steps:
@@ -185,7 +185,7 @@ jobs:
 
   deny:
     name: Dependency Check (cargo-deny)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, unraid]
     needs: [changes]
     if: ${{ needs.changes.outputs.security == 'true' }}
     steps:
@@ -198,7 +198,7 @@ jobs:
 
   mcp-integration:
     name: MCP Integration Tests
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, unraid]
     needs: [changes, test]
     if: ${{ needs.test.result == 'success' && (needs.changes.outputs.rust == 'true' || needs.changes.outputs.mcp == 'true') && (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository) }}
     steps:
@@ -210,7 +210,7 @@ jobs:
 
   gitleaks:
     name: Secret Scan
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, unraid]
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -221,7 +221,7 @@ jobs:
 
   ci-gate:
     name: CI Gate
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, unraid]
     if: always()
     needs:
       - changes
@@ -261,7 +261,7 @@ jobs:
 
   npm:
     name: npm launcher
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, unraid]
     needs: [changes]
     if: ${{ needs.changes.outputs.release == 'true' || needs.changes.outputs.workflow == 'true' || needs.changes.outputs.docs == 'true' }}
     steps:

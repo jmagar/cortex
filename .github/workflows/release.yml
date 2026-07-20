@@ -35,7 +35,7 @@ env:
 jobs:
   cortex-linux:
     name: build cortex (linux)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, unraid]
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -101,7 +101,7 @@ jobs:
   publish:
     name: publish github release
     needs: [cortex-linux, cortex-windows]
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, unraid]
     # Tag pushes publish automatically. workflow_dispatch stays dry-run unless
     # a human explicitly passes publish=true on a tagged ref.
     if: startsWith(github.ref, 'refs/tags/v') && (github.event_name == 'push' || github.event.inputs.publish == 'true')
@@ -135,7 +135,7 @@ jobs:
   npm:
     name: publish npm launcher
     needs: publish
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, unraid]
     if: startsWith(github.ref, 'refs/tags/v') && (github.event_name == 'push' || github.event.inputs.publish == 'true')
     permissions:
       contents: read
