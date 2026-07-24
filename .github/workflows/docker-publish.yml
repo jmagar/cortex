@@ -22,7 +22,7 @@ jobs:
   # non-tag pushes (it still runs, ensuring we never ship a broken image on tags).
   check:
     name: Pre-publish CI gate
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, unraid]
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -51,7 +51,7 @@ jobs:
         run: cargo test --doc --locked
 
   build-and-push:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, unraid]
     needs: [check]
     permissions:
       contents: read
